@@ -248,6 +248,7 @@ pub fn fixture_schema(selection: &PerfFixtureSelection) -> Vec<TableMeta> {
     };
     (1..=table_count)
         .map(|table_index| TableMeta {
+            primary_key_order: Vec::new(),
             table_name: table_name(selection, table_index),
             table_comment: format!(
                 "Deterministic {} fixture{}",

@@ -192,6 +192,21 @@ async function withMockLocation(search, action) {
   }
 }
 
+test("performance fixture edits survive page reload and reject stale writes", async () => {
+  await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-1k-12-pk", async () => {
+    const tables = await mockWorkbenchInvoke("list_tables", {});
+    const page = await mockWorkbenchInvoke("open_table_session", { tableName: tables[0].table_name, options: { pageSize: 25 } });
+    const original = page.rows[0].field_001;
+    const request = { sessionId: page.sessionId, rowIdentity: { id: page.rows[0].id }, columnName: "field_001", oldValue: original, newValue: "edited-fixture" };
+    assert.equal((await mockWorkbenchInvoke("update_cell", { request })).updated, true);
+    assert.equal((await mockWorkbenchInvoke("update_cell", { request })).conflict, true);
+    const reloaded = await mockWorkbenchInvoke("fetch_table_page", { sessionId: page.sessionId, request: { pageSize: 25 } });
+    assert.equal(reloaded.rows[0].field_001, "edited-fixture");
+    assert.equal(page.rows[0].field_001, original, "backend must not share mutable row objects with clients");
+    await mockWorkbenchInvoke("update_cell", { request: { ...request, oldValue: "edited-fixture", newValue: original } });
+  });
+});
+
 test("performance profile routes connection schema and pages through mockWorkbenchInvoke", async () => {
   await withMockLocation("?perfProfile=deterministic-v1&scenario=rows-100k-500-pk", async () => {
     const connections = await mockWorkbenchInvoke("list_connections", {});

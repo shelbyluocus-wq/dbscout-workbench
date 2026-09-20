@@ -21674,3 +21674,12 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-quiet-text);
   font-size: 11px;
 }
+
+/* Virtual columns preserve table geometry without content or pointer targets. */
+.wb-grid td.wb-col-spacer, .wb-grid th.wb-col-spacer {
+  padding: 0;
+  border-left: 0;
+  border-right: 0;
+  background: transparent;
+  pointer-events: none;
+}

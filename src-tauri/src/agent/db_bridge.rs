@@ -1519,6 +1519,7 @@ mod tests {
     #[test]
     fn table_page_response_exposes_the_next_offset_until_every_row_is_read() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: "玩家表".into(),
             columns: vec![
@@ -1546,6 +1547,7 @@ mod tests {
     fn database_profile_classifies_tables_and_infers_relationships() {
         let schema = vec![
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: "player".into(),
                 table_comment: "玩家账号表".into(),
                 columns: vec![
@@ -1561,6 +1563,7 @@ mod tests {
                 ],
             },
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: "player_login_log".into(),
                 table_comment: "玩家登录日志".into(),
                 columns: vec![
@@ -1570,6 +1573,7 @@ mod tests {
                 ],
             },
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: "hero_config".into(),
                 table_comment: "英雄配置表".into(),
                 columns: vec![

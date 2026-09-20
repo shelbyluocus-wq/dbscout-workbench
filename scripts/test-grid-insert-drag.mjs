@@ -131,7 +131,7 @@ async function openPlayerGrid(page) {
 
 async function insertBelow(page, rowHeader) {
   await rowHeader.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "往下新增行", exact: true }).click();
+  await page.getByRole("menuitem", { name: "往下新增 1 行", exact: true }).click();
 }
 
 async function writeClipboard(page, text) {
@@ -352,7 +352,7 @@ try {
   });
   await waitForRowSelection(page, ["1", "2"]);
   await page.keyboard.press(shortcut("C"));
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), fullRowTsv);
+  assert.equal((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, "\n"), fullRowTsv);
 
   await dragBetween(
     page,
@@ -374,6 +374,9 @@ try {
   await firstInsertRow.locator('td[data-column-index="1"]').click({ button: "right" });
   await page.getByRole("menuitem", { name: "复制", exact: true }).click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "alpha");
+  // A clicked context-menu button is removed on close. Restore grid keyboard
+  // focus explicitly before testing undo (also required on the baseline).
+  await page.locator(".wb-grid-wrap").focus();
   await page.keyboard.press(shortcut("Z"));
   await waitForValues(firstInsertRow, [1, 2], ["", ""]);
   await waitForValues(secondInsertRow, [1, 2], ["", ""]);

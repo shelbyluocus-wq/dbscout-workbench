@@ -8,7 +8,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const read = (path) => readFileSync(join(root, path), "utf8");
 
 test("the virtualized data grid exposes complete keyboard and screen-reader semantics", () => {
-  const grid = read("components/DataGrid.vue");
+  const grid = read("components/DataGrid.vue") + read("components/GridDataRow.vue");
 
   assert.match(grid, /role="grid"/);
   assert.match(grid, /:aria-rowcount="gridAriaRowCount"/);
@@ -22,7 +22,7 @@ test("the virtualized data grid exposes complete keyboard and screen-reader sema
 });
 
 test("SQL NULL and unsaved inserts have non-color-only visible affordances", () => {
-  const grid = read("components/DataGrid.vue");
+  const grid = read("components/DataGrid.vue") + read("components/GridDataRow.vue");
   const styles = read("workbench.css");
 
   assert.match(grid, /class="wb-null-badge"/);

@@ -396,6 +396,7 @@ mod tests {
 
     fn table() -> TableMeta {
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: String::new(),
             columns: vec![

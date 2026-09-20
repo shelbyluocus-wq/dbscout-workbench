@@ -129,7 +129,7 @@ export function useGridEditor(
   invokeWorkbench,
   activeTab,
   gridWrapRef,
-  { scrollRowIntoView, scrollCellIntoView = scrollRowIntoView, scrollInsertCellIntoView = () => {} },
+  { scrollRowIntoView, scrollCellIntoView = scrollRowIntoView, scrollInsertCellIntoView = () => {}, columnWindow = null },
   { busy, statusText, onSaveFeedback = () => {}, onCellCommitted = () => {} },
 ) {
   // ── Selection & editing state ─────────────────────────────────────────
@@ -1390,6 +1390,19 @@ export function useGridEditor(
   }
 
   function columnIndexFromPointer(wrap, clientX) {
+    const window = columnWindow?.value;
+    if (window?.offsets?.length > 1) {
+      const localX = clientX - wrap.getBoundingClientRect().left - ROW_INDEX_WIDTH;
+      const frozen = localX < window.frozenWidth;
+      const x = frozen ? Math.max(0, localX) : localX + wrap.scrollLeft;
+      const start = frozen ? 0 : window.frozenCount;
+      const end = frozen ? window.frozenCount : window.offsets.length - 1;
+      for (let index = start; index < end; index += 1) {
+        if (x < window.offsets[index + 1]) return index;
+      }
+      return Math.max(start, end - 1);
+    }
+
     const cells = [...wrap.querySelectorAll("th[data-column-index], td[data-column-index]")];
     let nearestIndex = 0;
     let nearestDistance = Number.POSITIVE_INFINITY;

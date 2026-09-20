@@ -758,6 +758,7 @@ mod tests {
 
     fn schema(table: &str, marker: &str) -> TableMeta {
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: table.into(),
             table_comment: marker.into(),
             columns: vec![ColumnMeta::with_basic(

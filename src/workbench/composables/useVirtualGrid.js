@@ -12,6 +12,7 @@ import { ensureTabRowStore, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { tableScrollRowCount, tableWindowOffset } from "../utils/tableScrollWindow.js";
+import { computeColumnWindow, columnWidthsOf } from "./useVirtualColumns.js";
 
 const ROW_INDEX_WIDTH = 38;
 
@@ -71,6 +72,9 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // ── DOM refs ──────────────────────────────────────────────────────────
   const gridWrapRef = ref(null);
   const scrollTop = ref(0);
+  const scrollLeft = ref(0);
+  const viewportWidth = ref(0);
+  const pinnedColumnIndexes = ref([]);
   // Before the grid DOM exists, mount only the 20-row buffer plus one visible
   // row. ResizeObserver expands this to the real viewport immediately after
   // mount, keeping the cold first frame cheap for wide tables.
@@ -105,7 +109,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   const frozenRowsH = computed(() => frozenRowCount.value * rowHeight.value);
 
   // ── Computed: virtual window ──────────────────────────────────────────
-  const virtualRange = computed(() => {
+  const virtualRange = computed((previous) => {
     const loadedTotal = tabRowCount(activeTab.value);
     const loadedStart = windowOffset.value;
     const loadedEnd = loadedStart + loadedTotal;
@@ -147,12 +151,15 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
       + anchoredInsertCountBefore(activeTab.value, start, loadedTotal)
     ) * rowH;
     const totalHeight = (scrollableTotal + insertCount) * rowH;
+    if (previous && previous.start === start && previous.end === end
+      && previous.padTop === padTop && previous.totalHeight === totalHeight) return previous;
     return { start, end, padTop, totalHeight };
   });
 
   const visibleRows = computed(() => {
     const tab = activeTab.value;
     const store = ensureTabRowStore(tab);
+    void tab?.dataVersion;
     if (!store) return [];
     const { start, end } = virtualRange.value;
     const frozenStart = frozenRowStart.value;
@@ -162,7 +169,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
       .map(({ row, absoluteIndex }) => {
         const originalIndex = absoluteIndex;
         const rowKey = rowKeyAt(tab, row, originalIndex);
-        return { row, originalIndex, rowKey };
+        return { row, originalIndex, rowKey, rowVersion: store.rowVersion?.(absoluteIndex) || 0 };
       });
   });
 
@@ -179,9 +186,23 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   // Frozen-column total width (depends on activeColumnMeta). Uses MIN_COL_WIDTH
   // as a conservative fallback per column; precise widths are the renderer's job.
   const frozenColsW = computed(() => fp.frozenColumnsWidth(activeTab.value, activeColumnMeta.value));
+  const columnWindow = computed((previous) => {
+    const next = computeColumnWindow({
+      widths: columnWidthsOf(activeTab.value, activeColumnMeta.value),
+      frozenCount: fp.frozenColumnCountOf(activeTab.value),
+      scrollLeft: scrollLeft.value,
+      viewportWidth: viewportWidth.value,
+      pinned: pinnedColumnIndexes.value,
+    });
+    if (previous && previous.signature === next.signature && previous.frozenCount === next.frozenCount
+      && previous.offsets.length === next.offsets.length
+      && previous.offsets.every((value, index) => value === next.offsets[index])) return previous;
+    return next;
+  });
 
   // ── Handlers ──────────────────────────────────────────────────────────
   function onGridScroll(event) {
+    scrollLeft.value = Math.max(0, event.target.scrollLeft || 0);
     scrollTop.value = Math.max(0, event.target.scrollTop);
     if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
   }
@@ -205,6 +226,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     const normalizedLeft = Math.max(0, Number(left) || 0);
     const wrap = gridWrapRef.value;
     scrollTop.value = normalizedTop;
+    scrollLeft.value = normalizedLeft;
     if (!wrap) return;
     setScrollTop(wrap, normalizedTop);
     wrap.scrollLeft = normalizedLeft;
@@ -272,6 +294,14 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   function scrollColumnIntoView(columnIndex, selectorPrefix = "td") {
     const wrap = gridWrapRef.value;
     if (!wrap) return;
+    const window = columnWindow.value;
+    if (viewportWidth.value > 0 && columnIndex >= 0 && columnIndex + 1 < window.offsets.length) {
+      if (columnIndex < window.frozenCount) return;
+      wrap.scrollLeft += columnIntoViewScrollDelta(window.offsets[columnIndex], window.offsets[columnIndex + 1],
+        wrap.scrollLeft + window.frozenWidth, wrap.scrollLeft + wrap.clientWidth - ROW_INDEX_WIDTH);
+      scrollLeft.value = Math.max(0, wrap.scrollLeft);
+      return;
+    }
     const cell = wrap.querySelector(`${selectorPrefix}[data-column-index="${columnIndex}"], ${selectorPrefix} [data-insert-column-index="${columnIndex}"]`)
       || wrap.querySelector(`td[data-column-index="${columnIndex}"], th[data-column-index="${columnIndex}"], input[data-insert-column-index="${columnIndex}"]`)?.closest("td, th");
     if (!cell) return;
@@ -292,12 +322,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   function scrollCellIntoView(rowIndex, columnIndex) {
     scrollRowIntoView(rowIndex);
     nextTick(() => {
-      scrollRowIntoView(rowIndex);
       scrollColumnIntoView(columnIndex);
-      requestAnimationFrame(() => {
-        scrollRowIntoView(rowIndex);
-        scrollColumnIntoView(columnIndex);
-      });
     });
   }
 
@@ -330,9 +355,11 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     resizeObserver = null;
     if (!el) return;
     viewportHeight.value = el.clientHeight;
+    viewportWidth.value = el.clientWidth || 0;
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         viewportHeight.value = entry.contentRect.height;
+        viewportWidth.value = el.clientWidth || entry.contentRect.width || 0;
       }
     });
     resizeObserver.observe(el);
@@ -347,6 +374,10 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   return {
     gridWrapRef,
     scrollTop,
+    scrollLeft,
+    viewportWidth,
+    columnWindow,
+    pinnedColumnIndexes,
     viewportHeight,
     virtualRange,
     visibleRows,

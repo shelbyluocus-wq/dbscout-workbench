@@ -55,6 +55,7 @@ impl TypeChangeCheck {
             source_column_name: change.source_column_name,
             target_type,
             target_table: TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: String::new(),
                 table_comment: String::new(),
                 columns: vec![change.target_column],
@@ -233,6 +234,7 @@ fn materialized_conversion_error(column: &ColumnMeta, value: Option<&str>) -> Op
 
     let target_name = validation_column.column_name.clone();
     let table = TableMeta {
+        primary_key_order: Vec::new(),
         table_name: String::new(),
         table_comment: String::new(),
         columns: vec![validation_column],

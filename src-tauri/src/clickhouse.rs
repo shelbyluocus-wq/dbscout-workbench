@@ -413,6 +413,7 @@ fn parse_schema_batch(value: &Value, table_names: &[String]) -> Vec<TableMeta> {
         .filter_map(|table_name| {
             let normalized = table_name.to_lowercase();
             columns.remove(&normalized).map(|columns| TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: table_name.clone(),
                 table_comment: comments.remove(&normalized).unwrap_or_default(),
                 columns,
@@ -835,6 +836,7 @@ mod tests {
     #[test]
     fn clickhouse_page_sql_is_select_only_and_uses_limit_by_offset() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "events".into(),
             table_comment: String::new(),
             columns: vec![
@@ -872,6 +874,7 @@ mod tests {
     #[test]
     fn clickhouse_page_sql_uses_natural_order_for_string_sort() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "events".into(),
             table_comment: String::new(),
             columns: vec![
@@ -901,6 +904,7 @@ mod tests {
     #[test]
     fn clickhouse_search_scan_sql_is_bounded_timed_and_preserves_sort() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "events".into(),
             table_comment: String::new(),
             columns: vec![
@@ -925,6 +929,7 @@ mod tests {
     #[test]
     fn clickhouse_search_scan_uses_primary_keys_for_stable_default_order() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "events".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1017,6 +1022,7 @@ mod tests {
     #[test]
     fn table_count_uses_a_server_timeout_without_fetching_a_page() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "events".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(

@@ -253,7 +253,7 @@ test("tab drag preview keeps its transform transition after base tab styles", ()
   const styles = read("./workbench.css");
   const moveRule = styles.match(/\.wb-tab\.wb-tab-reorder-move\s*\{([^}]*)\}/s)?.[1] || "";
 
-  assert.match(tabs, /<TransitionGroup name="wb-tab-reorder"/);
+  assert.match(tabs, /<div ref="tabListRef" class="wb-tab-list"/);
   assert.match(tabs, /@dragover\.prevent\.stop="markTabDragTarget\(tab\.id, \$event\)"/);
   assert.match(moveRule, /transform\s+0\.18s\s+cubic-bezier\(0\.25,\s*1,\s*0\.5,\s*1\)/);
 });

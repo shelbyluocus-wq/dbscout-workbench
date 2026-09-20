@@ -404,6 +404,9 @@ async fn mark_status_required_batch(
     ids: &[i64],
     status: &str,
 ) -> Result<(), String> {
+    if let [id] = ids {
+        return mark_status_required(pool, *id, status).await;
+    }
     let mut tx = pool
         .begin()
         .await

@@ -29,6 +29,39 @@ function countingKeyBuilder(count) {
   };
 }
 
+test("non-key edits reuse identity index but replacing a row returns the new object", () => {
+  const tab = makeTab([{ id: "1", name: "old" }]);
+  const count = { calls: 0 };
+  const index = createRowIndex(tab, { buildRowKey: countingKeyBuilder(count) });
+  assert.equal(index.rowForKey("id=1").name, "old");
+  mutateTabRow(tab, 0, (row) => { row.name = "edited"; });
+  assert.equal(index.rowForKey("id=1").name, "edited");
+  const replacement = { id: "1", name: "replacement" };
+  mutateTabRow(tab, 0, () => replacement);
+  assert.equal(index.rowForKey("id=1"), replacement);
+  assert.equal(count.calls, 1);
+  assert.equal(tab.rowStore.rowVersion(0), 2);
+  const generation = tab.dataVersion;
+  mutateTabRow(tab, 0, (row) => row);
+  assert.equal(tab.dataVersion, generation);
+});
+
+test("no-primary-key edits and failed-edit restoration invalidate identity across owners", () => {
+  const tab = makeTab([{ id: "1", name: "old" }]);
+  tab.primaryKeys = [];
+  const sibling = { ...tab };
+  ensureTabRowStore(sibling);
+  const index = createRowIndex(tab, { buildRowKey: (_tab, row) => `${row.id}:${row.name}` });
+  assert.equal(index.indexOfKey("1:old"), 0);
+  mutateTabRow(tab, 0, (row) => { row.name = "new"; });
+  assert.equal(index.indexOfKey("1:old"), -1);
+  assert.equal(index.indexOfKey("1:new"), 0);
+  assert.equal(sibling.rowKeyCacheVersion, tab.rowKeyCacheVersion);
+  mutateTabRow(tab, 0, (row) => { row.name = "old"; });
+  assert.equal(index.indexOfKey("1:old"), 0);
+  assert.equal(index.indexOfKey("1:new"), -1);
+});
+
 test("repeated row-key lookups reuse one index build for a data generation", () => {
   assert.equal(typeof createRowIndex, "function", "rowIndex module is unavailable");
   const tab = makeTab(Array.from({ length: 10_000 }, (_, index) => ({ id: String(index) })));

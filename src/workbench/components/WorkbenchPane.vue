@@ -1,4 +1,5 @@
 <script setup>
+import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
@@ -163,6 +164,8 @@ const {
   scrollInsertCellIntoView,
   visibleRows,
   activeColumnMeta,
+  columnWindow,
+  pinnedColumnIndexes,
   scrollTop,
   viewportHeight,
   rowHeight,
@@ -233,7 +236,7 @@ const editor = useGridEditor(
   props.invokeWorkbench,
   activeDataTab,
   gridWrapRef,
-  { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView },
+  { scrollRowIntoView, scrollCellIntoView, scrollInsertCellIntoView, columnWindow },
   {
     busy: props.appState.busy,
     statusText,
@@ -312,6 +315,20 @@ const {
   isColumnSelected,
   setCellToNull,
 } = editor;
+watch(() => {
+  const names = activeColumnMeta.value.map((meta) => meta.name);
+  const picked = [selectedCell.value?.column, editingCell.value?.column, selectedInsertCell.value?.column];
+  // Keep selection endpoints mounted so the fill handle retains exact geometry.
+  const bounds = gridSelectionActualBounds(selectedRange.value);
+  const indexes = picked.map((name) => names.indexOf(name)).filter((index) => index >= 0);
+  for (const value of [bounds?.left, bounds?.right]) {
+    if (Number.isInteger(value)) indexes.push(value);
+  }
+  return [...new Set(indexes)].sort((a, b) => a - b);
+}, (indexes) => {
+  if (indexes.join(",") !== pinnedColumnIndexes.value.join(",")) pinnedColumnIndexes.value = indexes;
+}, { immediate: true });
+
 
 async function refreshTabPage(tab, page) {
   const ready = await prepareInsertDraftsForRefresh(tab);
@@ -1607,6 +1624,7 @@ onMounted(() => emitPaneState());
       :engine-kind="activeEngineKind"
       :active-columns="activeColumns"
       :active-column-meta="activeColumnMeta"
+      :column-window="columnWindow"
       :visible-rows="visibleRows"
       :virtual-range="virtualRange"
       :frozen-rows-active="frozenRowsActive"

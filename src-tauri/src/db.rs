@@ -590,6 +590,8 @@ pub async fn connect_database(
     let options = mysql_connect_options(mysql_url, database)?;
     MySqlPoolOptions::new()
         .max_connections(5)
+        .min_connections(1)
+        .idle_timeout(Some(Duration::from_secs(300)))
         .acquire_timeout(MYSQL_POOL_ACQUIRE_TIMEOUT)
         .connect_with(options)
         .await
@@ -653,6 +655,33 @@ pub async fn test_database_connection(mysql_url: &str) -> Result<(), String> {
     }
 }
 
+async fn read_primary_key_orders(
+    pool: &MySqlPool,
+    database: &str,
+    tables: &[&str],
+) -> Result<HashMap<String, Vec<String>>, String> {
+    if tables.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = vec!["?"; tables.len()].join(", ");
+    let sql = format!("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND INDEX_NAME = 'PRIMARY' AND TABLE_NAME IN ({placeholders}) ORDER BY TABLE_NAME, SEQ_IN_INDEX");
+    let mut query = sqlx::query(&sql).bind(database);
+    for table in tables {
+        query = query.bind(*table);
+    }
+    let rows = query
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("读取主键列序失败: {error}"))?;
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let table = mysql_text::string(&row, "TABLE_NAME").map_err(|error| error.to_string())?;
+        let column = mysql_text::string(&row, "COLUMN_NAME").map_err(|error| error.to_string())?;
+        result.entry(table.to_lowercase()).or_default().push(column);
+    }
+    Ok(result)
+}
+
 pub async fn read_schema(
     pool: &MySqlPool,
     database: &str,
@@ -687,6 +716,10 @@ pub async fn read_schema(
     .collect::<Result<Vec<_>, String>>()?;
 
     Ok(TableMeta {
+        primary_key_order: read_primary_key_orders(pool, database, &[table_name])
+            .await?
+            .remove(&table_name.to_lowercase())
+            .unwrap_or_default(),
         table_name: mysql_text::string(&table_row, "TABLE_NAME")
             .unwrap_or_else(|_| table_name.to_string()),
         table_comment: mysql_text::string(&table_row, "TABLE_COMMENT").unwrap_or_default(),
@@ -872,8 +905,8 @@ pub async fn read_table_design(
             .filter(|value| !value.trim().is_empty());
         let (is_generated, is_supported, unsupported_reason) =
             column_support(&data_type, &extra, &generation_expression);
-        let column_name = mysql_text::string(&row, "COLUMN_NAME")
-            .map_err(|error| error.to_string())?;
+        let column_name =
+            mysql_text::string(&row, "COLUMN_NAME").map_err(|error| error.to_string())?;
         Ok(ColumnDesignMeta {
             ordinal: row.try_get::<u32, _>("ORDINAL_POSITION").unwrap_or(0),
             primary_key_ordinal: row
@@ -976,11 +1009,6 @@ pub async fn read_schemas_for_tables(
     for table_name in &table_names {
         query = query.bind(*table_name);
     }
-    let rows = query
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("读取字段信息失败: {error}"))?;
-
     let mut comments = HashMap::new();
     for table in tables {
         comments.insert(table.table_name.to_lowercase(), table.table_comment.clone());
@@ -992,11 +1020,14 @@ pub async fn read_schemas_for_tables(
     for table_name in &table_names {
         comment_query = comment_query.bind(*table_name);
     }
-    for row in comment_query
-        .fetch_all(pool)
-        .await
-        .map_err(|error| format!("读取表信息失败: {error}"))?
-    {
+    // A background schema job owns one scheduler pool permit. Do not fan out
+    // into three connections and consume the foreground reservation.
+    let rows = query.fetch_all(pool).await
+        .map_err(|error| format!("读取字段信息失败: {error}"))?;
+    let comment_rows = comment_query.fetch_all(pool).await
+        .map_err(|error| format!("读取表信息失败: {error}"))?;
+    let mut primary_orders = read_primary_key_orders(pool, database, &table_names).await?;
+    for row in comment_rows {
         comments.insert(
             mysql_text::string(&row, "TABLE_NAME")
                 .unwrap_or_default()
@@ -1022,6 +1053,9 @@ pub async fn read_schemas_for_tables(
             by_table
                 .remove(&table.table_name.to_lowercase())
                 .map(|columns| TableMeta {
+                    primary_key_order: primary_orders
+                        .remove(&table.table_name.to_lowercase())
+                        .unwrap_or_default(),
                     table_name: table.table_name.clone(),
                     table_comment: comments
                         .get(&table.table_name.to_lowercase())
@@ -1126,25 +1160,26 @@ fn requested_sort_order_sql(table: &TableMeta, sort: &TablePageSort) -> String {
     )
 }
 
-fn mysql_column_order_terms(table: &TableMeta, column: &ColumnMeta, descending: bool) -> String {
-    let qualified = format!(
-        "`{}`.`{}`",
-        escape_ident(&table.table_name),
-        escape_ident(&column.column_name)
-    );
-    natural_sort::mysql_order_by_terms(
-        &qualified,
-        descending,
-        natural_sort::is_textual_sort_column(column),
-    )
-}
-
 fn default_primary_key_order_sql(table: &TableMeta) -> String {
-    let terms = table
-        .columns
+    let names: Vec<&str> = if table.primary_key_order.is_empty() {
+        table
+            .columns
+            .iter()
+            .filter(|column| column.is_primary_key)
+            .map(|column| column.column_name.as_str())
+            .collect()
+    } else {
+        table.primary_key_order.iter().map(String::as_str).collect()
+    };
+    let terms = names
         .iter()
-        .filter(|column| column.is_primary_key)
-        .map(|column| mysql_column_order_terms(table, column, false))
+        .map(|name| {
+            format!(
+                "`{}`.`{}` ASC",
+                escape_ident(&table.table_name),
+                escape_ident(name)
+            )
+        })
         .collect::<Vec<_>>();
     if terms.is_empty() {
         String::new()
@@ -1178,8 +1213,8 @@ fn search_scan_order_sql(table: &TableMeta, sort: Option<&TablePageSort>) -> Str
 pub(crate) fn build_search_scan_sql(
     database: &str,
     table: &TableMeta,
-    offset: u64,
-    limit: u32,
+    _offset: u64,
+    _limit: u32,
     sort: Option<&TablePageSort>,
 ) -> String {
     let select_columns = table
@@ -1195,12 +1230,10 @@ pub(crate) fn build_search_scan_sql(
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ {} FROM {}{} LIMIT {} OFFSET {}",
+        "SELECT /*+ MAX_EXECUTION_TIME(3000) */ {} FROM {}{} LIMIT ? OFFSET ?",
         select_columns,
         table_ref_sql(Some(database), &table.table_name),
         search_scan_order_sql(table, sort),
-        limit.clamp(1, 512),
-        offset,
     )
 }
 
@@ -1221,7 +1254,11 @@ pub async fn read_db_search_scan_page_with_perf(
         Some(context),
         || PerfEventDetails::stage(PerfStage::Query),
     );
-    let result = sqlx::query(&sql).fetch_all(pool).await;
+    let result = sqlx::query(&sql)
+        .bind(limit.clamp(1, 512))
+        .bind(offset)
+        .fetch_all(pool)
+        .await;
     if let Some(span) = span {
         span.finish(
             if result.is_ok() {
@@ -1365,13 +1402,14 @@ async fn read_db_page_inner(
     let order_sql = page_order_sql(table, request.sort.as_ref());
 
     let sql = format!(
-        "SELECT {} FROM {}{}{} LIMIT {} OFFSET {}",
-        select_columns, table_ref, where_sql, order_sql, page_size, offset
+        "SELECT {} FROM {}{}{} LIMIT ? OFFSET ?",
+        select_columns, table_ref, where_sql, order_sql
     );
     let mut query = sqlx::query(&sql);
     for bind in &binds {
         query = query.bind(bind);
     }
+    query = query.bind(page_size as u64).bind(offset as u64);
     let query_span = perf.and_then(|(recorder, context)| {
         recorder.begin_span(
             "mysql.page_sql_wait",
@@ -1543,6 +1581,7 @@ mod tests {
     #[test]
     fn table_count_uses_a_single_connection_pool_and_server_timeout_hint() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -1579,6 +1618,7 @@ mod tests {
     #[test]
     fn table_search_scan_sql_is_bounded_timed_and_preserves_sort() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1598,13 +1638,14 @@ mod tests {
         ));
         assert!(sql.contains("DECIMAL(40,0)"));
         assert!(sql.contains("`hero`.`name` DESC"));
-        assert!(sql.ends_with(" LIMIT 128 OFFSET 256"));
-        assert!(!sql.contains('?'));
+        assert!(sql.ends_with(" LIMIT ? OFFSET ?"));
+        assert_eq!(sql.matches('?').count(), 2);
     }
 
     #[test]
     fn table_search_scan_sql_keeps_native_order_for_numeric_sort() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1626,6 +1667,7 @@ mod tests {
     #[test]
     fn table_search_scan_sql_uses_primary_keys_for_stable_default_order() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1637,12 +1679,13 @@ mod tests {
         let sql = build_search_scan_sql("game", &table, 0, 64, None);
 
         assert!(sql.contains(" ORDER BY `hero`.`realm` ASC, `hero`.`id` ASC "));
-        assert!(sql.ends_with("LIMIT 64 OFFSET 0"));
+        assert!(sql.ends_with("LIMIT ? OFFSET ?"));
     }
 
     #[test]
-    fn table_search_scan_sql_uses_natural_order_for_text_primary_keys() {
+    fn table_search_scan_sql_uses_index_order_for_text_primary_keys() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "activecondprop".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1653,10 +1696,35 @@ mod tests {
 
         let sql = build_search_scan_sql("newsg_4cfg", &table, 0, 64, None);
 
-        assert!(sql.contains("DECIMAL(40,0)"));
+        assert!(!sql.contains("DECIMAL(40,0)"));
         assert!(sql.contains("`activecondprop`.`CondID` ASC"));
         assert!(sql.contains("`activecondprop`.`Idx` ASC"));
-        assert!(!sql.contains(" ORDER BY `activecondprop`.`CondID` ASC, `activecondprop`.`Idx` ASC "));
+        assert!(
+            sql.contains(" ORDER BY `activecondprop`.`CondID` ASC, `activecondprop`.`Idx` ASC ")
+        );
+    }
+
+    #[test]
+    fn default_order_follows_composite_index_order_without_reordering_display_columns() {
+        let table = TableMeta {
+            primary_key_order: vec!["b".into(), "a".into()],
+            table_name: "t".into(),
+            table_comment: String::new(),
+            columns: vec![
+                ColumnMeta::with_basic("a", "varchar(32)", "", true, false),
+                ColumnMeta::with_basic("b", "int", "", true, false),
+            ],
+        };
+        assert_eq!(
+            default_primary_key_order_sql(&table),
+            " ORDER BY `t`.`b` ASC, `t`.`a` ASC"
+        );
+        assert_eq!(table.columns[0].column_name, "a");
+        assert!(!serde_json::to_value(&table)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("primary_key_order"));
     }
 
     #[test]
@@ -1832,6 +1900,7 @@ mod tests {
     #[test]
     fn build_value_search_sql_batches_all_columns_for_one_table() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player`profile".into(),
             table_comment: String::new(),
             columns: vec![
@@ -1859,6 +1928,7 @@ mod tests {
     #[test]
     fn build_value_search_column_sql_selects_preview_for_one_column() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player`profile".into(),
             table_comment: String::new(),
             columns: Vec::new(),

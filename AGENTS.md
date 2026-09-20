@@ -253,6 +253,24 @@ from UI):
 panel/message/card components. `DataGrid.vue`
 renders only `visibleRows` from `useVirtualGrid`; new grid features must preserve
 this virtualized flow.
+`GridDataRow.vue` receives per-row selection/edit state and a row version; keep
+unchanged row props stable. `useVirtualColumns.js` supplies exact-width spacer
+segments shared by headers, comments, drafts and data rows. Logical column
+indexes must never be interpreted as rendered DOM positions. Frozen, selected,
+editing and selection-endpoint columns stay mounted. `rowStore.js` separates
+content versions from identity versions; no-key tables use all columns for
+identity. `rowIndex.js` resolves current row objects through the store.
+Tab reorder animation measures geometry only while dragging.
+
+Grid regressions: `node scripts/test-grid-columns.mjs` and
+`DBSCOUT_GRID_TEST_URL=<preview URL> node scripts/test-grid-insert-drag.mjs`.
+The performance sampler is `node scripts/perf/grid-interaction.mjs --base <URL>
+--scenario schema-800x60 --label <name>`; build a production preview first.
+Mock performance fixture rows support conflict-checked updates independently of
+the ordinary demo data. MySQL default page/search ordering follows primary-index
+column order (backend-only `TableMeta.primary_key_order`); explicit sorting keeps
+natural order. Audit durability remains FULL.
+
 
 **Mock data** (`mock/`):
 - `mockBackend.js` — Browser-only mock implementing the Tauri command contract

@@ -140,7 +140,7 @@ test("navigation and tabs expose each table database source", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const identity = read("./components/SelectedCellIdentity.vue");
   const styles = read("./workbench.css");
 
@@ -181,7 +181,7 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /设计/);
   assert.match(tabs, /previewDragOrder/);
   assert.match(tabs, /previewTabs/);
-  assert.match(tabs, /<TransitionGroup\s+name="wb-tab-reorder"/);
+  assert.match(tabs, /<div ref="tabListRef" class="wb-tab-list"/);
   assert.match(tabs, /class="wb-tab-list"/);
   assert.doesNotMatch(tabs, /scrollIntoView/);
   assert.match(tabs, /:draggable="!tab\.opening && tabKind\(tab\) !== 'home'"/);
@@ -1072,7 +1072,7 @@ test("sidebar search input is not constrained by the result panel height", () =>
 
 test("readability copy pass uses explicit actions and localized ellipses", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const inspector = read("./components/InspectorPanel.vue");
   const cellDetail = read("./components/CellDetailPanel.vue");
   const connection = read("./components/ConnectionDialog.vue");
@@ -1195,7 +1195,7 @@ test("sidebar search opens selected schema results on Enter and hides schema aft
 test("workbench suppresses native context menus and keeps refresh menu scoped to table areas", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const inspector = read("./components/InspectorPanel.vue");
   const menu = read("./components/ContextMenu.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
@@ -1539,7 +1539,7 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
 
 test("data grid exposes its real scroll wrapper to editor and virtual grid", () => {
   const pane = read("./components/WorkbenchPane.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
 
   assert.match(dataGrid, /grid-ready/);
   assert.match(dataGrid, /emit\(["']grid-ready["'],\s*gridWrapRef\.value\)/);
@@ -1548,7 +1548,7 @@ test("data grid exposes its real scroll wrapper to editor and virtual grid", () 
 });
 
 test("data grid sorts from a hover-revealed column menu instead of header clicks", () => {
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const menu = read("./components/ColumnSortMenu.vue");
   const styles = read("./workbench.css");
@@ -1599,7 +1599,7 @@ test("table search completes normal rows automatically and keeps explicit result
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
   const tableSession = read("./composables/useTableSession.js");
   const tableSearch = read("./composables/useTableSearch.js");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
 
   assert.match(pane, /import\s+\{\s*useTableSearch\s*\}\s+from\s+["']\.\.\/composables\/useTableSearch\.js["']/);
   assert.match(pane, /handleTableFindKeydown\(event\)/);
@@ -1637,7 +1637,7 @@ test("table search completes normal rows automatically and keeps explicit result
 test("grid scroll schedules paging outside the event and keeps both directions fixed", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const virtualGrid = read("./composables/useVirtualGrid.js");
   const styles = read("./workbench.css");
 
@@ -1666,27 +1666,26 @@ test("grid scroll schedules paging outside the event and keeps both directions f
 });
 
 test("ordinary grid cells skip HTML parsing and search highlighting when no query is active", () => {
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
 
   assert.match(dataGrid, /import\s+\{[^}]*displayCellValue[^}]*\}\s+from\s+["']\.\.\/utils\/cellDisplay\.js["']/s);
   assert.match(dataGrid, /const\s+hasActiveCellSearch\s*=\s*computed/);
-  assert.match(dataGrid, /'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
-  assert.match(dataGrid, /v-else-if="hasActiveCellSearch"[^>]*v-html="highlightCellHtml/);
-  assert.match(dataGrid, /v-else[^>]*class="wb-cell-text"[^>]*>\{\{\s*plainCellText/);
+  assert.match(dataGrid, /'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatch/);
+  assert.match(dataGrid, /v-else-if="hasActiveCellSearch"[^>]*v-html="highlightHtml/);
+  assert.match(dataGrid, /v-else[^>]*class="wb-cell-text"[^>]*>\{\{\s*displayText/);
 });
 
 test("visible grid rows and columns reuse prepared geometry instead of recomputing it per cell", () => {
-  const dataGrid = read("./components/DataGrid.vue");
-  const ordinaryRows = dataGrid.match(/<template v-for="\{ row, originalIndex, rowKey, visualIndex \} in visibleRowsWithVisualIndex"[\s\S]*?<tr v-if="virtualBottomSpacerHeight/)?.[0] || "";
-
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
+  const row = read("./components/GridDataRow.vue");
   assert.match(dataGrid, /const\s+visibleRowsWithVisualIndex\s*=\s*computed/);
   assert.match(dataGrid, /const\s+renderCellColumns\s*=\s*computed/);
-  assert.match(dataGrid, /function\s+cellRangeClasses[\s\S]*?if\s*\(!props\.selectedRange/);
-  assert.match(ordinaryRows, /v-for="columnMeta in renderCellColumns"/);
-  assert.match(ordinaryRows, /\.\.\.cellRangeClasses\(/);
-  assert.doesNotMatch(ordinaryRows, /\.\.\.getCellRangeClasses\(/);
-  assert.match(ordinaryRows, /:style="columnMeta\.cellStyle"/);
-  assert.doesNotMatch(ordinaryRows, /dataRowVisualIndex\(originalIndex\)/);
+  assert.match(dataGrid, /<GridDataRow/);
+  assert.match(row, /v-for="columnMeta in columns"/);
+  assert.match(row, /rangeClasses\?\./);
+  assert.doesNotMatch(row, /getCellRangeClasses/);
+  assert.match(row, /columnMeta\.cellStyle/);
+  assert.doesNotMatch(row, /dataRowVisualIndex/);
 });
 
 test("Ctrl+F is captured globally and opens the find tab of the find/replace dialog", () => {
@@ -1984,7 +1983,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
 test("split panes render independent tabbars at the top of each pane", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(orchestrator, /<WorkbenchTopbarTabs/);
@@ -2020,7 +2019,7 @@ test("split panes render independent tabbars at the top of each pane", () => {
 
 test("table actions are direct in data tabs while non-data panes keep fallback choices", () => {
   const pane = read("./components/WorkbenchPane.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const menuMatch = pane.match(/<menu[\s\S]*?class="wb-split-menu is-floating"[\s\S]*?<\/menu>/);
   assert.ok(menuMatch, "split options menu should render in WorkbenchPane");
   const menu = menuMatch[0];
@@ -2126,7 +2125,7 @@ test("operation feedback messages remain available to assistive tech", () => {
 test("cell save feedback floats beside the saved cell", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const editor = read("./composables/useGridEditor.js");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
 
   assert.match(editor, /onSaveFeedback/);
@@ -2230,7 +2229,7 @@ test("inspector field remarks select the matching cell on the current visual row
 });
 
 test("data grid does not refit field widths when the window is resized", () => {
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const observer = grid.match(/resizeObserver = new ResizeObserver\(\(\) => \{[\s\S]*?\}\);/);
 
   assert.ok(observer, "expected a grid ResizeObserver");
@@ -2238,7 +2237,7 @@ test("data grid does not refit field widths when the window is resized", () => {
 });
 
 test("data grid column headers can be dragged to reorder fields without leaving the freeze band", () => {
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const menu = read("./components/ContextMenu.vue");
   const orchestrator = read("./MySqlWorkbench.vue");
@@ -2270,7 +2269,7 @@ test("data grid column headers can be dragged to reorder fields without leaving 
 test("schema search hits highlight table headers and inspector remarks with dedicated navigation", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
 
@@ -2483,7 +2482,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const split = read("./components/WorkbenchSplitLayout.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
   const frozenRowsTemplate = dataGrid.match(/<template v-if="frozenRowCount > 0">[\s\S]*?<\/template>/)?.[0] || "";
 
@@ -2493,14 +2492,14 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /wb-row-header/);
   assert.match(dataGrid, /'is-row-selecting':\s*isRowDragging/);
   assert.match(styles, /\.wb-grid-wrap\.is-row-selecting\s+\.wb-row-resize-handle\s*\{[^}]*cursor:\s*default;[^}]*pointer-events:\s*none;/s);
-  assert.match(dataGrid, /wb-frozen-row-index[\s\S]*?:style="frozenRowStyle\(frozenIndex\)"/);
+  assert.match(dataGrid, /:frozen-style="frozenRowStyles\[frozenIndex\]"/);
   // 行号使用视觉行号（含 anchored 草稿位移），不再用原始 originalIndex + 1
   assert.doesNotMatch(dataGrid, />\{\{ originalIndex \+ 1 \}\}</);
-  assert.match(frozenRowsTemplate, /\{\{ dataRowVisualIndex\(originalIndex\) \+ 1 \}\}[\s\S]*?wb-row-resize-handle/);
-  assert.match(frozenRowsTemplate, /:data-visual-row-index="dataRowVisualIndex\(originalIndex\)"/);
+  assert.match(frozenRowsTemplate, /rowModel\(row, rowKey, originalIndex, dataRowVisualIndex\(originalIndex\)/);
+  assert.match(dataGrid, /:data-visual-row-index="visualIndex"/);
   assert.doesNotMatch(frozenRowsTemplate, /:data-visual-row-index="originalIndex"/);
   assert.match(dataGrid, /row-selected/);
-  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*tab\.selectedRowKeys\.has\(rowKey\)[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatchCell/);
+  assert.match(dataGrid, /:data-row-key="rowKey"[\s\S]*'row-selected':\s*rowSelected[\s\S]*'search-match':\s*hasActiveCellSearch\s*&&\s*isSearchMatch/);
   assert.match(dataGrid, /insert-keydown/);
   assert.match(dataGrid, /selectedInsertCell/);
   assert.match(dataGrid, /selectedInsertRow/);
@@ -2545,7 +2544,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /@paste="emit\('insert-paste', tab, insertRow\.id, columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /insert-row-select/);
   assert.match(dataGrid, /@click\.stop="emit\('insert-row-select', tab, insertRow\.id, \$event\)"/);
-  assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, row, originalIndex\)"/);
+  assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, row, originalIndex\)"/);
   assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, insertRowObject\(insertRow\), anchoredInsertVisualIndex\(originalIndex, insertRowIndex\)\)"/);
   assert.match(dataGrid, /@contextmenu\.prevent\.stop="emit\('row-contextmenu', \$event, tab, insertRowObject\(insertRow\), trailingInsertVisualIndex\(insertRowIndex\)\)"/);
   assert.match(dataGrid, /row-select-start/);
@@ -2654,7 +2653,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
 
 test("data grid wires Excel-like drag range selection", () => {
   const pane = read("./components/WorkbenchPane.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
 
   assert.match(dataGrid, /cell-mousedown/);
@@ -2670,12 +2669,12 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.doesNotMatch(dataGrid, /function\s+continueRangeSelection\(event\)\s*\{\s*if \(!props\.isSelectingRange\) return;/);
   assert.match(dataGrid, /function\s+endRangeSelection\(\)\s*\{\s*if \(!isCellDragging\.value\) return;\s*isCellDragging\.value = false;\s*emit\('range-end'\);/);
   assert.match(dataGrid, /'is-selecting-range': isSelectingRange \|\| isCellDragging/);
-  assert.equal((dataGrid.match(/@mousedown\.left="onCellRangeStart\(/g) || []).length, 4);
-  assert.equal((dataGrid.match(/@mouseup="endRangeSelection"/g) || []).length, 4);
+  assert.equal((dataGrid.match(/@mousedown\.left="onCellRangeStart\(/g) || []).length, 2);
+  assert.equal((dataGrid.match(/@mouseup="endRangeSelection"/g) || []).length, 3);
   assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
   assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
   assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
-  assert.equal((dataGrid.match(/@blur="emit\('cell-blur'\)"\s*\n\s*@dblclick\.stop/g) || []).length, 4);
+  assert.equal((dataGrid.match(/@blur="emit\('cell-blur'\)"\s*\n\s*@dblclick\.stop/g) || []).length, 3);
   assert.match(pane, /@cell-mousedown="startGridRangeSelection"/);
   assert.match(pane, /function\s+startGridRangeSelection/);
   assert.match(pane, /startRangeSelection\(\.\.\.args\)/);
@@ -2709,7 +2708,7 @@ test("data grid wires Excel-like drag range selection", () => {
 
 test("data grid shows a fill handle overlay outside clipped cells", () => {
   const pane = read("./components/WorkbenchPane.vue");
-  const dataGrid = read("./components/DataGrid.vue");
+  const dataGrid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
 
   assert.match(dataGrid, /class="wb-fill-handle"/);
@@ -3463,7 +3462,7 @@ test("root surfaces keep resize gaps on the active theme background", () => {
 
 test("table search toolbar keeps previous and next navigation as compact icons", () => {
   const pane = read("./components/WorkbenchPane.vue");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const styles = read("./workbench.css");
 
   assert.match(grid, /hasSearchMatches/);
@@ -3580,7 +3579,7 @@ test("performance instrumentation uses the shared development-only utility", () 
   const bridge = read("./utils/tauriBridge.js");
   const connection = read("./composables/useConnection.js");
   const tableSession = read("./composables/useTableSession.js");
-  const grid = read("./components/DataGrid.vue");
+  const grid = read("./components/DataGrid.vue") + read("./components/GridDataRow.vue");
   const orchestrator = read("./MySqlWorkbench.vue");
 
   assert.match(perf, /\[dbscout:perf\]/);

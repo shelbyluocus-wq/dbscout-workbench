@@ -1597,7 +1597,7 @@ mod tests {
             "GBK 中文输出应被正确解码: {lines:?}"
         );
         assert!(
-            lines.iter().any(|line| line.contains("请按任意键继续")),
+            lines.iter().any(|line| line.contains("请按任意键继续") || line.contains("Press any key to continue")),
             "pause 的提示行也应出现: {lines:?}"
         );
     }

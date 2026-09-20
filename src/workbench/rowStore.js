@@ -1,4 +1,5 @@
 import { markRaw, toRaw } from "vue";
+import { columnName } from "./utils/normalize.js";
 
 const tabBindingsByStore = new WeakMap();
 
@@ -29,6 +30,8 @@ export class DenseRowStore {
       nonNegativeInteger(totalLength, this._absoluteStart + this._rows.length),
     );
     this.generation = nonNegativeInteger(generation);
+    this.identityGeneration = this.generation;
+    this._rowVersions = new Map();
     this._listeners = new Set();
   }
 
@@ -58,6 +61,7 @@ export class DenseRowStore {
   }
 
   replacePage(rows = [], { absoluteStart = 0, totalLength } = {}) {
+    this._rowVersions.clear();
     this._rows = rawRowArray(rows);
     this._absoluteStart = nonNegativeInteger(absoluteStart);
     this._totalLength = Math.max(
@@ -81,6 +85,7 @@ export class DenseRowStore {
 
   prependPage(rows = []) {
     const nextRows = rawRowArray(rows);
+    this._rowVersions = new Map([...this._rowVersions].map(([index, version]) => [index + nextRows.length, version]));
     if (nextRows.length > 0) this._rows.unshift(...nextRows);
     this._notify();
     return this;
@@ -122,13 +127,32 @@ export class DenseRowStore {
       return false;
     }
     const current = this._rows[loadedIndex];
+    const before = { ...current };
     const next = mutation(current, normalizedIndex);
     if (next !== undefined) this._rows[loadedIndex] = next;
-    this._notify();
+    const target = this._rows[loadedIndex];
+    const changedKeys = [...new Set([...Object.keys(before), ...Object.keys(target || {})])]
+      .filter((key) => !Object.is(before[key], target?.[key]));
+    if (target === current && !changedKeys.length) return true;
+    this._rowVersions.set(loadedIndex, this.rowVersion(normalizedIndex) + 1);
+    const owners = tabBindingsByStore.get(this)?.owners;
+    const identityChanged = !owners?.size || [...owners].some((tab) => {
+      const keys = tab.primaryKeys?.length ? tab.primaryKeys : (tab.columns || []).map(columnName);
+      return changedKeys.some((key) => keys.includes(key));
+    });
+    if (identityChanged) this.identityGeneration += 1;
+    this._notify(false);
     return true;
   }
 
+  rowVersion(absoluteIndex) {
+    return this._rowVersions.get(Number(absoluteIndex) - this._absoluteStart) || 0;
+  }
+
   invalidate() {
+    for (let index = 0; index < this._rows.length; index += 1) {
+      this._rowVersions.set(index, (this._rowVersions.get(index) || 0) + 1);
+    }
     this._notify();
   }
 
@@ -138,8 +162,9 @@ export class DenseRowStore {
     return () => this._listeners.delete(listener);
   }
 
-  _notify() {
+  _notify(structureChanged = true) {
     this.generation += 1;
+    if (structureChanged) this.identityGeneration += 1;
     for (const listener of this._listeners) listener(this.generation, this);
   }
 }
@@ -160,7 +185,7 @@ function bindTabToStore(tab, store) {
     store.subscribe((nextGeneration) => {
       for (const owner of [...owners].reverse()) {
         owner.dataVersion = nextGeneration;
-        owner.rowKeyCacheVersion = nextGeneration;
+        owner.rowKeyCacheVersion = store.identityGeneration ?? nextGeneration;
       }
     });
     binding = { owners };
@@ -168,7 +193,7 @@ function bindTabToStore(tab, store) {
   }
   binding.owners.add(tab);
   tab.dataVersion = store.generation;
-  tab.rowKeyCacheVersion = store.generation;
+  tab.rowKeyCacheVersion = store.identityGeneration ?? store.generation;
 }
 
 export function ensureTabRowStore(tab) {

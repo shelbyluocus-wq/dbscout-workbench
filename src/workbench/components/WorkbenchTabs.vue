@@ -1,4 +1,5 @@
 <script setup>
+import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
 import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
@@ -271,6 +272,8 @@ async function toggleMaximize() {
   }
 }
 
+const tabListRef = ref(null);
+useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
 </script>
 
 <template>
@@ -283,7 +286,7 @@ async function toggleMaximize() {
     @drop.prevent.stop="dropTabOnBar"
     @dblclick="toggleMaximize"
   >
-    <TransitionGroup name="wb-tab-reorder" tag="div" class="wb-tab-list" data-tauri-drag-region>
+    <div ref="tabListRef" class="wb-tab-list" data-tauri-drag-region>
       <div
         v-for="tab in previewTabs"
         :key="tab.id"
@@ -372,7 +375,7 @@ async function toggleMaximize() {
           <span class="wb-tab-close-mark" aria-hidden="true"></span>
         </button>
       </div>
-    </TransitionGroup>
+    </div>
   </section>
   <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="paneId" />
 </template>

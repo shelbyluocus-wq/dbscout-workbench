@@ -1852,6 +1852,7 @@ pub async fn select_database(
         rt.schema = tables
             .iter()
             .map(|table| TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 columns: Vec::new(),
@@ -1869,6 +1870,7 @@ pub async fn select_database(
         rt.schema = tables
             .iter()
             .map(|table| TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 columns: Vec::new(),
@@ -1895,6 +1897,7 @@ pub async fn select_database(
         rt.schema = tables
             .iter()
             .map(|table| TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: table.table_name.clone(),
                 table_comment: table.table_comment.clone(),
                 columns: Vec::new(),
@@ -2065,13 +2068,20 @@ async fn resolve_schema_load_context(
             .clone()
             .unwrap_or_else(|| rt.selected_database.clone())
     });
-    let demo_schema = demo_schema_for_runtime(
-        &rt.demo_schema_overrides,
-        rt.demo_profile,
-        &database,
-        &rt.selected_database,
-        &rt.schema,
-    );
+    let demo_schema = if connection.mysql_url.is_some()
+        || connection.clickhouse_url.is_some()
+        || connection.mongodb_url.is_some()
+    {
+        Vec::new()
+    } else {
+        demo_schema_for_runtime(
+            &rt.demo_schema_overrides,
+            rt.demo_profile,
+            &database,
+            &rt.selected_database,
+            &rt.schema,
+        )
+    };
     Ok(SchemaLoadContext {
         connection_id,
         kind: connection.kind,
@@ -3148,13 +3158,20 @@ pub async fn open_table_session(
                 .clone()
                 .unwrap_or_else(|| rt.selected_database.clone())
         });
-        let schema = demo_schema_for_runtime(
-            &rt.demo_schema_overrides,
-            rt.demo_profile,
-            &database,
-            &rt.selected_database,
-            &rt.schema,
-        );
+        let schema = if connection.mysql_url.is_some()
+            || connection.clickhouse_url.is_some()
+            || connection.mongodb_url.is_some()
+        {
+            Vec::new()
+        } else {
+            demo_schema_for_runtime(
+                &rt.demo_schema_overrides,
+                rt.demo_profile,
+                &database,
+                &rt.selected_database,
+                &rt.schema,
+            )
+        };
         let row_key = demo_row_key(&database, &requested_table_name);
         (
             connection_id,
@@ -6981,6 +6998,7 @@ mod tests {
 
     fn tm(name: &str) -> TableMeta {
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: name.into(),
             table_comment: String::new(),
             columns: vec![],
@@ -7034,6 +7052,7 @@ mod tests {
     #[test]
     fn demo_update_cell_primary_key_conflict_detection_ignores_current_row_only() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: String::new(),
             columns: vec![cm("id", true), cm("name", false)],
@@ -7058,6 +7077,7 @@ mod tests {
     #[test]
     fn demo_batch_update_validates_composite_primary_key_from_final_row_state() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "account_role".into(),
             table_comment: String::new(),
             columns: vec![
@@ -7109,6 +7129,7 @@ mod tests {
     #[test]
     fn demo_batch_update_rejects_duplicate_final_composite_key_atomically() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "account_role".into(),
             table_comment: String::new(),
             columns: vec![cm("account_id", true), cm("role_id", true)],
@@ -7153,6 +7174,7 @@ mod tests {
     #[test]
     fn validation_rejects_duplicate_and_incomplete_composite_primary_keys() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "account_role".into(),
             table_comment: String::new(),
             columns: vec![
@@ -7276,6 +7298,7 @@ mod tests {
     #[test]
     fn table_replacement_preview_classifies_every_change_and_identifies_deletions() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "items".into(),
             table_comment: String::new(),
             columns: vec![cm("id", true), cm("name", false)],
@@ -7338,6 +7361,7 @@ mod tests {
     #[test]
     fn table_replacement_preview_keeps_updated_details_when_deletions_fill_the_budget() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "items".into(),
             table_comment: String::new(),
             columns: vec![cm("id", true), cm("name", false)],

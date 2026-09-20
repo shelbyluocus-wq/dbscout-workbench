@@ -194,6 +194,9 @@ impl ColumnMeta {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TableMeta {
+    /// Backend-only index order; display columns retain their ordinal order.
+    #[serde(skip)]
+    pub primary_key_order: Vec<String>,
     pub table_name: String,
     pub table_comment: String,
     pub columns: Vec<ColumnMeta>,

@@ -1,14 +1,14 @@
 <script setup>
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
-import { isCellPending, getCellError } from "../editState.js";
+import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { isNumericColumnType } from "../utils/columnTypes.js";
 import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
-import { useColumnResize } from "../composables/useColumnResize.js";
+import { useColumnResize, ensureColumnWidthState } from "../composables/useColumnResize.js";
 import { useColumnReorder } from "../composables/useColumnReorder.js";
 import { columnReorderSurfaceState } from "../utils/columnOrder.js";
 import { useFreezePanes } from "../composables/useFreezePanes.js";
@@ -22,6 +22,7 @@ import {
 } from "../utils/tableImportToolbarActions.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
 import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
+import GridDataRow from "./GridDataRow.vue";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
@@ -42,6 +43,7 @@ defineExpose({ gridWrapRef });
 const props = defineProps({
   tab: { type: Object, default: null },
   activeColumns: { type: Array, default: () => [] },
+  columnWindow: { type: Object, default: null },
   activeColumnMeta: { type: Array, default: () => [] },
   visibleRows: { type: Array, default: () => [] },
   virtualRange: { type: Object, default: () => ({ start: 0, end: 0, padTop: 0, totalHeight: 0 }) },
@@ -83,6 +85,7 @@ const {
   onHandleMouseDown,
   onHandleKeyDown,
   autoFitColumnsRaf,
+  autoFitColumns,
   dispose: disposeColumnResize,
 } = useColumnResize();
 
@@ -433,13 +436,38 @@ const renderColumns = computed(() => {
   }));
 });
 
-const renderCellColumns = computed(() => renderColumns.value.map((columnMeta) => ({
-  ...columnMeta,
-  cellStyle: mergeStyles(
-    colStyle(props.tab, columnMeta.name),
-    frozenColumnStyle(columnMeta.columnIndex),
-  ),
-})));
+const renderCellColumns = computed(() => {
+  const all = renderColumns.value;
+  const segments = props.columnWindow?.segments || all.map((meta, index) => ({ kind: "column", index }));
+  return segments.map((segment) => {
+    if (segment.kind === "spacer") return {
+      kind: "spacer", name: segment.key,
+      cellStyle: { width: `${segment.width}px`, minWidth: `${segment.width}px`, maxWidth: `${segment.width}px` },
+    };
+    const meta = all[segment.index];
+    return { ...meta, kind: "column", cellStyle: mergeStyles(colStyle(props.tab, meta.name), frozenColumnStyle(meta.columnIndex)) };
+  });
+});
+
+// Column tint changes independently of data-row component updates.
+const gridInstanceId = `grid-${Math.random().toString(36).slice(2)}`;
+let activeColumnStyle = null;
+watch(() => [props.selectedCell?.tabId, props.selectedCell?.column, props.tab?.id, renderColumns.value], () => {
+  if (typeof document === "undefined") return;
+  if (!activeColumnStyle) {
+    activeColumnStyle = document.createElement("style");
+    document.head.appendChild(activeColumnStyle);
+  }
+  const index = props.selectedCell?.tabId === props.tab?.id
+    ? renderColumns.value.find((meta) => meta.name === props.selectedCell?.column)?.columnIndex : null;
+  const selector = `[data-grid-id="${gridInstanceId}"] .wb-grid-row`;
+  const cell = `td[data-column-index="${index}"]:not(.selected):not(.error):not(.row-selected)`;
+  activeColumnStyle.textContent = index == null ? "" : `
+    ${selector} ${cell} { background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row)); }
+    ${selector}.row-even ${cell} { background: color-mix(in srgb, var(--wb-cell-highlight) 18%, var(--wb-grid-row-alt)); }
+  `;
+}, { immediate: true, flush: "post" });
+onBeforeUnmount(() => activeColumnStyle?.remove());
 
 function tabScopeKey(tab) {
   return tab?.tableKey || tab?.tableName || "";
@@ -698,6 +726,68 @@ const visibleRowsWithVisualIndex = computed(() => props.visibleRows.map((entry) 
   ...entry,
   visualIndex: dataRowVisualIndex(entry.originalIndex),
 })));
+
+const rowCellStates = computed(() => collectCellStatesForTable(props.editState, tabScopeKey(props.tab)));
+const frozenRowStyles = computed(() => Array.from({ length: frozenRowCount.value }, (_, index) => frozenRowStyle(index)));
+const displayText = (row, column, key) => plainCellText(props.tab, row, column, key);
+const highlightHtml = (row, column, key) => highlightCellHtml(props.tab, row, column, key);
+const isSearchMatch = (row, column, key) => isSearchMatchCell(props.tab, row, column, key);
+const rangeClassesByRow = computed(() => {
+  const result = new Map();
+  if (!props.selectedRange && !props.isFilling) return result;
+  for (const entry of [...visibleRowsWithVisualIndex.value, ...frozenRows.value]) {
+    const visualIndex = entry.visualIndex ?? dataRowVisualIndex(entry.originalIndex);
+    const classes = {};
+    for (const meta of renderColumns.value) {
+      const value = props.getCellRangeClasses(props.tab, entry.rowKey, meta.name, visualIndex, meta.columnIndex);
+      if (value?.["range-selected"]) classes[meta.name] = value;
+    }
+    if (Object.keys(classes).length) result.set(entry.rowKey, classes);
+  }
+  return result;
+});
+
+function rowModel(row, rowKey, originalIndex, visualIndex, rowVersion) {
+  const isActiveRow = props.selectedCell?.tabId === props.tab.id && props.selectedCell?.rowKey === rowKey;
+  const editingColumn = props.editingCell?.rowKey === rowKey ? props.editingCell.column : "";
+  return {
+    row, rowKey, originalIndex, visualIndex, rowVersion,
+    rowNumber: rowWindowOffset.value + visualIndex + 1,
+    isActiveRow,
+    selectedColumn: isActiveRow ? props.selectedCell.column : "",
+    editingColumn,
+    editDraft: editingColumn ? props.editDraft : "",
+    rowSelected: props.tab.selectedRowKeys.has(rowKey),
+    inRowRange: isRowInSelectedRange(props.tab, visualIndex),
+    rangeClasses: rangeClassesByRow.value.get(rowKey) || null,
+    cellState: rowCellStates.value.get(rowKey) || null,
+  };
+}
+
+function resolveDataCellTarget(event) {
+  const target = event.target;
+  if (!target?.closest || target.closest("input, textarea, button, .wb-row-index, tr.wb-insert-row")) return null;
+  const td = target.closest(".wb-grid-row td[data-column-index]");
+  if (!td || !gridWrapRef.value?.contains(td)) return null;
+  const meta = renderColumns.value.find((column) => column.columnIndex === Number(td.dataset.columnIndex));
+  const row = tabRowAt(props.tab, Number(td.dataset.originalIndex));
+  return meta && row ? { td, row, meta, visualIndex: Number(td.dataset.visualRowIndex) } : null;
+}
+function onTbodyMouseDown(event) {
+  if (event.button !== 0) return;
+  const hit = resolveDataCellTarget(event);
+  if (hit) onCellRangeStart(props.tab, hit.row, hit.meta.name, hit.visualIndex, hit.meta.columnIndex, event);
+}
+function dispatchCellEvent(name, event) {
+  const hit = resolveDataCellTarget(event);
+  if (hit) emit(name, props.tab, hit.row, hit.meta.name, hit.visualIndex, hit.meta.columnIndex);
+}
+function onTbodyMouseOver(event) {
+  if (event.relatedTarget?.closest?.("td") === event.target?.closest?.("td")) return;
+  dispatchCellEvent("cell-enter", event);
+}
+const onTbodyClick = (event) => dispatchCellEvent("cell-click", event);
+const onTbodyDblClick = (event) => dispatchCellEvent("cell-dblclick", event);
 
 const renderedVirtualRowCount = computed(() => {
   let count = props.visibleRows.length + trailingInsertRows.value.length;
@@ -980,8 +1070,12 @@ watch(
   () => [props.tab?.id, props.activeColumns.length, props.tab?.loading],
   ([tabId, colCount, loading]) => {
     if (!tabId || !colCount || loading) return;
-    nextTick(() => performAutoFit());
+    const state = ensureColumnWidthState(props.tab);
+    if (gridWrapRef.value && state && !Object.keys(state.widths).length) {
+      autoFitColumns(gridWrapRef.value, props.tab, props.activeColumns, tabRows(props.tab));
+    } else nextTick(() => performAutoFit());
   },
+  { flush: "pre" },
 );
 
 // Re-fit when tab switches (active tab changed)
@@ -990,7 +1084,6 @@ watch(
   () => {
     closeToolbarMenu();
     nextTick(() => {
-      performAutoFit();
       setupResizeObserver();
     });
   },
@@ -1260,7 +1353,7 @@ function handleTableContextMenu(event) {
           <p class="wb-grid-error-detail">{{ tab.loadError }}</p>
           <button type="button" class="wb-grid-error-retry" @click="emit('retry-load', tab)">重试</button>
         </div>
-        <table class="wb-grid">
+        <table class="wb-grid" :data-grid-id="gridInstanceId">
         <thead>
           <tr class="wb-grid-column-header-row">
             <th
@@ -1270,11 +1363,12 @@ function handleTableContextMenu(event) {
               title="选择全部行"
               @click="emit('toggle-all-rows', tab)"
             ></th>
-            <th
-            v-for="columnMeta in renderColumns"
-            :key="columnMeta.name"
+            <template v-for="columnMeta in renderCellColumns" :key="columnMeta.name">
+<th v-if="columnMeta.kind === 'spacer'" class="wb-col-spacer" aria-hidden="true" :style="columnMeta.cellStyle"></th>
+<th v-else
             :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
             :data-column-index="columnMeta.columnIndex"
+                :aria-colindex="columnMeta.columnIndex + 2"
             :data-column-name="columnMeta.name"
             role="columnheader"
             :class="{
@@ -1315,6 +1409,7 @@ function handleTableContextMenu(event) {
                 @dblclick.stop.prevent="restoreAutoColumnWidth(tab, columnMeta.name)"
               ></span>
             </th>
+</template>
           </tr>
           <tr
             class="wb-field-comments-row"
@@ -1345,9 +1440,9 @@ function handleTableContextMenu(event) {
                 @dblclick.stop.prevent="resetRowHeight('fieldComment')"
               ></span>
             </th>
-            <th
-              v-for="columnMeta in renderColumns"
-              :key="`comment-${columnMeta.name}`"
+            <template v-for="columnMeta in renderCellColumns" :key="columnMeta.name">
+<th v-if="columnMeta.kind === 'spacer'" class="wb-col-spacer" aria-hidden="true" :style="columnMeta.cellStyle"></th>
+<th v-else
               class="wb-field-comment-cell"
               role="columnheader"
               :class="{
@@ -1367,102 +1462,43 @@ function handleTableContextMenu(event) {
               >{{ columnMeta.comment || '—' }}</span>
               <span v-else class="wb-field-comment-collapsed-mark" aria-hidden="true"></span>
             </th>
+</template>
           </tr>
         </thead>
-        <tbody>
+        <tbody @mousedown="onTbodyMouseDown" @mouseover="onTbodyMouseOver" @mouseup="endRangeSelection" @click="onTbodyClick" @dblclick="onTbodyDblClick">
           <!-- 越过冻结点后，冻结行段独立于虚拟窗口渲染。
                向上滚回冻结点之前时会释放，原始行重新进入 visibleRows。 -->
           <template v-if="frozenRowCount > 0">
-            <tr
+            <GridDataRow
               v-for="{ row, originalIndex, frozenIndex, rowKey } in frozenRows"
               :key="`frozen-${rowKey}`"
-              class="wb-grid-row wb-frozen-row"
-              :data-row-selection-index="dataRowVisualIndex(originalIndex)"
-              :class="{
-                'row-even': originalIndex % 2 === 1,
-                'row-selected': tab.selectedRowKeys.has(rowKey),
-                'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
-                'row-range-active': isRowInSelectedRange(tab, originalIndex),
-                'frozen-row-edge': isLastFrozenRow(originalIndex),
-              }"
-            >
-              <td
-                class="wb-row-index wb-row-header wb-frozen-row-index"
-                role="rowheader"
-                :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
-                :style="frozenRowStyle(frozenIndex)"
-                title="选择整行"
-                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, dataRowVisualIndex(originalIndex), $event)"
-                @click.stop="emit('toggle-row-select', tab, row, $event)"
-                @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >
-                {{ dataRowVisualIndex(originalIndex) + 1 }}
-                <span
-                  class="wb-row-resize-handle"
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label="拖动调整全部数据行高度，双击恢复默认"
-                  title="拖动调整全部数据行高度 · 双击恢复默认"
-                  @pointerdown="startRowResize($event, 'data')"
-                  @dblclick.stop.prevent="resetRowHeight('data')"
-                ></span>
-              </td>
-              <td
-                v-for="columnMeta in renderColumns"
-                :key="`frozen-${rowKey}-${columnMeta.name}`"
-                :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex), frozenRowStyle(frozenIndex))"
-                :data-column-index="columnMeta.columnIndex"
-                :data-row-key="rowKey"
-                :data-visual-row-index="dataRowVisualIndex(originalIndex)"
-                :data-column-name="columnMeta.name"
-                :id="gridCellDomId(tab.id, rowKey, columnMeta.name)"
-                role="gridcell"
-                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-                :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name))"
-                :aria-busy="isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name)"
-                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
-                :class="{
-                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
-                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
-                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
-                  'col-active': isActiveColumn(columnMeta.name),
-
-                  'is-numeric-col': columnMeta.isNumeric,
-                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
-                  'row-selected': tab.selectedRowKeys.has(rowKey),
-                  'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
-                  'is-null': row[columnMeta.name] == null,
-                  ...cellRangeClasses(tab, rowKey, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex),
-                  [frozenCellClass(originalIndex, columnMeta.columnIndex)]: true,
-                }"
-                @mousedown.left="onCellRangeStart(tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-                @mouseup="endRangeSelection"
-                @click="emit('cell-click', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, dataRowVisualIndex(originalIndex), columnMeta.columnIndex)"
-              >
-                <input
-                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"
-                  :value="editDraft"
-                  :data-row-index="originalIndex"
-                  :data-column-index="columnMeta.columnIndex"
-                  @input="emit('edit-input', $event.target.value)"
-                  @blur="emit('cell-blur')"
-                  @dblclick.stop
-                  @keydown.enter.prevent.stop="emit('finish-edit')"
-                  @keydown.escape.prevent.stop="emit('cancel-edit')"
-                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
-                />
-                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" aria-label="SQL NULL；复制时为空白">NULL</span>
-                <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
-                <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
-              </td>
-            </tr>
+              :frozen-style="frozenRowStyles[frozenIndex]"
+              :last-frozen-row="isLastFrozenRow(originalIndex)"
+              v-bind="rowModel(row, rowKey, originalIndex, dataRowVisualIndex(originalIndex), tab.rowStore?.rowVersion(originalIndex))"
+              :columns="renderCellColumns"
+              :tab-id="tab.id"
+              :frozen-column-count="frozenColumnCount"
+              :has-active-cell-search="hasActiveCellSearch"
+              :display-text="displayText"
+              :highlight-html="highlightHtml"
+              :is-search-match="isSearchMatch"
+              :cell-dom-id="gridCellDomId"
+              @row-select-start="(row, index, event) => onRowSelectStart(tab, row, index, event)"
+              @toggle-row-select="(row, event) => emit('toggle-row-select', tab, row, event)"
+              @row-contextmenu="(event, row, index) => emit('row-contextmenu', event, tab, row, index)"
+              @row-resize-start="startRowResize($event, 'data')"
+              @row-resize-reset="resetRowHeight('data')"
+              @edit-input="emit('edit-input', $event)"
+              @cell-blur="emit('cell-blur')"
+              @finish-edit="emit('finish-edit')"
+              @cancel-edit="emit('cancel-edit')"
+              @tab-edit="emit('tab-edit', $event)"
+            />
           </template>
           <tr v-if="virtualRange.padTop > 0" aria-hidden="true" class="wb-virtual-spacer">
-            <td :style="{ height: virtualRange.padTop + 'px' }" :colspan="1 + activeColumns.length"></td>
+            <td :style="{ height: virtualRange.padTop + 'px' }" :colspan="1 + renderCellColumns.length"></td>
           </tr>
-          <template v-for="{ row, originalIndex, rowKey, visualIndex } in visibleRowsWithVisualIndex" :key="rowKey">
+          <template v-for="{ row, originalIndex, rowKey, visualIndex, rowVersion } in visibleRowsWithVisualIndex" :key="rowKey">
             <tr
               v-for="(insertRow, insertRowIndex) in anchoredInsertRowsAt(originalIndex)"
               :key="insertRow.id"
@@ -1515,11 +1551,12 @@ function handleTableContextMenu(event) {
                   @dblclick.stop.prevent="resetRowHeight('data')"
                 ></span>
               </td>
-              <td
-                v-for="columnMeta in renderColumns"
-                :key="`insert-${insertRow.id}-${columnMeta.name}`"
+              <template v-for="columnMeta in renderCellColumns" :key="columnMeta.name">
+<td v-if="columnMeta.kind === 'spacer'" class="wb-col-spacer" aria-hidden="true" :style="columnMeta.cellStyle"></td>
+<td v-else
                 :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
                 :data-column-index="columnMeta.columnIndex"
+                :aria-colindex="columnMeta.columnIndex + 2"
                 :data-row-key="insertRowKey(tab, insertRow)"
                 :data-visual-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                 :data-column-name="columnMeta.name"
@@ -1555,6 +1592,7 @@ function handleTableContextMenu(event) {
                   :data-insert-column-index="columnMeta.columnIndex"
                   :data-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
                   :data-column-index="columnMeta.columnIndex"
+                :aria-colindex="columnMeta.columnIndex + 2"
                   :disabled="isInsertRowSaving(tab, insertRow.id)"
                   :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
@@ -1568,96 +1606,36 @@ function handleTableContextMenu(event) {
                 />
                 <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
               </td>
+</template>
             </tr>
-            <tr
-              class="wb-grid-row"
-              :data-row-selection-index="visualIndex"
-              :class="{
-                'row-even': visualIndex % 2 === 1,
-                'row-selected': tab.selectedRowKeys.has(rowKey),
-                'row-active': selectedCell?.tabId === tab.id && selectedCell?.rowKey === rowKey,
-                'row-range-active': isRowInSelectedRange(tab, visualIndex),
-              }"
-            >
-              <td
-                class="wb-row-index wb-row-header"
-                role="rowheader"
-                :class="{ 'row-selected': tab.selectedRowKeys.has(rowKey) }"
-                title="选择整行"
-                @mousedown.left.stop.prevent="onRowSelectStart(tab, row, visualIndex, $event)"
-                @click.stop="emit('toggle-row-select', tab, row, $event)"
-                @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, row, originalIndex)"
-              >
-                {{ rowWindowOffset + visualIndex + 1 }}
-                <span
-                  class="wb-row-resize-handle"
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label="拖动调整全部数据行高度，双击恢复默认"
-                  title="拖动调整全部数据行高度 · 双击恢复默认"
-                  @pointerdown="startRowResize($event, 'data')"
-                  @dblclick.stop.prevent="resetRowHeight('data')"
-                ></span>
-              </td>
-              <td
-                v-for="columnMeta in renderCellColumns"
-                :key="columnMeta.name"
-                :style="columnMeta.cellStyle"
-                :data-column-index="columnMeta.columnIndex"
-                :data-row-key="rowKey"
-                :data-visual-row-index="visualIndex"
-                :data-column-name="columnMeta.name"
-                :id="gridCellDomId(tab.id, rowKey, columnMeta.name)"
-                role="gridcell"
-                :aria-selected="isCellInSelectedRange(tab, rowKey, columnMeta.name, visualIndex, columnMeta.columnIndex)"
-                :aria-invalid="Boolean(getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name))"
-                :aria-busy="isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name)"
-                :title="getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name) || ''"
-                :class="{
-                  pending: isCellPending(editState, tabScopeKey(tab), rowKey, columnMeta.name),
-                  error: getCellError(editState, tabScopeKey(tab), rowKey, columnMeta.name),
-                  selected: selectedCell?.rowKey === rowKey && selectedCell?.column === columnMeta.name && selectedCell?.tabId === tab.id,
-                  'col-active': isActiveColumn(columnMeta.name),
-
-                  'is-numeric-col': columnMeta.isNumeric,
-                  editing: editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name,
-                  'row-selected': tab.selectedRowKeys.has(rowKey),
-                  'search-match': hasActiveCellSearch && isSearchMatchCell(tab, row, columnMeta.name, rowKey),
-                  'is-null': row[columnMeta.name] == null,
-                  ...cellRangeClasses(tab, rowKey, columnMeta.name, visualIndex, columnMeta.columnIndex),
-                  'frozen-col': columnMeta.columnIndex < frozenColumnCount,
-                  'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
-                }"
-                @mousedown.left="onCellRangeStart(tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex, $event)"
-                @mouseenter="emit('cell-enter', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
-                @mouseup="endRangeSelection"
-                @click="emit('cell-click', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
-                @dblclick="emit('cell-dblclick', tab, row, columnMeta.name, visualIndex, columnMeta.columnIndex)"
-              >
-                <input
-                  v-if="editingCell?.rowKey === rowKey && editingCell?.column === columnMeta.name"
-                  :value="editDraft"
-                  :data-row-index="visualIndex"
-                  :data-column-index="columnMeta.columnIndex"
-                  @input="emit('edit-input', $event.target.value)"
-                  @blur="emit('cell-blur')"
-                  @dblclick.stop
-                  @keydown.enter.prevent.stop="emit('finish-edit')"
-                  @keydown.escape.prevent.stop="emit('cancel-edit')"
-                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
-                />
-                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" aria-label="SQL NULL；复制时为空白">NULL</span>
-                <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightCellHtml(tab, row, columnMeta.name, rowKey)"></span>
-                <span v-else class="wb-cell-text">{{ plainCellText(tab, row, columnMeta.name, rowKey) }}</span>
-              </td>
-            </tr>
+            <GridDataRow
+              v-bind="rowModel(row, rowKey, originalIndex, visualIndex, rowVersion)"
+              :columns="renderCellColumns"
+              :tab-id="tab.id"
+              :frozen-column-count="frozenColumnCount"
+              :has-active-cell-search="hasActiveCellSearch"
+              :display-text="displayText"
+              :highlight-html="highlightHtml"
+              :is-search-match="isSearchMatch"
+              :cell-dom-id="gridCellDomId"
+              @row-select-start="(row, index, event) => onRowSelectStart(tab, row, index, event)"
+              @toggle-row-select="(row, event) => emit('toggle-row-select', tab, row, event)"
+              @row-contextmenu="(event, row, index) => emit('row-contextmenu', event, tab, row, index)"
+              @row-resize-start="startRowResize($event, 'data')"
+              @row-resize-reset="resetRowHeight('data')"
+              @edit-input="emit('edit-input', $event)"
+              @cell-blur="emit('cell-blur')"
+              @finish-edit="emit('finish-edit')"
+              @cancel-edit="emit('cancel-edit')"
+              @tab-edit="emit('tab-edit', $event)"
+            />
           </template>
           <tr v-if="virtualBottomSpacerHeight > 0" aria-hidden="true" class="wb-virtual-spacer">
-            <td :style="{ height: virtualBottomSpacerHeight + 'px' }" :colspan="1 + activeColumns.length"></td>
+            <td :style="{ height: virtualBottomSpacerHeight + 'px' }" :colspan="1 + renderCellColumns.length"></td>
           </tr>
           <!-- 0 行空状态：表加载成功但无数据 -->
           <tr v-if="!tab.loading && !tab.loadError && loadedRowCount === 0 && !hasInsertRows" class="wb-grid-empty-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-empty-cell">
+            <td :colspan="1 + renderCellColumns.length" class="wb-grid-empty-cell">
               <span>{{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}</span>
               <button
                 v-if="!tab.filter && !tab.sort && !activeTabReadOnly"
@@ -1722,11 +1700,12 @@ function handleTableContextMenu(event) {
                 @dblclick.stop.prevent="resetRowHeight('data')"
               ></span>
             </td>
-            <td
-              v-for="columnMeta in renderColumns"
-              :key="`insert-${insertRow.id}-${columnMeta.name}`"
+            <template v-for="columnMeta in renderCellColumns" :key="columnMeta.name">
+<td v-if="columnMeta.kind === 'spacer'" class="wb-col-spacer" aria-hidden="true" :style="columnMeta.cellStyle"></td>
+<td v-else
               :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
               :data-column-index="columnMeta.columnIndex"
+                :aria-colindex="columnMeta.columnIndex + 2"
               :data-row-key="insertRowKey(tab, insertRow)"
               :data-visual-row-index="trailingInsertVisualIndex(insertRowIndex)"
               :data-column-name="columnMeta.name"
@@ -1762,6 +1741,7 @@ function handleTableContextMenu(event) {
                 :data-insert-column-index="columnMeta.columnIndex"
                 :data-row-index="trailingInsertVisualIndex(insertRowIndex)"
                 :data-column-index="columnMeta.columnIndex"
+                :aria-colindex="columnMeta.columnIndex + 2"
                 :disabled="isInsertRowSaving(tab, insertRow.id)"
                 :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
@@ -1775,9 +1755,10 @@ function handleTableContextMenu(event) {
               />
               <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
             </td>
+</template>
           </tr>
           <tr v-if="showAppendRowAction" class="wb-grid-append-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-append-cell">
+            <td :colspan="1 + renderCellColumns.length" class="wb-grid-append-cell">
               <button
                 type="button"
                 class="wb-grid-append-action"
@@ -1792,18 +1773,18 @@ function handleTableContextMenu(event) {
           </tr>
           <!-- 加载状态始终收在表格最底部，避免新增草稿出现在“已加载全部”之后。 -->
           <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
+            <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell">
               <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
               <span>加载更多…</span>
             </td>
           </tr>
           <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell is-done">
+            <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell is-done">
               {{ loadedRangeLabel }}
             </td>
           </tr>
           <tr v-else-if="loadedRowCount > 0" aria-hidden="true" class="wb-grid-loadmore-row">
-            <td :colspan="1 + activeColumns.length" class="wb-grid-loadmore-cell">
+            <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell">
               <span>&nbsp;</span>
             </td>
           </tr>

@@ -627,6 +627,7 @@ mod tests {
     #[test]
     fn search_profile_returns_clickable_column_reference() {
         let schema = vec![TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: "玩家账号表".into(),
             columns: vec![
@@ -650,6 +651,7 @@ mod tests {
     #[test]
     fn profile_redacts_contact_columns_from_sample_values() {
         let schema = vec![TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: "玩家账号表".into(),
             columns: vec![
@@ -693,6 +695,7 @@ mod tests {
     #[test]
     fn profile_includes_index_and_row_count_metadata() {
         let schema = vec![TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".into(),
             table_comment: "玩家账号表".into(),
             columns: vec![

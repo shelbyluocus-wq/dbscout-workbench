@@ -1,5 +1,27 @@
 const KEY_SEPARATOR = "\u001f";
 
+export function collectCellStatesForTable(edit, tableName) {
+  const states = new Map();
+  const prefix = `${tableName ?? ""}${KEY_SEPARATOR}`;
+  function bucket(key) {
+    const split = key.lastIndexOf(KEY_SEPARATOR);
+    const rowKey = key.slice(prefix.length, split);
+    if (!states.has(rowKey)) states.set(rowKey, { pending: new Set(), errors: new Map() });
+    return [states.get(rowKey), key.slice(split + 1)];
+  }
+  for (const key of edit.pendingCells.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    const [state, column] = bucket(key);
+    state.pending.add(column);
+  }
+  for (const [key, message] of edit.cellErrors) {
+    if (!key.startsWith(prefix)) continue;
+    const [state, column] = bucket(key);
+    state.errors.set(column, message);
+  }
+  return states;
+}
+
 function cellKey(tableName, rowKey, columnName) {
   return [tableName, rowKey, columnName].map((value) => String(value ?? "")).join(KEY_SEPARATOR);
 }

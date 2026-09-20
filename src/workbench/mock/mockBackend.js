@@ -22,6 +22,8 @@ let mockObjectIdSeq = 0x1000;
 let mockTableSearchSeq = 0;
 let mockConnectionSeq = 10;
 const mockSessions = new Map();
+// Materialize only requested fixture pages; keep writes isolated from demo rows.
+const perfRows = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
 let mockExternalMcpEnabled = true;
@@ -94,6 +96,7 @@ export function resetMockWorkbenchState() {
   mockSqlHistorySeq = 0;
   schemaOverrides.clear();
   rowCache.clear();
+  perfRows.clear();
   resetMockDatabaseSchemas();
 }
 
@@ -242,6 +245,13 @@ function perfPageResponse(active, tableName, sessionId, request = {}) {
     ? Math.max(0, Math.floor(requestedOffset))
     : (page - 1) * pageSize;
   const generated = createPerfFixturePage(active.scenario, { offset, limit: pageSize, tableName });
+  const cacheKey = sourceKey(active.connectionId, active.database, tableName);
+  if (!perfRows.has(cacheKey)) perfRows.set(cacheKey, new Map());
+  const cached = perfRows.get(cacheKey);
+  generated.rows = generated.rows.map((row, index) => {
+    if (!cached.has(offset + index)) cached.set(offset + index, row);
+    return { ...cached.get(offset + index) };
+  });
   return {
     sessionId,
     tableName,
@@ -1709,10 +1719,11 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return results;
   }
   if (command === "update_cell" || command === "update_cells") {
-    const { tableName, connectionId, database, readOnly } = requireMockSessionContext(payload.request?.sessionId);
+    const { tableName, connectionId, database, readOnly, perfScenario } = requireMockSessionContext(payload.request?.sessionId);
     if (readOnly) throw new Error("只读连接不能编辑数据");
-    const table = resolvedTable(connectionId, database, tableName);
-    const rows = getOrInitRows(connectionId, database, tableName);
+    const table = perfScenario ? createPerfFixtureTable(perfScenario, tableName) : resolvedTable(connectionId, database, tableName);
+    const fixtureRows = perfScenario ? perfRows.get(sourceKey(connectionId, database, tableName)) : null;
+    const rows = fixtureRows ? [...fixtureRows.values()] : getOrInitRows(connectionId, database, tableName);
     const requestRows = command === "update_cell"
       ? [{
         rowIdentity: payload.request?.rowIdentity || {},
@@ -1764,6 +1775,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       if (signature) signatures.add(signature);
     }
     rows.splice(0, rows.length, ...working);
+    if (fixtureRows) [...fixtureRows.keys()].forEach((key, index) => fixtureRows.set(key, working[index]));
     return command === "update_cell"
       ? {
         updated: updated > 0,

@@ -23,25 +23,22 @@ function cacheFor(store, buildRowKey) {
 function buildIndex(tab, store, buildRowKey) {
   const keys = [];
   const indexByKey = new Map();
-  const rowByKey = new Map();
   const primaryKeySignatures = new Set();
   for (const { absoluteIndex, loadedIndex, row } of store.iterateLoadedRange()) {
     const key = buildRowKey(tab, row);
     keys[loadedIndex] = key;
     if (!indexByKey.has(key)) {
       indexByKey.set(key, absoluteIndex);
-      rowByKey.set(key, row);
     }
     primaryKeySignatures.add(key);
   }
   return {
-    generation: Number(tab?.dataVersion ?? store.generation),
+    generation: Number(tab?.rowKeyCacheVersion ?? store.identityGeneration ?? store.generation),
     loadedLength: store.loadedLength,
     identityShape: identityShape(tab),
     absoluteStart: store.absoluteStart,
     keys,
     indexByKey,
-    rowByKey,
     primaryKeySignatures,
   };
 }
@@ -55,7 +52,7 @@ function currentIndex(tab, buildRowKey) {
   const shape = identityShape(tab);
   if (
     cached
-    && cached.generation === Number(tab?.dataVersion ?? store.generation)
+    && cached.generation === Number(tab?.rowKeyCacheVersion ?? store.identityGeneration ?? store.generation)
     && cached.loadedLength === store.loadedLength
     && cached.identityShape === shape
     && cached.absoluteStart === store.absoluteStart
@@ -73,7 +70,8 @@ export function createRowIndex(tab, { buildRowKey } = {}) {
       return currentIndex(tab, buildRowKey).index.indexByKey.get(rowKey) ?? -1;
     },
     rowForKey(rowKey) {
-      return currentIndex(tab, buildRowKey).index.rowByKey.get(rowKey) || null;
+      const { store, index } = currentIndex(tab, buildRowKey);
+      return store.get(index.indexByKey.get(rowKey)) || null;
     },
     keyAt(absoluteIndex) {
       const { store, index } = currentIndex(tab, buildRowKey);

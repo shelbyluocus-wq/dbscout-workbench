@@ -360,6 +360,7 @@ mod tests {
     #[test]
     fn collects_patches_only_for_matching_rows() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".to_string(),
             table_comment: String::new(),
             columns: vec![column("id", true), column("name", false)],
@@ -388,6 +389,7 @@ mod tests {
     #[test]
     fn collects_matches_with_occurrences_and_truncation() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "player".to_string(),
             table_comment: String::new(),
             columns: vec![column("id", true), column("name", false)],

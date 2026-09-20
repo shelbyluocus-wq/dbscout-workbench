@@ -166,6 +166,7 @@ pub fn stress_schema_for(database: &str) -> Vec<TableMeta> {
             let table_name = stress_table_name(database, table_index);
             let (_, domain_label) = stress_domain(table_index);
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name,
                 table_comment: if table_index == 1 {
                     "5000 行大表，固定排在调试表列表首位，用于滚动、搜索和排序性能检测".into()
@@ -418,7 +419,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
         ]
     }
     vec![
-        TableMeta { table_name: "player".into(), table_comment: "玩家账号表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "player".into(), table_comment: "玩家账号表".into(), columns: vec![
             cm("id", "int", "玩家ID", true, false), cm("username", "varchar(32)", "用户名", false, false),
             cm("nickname", "varchar(64)", "昵称", false, false), cm("level", "int", "等级", false, false),
             cm("exp", "bigint", "经验值", false, false), cm("vip_level", "tinyint", "VIP等级", false, false),
@@ -426,7 +427,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("last_login", "datetime", "最后登录", false, true), cm("status", "tinyint", "状态(0正常1封禁)", false, false),
             cm("create_time", "datetime", "注册时间", false, false), cm("guild_id", "int", "公会ID", false, true),
         ]},
-        TableMeta { table_name: "hero".into(), table_comment: "英雄配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "hero".into(), table_comment: "英雄配置表".into(), columns: vec![
             cm("id", "int", "英雄ID", true, false), cm("name", "varchar(32)", "名称", false, false),
             cm("rarity", "tinyint", "稀有度(1-5)", false, false), cm("element", "varchar(16)", "元素属性", false, false),
             cm("hp_base", "int", "基础生命", false, false), cm("atk_base", "int", "基础攻击", false, false),
@@ -434,7 +435,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("skill_id", "int", "主动技能ID", false, false), cm("passive_id", "int", "被动技能ID", false, true),
             cm("description", "text", "描述", false, true), cm("is_available", "tinyint", "是否可用", false, false),
         ]},
-        TableMeta { table_name: "item".into(), table_comment: "道具配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "item".into(), table_comment: "道具配置表".into(), columns: vec![
             cm("id", "int", "道具ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("type", "tinyint", "类型(1消耗2材料3装备4任务)", false, false), cm("quality", "tinyint", "品质(1白2绿3蓝4紫5橙)", false, false),
             cm("max_stack", "int", "最大堆叠", false, false), cm("sell_price", "int", "出售价格", false, true),
@@ -442,7 +443,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标路径", false, true),
             cm("expire_days", "int", "过期天数(0永久)", false, false), cm("is_tradable", "tinyint", "是否可交易", false, false),
         ]},
-        TableMeta { table_name: "equip".into(), table_comment: "装备配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "equip".into(), table_comment: "装备配置表".into(), columns: vec![
             cm("id", "int", "装备ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("slot", "tinyint", "部位(1武器2头盔3铠甲4鞋子5饰品)", false, false), cm("rarity", "tinyint", "稀有度", false, false),
             cm("hp_bonus", "int", "生命加成", false, false), cm("atk_bonus", "int", "攻击加成", false, false),
@@ -450,7 +451,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("required_level", "int", "需求等级", false, false), cm("enchant_max", "tinyint", "最大附魔等级", false, false),
             cm("description", "text", "描述", false, true), cm("source", "varchar(32)", "获取途径", false, true),
         ]},
-        TableMeta { table_name: "skill".into(), table_comment: "技能配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "skill".into(), table_comment: "技能配置表".into(), columns: vec![
             cm("id", "int", "技能ID", true, false), cm("name", "varchar(32)", "名称", false, false),
             cm("type", "tinyint", "类型(1主动2被动3终极)", false, false), cm("element", "varchar(16)", "元素", false, true),
             cm("cooldown", "decimal(5,2)", "冷却时间(秒)", false, false), cm("mp_cost", "int", "法力消耗", false, false),
@@ -458,7 +459,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("unlock_level", "int", "解锁等级", false, false), cm("max_level", "tinyint", "最大等级", false, false),
             cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标", false, true),
         ]},
-        TableMeta { table_name: "quest".into(), table_comment: "任务配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "quest".into(), table_comment: "任务配置表".into(), columns: vec![
             cm("id", "int", "任务ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("type", "tinyint", "类型(1主线2支线3日常4活动)", false, false), cm("chapter", "int", "章节", false, true),
             cm("required_level", "int", "需求等级", false, false), cm("pre_quest", "int", "前置任务ID", false, true),
@@ -466,7 +467,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("reward_item_id", "int", "奖励道具ID", false, true), cm("reward_item_count", "int", "奖励道具数量", false, true),
             cm("description", "text", "描述", false, true), cm("is_repeatable", "tinyint", "是否可重复", false, false),
         ]},
-        TableMeta { table_name: "stage".into(), table_comment: "关卡配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "stage".into(), table_comment: "关卡配置表".into(), columns: vec![
             cm("id", "int", "关卡ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("chapter", "int", "章节", false, false), cm("difficulty", "tinyint", "难度(1普通2困难3地狱)", false, false),
             cm("stamina_cost", "int", "体力消耗", false, false), cm("recommended_level", "int", "推荐等级", false, false),
@@ -474,7 +475,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("reward_exp", "int", "奖励经验", false, false), cm("reward_gold", "int", "奖励金币", false, false),
             cm("star_condition", "varchar(128)", "三星条件", false, true), cm("is_unlocked", "tinyint", "默认解锁", false, false),
         ]},
-        TableMeta { table_name: "monster".into(), table_comment: "怪物配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "monster".into(), table_comment: "怪物配置表".into(), columns: vec![
             cm("id", "int", "怪物ID", true, false), cm("name", "varchar(32)", "名称", false, false),
             cm("type", "tinyint", "类型(1普通2精英3BOSS)", false, false), cm("element", "varchar(16)", "元素", false, true),
             cm("hp", "int", "生命值", false, false), cm("atk", "int", "攻击力", false, false),
@@ -482,7 +483,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("skill_id_1", "int", "技能1", false, true), cm("skill_id_2", "int", "技能2", false, true),
             cm("drop_table_id", "int", "掉落表ID", false, true), cm("description", "text", "描述", false, true),
         ]},
-        TableMeta { table_name: "shop".into(), table_comment: "商店配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "shop".into(), table_comment: "商店配置表".into(), columns: vec![
             cm("id", "int", "商品ID", true, false), cm("name", "varchar(64)", "商品名", false, false),
             cm("category", "tinyint", "分类(1道具2英雄3皮肤4礼包)", false, false), cm("item_id", "int", "关联道具ID", false, true),
             cm("price_type", "tinyint", "货币类型(1金币2钻石)", false, false), cm("price", "int", "价格", false, false),
@@ -490,7 +491,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("refresh_cycle", "tinyint", "刷新周期(0不刷新1日2周)", false, false), cm("required_vip", "tinyint", "需求VIP", false, false),
             cm("start_time", "datetime", "开始时间", false, true), cm("end_time", "datetime", "结束时间", false, true),
         ]},
-        TableMeta { table_name: "mail".into(), table_comment: "邮件模板表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "mail".into(), table_comment: "邮件模板表".into(), columns: vec![
             cm("id", "int", "模板ID", true, false), cm("title", "varchar(128)", "标题", false, false),
             cm("sender", "varchar(32)", "发送者", false, false), cm("content", "text", "内容", false, false),
             cm("reward_item_id", "int", "附件道具ID", false, true), cm("reward_count", "int", "附件数量", false, true),
@@ -498,7 +499,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("trigger_event", "varchar(32)", "触发事件", false, true), cm("is_system", "tinyint", "是否系统邮件", false, false),
             cm("create_time", "datetime", "创建时间", false, false), cm("is_read", "tinyint", "默认已读", false, false),
         ]},
-        TableMeta { table_name: "guild".into(), table_comment: "公会配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "guild".into(), table_comment: "公会配置表".into(), columns: vec![
             cm("id", "int", "公会ID", true, false), cm("name", "varchar(32)", "公会名", false, false),
             cm("level", "tinyint", "公会等级", false, false), cm("leader_id", "int", "会长ID", false, false),
             cm("member_count", "int", "成员数", false, false), cm("max_members", "int", "最大成员数", false, false),
@@ -506,7 +507,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("create_time", "datetime", "创建时间", false, false), cm("is_recruiting", "tinyint", "是否招募中", false, false),
             cm("min_join_level", "int", "最低加入等级", false, false), cm("icon_id", "int", "公会图标ID", false, true),
         ]},
-        TableMeta { table_name: "achievement".into(), table_comment: "成就配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "achievement".into(), table_comment: "成就配置表".into(), columns: vec![
             cm("id", "int", "成就ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("category", "tinyint", "分类(1战斗2收集3探索4社交)", false, false), cm("condition_type", "varchar(32)", "条件类型", false, false),
             cm("condition_value", "int", "条件数值", false, false), cm("reward_diamond", "int", "奖励钻石", false, false),
@@ -514,7 +515,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("is_hidden", "tinyint", "是否隐藏", false, false), cm("parent_id", "int", "父成就ID", false, true),
             cm("description", "text", "描述", false, true), cm("icon", "varchar(64)", "图标", false, true),
         ]},
-        TableMeta { table_name: "activity".into(), table_comment: "活动配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "activity".into(), table_comment: "活动配置表".into(), columns: vec![
             cm("id", "int", "活动ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("type", "tinyint", "类型(1签到2抽卡3副本4消费返利)", false, false), cm("start_time", "datetime", "开始时间", false, false),
             cm("end_time", "datetime", "结束时间", false, false), cm("reward_pool", "text", "奖励池(JSON)", false, true),
@@ -522,7 +523,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("required_level", "int", "需求等级", false, false), cm("is_active", "tinyint", "是否启用", false, false),
             cm("description", "text", "描述", false, true), cm("sort_order", "int", "排序权重", false, false),
         ]},
-        TableMeta { table_name: "buff".into(), table_comment: "增益效果配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "buff".into(), table_comment: "增益效果配置表".into(), columns: vec![
             cm("id", "int", "增益ID", true, false), cm("name", "varchar(32)", "名称", false, false),
             cm("icon", "varchar(64)", "图标", false, true), cm("stack_max", "int", "最大叠加层数", false, false),
             cm("duration", "decimal(8,2)", "持续秒数(0永久)", false, false), cm("effect_type", "tinyint", "效果类型", false, false),
@@ -530,7 +531,7 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("is_debuff", "tinyint", "是否减益", false, false), cm("is_dispel", "tinyint", "可否驱散", false, false),
             cm("description", "text", "描述", false, true), cm("source", "varchar(32)", "来源", false, true),
         ]},
-        TableMeta { table_name: "drop_table".into(), table_comment: "掉落配置表".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "drop_table".into(), table_comment: "掉落配置表".into(), columns: vec![
             cm("id", "int", "掉落ID", true, false), cm("name", "varchar(64)", "名称", false, false),
             cm("item_id", "int", "道具ID", false, false), cm("min_count", "int", "最小数量", false, false),
             cm("max_count", "int", "最大数量", false, false), cm("weight", "int", "权重", false, false),
@@ -538,15 +539,15 @@ pub fn demo_schema() -> Vec<TableMeta> {
             cm("condition", "varchar(64)", "掉落条件", false, true), cm("group_id", "int", "掉落组ID", false, true),
             cm("description", "text", "描述", false, true), cm("is_enabled", "tinyint", "是否启用", false, false),
         ]},
-        TableMeta { table_name: "user".into(), table_comment: "相似表名测试：user，用于验证搜索和备注换行。".into(), columns: similar_columns() },
-        TableMeta { table_name: "users".into(), table_comment: "相似表名测试：users，只比 user 多一个 s。".into(), columns: similar_columns() },
-        TableMeta { table_name: "user_profile".into(), table_comment: "相似表名测试：user_profile，下划线命名。".into(), columns: similar_columns() },
-        TableMeta { table_name: "user_profiles".into(), table_comment: "相似表名测试：user_profiles，复数下划线命名。".into(), columns: similar_columns() },
-        TableMeta { table_name: "order".into(), table_comment: "相似表名测试：order，和 orders/order_item 相近。".into(), columns: similar_columns() },
-        TableMeta { table_name: "orders".into(), table_comment: "相似表名测试：orders，复数订单表。".into(), columns: similar_columns() },
-        TableMeta { table_name: "order_item".into(), table_comment: "相似表名测试：order_item，订单明细单数。".into(), columns: similar_columns() },
-        TableMeta { table_name: "order_items".into(), table_comment: "相似表名测试：order_items，订单明细复数。".into(), columns: similar_columns() },
-        TableMeta { table_name: "ui_edge_case_values".into(), table_comment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名。".into(), columns: vec![
+        TableMeta { primary_key_order: Vec::new(), table_name: "user".into(), table_comment: "相似表名测试：user，用于验证搜索和备注换行。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "users".into(), table_comment: "相似表名测试：users，只比 user 多一个 s。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "user_profile".into(), table_comment: "相似表名测试：user_profile，下划线命名。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "user_profiles".into(), table_comment: "相似表名测试：user_profiles，复数下划线命名。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "order".into(), table_comment: "相似表名测试：order，和 orders/order_item 相近。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "orders".into(), table_comment: "相似表名测试：orders，复数订单表。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "order_item".into(), table_comment: "相似表名测试：order_item，订单明细单数。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "order_items".into(), table_comment: "相似表名测试：order_items，订单明细复数。".into(), columns: similar_columns() },
+        TableMeta { primary_key_order: Vec::new(), table_name: "ui_edge_case_values".into(), table_comment: "UI边界测试表：包含超长备注、嵌套JSON、TypeScript函数、大小写相近字段和 snake/camel 命名。".into(), columns: vec![
             cm("id", "int", "边界用例ID", true, false), cm("name", "varchar(64)", "用例名称", false, false),
             cm("long_remark", "text", "这是一个非常非常长的字段备注，包含中文、English words、符号以及连续描述，用来确认备注面板中的字段说明会自动换行。", false, true),
             cm("json_value", "text", "JSON字符串：右侧详情应该格式化为更容易阅读的结构，并对 key/string/number/boolean/null 做颜色标注。", false, true),
@@ -879,6 +880,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
     for table in vec![
         // demo / game_config
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "config_entry".into(),
             table_comment: "游戏配置键值表".into(),
             columns: vec![
@@ -891,6 +893,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "localization".into(),
             table_comment: "多语言文案表".into(),
             columns: vec![
@@ -902,6 +905,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "version_info".into(),
             table_comment: "版本信息表".into(),
             columns: vec![
@@ -914,6 +918,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "feature_flag".into(),
             table_comment: "功能开关表".into(),
             columns: vec![
@@ -926,6 +931,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
         },
         // demo-staging / game_db extras
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "staging_migration".into(),
             table_comment: "Staging迁移记录表".into(),
             columns: vec![
@@ -937,6 +943,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "staging_flag".into(),
             table_comment: "Staging环境开关表".into(),
             columns: vec![
@@ -948,6 +955,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "staging_override".into(),
             table_comment: "Staging配置覆盖表".into(),
             columns: vec![
@@ -960,6 +968,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
         },
         // demo-staging / analytics_db
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "event_log".into(),
             table_comment: "事件日志表".into(),
             columns: vec![
@@ -972,6 +981,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "daily_active_user".into(),
             table_comment: "日活跃用户统计表".into(),
             columns: vec![
@@ -984,6 +994,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "revenue_report".into(),
             table_comment: "收入报表".into(),
             columns: vec![
@@ -996,6 +1007,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "retention_cohort".into(),
             table_comment: "留存队列分析表".into(),
             columns: vec![
@@ -1008,6 +1020,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "ab_test_config".into(),
             table_comment: "A/B测试配置表".into(),
             columns: vec![
@@ -1021,6 +1034,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
         },
         // demo-test / game_db extras
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "test_case".into(),
             table_comment: "测试用例表".into(),
             columns: vec![
@@ -1033,6 +1047,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "test_result".into(),
             table_comment: "测试结果表".into(),
             columns: vec![
@@ -1052,6 +1067,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
         },
         // demo-test / game_db_archive
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "archived_player".into(),
             table_comment: "归档玩家表".into(),
             columns: vec![
@@ -1064,6 +1080,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "archived_guild".into(),
             table_comment: "归档公会表".into(),
             columns: vec![
@@ -1075,6 +1092,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "archived_mail".into(),
             table_comment: "归档邮件表".into(),
             columns: vec![
@@ -1086,6 +1104,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "archived_activity".into(),
             table_comment: "归档活动表".into(),
             columns: vec![
@@ -1097,6 +1116,7 @@ fn demo_schema_all() -> HashMap<String, TableMeta> {
             ],
         },
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "archive_metadata".into(),
             table_comment: "归档元数据表".into(),
             columns: vec![
@@ -2138,6 +2158,7 @@ mod tests {
     #[test]
     fn search_demo_values_requires_a_contiguous_match() {
         let schema = vec![TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2161,6 +2182,7 @@ mod tests {
     #[test]
     fn search_single_demo_table_matches_contiguous_text_case_insensitively() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2185,6 +2207,7 @@ mod tests {
     #[test]
     fn search_single_demo_table_rejects_subsequence_only_match() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2205,6 +2228,7 @@ mod tests {
     #[test]
     fn demo_filtered_pages_match_value_search_subsequence_hits() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2241,6 +2265,7 @@ mod tests {
     #[test]
     fn demo_continuous_filter_rejects_subsequence_only_hits() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2280,6 +2305,7 @@ mod tests {
     #[test]
     fn search_demo_values_returns_multiple_matching_columns_per_table() {
         let schema = vec![TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "hero".into(),
             table_comment: String::new(),
             columns: vec![
@@ -2310,6 +2336,7 @@ mod tests {
     fn search_demo_values_scans_priority_tables_before_limit() {
         let schema = vec![
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: "first".into(),
                 table_comment: String::new(),
                 columns: vec![ColumnMeta::with_basic(
@@ -2321,6 +2348,7 @@ mod tests {
                 )],
             },
             TableMeta {
+                primary_key_order: Vec::new(),
                 table_name: "hero".into(),
                 table_comment: String::new(),
                 columns: vec![ColumnMeta::with_basic(
@@ -2372,6 +2400,7 @@ mod tests {
     #[test]
     fn demo_sort_orders_numeric_column_by_value() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "nums".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic("level", "int", "", false, false)],
@@ -2405,6 +2434,7 @@ mod tests {
     #[test]
     fn demo_sort_orders_letter_number_ids_naturally() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "conds".into(),
             table_comment: String::new(),
             columns: vec![ColumnMeta::with_basic(
@@ -2445,6 +2475,7 @@ mod tests {
     #[test]
     fn demo_default_order_uses_natural_primary_keys() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "conds".into(),
             table_comment: String::new(),
             columns: vec![
@@ -2486,6 +2517,7 @@ mod tests {
     #[test]
     fn demo_search_scan_preserves_sort_and_uses_an_absolute_slice() {
         let table = TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "nums".into(),
             table_comment: String::new(),
             columns: vec![

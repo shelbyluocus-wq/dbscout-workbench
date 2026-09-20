@@ -344,6 +344,7 @@ mod tests {
         let first = cache
             .get_or_load(&cache_key, false, |_| async {
                 Ok(vec![TableMeta {
+                    primary_key_order: Vec::new(),
                     table_name: "hero".into(),
                     table_comment: "first".into(),
                     columns: vec![ColumnMeta::with_basic("id", "bigint", "", true, false)],
@@ -365,6 +366,7 @@ mod tests {
         let refreshed = cache
             .get_or_load(&cache_key, true, |_| async {
                 Ok(vec![TableMeta {
+                    primary_key_order: Vec::new(),
                     table_name: "hero".into(),
                     table_comment: "refreshed".into(),
                     columns: vec![ColumnMeta::with_basic("id", "bigint", "", true, false)],

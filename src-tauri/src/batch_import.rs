@@ -622,6 +622,7 @@ mod tests {
 
     fn table(columns: Vec<ColumnMeta>) -> TableMeta {
         TableMeta {
+            primary_key_order: Vec::new(),
             table_name: "translations".into(),
             table_comment: String::new(),
             columns,

@@ -310,6 +310,7 @@ pub fn infer_table_meta(table_name: &str, samples: &[Document]) -> TableMeta {
         })
         .collect();
     TableMeta {
+        primary_key_order: Vec::new(),
         table_name: table_name.into(),
         table_comment: String::new(),
         columns,
