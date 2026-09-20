@@ -7270,9 +7270,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-inspector-table-status {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 8px;
   min-height: 56px;
   padding: 8px 10px;
   background: var(--wb-grid-row-alt);
@@ -7298,30 +7298,17 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-inspector-table-comment {
   min-width: 0;
-  overflow: hidden;
   color: var(--wb-remark-text);
   font-size: 12.5px;
   font-weight: 400;
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .wb-inspector-table-comment.is-empty {
   color: var(--wb-secondary-text);
   font-size: 11px;
-}
-
-.wb-inspector-table-count {
-  align-self: start;
-  flex: 0 0 auto;
-  padding-top: 1px;
-  color: var(--wb-accent-strong);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 620;
-  line-height: 1.45;
-  white-space: nowrap;
 }
 
 .wb-inspector-section-head {

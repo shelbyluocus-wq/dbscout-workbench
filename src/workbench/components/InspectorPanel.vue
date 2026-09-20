@@ -10,7 +10,6 @@ const props = defineProps({
   activeColumns: { type: Array, default: () => [] },
   selectedCell: { type: Object, default: null },
   selectedRange: { type: Object, default: null },
-  activeStatusLabel: { type: String, default: "" },
   schemaSearchQuery: { type: String, default: "" },
   schemaSearchMatches: { type: Array, default: () => [] },
   schemaSearchIndex: { type: Number, default: -1 },
@@ -199,7 +198,6 @@ watch(
         >{{ tableComment }}</span>
         <span v-else class="wb-inspector-table-comment is-empty">无表备注</span>
       </div>
-      <strong v-if="activeStatusLabel" class="wb-inspector-table-count">{{ activeStatusLabel }}</strong>
     </header>
     <div class="wb-inspector-section-head">
       <div class="wb-inspector-section-label">字段备注</div>

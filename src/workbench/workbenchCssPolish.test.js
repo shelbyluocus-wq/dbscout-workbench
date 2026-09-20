@@ -1074,6 +1074,10 @@ test("grid and inspector typography favor long-session readability", () => {
   assert.match(commentRule, /line-height\s*:\s*1\.6/);
   assert.match(detailRule, /font-size\s*:\s*13px/);
   assert.match(tableCommentRule, /font-size\s*:\s*12\.5px/);
+  assert.match(tableCommentRule, /white-space\s*:\s*normal/);
+  assert.match(tableCommentRule, /overflow-wrap\s*:\s*anywhere/);
+  assert.doesNotMatch(tableCommentRule, /white-space\s*:\s*nowrap/);
+  assert.doesNotMatch(tableCommentRule, /text-overflow\s*:\s*ellipsis/);
   assert.match(cellIdentityRule, /font-size\s*:\s*11px/);
 });
 

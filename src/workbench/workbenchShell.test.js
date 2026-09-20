@@ -154,9 +154,9 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(sidebar, /aria-current/);
   assert.match(orchestrator, /:active-tab="activeTab"/);
   assert.doesNotMatch(orchestrator, /wb-grid-statusbar/);
-  assert.match(orchestrator, /:active-status-label="activeStatusLabel"/);
+  assert.doesNotMatch(orchestrator, /:active-status-label=/);
   assert.match(orchestrator, /:selected-range="focusedSelectedRange"/);
-  assert.match(orchestrator, /activeStatusLabel/);
+  assert.doesNotMatch(orchestrator, /activeStatusLabel/);
   assert.doesNotMatch(orchestrator, /wb-sidebar-status/);
   assert.match(orchestrator, /class="wb-operation-status-live wb-visually-hidden"/);
   assert.doesNotMatch(orchestrator, /import\s+SelectedCellIdentity/);
@@ -264,20 +264,20 @@ test("workbench keeps design tabs out of data-grid rendering paths", () => {
   assert.doesNotMatch(orchestrator, /<SelectedCellIdentity[\s\S]*:tab="activeDataTab"/);
 });
 
-test("inspector status does not render a data row count for design tabs", () => {
+test("inspector status does not render a data row count", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const inspectorTag = orchestrator.match(/<InspectorPanel[\s\S]*?\/>/)?.[0] || "";
   const inspector = read("./components/InspectorPanel.vue");
+  const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /const\s+activeStatusLabel\s*=\s*computed/);
-  assert.match(inspectorTag, /:active-status-label="activeStatusLabel"/);
-  assert.match(inspector, /\{\{\s*activeStatusLabel\s*\}\}/);
-  assert.doesNotMatch(inspector, /rowCountLabel\(activeTab\.totalRows\)/);
-  assert.match(orchestrator, /function\s+rowCountLabel\(tab\)/);
-  assert.match(orchestrator, /tab\??\.totalRowsExact\s*===\s*false/);
-  assert.match(orchestrator, /tab\.totalRowsLoading\s*\?\s*["'] · 计算中["']/);
-  assert.match(orchestrator, /activeDataTab\.value\s*\?\s*rowCountLabel\(activeDataTab\.value\)/);
-  assert.match(orchestrator, /activeDesignTab\.value\s*\?\s*["']表设计["']/);
+  assert.doesNotMatch(orchestrator, /activeStatusLabel/);
+  assert.doesNotMatch(orchestrator, /function\s+rowCountLabel/);
+  assert.doesNotMatch(inspectorTag, /active-status-label/);
+  assert.doesNotMatch(inspector, /activeStatusLabel/);
+  assert.doesNotMatch(inspector, /wb-inspector-table-count/);
+  assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*white-space:\s*normal/s);
+  assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.doesNotMatch(styles, /\.wb-inspector-table-comment\s*\{[^}]*white-space:\s*nowrap/s);
 });
 
 test("workbench renders recursive split panes and keeps inspector scoped to the focused pane", () => {
@@ -1087,7 +1087,7 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(inspector, /class="wb-inspector-table-status"/);
   assert.match(inspector, /class="wb-inspector-table-source"/);
   assert.match(inspector, /class="wb-inspector-table-comment"/);
-  assert.match(inspector, /class="wb-inspector-table-count"/);
+  assert.doesNotMatch(inspector, /class="wb-inspector-table-count"/);
   assert.match(inspector, /字段备注/);
   assert.doesNotMatch(inspector, /<strong>字段备注<\/strong>/);
   // The inspector no longer shows the current-cell identity chip. Selection

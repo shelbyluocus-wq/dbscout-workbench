@@ -2030,20 +2030,6 @@ const totalPages = computed(() => {
   return Math.max(1, Math.ceil(tab.totalRows / tab.pageSize));
 });
 
-function rowCountLabel(tab) {
-  const loadedRows = tabRowCount(tab);
-  if (tab?.totalRowsExact === false) {
-    if (tab.hasMore === false) return `已加载全部 ${loadedRows.toLocaleString("zh-CN")} 行`;
-    return `已加载 ${loadedRows.toLocaleString("zh-CN")}+ 行${tab.totalRowsLoading ? " · 计算中" : ""}`;
-  }
-  const count = Number(tab?.totalRows);
-  return `${Number.isFinite(count) ? count.toLocaleString("zh-CN") : "0"} 行`;
-}
-
-const activeStatusLabel = computed(() => (
-  activeDataTab.value ? rowCountLabel(activeDataTab.value) : activeDesignTab.value ? "表设计" : ""
-));
-
 function highlightCell(tab, row, column, rowKey) {
   return _highlightCellResult(editState, tab, row, column, rowKey);
 }
@@ -4623,7 +4609,6 @@ onBeforeUnmount(() => {
         :active-columns="focusedActiveColumns"
         :selected-cell="focusedSelectedCell"
         :selected-range="focusedSelectedRange"
-        :active-status-label="activeStatusLabel"
         :schema-search-query="focusedPaneState.activeDataTab?.schemaSearchQuery || ''"
         :schema-search-matches="focusedPaneState.activeDataTab?.schemaSearchMatches || []"
         :schema-search-index="focusedPaneState.activeDataTab?.schemaSearchIndex ?? -1"
