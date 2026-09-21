@@ -277,6 +277,20 @@ export function useRowSelection(
     return suppressed;
   }
 
+  // 删除成功后必须重拉当前页。拉取失败时自动重试一次；仍失败则保留现有数据
+  // 并明确提示（历史上曾出现删除后整页空白、只能重开表的问题）。
+  async function refetchAfterDelete(tab, page) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await fetchPage(tab, page);
+        if (result?.ok || result?.cancelled) return result;
+      } catch {
+        // fetchPage 内部已兜底；这里防御直接抛错的情况。
+      }
+    }
+    return null;
+  }
+
   async function deleteSelectedRows(tab) {
     if (!tab || tab.selectedRowKeys.size === 0) return;
     const selectedEntries = allRowEntries(tab)
@@ -322,7 +336,13 @@ export function useRowSelection(
       tab.selectedRowKeys = new Set();
       rowSelectionAnchor = null;
       rowSelectionFocus = null;
-      await fetchPage(tab, 1);
+      const refreshed = await refetchAfterDelete(tab, 1);
+      if (!refreshed) {
+        statusText.value = insertRowIds.length > 0
+          ? `已删除 ${count} 行，并移除 ${insertRowIds.length} 条未保存新增行；但列表刷新失败，请点击「重试」或重新打开表`
+          : `已删除 ${count} 行，但列表刷新失败，请点击「重试」或重新打开表`;
+        return;
+      }
       statusText.value = insertRowIds.length > 0
         ? `已删除 ${count} 行，并移除 ${insertRowIds.length} 条未保存新增行`
         : `已删除 ${count} 行`;
@@ -360,7 +380,11 @@ export function useRowSelection(
         },
       });
       const page = tabRowCount(tab) <= 1 && tab.page > 1 ? tab.page - 1 : tab.page;
-      await fetchPage(tab, page);
+      const refreshed = await refetchAfterDelete(tab, page);
+      if (!refreshed) {
+        statusText.value = "已删除 1 行，但列表刷新失败，请点击「重试」或重新打开表";
+        return;
+      }
       statusText.value = "已删除 1 行";
     } catch (error) {
       statusText.value = `删除失败：${String(error)}`;

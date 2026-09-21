@@ -38,7 +38,10 @@ function createHarness(options = {}) {
     },
     { statusText },
     {
-      fetchPage: async (targetTab, page) => fetched.push({ tab: targetTab, page }),
+      fetchPage: options.fetchPage || (async (targetTab, page) => {
+        fetched.push({ tab: targetTab, page });
+        return { ok: true };
+      }),
       prepareForDelete: options.prepareForDelete,
       getVisualRowModel: options.getVisualRowModel,
       removeInsertRows: options.removeInsertRows,
@@ -535,4 +538,59 @@ test("deleteSelectedRows confirm names the table and mentions rollback", async (
   assert.doesNotMatch(confirmDialog.message, /不可撤销/);
   close(true);
   await deletePromise;
+});
+
+test("delete retries the post-delete refetch once and keeps the success message when the retry recovers", async () => {
+  let attempts = 0;
+  const { tab, selection, statusText } = createHarness({
+    async fetchPage() {
+      attempts += 1;
+      return attempts === 1 ? { ok: false, error: new Error("boom") } : { ok: true };
+    },
+  });
+  const { close } = useConfirm();
+  selection.toggleRowSelect(tab, tab.rows[1], {});
+  const deletePromise = selection.deleteSelectedRows(tab);
+  close(true);
+  await deletePromise;
+
+  assert.equal(attempts, 2);
+  assert.equal(statusText.value, "已删除 1 行");
+});
+
+test("deleteSelectedRows reports a refresh failure when the post-delete refetch keeps failing", async () => {
+  let attempts = 0;
+  const { tab, calls, selection, statusText } = createHarness({
+    async fetchPage() {
+      attempts += 1;
+      return { ok: false, error: new Error("boom") };
+    },
+  });
+  const { close } = useConfirm();
+  selection.toggleRowSelect(tab, tab.rows[0], {});
+  const deletePromise = selection.deleteSelectedRows(tab);
+  close(true);
+  await deletePromise;
+
+  assert.equal(calls.filter((call) => call.command === "delete_rows").length, 1);
+  assert.equal(attempts, 2);
+  assert.equal(statusText.value, "已删除 1 行，但列表刷新失败，请点击「重试」或重新打开表");
+});
+
+test("deleteRow reports a refresh failure when the post-delete refetch keeps failing", async () => {
+  let attempts = 0;
+  const { tab, calls, selection, statusText } = createHarness({
+    async fetchPage() {
+      attempts += 1;
+      return { ok: false, error: new Error("boom") };
+    },
+  });
+  const { close } = useConfirm();
+  const deletePromise = selection.deleteRow(tab, tab.rows[0]);
+  close(true);
+  await deletePromise;
+
+  assert.equal(calls.filter((call) => call.command === "delete_rows").length, 1);
+  assert.equal(attempts, 2);
+  assert.equal(statusText.value, "已删除 1 行，但列表刷新失败，请点击「重试」或重新打开表");
 });

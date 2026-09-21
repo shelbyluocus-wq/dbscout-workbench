@@ -2621,7 +2621,11 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(orchestrator, /focusedPaneState\.commitInsertRowsAndRefresh/);
   // The detail editor save path now lives on the WorkbenchPane (CellDetailPanel
   // below the table) rather than the orchestrator's InspectorPanel bridge (#2/#3).
-  assert.match(pane, /@save-text-panel="saveTextPanel"/);
+  assert.match(pane, /@save-text-panel="handleSaveTextPanel"/);
+  assert.match(pane, /@commit-detail-draft="handleCommitDetailDraft"/);
+  assert.match(pane, /async function refreshAfterInsertSave\(tab, draftSnapshot = null, \{ reselect = true \} = \{\}\)/);
+  assert.match(pane, /props\.fetchPage\(tab, tab\.page \|\| 1, \{ skipInsertDraftCheck: true \}\)/);
+  assert.match(pane, /async function saveInsertDraftRow\(tab, rowId\) \{[\s\S]*?insertDraftSnapshotOf\(tab, rowId\)/);
   assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
   assert.match(pane, /clearSelection\(\)/);
   assert.match(pane, /handleGridKeydownWithRows/);

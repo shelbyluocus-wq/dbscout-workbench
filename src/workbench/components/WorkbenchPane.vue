@@ -11,6 +11,7 @@ import { getOptimisticCellValue } from "../editState.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { buildSelectionStats } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
+import { insertRowIdFromKey } from "../utils/gridRowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
 import {
   distanceToTableWindowEnd,
@@ -801,8 +802,54 @@ const selectedCellIsNull = computed(() => {
   return Boolean(row && Object.prototype.hasOwnProperty.call(row, cell.column) && row[cell.column] == null);
 });
 
+function insertDraftSnapshotOf(tab, rowId) {
+  const row = getInsertRows(tab).find((candidate) => candidate.id === rowId);
+  return row ? { ...row.draft } : null;
+}
+
+// 新增行保存成功后立刻重拉当前页，让新行按数据库排序归位（与重新打开表一致），
+// 不再停在末尾的幻影位置。skipInsertDraftCheck：其余未保存草稿原样保留、不弹提示。
+async function refreshAfterInsertSave(tab, draftSnapshot = null, { reselect = true } = {}) {
+  if (!tab?.id) return;
+  const result = await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true });
+  if (!result?.ok) return;
+  emit("page-refreshed", tab);
+  if (!reselect) return;
+  if (draftSnapshot && selectVisibleInsertedRow(tab, draftSnapshot)) return;
+  gridWrapRef.value?.focus();
+}
+
 async function saveInsertDraftRow(tab, rowId) {
-  await commitInsertRow(tab, rowId);
+  const draftSnapshot = insertDraftSnapshotOf(tab, rowId);
+  const inserted = await commitInsertRow(tab, rowId);
+  if (!inserted) return;
+  await refreshAfterInsertSave(tab, draftSnapshot);
+}
+
+async function handleSaveTextPanel() {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  const rowId = tab && cell?.tabId === tab.id && isInsertRowKey(cell.rowKey)
+    ? insertRowIdFromKey(tab, cell.rowKey)
+    : null;
+  const draftSnapshot = rowId ? insertDraftSnapshotOf(tab, rowId) : null;
+  const result = await saveTextPanel();
+  if (result?.insertedRows > 0 && !result?.failedRowId) {
+    await refreshAfterInsertSave(tab, draftSnapshot);
+  }
+  return result;
+}
+
+async function handleCommitDetailDraft(payload) {
+  const tab = activeDataTab.value;
+  const rowKey = payload?.rowKey || selectedCell.value?.rowKey;
+  const rowId = tab && isInsertRowKey(rowKey) ? insertRowIdFromKey(tab, rowKey) : null;
+  const draftSnapshot = rowId ? insertDraftSnapshotOf(tab, rowId) : null;
+  const result = await commitDetailDraft(payload);
+  if (result?.insertedRows > 0 && !result?.failedRowId) {
+    await refreshAfterInsertSave(tab, draftSnapshot, { reselect: false });
+  }
+  return result;
 }
 
 function cancelInsertDraftRow(tab, rowId) {
@@ -1721,8 +1768,8 @@ onMounted(() => emitPaneState());
       :is-null="selectedCellIsNull"
       :selection-stats="selectionStats"
       @update:text-draft="updateTextDraft"
-      @save-text-panel="saveTextPanel"
-      @commit-detail-draft="commitDetailDraft"
+      @save-text-panel="handleSaveTextPanel"
+      @commit-detail-draft="handleCommitDetailDraft"
       @detail-contextmenu="openDetailContextMenu"
     />
 
