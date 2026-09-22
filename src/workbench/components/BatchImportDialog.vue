@@ -1,7 +1,13 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
+import {
+  clampDialogFrame,
+  loadBatchImportDialogFrame,
+  resizeDialogFrame,
+  saveBatchImportDialogFrame,
+} from "../utils/batchImportDialogFrame.js";
 import BatchImportComparison from "./BatchImportComparison.vue";
 
 const props = defineProps({
@@ -15,6 +21,18 @@ const query = ref("");
 const viewMode = ref("scope");
 const comparisonFullscreen = ref(false);
 const dialogRef = ref(null);
+const frame = ref(null);
+const resizing = ref(false);
+const resizeHandles = [
+  { edge: "n", label: "调整窗口上边缘", orientation: "horizontal", edges: { top: true } },
+  { edge: "s", label: "调整窗口下边缘", orientation: "horizontal", edges: { bottom: true } },
+  { edge: "e", label: "调整窗口右边缘", orientation: "vertical", edges: { right: true } },
+  { edge: "w", label: "调整窗口左边缘", orientation: "vertical", edges: { left: true } },
+  { edge: "nw", label: "调整窗口左上角", edges: { top: true, left: true } },
+  { edge: "ne", label: "调整窗口右上角", edges: { top: true, right: true } },
+  { edge: "sw", label: "调整窗口左下角", edges: { bottom: true, left: true } },
+  { edge: "se", label: "调整窗口右下角", edges: { bottom: true, right: true } },
+];
 const batch = computed(() => props.transfer.batchImport);
 const isBusy = computed(() =>
   batch.value.importing || batch.value.comparison.running || batch.value.status === "reading"
@@ -101,14 +119,118 @@ watch(
     else if (["succeeded", "partial", "cancelled"].includes(status)) viewMode.value = "comparison";
   },
 );
+
+const dialogStyle = computed(() => {
+  if (!frame.value) return null;
+  return {
+    position: "absolute",
+    left: `${frame.value.left}px`,
+    top: `${frame.value.top}px`,
+    width: `${frame.value.width}px`,
+    height: `${frame.value.height}px`,
+    maxWidth: "none",
+    maxHeight: "none",
+  };
+});
+
+function viewportSize() {
+  return {
+    width: globalThis.innerWidth || 0,
+    height: globalThis.innerHeight || 0,
+  };
+}
+
+function rememberFrame(next) {
+  frame.value = next;
+  saveBatchImportDialogFrame(next, globalThis.localStorage);
+}
+
+function keepFrameInViewport() {
+  if (!frame.value || resizing.value) return;
+  rememberFrame(clampDialogFrame(frame.value, viewportSize()));
+}
+
+function resizeCursor(edges) {
+  const vertical = Boolean(edges.top || edges.bottom);
+  const horizontal = Boolean(edges.left || edges.right);
+  if (vertical && horizontal) return edges.top === edges.left ? "nwse-resize" : "nesw-resize";
+  return horizontal ? "ew-resize" : "ns-resize";
+}
+
+let stopResize = null;
+
+function startResize(event, edges) {
+  if (event.button != null && event.button !== 0) return;
+  const rect = dialogRef.value?.getBoundingClientRect();
+  if (!rect) return;
+  event.preventDefault();
+  event.stopPropagation();
+  stopResize?.();
+  const origin = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  const startPoint = { x: event.clientX, y: event.clientY };
+  const pointerId = event.pointerId;
+  const handle = event.currentTarget;
+  resizing.value = true;
+  try {
+    handle?.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture is unavailable for this event; window listeners still track the drag.
+  }
+  if (globalThis.document?.body) {
+    globalThis.document.body.style.cursor = resizeCursor(edges);
+    globalThis.document.body.style.userSelect = "none";
+  }
+  const move = (moveEvent) => {
+    const samples = moveEvent.getCoalescedEvents?.();
+    const latest = samples?.length ? samples[samples.length - 1] : moveEvent;
+    frame.value = resizeDialogFrame(origin, {
+      x: latest.clientX - startPoint.x,
+      y: latest.clientY - startPoint.y,
+    }, edges, viewportSize());
+  };
+  const stop = () => {
+    globalThis.removeEventListener?.("pointermove", move);
+    globalThis.removeEventListener?.("pointerup", stop);
+    globalThis.removeEventListener?.("pointercancel", stop);
+    handle?.removeEventListener?.("lostpointercapture", stop);
+    if (handle?.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
+    resizing.value = false;
+    if (globalThis.document?.body) {
+      globalThis.document.body.style.cursor = "";
+      globalThis.document.body.style.userSelect = "";
+    }
+    if (frame.value) saveBatchImportDialogFrame(frame.value, globalThis.localStorage);
+    if (stopResize === stop) stopResize = null;
+  };
+  stopResize = stop;
+  globalThis.addEventListener?.("pointermove", move);
+  globalThis.addEventListener?.("pointerup", stop);
+  globalThis.addEventListener?.("pointercancel", stop);
+  handle?.addEventListener?.("lostpointercapture", stop);
+}
+
+onMounted(() => {
+  frame.value = loadBatchImportDialogFrame(globalThis.localStorage, viewportSize());
+  globalThis.addEventListener?.("resize", keepFrameInViewport);
+});
+
+onBeforeUnmount(() => {
+  stopResize?.();
+  globalThis.removeEventListener?.("resize", keepFrameInViewport);
+});
 </script>
 
 <template>
   <div class="wb-dialog-overlay">
     <section
       ref="dialogRef"
-      class="wb-dialog wb-batch-transfer-dialog"
-      :class="{ 'is-comparison-mode': viewMode === 'comparison' }"
+      class="wb-dialog wb-batch-transfer-dialog wb-batch-import-dialog"
+      :class="{
+        'is-comparison-mode': viewMode === 'comparison',
+        'is-user-sized': frame != null,
+        'is-resizing': resizing,
+      }"
+      :style="dialogStyle"
       role="dialog"
       aria-modal="true"
       aria-labelledby="wb-batch-import-title"
@@ -295,6 +417,16 @@ watch(
           {{ importButtonLabel }}
         </button>
       </footer>
+      <span
+        v-for="handle in resizeHandles"
+        :key="handle.edge"
+        class="wb-batch-import-resize"
+        :class="`is-${handle.edge}`"
+        role="separator"
+        :aria-label="handle.label"
+        :aria-orientation="handle.orientation"
+        @pointerdown="startResize($event, handle.edges)"
+      />
     </section>
   </div>
 </template>

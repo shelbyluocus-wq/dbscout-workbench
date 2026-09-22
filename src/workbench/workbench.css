@@ -5010,6 +5010,95 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 500;
 }
 
+.wb-batch-import-dialog {
+  position: relative;
+}
+
+.wb-batch-import-dialog.is-resizing {
+  user-select: none;
+}
+
+.wb-batch-import-dialog.is-user-sized {
+  overflow: hidden;
+}
+
+.wb-batch-import-dialog.is-user-sized > * {
+  flex-shrink: 0;
+}
+
+.wb-batch-import-dialog.is-user-sized .wb-batch-transfer-list,
+.wb-batch-import-dialog.is-user-sized .wb-batch-transfer-empty,
+.wb-batch-import-dialog.is-user-sized.is-comparison-mode .wb-batch-comparison {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.wb-batch-import-resize {
+  position: absolute;
+  z-index: 6;
+  touch-action: none;
+}
+
+.wb-batch-import-resize.is-n,
+.wb-batch-import-resize.is-s {
+  left: 14px;
+  right: 14px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.wb-batch-import-resize.is-n { top: 0; }
+.wb-batch-import-resize.is-s { bottom: 0; }
+
+.wb-batch-import-resize.is-e,
+.wb-batch-import-resize.is-w {
+  top: 14px;
+  bottom: 14px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.wb-batch-import-resize.is-e { right: 0; }
+.wb-batch-import-resize.is-w { left: 0; }
+
+.wb-batch-import-resize.is-n:hover,
+.wb-batch-import-resize.is-s:hover,
+.wb-batch-import-resize.is-e:hover,
+.wb-batch-import-resize.is-w:hover {
+  background: color-mix(in srgb, var(--wb-accent) 28%, transparent);
+}
+
+.wb-batch-import-resize.is-nw,
+.wb-batch-import-resize.is-ne,
+.wb-batch-import-resize.is-sw,
+.wb-batch-import-resize.is-se {
+  width: 14px;
+  height: 14px;
+}
+
+.wb-batch-import-resize.is-nw { top: 0; left: 0; cursor: nwse-resize; }
+.wb-batch-import-resize.is-ne { top: 0; right: 0; cursor: nesw-resize; }
+.wb-batch-import-resize.is-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.wb-batch-import-resize.is-se { right: 0; bottom: 0; cursor: nwse-resize; }
+
+.wb-batch-import-resize.is-se::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--wb-muted) 50%, var(--wb-muted) 64%, transparent 64%),
+    linear-gradient(135deg, transparent 74%, var(--wb-muted) 74%, var(--wb-muted) 88%, transparent 88%);
+  opacity: 0.7;
+}
+
+.wb-batch-import-resize.is-se:hover::after {
+  opacity: 1;
+}
+
 .wb-batch-mode-switch {
   display: inline-flex;
   align-items: center;

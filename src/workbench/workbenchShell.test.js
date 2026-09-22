@@ -872,6 +872,22 @@ test("table comparison supports complete rows, primary-key visibility, fullscree
   assert.match(types, /pub row_statuses:\s*Vec<String>/);
 });
 
+test("batch import dialog can be dragged to resize the window", () => {
+  const dialog = read("./components/BatchImportDialog.vue");
+  const styles = read("./workbench.css");
+  const frame = read("./utils/batchImportDialogFrame.js");
+
+  assert.match(dialog, /wb-batch-import-resize/);
+  assert.match(dialog, /startResize\(\$event, handle\.edges\)/);
+  assert.match(dialog, /is-user-sized/);
+  assert.match(dialog, /resizeDialogFrame/);
+  assert.match(frame, /export function resizeDialogFrame/);
+  assert.match(styles, /\.wb-batch-import-resize\.is-e,\s*\n\.wb-batch-import-resize\.is-w\s*\{[^}]*cursor:\s*ew-resize/s);
+  assert.match(styles, /\.wb-batch-import-resize\.is-n,\s*\n\.wb-batch-import-resize\.is-s\s*\{[^}]*cursor:\s*ns-resize/s);
+  assert.match(styles, /\.wb-batch-import-resize\.is-se\s*\{[^}]*cursor:\s*nwse-resize/s);
+  assert.match(styles, /\.wb-batch-import-dialog\.is-user-sized\.is-comparison-mode \.wb-batch-comparison\s*\{[^}]*min-height:\s*0/s);
+});
+
 test("table comparison panes can be dragged to resize left, right, and the detail band", () => {
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");
