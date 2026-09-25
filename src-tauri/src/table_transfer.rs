@@ -704,6 +704,9 @@ async fn resolve_script_launch(script: &Path) -> Result<ScriptLaunch, String> {
                 .unwrap_or_else(|| PathBuf::from(".")),
             kind: ScriptKind::Batch,
         }),
+        #[cfg(not(target_os = "windows"))]
+        "lnk" => Err("快捷方式(.lnk)仅支持 Windows".into()),
+        #[cfg(target_os = "windows")]
         "lnk" => {
             if !cfg!(target_os = "windows") {
                 return Err("快捷方式(.lnk)仅支持 Windows".into());

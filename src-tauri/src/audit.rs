@@ -308,6 +308,8 @@ pub async fn record_pending_batch(
         .map_err(|error| format!("开启审计写入事务失败: {error}"))?;
     let mut ids = Vec::with_capacity(pendings.len());
     for pending in pendings {
+        // The server deduplicates individual audit rows, not whole operations.
+        let client_id = uuid::Uuid::new_v4().to_string();
         let identity_json = pending
             .row_identity
             .as_ref()
@@ -338,7 +340,7 @@ pub async fn record_pending_batch(
         .bind(STATUS_PENDING)
         .bind(&pending.notes)
         .bind(&ctx.actor)
-        .bind(&ctx.client_id)
+        .bind(&client_id)
         .execute(&mut *tx)
         .await;
         let result = match result {
@@ -397,6 +399,18 @@ pub async fn mark_committed_required_batch(pool: &SqlitePool, ids: &[i64]) -> Re
 
 pub async fn mark_aborted_required_batch(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
     mark_status_required_batch(pool, ids, STATUS_ABORTED).await
+}
+
+pub async fn mark_aborted_batch(pool: &SqlitePool, ids: &[i64]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    if mark_aborted_required_batch(pool, ids).await.is_err() {
+        // Retain best-effort cleanup of every surviving entry if one bad entry
+        // prevents an atomic status update after the database has rolled back.
+        return mark_aborted(pool, ids).await;
+    }
+    Ok(())
 }
 
 async fn mark_status_required_batch(
@@ -1269,15 +1283,21 @@ mod tests {
 
                 assert_eq!(ids.len(), 2);
                 assert!(ids[0] < ids[1]);
-                let rows = sqlx::query("SELECT operation, status FROM audit_log ORDER BY id")
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap();
+                let rows =
+                    sqlx::query("SELECT operation, status, client_id FROM audit_log ORDER BY id")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
                 let operations = rows
                     .iter()
                     .map(|row| row.try_get::<String, _>("operation").unwrap())
                     .collect::<Vec<_>>();
                 assert_eq!(operations, vec!["INSERT", "UPDATE"]);
+                assert_ne!(
+                    rows[0].try_get::<String, _>("client_id").unwrap(),
+                    rows[1].try_get::<String, _>("client_id").unwrap(),
+                    "each audit row must survive central-server deduplication"
+                );
                 for row in &rows {
                     assert_eq!(row.try_get::<String, _>("status").unwrap(), STATUS_PENDING);
                 }
@@ -1292,9 +1312,7 @@ mod tests {
             .unwrap()
             .block_on(async {
                 let pool = full_schema_test_pool().await;
-                // client_id is the idempotency key: make it unique so the second
-                // row of the batch violates the constraint mid-transaction.
-                sqlx::query("CREATE UNIQUE INDEX ux_audit_client_id ON audit_log(client_id)")
+                sqlx::query("CREATE TRIGGER fail_second_audit BEFORE INSERT ON audit_log WHEN (SELECT COUNT(*) FROM audit_log) > 0 BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END")
                     .execute(&pool)
                     .await
                     .unwrap();
@@ -1306,7 +1324,7 @@ mod tests {
 
                 let error = record_pending_batch(&pool, &ctx, &pendings)
                     .await
-                    .expect_err("second row violates the unique client_id");
+                    .expect_err("second row triggers the injected failure");
                 assert!(error.contains("写入审计记录失败"));
 
                 // The whole transaction rolled back: nothing was written.
@@ -1315,6 +1333,106 @@ mod tests {
                     .await
                     .unwrap();
                 assert_eq!(count, 0);
+            });
+    }
+
+    #[test]
+    fn required_batch_status_changes_are_atomic_and_abortable() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let pendings = vec![
+                    test_pending_audit("DELETE", "DELETE FROM hero WHERE id = ?"),
+                    test_pending_audit("DELETE", "DELETE FROM hero WHERE id = ?"),
+                ];
+                let ids = record_pending_batch(&pool, &test_audit_context(), &pendings)
+                    .await
+                    .unwrap();
+                assert!(mark_committed_required_batch(&pool, &[ids[0], 999])
+                    .await
+                    .is_err());
+                assert_eq!(
+                    fetch_audit_entry(&pool, ids[0]).await.unwrap().status,
+                    STATUS_PENDING
+                );
+                mark_committed_required_batch(&pool, &ids).await.unwrap();
+                for id in &ids {
+                    assert_eq!(
+                        fetch_audit_entry(&pool, *id).await.unwrap().status,
+                        STATUS_COMMITTED
+                    );
+                }
+                mark_aborted_required_batch(&pool, &ids).await.unwrap();
+                for id in &ids {
+                    assert_eq!(
+                        fetch_audit_entry(&pool, *id).await.unwrap().status,
+                        STATUS_ABORTED
+                    );
+                }
+                mark_committed_required_batch(&pool, &ids).await.unwrap();
+                mark_aborted_batch(&pool, &[ids[0], 999, ids[1]])
+                    .await
+                    .unwrap();
+                for id in &ids {
+                    assert_eq!(
+                        fetch_audit_entry(&pool, *id).await.unwrap().status,
+                        STATUS_ABORTED
+                    );
+                }
+            });
+    }
+
+    #[test]
+    #[ignore = "local disk benchmark; uses only a temporary SQLite database"]
+    fn bulk_delete_audit_disk_benchmark() {
+        use sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let path = std::env::temp_dir().join(format!(
+                    "blackcat-audit-bench-{}.sqlite",
+                    uuid::Uuid::new_v4()
+                ));
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(
+                        SqliteConnectOptions::new()
+                            .filename(&path)
+                            .create_if_missing(true)
+                            .journal_mode(SqliteJournalMode::Wal)
+                            .synchronous(SqliteSynchronous::Full),
+                    )
+                    .await
+                    .unwrap();
+                ensure_schema(&pool).await.unwrap();
+                let pendings: Vec<_> = (0..1000)
+                    .map(|_| test_pending_audit("DELETE", "DELETE FROM hero WHERE id = ?"))
+                    .collect();
+                let ctx = test_audit_context();
+                let started = std::time::Instant::now();
+                let mut ids = Vec::new();
+                for pending in &pendings {
+                    ids.push(record_pending(&pool, &ctx, pending).await.unwrap());
+                }
+                for id in &ids {
+                    mark_committed_required(&pool, *id).await.unwrap();
+                }
+                let serial_ms = started.elapsed().as_millis();
+                let started = std::time::Instant::now();
+                let mut ids = Vec::new();
+                for chunk in pendings.chunks(256) {
+                    ids.extend(record_pending_batch(&pool, &ctx, chunk).await.unwrap());
+                }
+                mark_committed_required_batch(&pool, &ids).await.unwrap();
+                let batch_ms = started.elapsed().as_millis();
+                eprintln!("1000-row audit, WAL/FULL: serial={serial_ms}ms batch={batch_ms}ms");
+                pool.close().await;
+                std::fs::remove_file(&path).unwrap();
             });
     }
 

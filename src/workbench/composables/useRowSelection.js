@@ -291,7 +291,25 @@ export function useRowSelection(
     return null;
   }
 
-  async function deleteSelectedRows(tab) {
+  async function runRowDeletion(tab, action) {
+    if (!tab || tab.deletingRows) return;
+    tab.deletingRows = true;
+    try {
+      return await action();
+    } finally {
+      tab.deletingRows = false;
+    }
+  }
+
+  function deleteSelectedRows(tab) {
+    return runRowDeletion(tab, () => deleteSelectedRowsImpl(tab));
+  }
+
+  function deleteRow(tab, row) {
+    return runRowDeletion(tab, () => deleteRowImpl(tab, row));
+  }
+
+  async function deleteSelectedRowsImpl(tab) {
     if (!tab || tab.selectedRowKeys.size === 0) return;
     const selectedEntries = allRowEntries(tab)
       .filter((entry) => tab.selectedRowKeys.has(gridRowKey(tab, entry.row)));
@@ -324,6 +342,7 @@ export function useRowSelection(
     try {
       if (!(await prepareForDelete(tab, { excludeInsertRowIds: insertRowIds }))) return;
       const identities = dataEntries.map((entry) => buildRowIdentity(tab, entry.row));
+      statusText.value = `正在删除 ${count} 行，请稍候…`;
       await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,
@@ -351,7 +370,7 @@ export function useRowSelection(
     }
   }
 
-  async function deleteRow(tab, row) {
+  async function deleteRowImpl(tab, row) {
     if (isInsertDraftRow(row)) {
       removeInsertRows(tab, [insertRowIdFromRow(row)]);
       return;
@@ -373,6 +392,7 @@ export function useRowSelection(
     if (!confirmed) return;
     try {
       if (!(await prepareForDelete(tab))) return;
+      statusText.value = "正在删除 1 行，请稍候…";
       await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,

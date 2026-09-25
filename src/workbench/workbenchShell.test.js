@@ -511,7 +511,7 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /function\s+deleteHomeTables/);
   assert.match(
     orchestrator,
-    /invokeWorkbench\(["']drop_tables["'],\s*\{\s*request:\s*\{[\s\S]*?connectionId:\s*source\.connectionId,[\s\S]*?database:\s*source\.database,[\s\S]*?tables:\s*tableNames,[\s\S]*?\}\s*,?\s*\}\s*\)/,
+    /invokeWorkbench\(["']drop_tables["'],\s*\{\s*request:\s*\{[\s\S]*?connectionId:\s*source\.connectionId,[\s\S]*?database:\s*source\.database,[\s\S]*?tables:\s*batch\s*[,}]/,
   );
 });
 

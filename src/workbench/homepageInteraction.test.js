@@ -193,7 +193,8 @@ test("homepage context menu deletes the complete multi-table selection after con
   assert.match(orchestrator, /items:\s*tableNames/);
   assert.match(orchestrator, /note:\s*"删除表会同时移除数据和结构，此操作不可撤销。"/);
   assert.match(orchestrator, /if\s*\(!confirmed\)\s*return/);
-  assert.match(orchestrator, /invokeWorkbench\("drop_tables",\s*\{[\s\S]*?tables:\s*tableNames/);
+  assert.match(orchestrator, /const batch = tableNames\.slice\(offset, offset \+ 32\)/);
+  assert.match(orchestrator, /invokeWorkbench\("drop_tables",\s*\{[\s\S]*?tables:\s*batch/);
 });
 
 test("homepage tab keeps the normal arrow cursor", () => {

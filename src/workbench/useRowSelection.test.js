@@ -34,7 +34,7 @@ function createHarness(options = {}) {
   const selection = useRowSelection(
     async (command, payload) => {
       calls.push({ command, payload });
-      return {};
+      return options.invokeWorkbench ? options.invokeWorkbench(command, payload) : {};
     },
     { statusText },
     {
@@ -62,6 +62,45 @@ function pointerYForRow(rowIndex, {
 } = {}) {
   return wrapTop + 28 + fieldCommentHeight + rowIndex * rowHeight + offset;
 }
+
+test("row deletion reports pending work and rejects duplicate single or batch requests", async () => {
+  let finish;
+  const pending = new Promise((resolve) => { finish = resolve; });
+  const { tab, selection, calls, statusText } = createHarness({ invokeWorkbench: () => pending });
+  tab.selectedRowKeys = new Set(keys(tab));
+  const { close } = useConfirm();
+  const deletion = selection.deleteSelectedRows(tab);
+  close(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.equal(tab.deletingRows, true);
+    assert.match(statusText.value, /正在删除 4 行/);
+    await selection.deleteSelectedRows(tab);
+    await selection.deleteRow(tab, tab.rows[0]);
+    assert.equal(calls.length, 1);
+  } finally {
+    finish({ affected: 4 });
+    await deletion;
+  }
+  assert.equal(tab.deletingRows, false);
+  assert.equal(statusText.value, "已删除 4 行");
+});
+
+test("cancelled and failed row deletions release the pending guard and retain selection", async () => {
+  const { tab, selection, statusText } = createHarness({ invokeWorkbench: async () => { throw new Error("denied"); } });
+  tab.selectedRowKeys = new Set(keys(tab));
+  const { close } = useConfirm();
+  const cancelled = selection.deleteSelectedRows(tab);
+  close(false);
+  await cancelled;
+  assert.equal(tab.deletingRows, false);
+  const failed = selection.deleteSelectedRows(tab);
+  close(true);
+  await failed;
+  assert.equal(tab.deletingRows, false);
+  assert.equal(tab.selectedRowKeys.size, 4);
+  assert.match(statusText.value, /删除失败.*denied/);
+});
 
 test("plain row-header click selects only the clicked row (single-select)", () => {
   const { tab, selection } = createHarness();

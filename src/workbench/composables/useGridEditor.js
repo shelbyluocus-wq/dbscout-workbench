@@ -1,4 +1,4 @@
-import { computed, nextTick, ref, toRaw } from "vue";
+import { computed, nextTick, ref, toRaw, watch } from "vue";
 import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
@@ -201,6 +201,23 @@ export function useGridEditor(
   let suppressNextCellClick = false;
   let suppressNextCellClickTimer = null;
   const primaryKeyBuilders = new Map();
+
+  function shiftSelectedRows(range, shift) {
+    if (!range || !shift) return range;
+    const move = (position) => position ? { ...position, rowIndex: position.rowIndex + shift } : position;
+    return createGridSelection(range.tabId, move(range.anchor), move(range.focus), {
+      shiftAnchor: move(range.shiftAnchor || range.anchor),
+      toggledCells: (range.toggledCells || []).map(move),
+    });
+  }
+
+  // This scalar changes only on a prepend, never on scrolling or cell edits.
+  watch(() => [activeTab.value?.id, activeTab.value?.rowIndexShift || 0], ([id, offset], previous) => {
+    if (!previous || id !== previous[0] || selectedRange.value?.tabId !== id) return;
+    selectedRange.value = shiftSelectedRows(selectedRange.value, offset - previous[1]);
+    cancelFillSession();
+    clearFillOptions();
+  }, { flush: "sync" });
 
   // ── Column selection state ────────────────────────────────────────────
   const selectedColumnAnchor = ref(-1);
@@ -1520,8 +1537,9 @@ export function useGridEditor(
     clearFillOptions();
   }
 
-  function captureTableViewSelection() {
+  function captureTableViewSelection(tab = activeTab.value) {
     return {
+      rowIndexShift: tab?.rowIndexShift || 0,
       selectedCell: selectedCell.value,
       selectedRange: selectedRange.value,
       selectedInsertCell: selectedInsertCell.value,
@@ -1532,7 +1550,8 @@ export function useGridEditor(
 
   function restoreTableViewSelection(state = null) {
     selectedCell.value = state?.selectedCell || null;
-    selectedRange.value = state?.selectedRange || null;
+    const offset = activeTab.value?.rowIndexShift || 0;
+    selectedRange.value = shiftSelectedRows(state?.selectedRange || null, offset - (state?.rowIndexShift ?? offset));
     selectedInsertCell.value = state?.selectedInsertCell || null;
     selectedInsertRow.value = state?.selectedInsertRow || null;
     textDraft.value = String(state?.textDraft || "");
@@ -4299,65 +4318,69 @@ export function useGridEditor(
 
     if (isCopy) {
       event.preventDefault();
-      if (tab.selectedRowKeys.size > 0) {
-        const selectedRows = selectedWholeRows(tab);
-        if (selectedRows.length > 0) {
-          const columnNames = activeColumnNames();
-          const matrix = selectedRows.map(({ row }) => columnNames.map((col) => clipboardCellValue(row, col)));
-          await writeGridMatrix(matrix, { kind: "full-row", columnCount: columnsForTab(tab).length, columnNames });
-          const message = `已复制 ${selectedRows.length} 行`;
-          const anchorRowKey = selectedRows[0].rowKey;
-          showCopyFeedback(tab, { tabId: tab.id, rowKey: anchorRowKey, column: activeColumnNames()[0] }, message);
-        }
-      } else if (isMultiCellRange(selectedRange.value)) {
-        const copied = getSelectedClipboardData(tab);
-        if (copied?.ok === false) {
-          statusText.value = `无法复制：离散选区跨度为 ${copied.rowCount}×${copied.columnCount}，请缩小范围`;
-          return;
-        }
-        if (copied?.matrix?.length) {
-          await writeGridMatrix(copied.matrix, {
-            kind: copied.sparse ? "sparse" : "range",
-            mask: copied.mask,
-            bounds: copied.bounds,
+      try {
+        if (tab.selectedRowKeys.size > 0) {
+          const selectedRows = selectedWholeRows(tab);
+          if (selectedRows.length > 0) {
+            const columnNames = activeColumnNames();
+            const matrix = selectedRows.map(({ row }) => columnNames.map((col) => clipboardCellValue(row, col)));
+            await writeGridMatrix(matrix, { kind: "full-row", columnCount: columnsForTab(tab).length, columnNames });
+            const message = `已复制 ${selectedRows.length} 行`;
+            const anchorRowKey = selectedRows[0].rowKey;
+            showCopyFeedback(tab, { tabId: tab.id, rowKey: anchorRowKey, column: activeColumnNames()[0] }, message);
+          }
+        } else if (isMultiCellRange(selectedRange.value)) {
+          const copied = getSelectedClipboardData(tab);
+          if (copied?.ok === false) {
+            statusText.value = `无法复制：离散选区跨度为 ${copied.rowCount}×${copied.columnCount}，请缩小范围`;
+            return;
+          }
+          if (copied?.matrix?.length) {
+            await writeGridMatrix(copied.matrix, {
+              kind: copied.sparse ? "sparse" : "range",
+              mask: copied.mask,
+              bounds: copied.bounds,
+            });
+            const message = copied.sparse
+              ? `已复制 ${copied.selectedCount} 个单元格（范围 ${copied.rowCount}×${copied.columnCount}）`
+              : `已复制 ${copied.rowCount}×${copied.columnCount} 区域`;
+            const feedbackCell = copied.sparse
+              ? selectedCell.value
+              : selectedRange.value?.anchor
+                ? { tabId: tab.id, rowKey: selectedRange.value.anchor.rowKey, column: selectedRange.value.anchor.column }
+                : selectedCell.value;
+            showCopyFeedback(tab, feedbackCell, message);
+          }
+        } else if (selectedCell.value) {
+          if (isInsertRowKey(selectedCell.value.rowKey)) {
+            await writeGridMatrix([[insertDraftValue(tab, selectedCell.value.rowKey, selectedCell.value.column)]], { kind: "cell" });
+            showCopyFeedback(tab);
+            return;
+          }
+          const row = findRowByKey(tab, selectedCell.value.rowKey);
+          if (row) {
+            const value = clipboardCellValue(row, selectedCell.value.column);
+            await writeGridMatrix([[value]], { kind: "cell" });
+            showCopyFeedback(tab);
+          }
+        } else if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
+          await writeGridMatrix([insertDraftRow(tab, selectedInsertRow.value.rowId)], {
+            kind: "full-row",
+            columnCount: activeColumns.value.length,
+            columnNames: activeColumnNames(),
           });
-          const message = copied.sparse
-            ? `已复制 ${copied.selectedCount} 个单元格（范围 ${copied.rowCount}×${copied.columnCount}）`
-            : `已复制 ${copied.rowCount}×${copied.columnCount} 区域`;
-          const feedbackCell = copied.sparse
-            ? selectedCell.value
-            : selectedRange.value?.anchor
-              ? { tabId: tab.id, rowKey: selectedRange.value.anchor.rowKey, column: selectedRange.value.anchor.column }
-              : selectedCell.value;
-          showCopyFeedback(tab, feedbackCell, message);
+          statusText.value = "已复制新增行";
+        } else if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
+          const draft = getInsertDraft(tab, selectedInsertCell.value.rowId);
+          await writeGridMatrix([[draft[selectedInsertCell.value.column] ?? ""]], { kind: "cell" });
+          showCopyFeedback(tab, {
+            tabId: tab.id,
+            rowKey: getInsertRowKey(tab, selectedInsertCell.value.rowId),
+            column: selectedInsertCell.value.column,
+          });
         }
-      } else if (selectedCell.value) {
-        if (isInsertRowKey(selectedCell.value.rowKey)) {
-          await writeGridMatrix([[insertDraftValue(tab, selectedCell.value.rowKey, selectedCell.value.column)]], { kind: "cell" });
-          showCopyFeedback(tab);
-          return;
-        }
-        const row = findRowByKey(tab, selectedCell.value.rowKey);
-        if (row) {
-          const value = clipboardCellValue(row, selectedCell.value.column);
-          await writeGridMatrix([[value]], { kind: "cell" });
-          showCopyFeedback(tab);
-        }
-      } else if (isInsertRowVisible(tab) && selectedInsertRow.value?.tabId === tab.id) {
-        await writeGridMatrix([insertDraftRow(tab, selectedInsertRow.value.rowId)], {
-          kind: "full-row",
-          columnCount: activeColumns.value.length,
-          columnNames: activeColumnNames(),
-        });
-        statusText.value = "已复制新增行";
-      } else if (isInsertRowVisible(tab) && selectedInsertCell.value?.tabId === tab.id) {
-        const draft = getInsertDraft(tab, selectedInsertCell.value.rowId);
-        await writeGridMatrix([[draft[selectedInsertCell.value.column] ?? ""]], { kind: "cell" });
-        showCopyFeedback(tab, {
-          tabId: tab.id,
-          rowKey: getInsertRowKey(tab, selectedInsertCell.value.rowId),
-          column: selectedInsertCell.value.column,
-        });
+      } catch (error) {
+        statusText.value = `复制失败：${String(error?.message || error)}，请重新复制`;
       }
       return;
     }

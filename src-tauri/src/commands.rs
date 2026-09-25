@@ -6267,8 +6267,9 @@ pub async fn delete_rows(
         // Read and lock every row inside the delete transaction. This keeps the
         // rollback image aligned with the exact version that is removed.
         let mut audit_ids: Vec<i64> = Vec::new();
-        for (identity, (forward_sql, forward_binds)) in
-            request.row_identities.iter().zip(plans.iter())
+        let mut pendings = Vec::with_capacity(256);
+        for (index, (identity, (forward_sql, forward_binds))) in
+            request.row_identities.iter().zip(plans.iter()).enumerate()
         {
             let preimage = match fetch_preimage(
                 &mut tx,
@@ -6282,16 +6283,12 @@ pub async fn delete_rows(
                 Ok(Some(preimage)) => preimage,
                 Ok(None) => {
                     tx.rollback().await.ok();
-                    for id in &audit_ids {
-                        let _ = audit::mark_aborted_required(&audit_pool, *id).await;
-                    }
+                    let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
                     return Err("有行已变化或不存在，本次删除已取消".into());
                 }
                 Err(error) => {
                     tx.rollback().await.ok();
-                    for id in &audit_ids {
-                        let _ = audit::mark_aborted_required(&audit_pool, *id).await;
-                    }
+                    let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
                     return Err(error);
                 }
             };
@@ -6314,15 +6311,19 @@ pub async fn delete_rows(
                 rollback_strategy: audit::STRATEGY_AUTO,
                 notes: None,
             };
-            match audit::record_pending(&audit_pool, &ctx, &pending).await {
-                Ok(id) => audit_ids.push(id),
-                Err(error) => {
-                    tx.rollback().await.ok();
-                    for id in &audit_ids {
-                        let _ = audit::mark_aborted_required(&audit_pool, *id).await;
+            pendings.push(pending);
+            // Bound before-image memory and durable SQLite commits without
+            // splitting the MySQL transaction or deleting any unaudited rows.
+            if pendings.len() == 256 || index + 1 == plans.len() {
+                match audit::record_pending_batch(&audit_pool, &ctx, &pendings).await {
+                    Ok(ids) => audit_ids.extend(ids),
+                    Err(error) => {
+                        tx.rollback().await.ok();
+                        let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
+                        return Err(format!("无法写入审计记录，未执行删除: {error}"));
                     }
-                    return Err(format!("无法写入审计记录，未执行删除: {error}"));
                 }
+                pendings.clear();
             }
         }
 
@@ -6353,25 +6354,17 @@ pub async fn delete_rows(
         match exec_error {
             Some(error) => {
                 tx.rollback().await.ok();
-                for id in &audit_ids {
-                    let _ = audit::mark_aborted_required(&audit_pool, *id).await;
-                }
+                let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
                 return Err(error);
             }
             None => {
-                for id in &audit_ids {
-                    if let Err(error) = audit::mark_committed_required(&audit_pool, *id).await {
-                        tx.rollback().await.ok();
-                        for audit_id in &audit_ids {
-                            let _ = audit::mark_aborted_required(&audit_pool, *audit_id).await;
-                        }
-                        return Err(format!("删除审计落定失败，本次删除已回滚: {error}"));
-                    }
+                if let Err(error) = audit::mark_committed_required_batch(&audit_pool, &audit_ids).await {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
+                    return Err(format!("删除审计落定失败，本次删除已回滚: {error}"));
                 }
                 if let Err(error) = tx.commit().await {
-                    for id in &audit_ids {
-                        let _ = audit::mark_aborted_required(&audit_pool, *id).await;
-                    }
+                    let _ = audit::mark_aborted_batch(&audit_pool, &audit_ids).await;
                     return Err(format!("提交删除事务失败: {error}"));
                 }
                 crate::audit_sync::trigger_immediate_sync(&app);

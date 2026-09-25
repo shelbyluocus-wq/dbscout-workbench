@@ -6,6 +6,7 @@ import { useGridEditor } from "./composables/useGridEditor.js";
 import { useUndo } from "./composables/useUndo.js";
 import { clearGridClipboardPayload } from "./utils/gridClipboardStore.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { prependTabPage, appendTabPage } from "./workspaceState.js";
 
 const initialNavigator = globalThis.navigator;
 const initialRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -101,7 +102,7 @@ function createEditor(options = {}) {
       invokeCalls.push({ command, payload });
       return invokeWorkbench(command, payload);
     },
-    computed(() => tab),
+    options.activeTab || computed(() => tab),
     gridWrapRef,
     {
       scrollRowIntoView(rowIndex) {
@@ -133,6 +134,72 @@ function pointerSelect(editor, tab, rowIndex, columnIndex, modifiers = {}) {
   });
   editor.finishRangeSelection();
 }
+
+test("prepending a page preserves copied range identities and shift extension", async () => {
+  const { editor, tab, clipboard } = createEditor();
+  tab.primaryKeys = ["id"];
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { shiftKey: true });
+  const copy = () => editor.handleGridKeydown({ key: "c", ctrlKey: true, preventDefault() {} });
+  await copy();
+  const original = clipboard.text;
+  prependTabPage({ tabs: [tab] }, tab.id, { rows: [{ id: "0", name: "Earlier", level: "1" }] });
+  await copy();
+  assert.equal(clipboard.text, original);
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, 1);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 2);
+  pointerSelect(editor, tab, 3, 1, { shiftKey: true });
+  await copy();
+  assert.equal(clipboard.text, "Alice\t10\nBob\t12\nCara\t14");
+  appendTabPage({ tabs: [tab] }, tab.id, { rows: [{ id: "4", name: "Later", level: "20" }] });
+  await copy();
+  assert.equal(clipboard.text, "Alice\t10\nBob\t12\nCara\t14");
+});
+
+test("prepending preserves sparse selection and range edits without touching earlier rows", async () => {
+  const { editor, tab, clipboard, invokeCalls } = createEditor();
+  tab.primaryKeys = ["id"];
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 2, 0, { ctrlKey: true });
+  prependTabPage({ tabs: [tab] }, tab.id, { rows: [{ id: "0", name: "Earlier", level: "1" }] });
+  await editor.handleGridKeydown({ key: "c", ctrlKey: true, preventDefault() {} });
+  assert.equal(clipboard.text, "Alice\n\nCara");
+  await editor.handleGridKeydown({ key: "Delete", preventDefault() {} });
+  assert.equal(tab.rows[0].name, "Earlier");
+  assert.equal(tab.rows[2].name, "Bob");
+  assert.equal(updatedCellCount(invokeCalls), 2);
+});
+
+test("copy failures are visible and leave selection and data intact", async () => {
+  const { editor, tab, statusText, saveFeedback } = createEditor({
+    clipboard: { async writeText() { throw new Error("clipboard unavailable"); } },
+  });
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 1, { shiftKey: true });
+  await assert.doesNotReject(editor.handleGridKeydown({ key: "c", ctrlKey: true, preventDefault() {} }));
+  assert.match(statusText.value, /复制失败/);
+  assert.equal(saveFeedback.length, 0);
+  assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
+  assert.equal(tab.rows[0].name, "Alice");
+});
+
+test("saved selection uses the previous tab offset and survives inactive page prepends", async () => {
+  const activeTab = reactive({ value: null });
+  const { editor, tab, clipboard } = createEditor({ activeTab });
+  activeTab.value = tab;
+  pointerSelect(editor, tab, 0, 0);
+  pointerSelect(editor, tab, 1, 0, { shiftKey: true });
+  prependTabPage({ tabs: [tab] }, tab.id, { rows: [{ id: "0", name: "Earlier" }] });
+  activeTab.value = { id: "another", rowIndexShift: 100, rows: [], columns: [] };
+  const saved = editor.captureTableViewSelection(tab);
+  editor.clearSelection();
+  prependTabPage({ tabs: [tab] }, tab.id, { rows: [{ id: "-1", name: "Before earlier" }] });
+  activeTab.value = tab;
+  editor.restoreTableViewSelection(saved);
+  await editor.handleGridKeydown({ key: "c", ctrlKey: true, preventDefault() {} });
+  assert.equal(clipboard.text, "Alice\nBob");
+  assert.equal(editor.selectedRange.value.anchor.rowIndex, 2);
+});
 
 function selectedCoordinates(editor, tab) {
   const selected = [];

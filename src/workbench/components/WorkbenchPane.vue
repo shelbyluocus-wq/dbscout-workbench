@@ -731,7 +731,7 @@ function captureActiveTableViewState(tab = activeDataTab.value) {
   return captureTableTabViewState(tab, {
     scrollTop: wrap?.scrollTop ?? scrollTop.value,
     scrollLeft: wrap?.scrollLeft ?? 0,
-    editor: captureTableViewSelection(),
+    editor: captureTableViewSelection(tab),
   });
 }
 

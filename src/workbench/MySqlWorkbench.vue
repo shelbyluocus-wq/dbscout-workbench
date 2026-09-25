@@ -3086,7 +3086,8 @@ async function renameHomeTable(source) {
 }
 
 async function deleteHomeTables(source = {}) {
-  const tableNames = Array.isArray(source.tableNames) ? source.tableNames.filter(Boolean) : [];
+  if (busy.value) return;
+  const tableNames = [...new Set(Array.isArray(source.tableNames) ? source.tableNames.filter(Boolean) : [])];
   if (!tableNames.length) return;
   if (isReadOnlyConnection(source.connectionId)) {
     blockReadOnlyAction("删除表");
@@ -3096,36 +3097,67 @@ async function deleteHomeTables(source = {}) {
     blockUnsupportedEngine("删除表");
     return;
   }
-  const confirmed = await confirmDialogConfirm({
-    title: tableNames.length === 1 ? "删除表" : `删除 ${tableNames.length} 张表`,
-    message: `即将从 ${source.database} 删除以下表`,
-    items: tableNames,
-    note: "删除表会同时移除数据和结构，此操作不可撤销。",
-    confirmText: tableNames.length === 1 ? "删除表" : "删除所选表",
-    cancelText: "取消",
-    danger: true,
-  });
-  if (!confirmed) return;
   busy.value = true;
   try {
-    await invokeWorkbench("drop_tables", {
-      request: {
-        connectionId: source.connectionId,
-        database: source.database,
-        tables: tableNames,
-      },
+    const confirmed = await confirmDialogConfirm({
+      title: tableNames.length === 1 ? "删除表" : `删除 ${tableNames.length} 张表`,
+      message: `即将从 ${source.database} 删除以下表`,
+      items: tableNames,
+      note: "删除表会同时移除数据和结构，此操作不可撤销。",
+      confirmText: tableNames.length === 1 ? "删除表" : "删除所选表",
+      cancelText: "取消",
+      danger: true,
     });
+    if (!confirmed) return;
+    statusText.value = `正在删除 ${tableNames.length} 张表，请稍候…`;
+    const result = { dropped: [], failed: [] };
+    for (let offset = 0; offset < tableNames.length; offset += 32) {
+      const batch = tableNames.slice(offset, offset + 32);
+      statusText.value = `正在删除表 ${offset}/${tableNames.length}，已确认删除 ${result.dropped.length} 张`;
+      try {
+        const response = await invokeWorkbench("drop_tables", {
+          request: { connectionId: source.connectionId, database: source.database, tables: batch },
+        });
+        result.dropped.push(...(response?.dropped || []));
+        result.failed.push(...(response?.failed || []));
+      } catch (error) {
+        // A lost response may follow applied DDL. Never retry it automatically.
+        result.failed.push(...batch.map((tableName) => ({
+          tableName, reason: `结果未确认：${String(error?.message || error)}，请刷新后检查`,
+        })));
+        result.failed.push(...tableNames.slice(offset + batch.length).map((tableName) => ({
+          tableName, reason: "前一批中断，尚未执行",
+        })));
+        break;
+      }
+    }
+    const droppedSet = new Set((result?.dropped || []).map((item) => item.tableName));
+    const droppedNames = tableNames.filter((name) => droppedSet.has(name));
+    const failureReasons = new Map((result?.failed || []).map((item) => [item.tableName, item.reason]));
+    const failed = tableNames.filter((name) => !droppedSet.has(name)).map((name) => ({
+      name,
+      reason: failureReasons.get(name) || "删除结果未确认，请刷新后检查",
+    }));
     const closedTabs = closeTableObjectTabs(workspace, {
       connectionId: source.connectionId,
       database: source.database,
-      tableNames,
+      tableNames: droppedNames,
     });
     closedTabs.forEach(clearTabCellErrors);
-    await loadTables({ connectionId: source.connectionId, database: source.database });
+    recentHomeTableNames.value = recentHomeTableNames.value.filter((name) => !droppedSet.has(name));
+    const failureSummary = failed.slice(0, 3).map((item) => `${item.name}（${item.reason}）`).join("；");
+    const summary = `已删除 ${droppedNames.length} 张表`
+      + (failed.length ? `，${failed.length} 张未删除或未确认：${failureSummary}` : "")
+      + (failed.length > 3 ? "；其余失败表保留选中" : "");
+    let refreshError = "";
+    try {
+      await loadTables({ connectionId: source.connectionId, database: source.database });
+    } catch (error) {
+      refreshError = `；列表刷新失败：${String(error?.message || error)}，请重试刷新`;
+    }
     const home = openCurrentDatabaseHome({ activate: true });
-    if (home) home.selectedTableNames = [];
-    recentHomeTableNames.value = recentHomeTableNames.value.filter((name) => !tableNames.includes(name));
-    statusText.value = `已删除 ${tableNames.length} 张表`;
+    if (home) home.selectedTableNames = failed.map((item) => item.name);
+    statusText.value = summary + refreshError;
   } catch (error) {
     statusText.value = `删除表失败：${String(error?.message || error)}`;
   } finally {

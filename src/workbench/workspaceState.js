@@ -1269,6 +1269,8 @@ export function prependTabPage(state, tabId, pageData = {}) {
   const receivedRows = rowsWithRestoredNulls(pageData);
   if (receivedRows.length > 0) {
     prependTabRows(tab, receivedRows);
+    // Selection coordinates are relative to the loaded window, not the table.
+    tab.rowIndexShift = (tab.rowIndexShift || 0) + receivedRows.length;
   }
   if (primaryKeysChanged) invalidateTabRows(tab);
   const fallbackOffset = Math.max(0, coerceNonNegativeInteger(tab.rowWindowOffset, 0) - receivedRows.length);
