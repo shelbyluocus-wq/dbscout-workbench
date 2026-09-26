@@ -85,6 +85,10 @@ function createBackend() {
     get lastAuditRequest() { return lastAuditRequest; },
     get lastSharedAuditRequest() { return lastSharedAuditRequest; },
     invokeWorkbench(command, payload = {}) {
+      if (command === "list_audit_tables") {
+        lastAuditRequest = payload.request || {};
+        return Promise.resolve({ items: logs.length ? [{ connectionId: "demo", database: "game_db", tableName: "player", latestTs: logs[0].ts, entryCount: logs.length }] : [], hasMore: false });
+      }
       if (command === "list_audit_logs") {
         lastAuditRequest = payload.request || {};
         return Promise.resolve(logs.slice());
@@ -260,8 +264,8 @@ test("open loads audit logs, snapshots and config and lands on the audit tab", a
   const backup = useBackupCenter({ ...backend });
   backup.dialog.tab = "snapshot";
   await backup.open();
-  assert.equal(backup.auditLogs.value.length, 1);
-  assert.equal(backup.auditLogs.value[0].id, 1);
+  assert.equal(backup.history.state.tables.length, 1);
+  assert.equal(backup.history.state.tables[0].tableName, "player");
   assert.equal(backup.snapshots.value.length, 1);
   assert.equal(backup.config.value.intervalMinutes, 30);
   assert.equal(backup.config.value.resolvedStorageDir, "/tmp/dbscout-backup");
@@ -274,10 +278,10 @@ test("clearAuditLogs deletes all audit records and refreshes the list", async ()
   const backend = createBackend();
   const backup = useBackupCenter({ ...backend });
   await backup.open();
-  assert.equal(backup.auditLogs.value.length, 1);
+  assert.equal(backup.history.state.tables.length, 1);
   const result = await backup.clearAuditLogs();
   assert.equal(result.deletedCount, 1);
-  assert.equal(backup.auditLogs.value.length, 0);
+  assert.equal(backup.history.state.tables.length, 0);
   backup.dispose();
 });
 
@@ -319,9 +323,10 @@ test("rollback marks the original entry rolled back and records a symmetric roll
   assert.ok(result.newAuditId);
   // reload reflects the rolled-back original + the new rollback row
   await backup.loadAuditLogs();
-  const original = backup.auditLogs.value.find((item) => item.id === 1);
+  const entries = await backend.invokeWorkbench("list_audit_logs");
+  const original = entries.find((item) => item.id === 1);
   assert.equal(original.status, "rolled_back");
-  const rollbackRow = backup.auditLogs.value.find((item) => item.id === result.newAuditId);
+  const rollbackRow = entries.find((item) => item.id === result.newAuditId);
   assert.ok(rollbackRow);
   assert.equal(rollbackRow.isRollback, true);
   assert.equal(rollbackRow.rollbackOf, 1);
@@ -427,7 +432,7 @@ test("manual refresh helpers report success and failure to the dialog", async ()
   assert.equal(await backup.loadSnapshots(), true);
 
   invoke = (command, payload = {}) => {
-    if (command === "list_audit_logs") {
+    if (command === "list_audit_tables") {
       return Promise.reject(new Error("audit unavailable"));
     }
     return createBackend().invokeWorkbench(command, payload);
@@ -666,7 +671,7 @@ test("setAuditMode('shared') loads the shared change-log from the server", async
   await backup.open();
   // Default mode is local.
   assert.equal(backup.auditMode.mode, "local");
-  assert.equal(backup.auditLogs.value.length, 1);
+  assert.equal(backup.history.state.tables.length, 1);
   assert.equal(backup.sharedAuditLogs.value.length, 0);
 
   await backup.setAuditMode("shared");
@@ -683,7 +688,7 @@ test("setAuditMode('local') falls back to the local audit store", async () => {
   await backup.setAuditMode("shared");
   await backup.setAuditMode("local");
   assert.equal(backup.auditMode.mode, "local");
-  assert.equal(backup.auditLogs.value.length, 1);
+  assert.equal(backup.history.state.tables.length, 1);
   backup.dispose();
 });
 

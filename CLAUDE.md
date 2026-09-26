@@ -489,3 +489,27 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   zod
 - **Build**: Vite 6 with `@vitejs/plugin-vue`, Tauri CLI 2, esbuild (sidecar
   bundling), Playwright (dev screenshots/scripts)
+
+### Table history and recovery
+
+The local Backup Center audit view is table-first. `AuditTableHistory.vue` and
+`useAuditHistory.js` page table summaries, operation groups, and row details;
+shared history remains read-only. Audit batches have an `operation_id` and an
+expected record count independent of each row's sync `client_id`. Legacy rows
+are labelled timestamp buckets, never inferred imports.
+
+`audit_history.rs` serves the three paged history commands. `audit_restore.rs`
+provides preview tokens and atomic reverse replay for one MySQL InnoDB table.
+It locks and fingerprints the current table, verifies retained history, writes a
+pending audit batch and a durable restore journal, then commits and settles the
+journal. An uncertain commit is reconciled from before/after fingerprints on the
+next preview; unknown outcomes block further restoration. Triggers, foreign keys,
+automatic ON UPDATE fields, incomplete history and conflicting data block this
+path. `audit_postimage.rs` captures complete inserted rows (including defaults),
+with bounded batch reads and reuse of already fetched interactive insert rows.
+
+Checks: `node --test src/workbench/useAuditHistory.test.js`,
+`cargo test --manifest-path src-tauri/Cargo.toml audit --lib`, and
+`node scripts/test-audit-history-browser.mjs` against a fresh Vite dev server
+(`DBSCOUT_AUDIT_TEST_URL`, default `http://127.0.0.1:1431`). Browser test screenshots
+use `DBSCOUT_AUDIT_SCREENSHOTS` (default `/tmp/blackcat-audit-review`).

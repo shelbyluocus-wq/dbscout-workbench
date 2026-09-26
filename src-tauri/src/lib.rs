@@ -2,6 +2,9 @@ mod account;
 mod agent;
 mod agent_runtime;
 mod audit;
+mod audit_history;
+mod audit_postimage;
+mod audit_restore;
 mod audit_sync;
 mod backup;
 mod batch_import;
@@ -240,6 +243,11 @@ pub fn run() {
             commands::list_audit_logs,
             commands::clear_audit_logs,
             commands::rollback_audit_entry,
+            audit_history::list_audit_tables,
+            audit_history::list_audit_operations,
+            audit_history::list_audit_operation_details,
+            audit_restore::preview_audit_table_restore,
+            audit_restore::restore_audit_table,
             commands::list_snapshots,
             commands::create_snapshot,
             commands::restore_snapshot,

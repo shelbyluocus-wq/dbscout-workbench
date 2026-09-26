@@ -331,7 +331,7 @@ fn strict_sql_mode(current: &str) -> String {
     modes.join(",")
 }
 
-async fn configure_strict_session(connection: &mut MySqlConnection) -> Result<(), String> {
+pub(crate) async fn configure_strict_session(connection: &mut MySqlConnection) -> Result<(), String> {
     let row = sqlx::query("SELECT @@SESSION.sql_mode AS sql_mode")
         .fetch_one(&mut *connection)
         .await

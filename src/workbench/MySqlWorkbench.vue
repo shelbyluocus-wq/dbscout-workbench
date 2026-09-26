@@ -884,11 +884,16 @@ const databaseSync = useDatabaseSync({
 });
 
 const backupCenter = useBackupCenter({
-  onDataChanged: () => {
-    const tab = activeDataTab.value;
-    if (tab) {
-      refreshTabPage(tab, tab.page || 1);
-    }
+  onDataChanged: (change = {}) => {
+    const tabs = workspace.tabs.filter((tab) =>
+      (tab.kind || "data") === "data" &&
+      (!change.connectionId || tab.connectionId === change.connectionId) &&
+      (!change.database || tab.database === change.database) &&
+      (!change.table || tab.tableName === change.table)
+    );
+    // Refresh the visible tab first; other open copies refresh independently.
+    tabs.sort((a, b) => Number(b.id === activeDataTab.value?.id) - Number(a.id === activeDataTab.value?.id));
+    for (const tab of tabs) void refreshTabPage(tab, tab.page || 1);
   },
 });
 
@@ -905,12 +910,11 @@ function openTableTransfer() {
 
 const account = useAccount({
   onSessionChanged: async () => {
-    // After login/logout, refresh the audit view. If the user just logged in
-    // and the dialog is showing the audit tab, switch to the shared view so
-    // they immediately see everyone's changes.
-    if (backupCenter.dialog.open && backupCenter.dialog.tab === "audit") {
-      if (account.isLoggedIn.value && backupCenter.auditMode.mode !== "shared") {
-        await backupCenter.setAuditMode("shared");
+    // Preserve the user's chosen history view; login must not replace the
+    // table they are inspecting with the shared audit feed.
+    if (backupCenter.dialog.open && backupCenter.dialog.tab === "audit" && backupCenter.auditMode.mode === "shared") {
+      if (!account.isLoggedIn.value && backupCenter.auditMode.mode === "shared") {
+        await backupCenter.setAuditMode("local");
       } else {
         await backupCenter.loadAuditLogs();
       }
@@ -922,9 +926,9 @@ async function openBackupCenter() {
   // Change logs are a cross-connection history, so open with the broadest
   // view instead of silently narrowing the list to the active workspace.
   backupCenter.setFilters({ connectionId: "", database: "", tableName: "" });
-  // Ensure the account state is fresh before the dialog reads it.
-  await account.loadAccount();
+  // Local history is usable immediately; account metadata loads independently.
   backupCenter.open();
+  void account.loadAccount();
 }
 
 const tableCopy = useTableCopy({

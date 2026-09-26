@@ -21759,3 +21759,51 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   pointer-events: none;
 }
+
+/* Table-first audit history uses the existing backup dialog's visual tokens. */
+.wb-audit-history { display: grid; grid-template-columns: 240px minmax(0, 1fr); flex: 1; min-height: 260px; overflow: hidden; border-top: 1px solid var(--wb-border); }
+.wb-audit-tables { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--wb-border); }
+.wb-audit-search { padding: 12px; display: grid; gap: 6px; }
+.wb-audit-search label { font-weight: 600; }
+.wb-audit-search > div { display: flex; gap: 6px; }
+.wb-audit-search button { flex: 0 0 auto; white-space: nowrap; }
+.wb-audit-search input { min-width: 0; width: 100%; padding: 6px 8px; color: var(--wb-text); background: var(--wb-surface); border: 1px solid var(--wb-border); border-radius: 4px; }
+.wb-audit-table-scroll, .wb-audit-timeline { overflow: auto; min-height: 0; scrollbar-gutter: stable; }
+.wb-audit-table { display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 12px; text-align: left; border: 0; border-bottom: 1px solid var(--wb-border); background: transparent; color: var(--wb-text); cursor: pointer; overflow-wrap: anywhere; }
+.wb-audit-table span, .wb-audit-table time, .wb-audit-hint { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.wb-audit-table.active { background: var(--wb-accent-soft); box-shadow: inset 2px 0 var(--wb-accent); }
+.wb-audit-table:hover:not(:disabled) { background: var(--wb-control-hover); }
+.wb-audit-timeline { padding: 14px 18px; }
+.wb-audit-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; overflow-wrap: anywhere; }
+.wb-audit-heading > strong { font-size: 16px; }
+.wb-audit-heading > span { font-size: 12px; color: var(--wb-muted); }
+.wb-audit-operation { padding: 16px 0; border-bottom: 1px solid var(--wb-border); }
+.wb-audit-operation > header, .wb-audit-detail > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.wb-audit-operation time, .wb-audit-detail header > span { color: var(--wb-muted); font-size: 12px; }
+.wb-audit-operation p { margin: 8px 0; }
+.wb-audit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.wb-audit-history button:not(.wb-audit-table) { padding: 6px 10px; border: 1px solid var(--wb-border); border-radius: 4px; background: var(--wb-surface); color: var(--wb-text); cursor: pointer; }
+.wb-audit-history button:hover:not(:disabled):not(.wb-audit-table) { background: var(--wb-control-hover); }
+.wb-audit-history button:disabled { opacity: .5; cursor: default; }
+.wb-audit-history button:focus-visible, .wb-audit-history input:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: -2px; }
+.wb-audit-history .wb-audit-back { display: none; }
+.wb-audit-preview { margin: 16px 0; padding: 16px; background: var(--wb-surface); border: 1px solid var(--wb-border); border-radius: 6px; }
+.wb-audit-preview h3 { font-size: 15px; margin: 0 0 12px; overflow-wrap: anywhere; }
+.wb-audit-preview p { line-height: 1.6; }
+.wb-audit-history button.wb-backup-action-danger { color: var(--wb-danger); border-color: var(--wb-danger); }
+.wb-audit-error { color: var(--wb-danger); line-height: 1.6; overflow-wrap: anywhere; }
+.wb-audit-notice { color: var(--wb-accent); line-height: 1.6; }
+.wb-audit-details { margin-top: 12px; padding: 0 12px; background: var(--wb-surface); }
+.wb-audit-detail { padding: 12px 0; border-bottom: 1px solid var(--wb-border); overflow-wrap: anywhere; }
+.wb-audit-detail ul { padding-left: 18px; line-height: 1.7; white-space: pre-wrap; }
+.wb-audit-more { margin: 12px; }
+.wb-audit-welcome { padding: 40px 8px; line-height: 1.7; }
+.wb-audit-welcome p { color: var(--wb-muted); max-width: 38em; }
+@media (max-width: 700px) {
+  .wb-audit-history { grid-template-columns: minmax(0, 1fr); }
+  .wb-audit-history:not(.has-selection) .wb-audit-timeline { display: none; }
+  .wb-audit-history.has-selection .wb-audit-tables { display: none; }
+  .wb-audit-history .wb-audit-back { display: inline-block; }
+  .wb-audit-tables { border-right: 0; }
+  .wb-audit-heading > strong { width: 100%; }
+}

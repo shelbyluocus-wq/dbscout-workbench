@@ -1,4 +1,5 @@
 import { reactive, shallowRef } from "vue";
+import { useAuditHistory } from "./useAuditHistory.js";
 import { normalizeTableName } from "../utils/normalize.js";
 import {
   invokeWorkbench as defaultInvokeWorkbench,
@@ -90,6 +91,7 @@ export function useBackupCenter(options = {}) {
     pruning: false,
   });
 
+  const history = useAuditHistory({ invokeWorkbench, onBusy: (value) => { busy.restoring = value; } });
   const lastError = shallowRef("");
   let filterLoadToken = 0;
   let listingRequestCount = 0;
@@ -195,16 +197,9 @@ export function useBackupCenter(options = {}) {
     }
     beginListing();
     try {
-      const request = {
-        limit: filters.limit,
-        offset: filters.offset,
-      };
-      if (filters.connectionId) request.connectionId = filters.connectionId;
-      if (filters.database) request.database = filters.database;
-      if (filters.tableName) request.tableName = filters.tableName;
-      auditLogs.value = await invokeWorkbench("list_audit_logs", { request });
-      lastError.value = "";
-      return true;
+      const ok = await history.loadTables(filters);
+      lastError.value = history.state.error;
+      return ok;
     } catch (error) {
       lastError.value = errorMessage(error);
       return false;
@@ -578,6 +573,7 @@ export function useBackupCenter(options = {}) {
 
   function close() {
     dialog.open = false;
+    history.dispose();
     filterLoadToken += 1;
     filterDatabases.value = [];
     filterTables.value = [];
@@ -605,7 +601,7 @@ export function useBackupCenter(options = {}) {
     const unlistenJob = await listen(BACKUP_JOB_EVENT, (event) => {
       const payload = event?.payload || event;
       if (payload?.kind === "rollback" || payload?.kind === "restore") {
-        onDataChanged();
+        onDataChanged(payload);
       }
     });
     return () => {
@@ -615,6 +611,7 @@ export function useBackupCenter(options = {}) {
   }
 
   function dispose() {
+    history.dispose();
     if (stopListeners) {
       stopListeners();
       stopListeners = null;
@@ -625,6 +622,7 @@ export function useBackupCenter(options = {}) {
     dialog,
     filters,
     auditMode,
+    history,
     auditLogs,
     sharedAuditLogs,
     snapshots,

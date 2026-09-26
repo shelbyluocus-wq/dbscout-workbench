@@ -178,7 +178,7 @@ fn invalidate_renamed_schema(
     );
 }
 
-fn invalidate_table_count(state: &AppState, connection_id: &str, database: &str, table: &str) {
+pub(crate) fn invalidate_table_count(state: &AppState, connection_id: &str, database: &str, table: &str) {
     state
         .table_counts
         .invalidate_table(&PoolKey::new(connection_id, database), table);
@@ -771,7 +771,7 @@ async fn real_connection_pool(
     result
 }
 
-async fn real_database_pool(
+pub(crate) async fn real_database_pool(
     connection_id: &str,
     database: &str,
     state: &State<'_, AppState>,
@@ -4056,16 +4056,9 @@ async fn update_cells_impl(
             actor,
             client_id,
         };
-        let mut audit_ids = Vec::with_capacity(plans.len());
-        for plan in &plans {
-            match audit::record_pending(&audit_pool, &ctx, &plan.pending).await {
-                Ok(id) => audit_ids.push(id),
-                Err(error) => {
-                    let _ = audit::mark_aborted_required_batch(&audit_pool, &audit_ids).await;
-                    return Err(format!("无法写入审计记录，未执行保存: {error}"));
-                }
-            }
-        }
+        let pending = plans.iter().map(|plan| plan.pending.clone()).collect::<Vec<_>>();
+        let audit_ids = audit::record_pending_batch(&audit_pool, &ctx, &pending)
+            .await.map_err(|error| format!("无法写入审计记录，未执行保存: {error}"))?;
 
         let mut tx = match pool.begin().await {
             Ok(tx) => tx,
@@ -4623,6 +4616,13 @@ pub async fn insert_row(
                         return Err(format!("无法生成新增回滚记录，本行已回滚: {error}"));
                     }
                 };
+                let postimage = row.iter().flat_map(|values| values.iter()).filter(|(key,_)| table.columns.iter().any(|c| &c.column_name == *key && !c.is_generated))
+                    .map(|(key,value)| (key.clone(), if null_columns.contains(key) { None } else { Some(value.clone()) })).collect();
+                if let Err(error) = crate::audit_postimage::persist(&audit_pool, &[(audit_id, postimage)]).await {
+                    tx.rollback().await.ok();
+                    let _ = audit::mark_aborted_required(&audit_pool, audit_id).await;
+                    return Err(error);
+                }
                 if let Err(error) = audit::finalize_insert_audit(
                     &audit_pool,
                     audit_id,
@@ -5265,6 +5265,12 @@ pub async fn import_rows(
             // Phase 4 — finalize the audit trail first, then commit MySQL
             // (the same ordering the per-row implementation used).
             let finalize_result = async {
+                let committed_set = committed_ids.iter().copied().collect::<HashSet<_>>();
+                let mut postimages = insert_stash.iter().zip(insert_audit_ids.iter())
+                    .filter(|(_, id)| committed_set.contains(id))
+                    .map(|(stashed,id)| (*id, stashed.plan.identity.clone())).collect::<Vec<_>>();
+                postimages.extend(finalize_items.iter().map(|item| (item.id, item.identity.clone())));
+                crate::audit_postimage::capture(&audit_pool, &mut tx, &session.database, &table, &postimages).await?;
                 audit::finalize_insert_audit_batch(&audit_pool, &finalize_items).await?;
                 if !committed_ids.is_empty() {
                     audit::mark_committed_required_batch(&audit_pool, &committed_ids).await?;
@@ -5869,6 +5875,11 @@ pub async fn replace_table_rows(
             .filter(|id| !normalize_equal_audit_ids.contains(id))
             .collect::<Vec<_>>();
         let finalize_result = async {
+            let postimages = plans.iter().zip(&audit_ids).filter_map(|(plan,id)| match plan {
+                TableReplacementPlan::Insert { plan, .. } => Some((*id, plan.identity.clone())),
+                _ => None,
+            }).collect::<Vec<_>>();
+            crate::audit_postimage::capture(&audit_pool, &mut tx, &session.database, &table, &postimages).await?;
             if !normalize_equal_audit_ids.is_empty() {
                 audit::mark_aborted_required_batch(&audit_pool, &normalize_equal_audit_ids).await?;
             }

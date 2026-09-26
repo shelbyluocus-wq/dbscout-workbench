@@ -1,3 +1,4 @@
+import { createMockAuditHistory, recordMockTableDiff } from "./mockAuditHistory.js";
 import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
@@ -1774,6 +1775,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       if (signature && signatures.has(signature)) throw new Error("主键重复，不能保存");
       if (signature) signatures.add(signature);
     }
+    if (!fixtureRows) recordMockTableDiff(mockAuditLogState, { connectionId, database, tableName }, table, rows, working);
     rows.splice(0, rows.length, ...working);
     if (fixtureRows) [...fixtureRows.keys()].forEach((key, index) => fixtureRows.set(key, working[index]));
     return command === "update_cell"
@@ -2108,6 +2110,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       result.rowStatuses = rowStatuses;
       return result;
     }
+    recordMockTableDiff(mockAuditLogState, { connectionId, database, tableName }, table, rows, replacementRows, "import");
     rows.length = 0;
     rows.push(...replacementRows);
     return result;
@@ -2759,6 +2762,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
 
   // ---- Backup & audit (mock) ----
+  if (["list_audit_tables", "list_audit_operations", "list_audit_operation_details", "preview_audit_table_restore", "restore_audit_table"].includes(command)) {
+    return mockAuditHistory(command, payload.request || {});
+  }
   if (command === "list_audit_logs") {
     return mockAuditLogs(payload.request || {});
   }
@@ -3160,3 +3166,10 @@ function mockSnapshots(request) {
   if (request.database) rows = rows.filter((row) => row.database === request.database);
   return rows;
 }
+
+const mockAuditHistory = createMockAuditHistory({
+  logs: mockAuditLogState,
+  getRows: (r) => getOrInitRows(r.connectionId, r.database, r.tableName),
+  getTable: (r) => resolvedTable(r.connectionId, r.database, r.tableName),
+  onRestored: (r) => emitMockEvent("backup-job", { kind: "restore", connectionId: r.connectionId, database: r.database, table: r.tableName }),
+});

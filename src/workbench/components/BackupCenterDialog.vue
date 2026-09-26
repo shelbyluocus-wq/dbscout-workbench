@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 
+import AuditTableHistory from "./AuditTableHistory.vue";
 import BackupNumberInput from "./BackupNumberInput.vue";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -560,7 +561,7 @@ async function onPruneSnapshots() {
         <button type="button" class="wb-dialog-close wb-backup-close" :disabled="isBusy" aria-label="关闭备份中心" @click="emit('close')">×</button>
       </header>
 
-      <nav class="wb-backup-tabs" role="tablist" aria-label="备份中心视图">
+      <nav class="wb-backup-tabs" :inert="busy.restoring" role="tablist" aria-label="备份中心视图">
         <button
           type="button"
           role="tab"
@@ -588,7 +589,7 @@ async function onPruneSnapshots() {
       </nav>
 
       <div v-if="dialog.tab === 'audit'" id="wb-backup-panel-audit" class="wb-backup-panel" role="tabpanel" aria-labelledby="wb-backup-title">
-        <div class="wb-backup-toolbar wb-backup-audit-toolbar">
+        <div class="wb-backup-toolbar wb-backup-audit-toolbar" :inert="busy.restoring">
           <div class="wb-backup-audit-mode" role="group" aria-label="变更日志视图范围">
             <button
               type="button"
@@ -662,7 +663,8 @@ async function onPruneSnapshots() {
           </div>
         </div>
 
-        <div class="wb-backup-list wb-backup-audit">
+        <AuditTableHistory v-if="!isSharedMode" :history="backup.history" :connections="connections" />
+        <div v-else class="wb-backup-list wb-backup-audit">
           <div v-if="!visibleAuditLogs.length" class="wb-backup-empty">
             <svg class="wb-backup-empty-icon" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
               <rect x="8" y="6" width="24" height="28" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -708,7 +710,7 @@ async function onPruneSnapshots() {
                 @click="toggleAuditDetails(row.key)"
               >{{ isAuditExpanded(row.key) ? "收起详情" : "详细信息" }}</button>
               <button
-                v-if="!isSharedMode || isLocalRow(row.entry)"
+                v-if="!isSharedMode"
                 type="button"
                 class="wb-backup-action-btn"
                 :disabled="!canRollback(row.entry) || busy.rollingBack"

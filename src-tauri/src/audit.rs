@@ -61,6 +61,7 @@ pub struct AuditContext {
 /// `None` when a reliable inverse cannot be built (e.g. agent SQL we could not
 /// parse, or a table without a usable primary key); such rows are flagged
 /// `rollback_strategy = manual` and cannot be auto-rolled-back.
+#[derive(Clone, Debug)]
 pub struct PendingAudit {
     pub operation: &'static str,
     pub column_name: Option<String>,
@@ -76,6 +77,7 @@ pub struct PendingAudit {
 }
 
 /// A full audit row fetched from SQLite, used by the rollback flow.
+#[derive(Debug, serde::Serialize)]
 pub struct AuditEntry {
     pub id: i64,
     pub connection_id: String,
@@ -168,7 +170,7 @@ pub fn migrate_audit_db(from_dir: &Path, to_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
+pub(crate) async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS audit_log (\
             id INTEGER PRIMARY KEY AUTOINCREMENT,\
@@ -209,6 +211,8 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
         ("actor", "actor TEXT"),
         ("client_id", "client_id TEXT"),
         ("synced", "synced INTEGER NOT NULL DEFAULT 0"),
+        ("operation_id", "operation_id TEXT"),
+        ("operation_size", "operation_size INTEGER"),
     ] {
         let sql = format!("ALTER TABLE audit_log ADD COLUMN {decl}");
         if let Err(error) = sqlx::query(&sql).execute(pool).await {
@@ -221,6 +225,9 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
     }
 
     for stmt in [
+        "CREATE INDEX IF NOT EXISTS ix_audit_operation ON audit_log(operation_id, id)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_table_id ON audit_log(connection_id, database, table_name, id)",
+        "CREATE TABLE IF NOT EXISTS audit_restore_jobs (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, database TEXT NOT NULL, table_name TEXT NOT NULL, before_hash TEXT NOT NULL, after_hash TEXT NOT NULL, audit_ids TEXT NOT NULL, status TEXT NOT NULL)",
         "CREATE INDEX IF NOT EXISTS ix_audit_conn_db_ts ON audit_log(connection_id, database, ts DESC)",
         "CREATE INDEX IF NOT EXISTS ix_audit_table_ts ON audit_log(connection_id, database, table_name, ts DESC)",
         "CREATE INDEX IF NOT EXISTS ix_audit_rollback_of ON audit_log(rollback_of)",
@@ -265,8 +272,8 @@ pub async fn record_pending(
         "INSERT INTO audit_log \
             (ts, connection_id, database, table_name, operation, row_identity, column_name, \
              old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
-             rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)",
+             rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced, operation_id, operation_size) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, 1)",
     )
     .bind(&ts)
     .bind(&ctx.connection_id)
@@ -288,6 +295,7 @@ pub async fn record_pending(
     .bind(&pending.notes)
     .bind(&ctx.actor)
     .bind(&ctx.client_id)
+    .bind(uuid::Uuid::new_v4().to_string())
     .execute(pool)
     .await
     .map_err(|error| format!("写入审计记录失败: {error}"))?;
@@ -302,6 +310,7 @@ pub async fn record_pending_batch(
     pendings: &[PendingAudit],
 ) -> Result<Vec<i64>, String> {
     let ts = now_ts();
+    let operation_id = uuid::Uuid::new_v4().to_string();
     let mut tx = pool
         .begin()
         .await
@@ -318,8 +327,8 @@ pub async fn record_pending_batch(
             "INSERT INTO audit_log \
                 (ts, connection_id, database, table_name, operation, row_identity, column_name, \
                  old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
-                 rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0)",
+                 rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced, operation_id, operation_size) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?)",
         )
         .bind(&ts)
         .bind(&ctx.connection_id)
@@ -341,6 +350,8 @@ pub async fn record_pending_batch(
         .bind(&pending.notes)
         .bind(&ctx.actor)
         .bind(&client_id)
+        .bind(&operation_id)
+        .bind(pendings.len() as i64)
         .execute(&mut *tx)
         .await;
         let result = match result {
@@ -555,12 +566,16 @@ pub async fn fetch_audit_entry(pool: &SqlitePool, id: i64) -> Result<AuditEntry,
         .await
         .map_err(|error| format!("读取审计记录失败: {error}"))?
         .ok_or_else(|| format!("审计记录 {id} 不存在"))?;
+    Ok(audit_entry(&row))
+}
+
+pub(crate) fn audit_entry(row: &sqlx::sqlite::SqliteRow) -> AuditEntry {
     let row_identity = row
         .try_get::<Option<String>, _>("row_identity")
         .ok()
         .flatten()
         .and_then(|raw| serde_json::from_str(&raw).ok());
-    Ok(AuditEntry {
+    AuditEntry {
         id: row.try_get("id").unwrap_or(0),
         connection_id: row.try_get("connection_id").unwrap_or_default(),
         database: row.try_get("database").unwrap_or_default(),
@@ -580,7 +595,7 @@ pub async fn fetch_audit_entry(pool: &SqlitePool, id: i64) -> Result<AuditEntry,
         session_id: row.try_get("session_id").ok().flatten(),
         actor: row.try_get("actor").ok().flatten(),
         client_id: row.try_get("client_id").ok().flatten(),
-    })
+    }
 }
 
 /// Record the symmetric rollback audit row E' for a completed rollback of `original`.
@@ -608,8 +623,8 @@ pub async fn record_rollback(
             (ts, connection_id, database, table_name, operation, row_identity, column_name, \
              old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
              rollback_strategy, session_id, source, status, is_rollback, rollback_of, notes, \
-             actor, client_id, synced) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0)",
+             actor, client_id, synced, operation_id, operation_size) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 0, ?, 1)",
     )
     .bind(&ts)
     .bind(&ctx.connection_id)
@@ -618,8 +633,8 @@ pub async fn record_rollback(
     .bind(inverse_op)
     .bind(&identity_json)
     .bind(&original.column_name)
-    .bind(&original.old_value)
     .bind(&original.new_value)
+    .bind(&original.old_value)
     .bind(executed_inverse_sql)
     .bind(encode_binds(executed_inverse_binds))
     .bind(&original.forward_sql)
@@ -632,6 +647,7 @@ pub async fn record_rollback(
     .bind::<Option<String>>(None)
     .bind(&ctx.actor)
     .bind(&ctx.client_id)
+    .bind(uuid::Uuid::new_v4().to_string())
     .execute(pool)
     .await
     .map_err(|error| format!("写入回滚审计记录失败: {error}"))?;
@@ -684,43 +700,43 @@ pub async fn list_audit_logs(
         .fetch_all(pool)
         .await
         .map_err(|error| format!("查询审计记录失败: {error}"))?;
-    let mut entries = Vec::new();
-    for row in rows {
-        let identity_raw = row
-            .try_get::<Option<String>, _>("row_identity")
-            .ok()
-            .flatten();
-        let row_identity = identity_raw.and_then(|raw| serde_json::from_str(&raw).ok());
-        entries.push(AuditLogEntry {
-            id: row.try_get("id").unwrap_or(0),
-            ts: row.try_get("ts").unwrap_or_default(),
-            connection_id: row.try_get("connection_id").unwrap_or_default(),
-            database: row.try_get("database").unwrap_or_default(),
-            table_name: row.try_get("table_name").unwrap_or_default(),
-            operation: row.try_get("operation").unwrap_or_default(),
-            row_identity,
-            column_name: row.try_get("column_name").ok().flatten(),
-            old_value: row.try_get("old_value").ok().flatten(),
-            new_value: row.try_get("new_value").ok().flatten(),
-            forward_sql: row.try_get("forward_sql").ok().flatten(),
-            inverse_sql: row.try_get("inverse_sql").ok().flatten(),
-            rollback_strategy: row.try_get("rollback_strategy").unwrap_or_default(),
-            source: row.try_get("source").unwrap_or_default(),
-            status: row.try_get("status").unwrap_or_default(),
-            is_rollback: row.try_get::<i64, _>("is_rollback").unwrap_or(0) != 0,
-            rollback_of: row.try_get("rollback_of").ok().flatten(),
-            notes: row.try_get("notes").ok().flatten(),
-            actor: row.try_get("actor").ok().flatten(),
-            client_id: row.try_get("client_id").ok().flatten(),
-        });
+    Ok(rows.iter().map(audit_log_entry).collect())
+}
+
+pub(crate) fn audit_log_entry(row: &sqlx::sqlite::SqliteRow) -> AuditLogEntry {
+    let identity_raw = row
+        .try_get::<Option<String>, _>("row_identity")
+        .ok()
+        .flatten();
+    let row_identity = identity_raw.and_then(|raw| serde_json::from_str(&raw).ok());
+    AuditLogEntry {
+        id: row.try_get("id").unwrap_or(0),
+        ts: row.try_get("ts").unwrap_or_default(),
+        connection_id: row.try_get("connection_id").unwrap_or_default(),
+        database: row.try_get("database").unwrap_or_default(),
+        table_name: row.try_get("table_name").unwrap_or_default(),
+        operation: row.try_get("operation").unwrap_or_default(),
+        row_identity,
+        column_name: row.try_get("column_name").ok().flatten(),
+        old_value: row.try_get("old_value").ok().flatten(),
+        new_value: row.try_get("new_value").ok().flatten(),
+        forward_sql: row.try_get("forward_sql").ok().flatten(),
+        inverse_sql: row.try_get("inverse_sql").ok().flatten(),
+        rollback_strategy: row.try_get("rollback_strategy").unwrap_or_default(),
+        source: row.try_get("source").unwrap_or_default(),
+        status: row.try_get("status").unwrap_or_default(),
+        is_rollback: row.try_get::<i64, _>("is_rollback").unwrap_or(0) != 0,
+        rollback_of: row.try_get("rollback_of").ok().flatten(),
+        notes: row.try_get("notes").ok().flatten(),
+        actor: row.try_get("actor").ok().flatten(),
+        client_id: row.try_get("client_id").ok().flatten(),
     }
-    Ok(entries)
 }
 
 pub async fn prune_audit_logs(pool: &SqlitePool, retention_days: u32) -> Result<u64, String> {
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
     let cutoff_ts = cutoff.to_rfc3339();
-    let result = sqlx::query("DELETE FROM audit_log WHERE ts < ? AND is_rollback = 0")
+    let result = sqlx::query("DELETE FROM audit_log WHERE ts < ? AND is_rollback = 0 AND status != 'pending' AND NOT EXISTS (SELECT 1 FROM audit_restore_jobs WHERE status='prepared')")
         .bind(&cutoff_ts)
         .execute(pool)
         .await
@@ -731,6 +747,13 @@ pub async fn prune_audit_logs(pool: &SqlitePool, retention_days: u32) -> Result<
 /// Delete all audit log entries. Used by the "Clear" button in the backup center.
 /// Returns the number of deleted rows.
 pub async fn clear_audit_logs(pool: &SqlitePool) -> Result<u64, String> {
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE status='pending'")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if pending > 0 {
+        return Err("存在执行中或待核对的操作，暂不能清空日志".into());
+    }
     let result = sqlx::query("DELETE FROM audit_log")
         .execute(pool)
         .await
