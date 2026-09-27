@@ -1442,7 +1442,10 @@ test("backup center opens change logs with all connections selected", () => {
 });
 
 test("backup center settings use scoped number steppers and close after saved feedback", () => {
-  const dialog = read("./components/BackupCenterDialog.vue");
+  const shell = read("./components/BackupCenterDialog.vue");
+  const settings = read("./components/BackupSettingsPanel.vue");
+  const snapshots = read("./components/BackupSnapshotsPanel.vue");
+  const dialog = [shell, settings, snapshots].join("\n");
   const styles = read("./workbench.css");
   const composable = read("./composables/useBackupCenter.js");
   const mock = read("./mock/mockBackend.js");
@@ -1450,16 +1453,18 @@ test("backup center settings use scoped number steppers and close after saved fe
   const lib = read("../../src-tauri/src/lib.rs");
   const types = read("../../src-tauri/src/types.rs");
 
-  assert.match(dialog, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
+  assert.match(settings, /import\s+BackupNumberInput\s+from\s+["']\.\/BackupNumberInput\.vue["']/);
   assert.doesNotMatch(dialog, /import\s+ConfirmDialog\s+from\s+["']\.\/ConfirmDialog\.vue["']/);
   assert.match(dialog, /import\s+\{\s*useConfirm\s*\}\s+from\s+["']\.\.\/composables\/useConfirm\.js["']/);
   assert.match(dialog, /await\s+props\.backup\.saveConfig\(\{\s*\.\.\.draftConfig\.value\s*\}\)/);
-  assert.match(dialog, /await\s+alert\(\{[\s\S]*title:\s*"保存成功"[\s\S]*message:\s*"备份设置已保存。"/);
-  assert.match(dialog, /emit\("close"\)/);
+  assert.match(settings, /await\s+alert\(\{[\s\S]*title:\s*t\("backup\.alert\.savedTitle"\)[\s\S]*message:\s*t\("backup\.alert\.saved"\)[\s\S]*emit\("close"\)/);
+  assert.match(shell, /<BackupSettingsPanel[\s\S]*?@close="emit\('close'\)"/);
   assert.match(dialog, /props\.backup\.loadAuditLogs\(\)/);
   assert.match(dialog, /props\.backup\.loadSnapshots\(\)/);
   assert.match(dialog, /await\s+alert\(\{/);
-  assert.match(dialog, /"刷新完成"/);
+  // Refresh is silent on success; only a failure interrupts with a dialog.
+  assert.doesNotMatch(dialog, /"刷新完成"/);
+  assert.match(shell, /if \(!ok && !silent\)[\s\S]*?title:\s*t\("backup\.refreshFailedTitle"\)/);
   assert.match(dialog, /await\s+props\.backup\.pruneSnapshots\(\)/);
   assert.match(dialog, /deletedCount/);
   assert.match(dialog, /wb-backup-snapshot-toolbar/);
@@ -1468,9 +1473,11 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /onOpenSnapshotFolder\(snapshot\)/);
   assert.match(dialog, /onOpenStorageDir/);
   assert.match(dialog, /draftConfig\.value\s*=\s*\{\s*\.\.\.draftConfig\.value,\s*storageDir:\s*dir,\s*resolvedStorageDir:\s*dir\s*\}/);
+  // Refreshed config (e.g. after toggling a database) keeps unsaved edits.
+  assert.match(settings, /const edits = previous \? editedFields\(draftConfig\.value, previous\) : \{\};/);
   assert.doesNotMatch(dialog, /^\s*config\.value\s*=/m);
-  assert.match(dialog, />打开资源管理器<\/button>/);
-  assert.match(dialog, />打开<\/button>/);
+  assert.match(snapshots, /\/>打开资源管理器<\/button>/);
+  assert.match(settings, /\/>打开<\/button>/);
   assert.match(composable, /async function openBackupPath/);
   assert.match(composable, /invokeWorkbench\(["']open_backup_path["'],\s*\{\s*path:\s*normalized\s*\}/);
   assert.match(mock, /command === ["']open_backup_path["']/);
@@ -1481,6 +1488,8 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(dialog, /aria-label="快照按数据库筛选"/);
   assert.match(dialog, /@change="onConnectionFilterChange"/);
   assert.match(dialog, /@change="onDatabaseFilterChange"/);
+  assert.match(shell, /@connection-change="onConnectionFilterChange"/);
+  assert.match(shell, /@database-change="onDatabaseFilterChange"/);
   assert.match(dialog, /createSnapshotFromFilters/);
   assert.doesNotMatch(dialog, /wb-backup-config-layout/);
   assert.doesNotMatch(dialog, /wb-backup-config-main/);

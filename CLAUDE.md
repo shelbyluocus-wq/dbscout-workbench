@@ -129,6 +129,12 @@ npm run quality:duplication  # Fail when maintainable source duplication reaches
 npm run release:agent-runtime -- --version 1  # Publish the independently versioned AI runtime
 ```
 
+The macOS `icon.icns` is not full-bleed: it follows the macOS icon grid
+(824px rounded tile with a drop shadow on a transparent 1024px canvas), while
+the Windows `.ico` fills the canvas. After changing the artwork
+(`src-tauri/icons/black-cat-icon.png`), regenerate it with
+`swift scripts/build-macos-icon.swift`; do not let `tauri icon` overwrite it.
+
 Release with `npm run release:package`; it builds the desktop app, renames the
 Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
 `latest.json` to that exact filename. Pass `--notes-file <path>` (or `--notes
@@ -259,7 +265,9 @@ from UI):
 `BatchImportDialog.vue`, both with the side-by-side
 `BatchImportComparison.vue` / `BatchImportDiffGrid.vue` change-diff view),
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
-`BackupCenterDialog.vue`, `TableTransferDialog.vue` (one-click table transfer),
+`BackupCenterDialog.vue` (shell + history tab, with the
+`BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
+`TableTransferDialog.vue` (one-click table transfer),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the

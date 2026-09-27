@@ -10,8 +10,17 @@ function read(path) {
   return readLocalizedContractSource(join(__dirname, path), "utf8");
 }
 
+// The dialog shell delegates the snapshot and settings tabs to panel components.
+function readBackupCenter() {
+  return [
+    "./components/BackupCenterDialog.vue",
+    "./components/BackupSnapshotsPanel.vue",
+    "./components/BackupSettingsPanel.vue",
+  ].map(read).join("\n");
+}
+
 test("snapshot range follows the top connection filter without a duplicate selector", () => {
-  const dialog = read("./components/BackupCenterDialog.vue");
+  const dialog = readBackupCenter();
   const styles = read("./workbench.css");
 
   assert.match(dialog, /class="wb-backup-toolbar wb-backup-snapshot-toolbar"/);
@@ -22,7 +31,12 @@ test("snapshot range follows the top connection filter without a duplicate selec
 });
 
 test("snapshot scope keeps its natural height ahead of the snapshot list", () => {
+  const panel = read("./components/BackupSnapshotsPanel.vue");
   const styles = read("./workbench.css");
+
+  // The scope editor is a collapsible section so the snapshot list stays primary.
+  assert.match(panel, /class="wb-backup-auto-toggle"[\s\S]*?:aria-expanded="scopeOpen"/);
+  assert.match(panel, /v-if="scopeOpen" id="wb-backup-snapshot-scope" class="wb-backup-snapshot-layout"/);
 
   assert.match(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*flex:\s*none/s);
   assert.doesNotMatch(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*min-height:\s*0/s);
@@ -47,15 +61,15 @@ test("backup center close button has a stable header-specific target", () => {
 });
 
 test("settings tab has a user account section with register/login", () => {
-  const dialog = read("./components/BackupCenterDialog.vue");
+  const dialog = read("./components/BackupSettingsPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(dialog, /class="wb-account-section"/);
+  assert.match(dialog, /class="wb-backup-settings-section wb-account-section"/);
   assert.match(dialog, /中心服务地址/);
   assert.match(dialog, /用户名/);
   assert.match(dialog, /注册/);
   assert.match(dialog, /登录/);
-  assert.match(styles, /\.wb-account-section\b/);
+  assert.match(styles, /\.wb-backup-settings-section\s*\{/);
   assert.match(styles, /\.wb-account-logged-in\b/);
 });
 
@@ -90,12 +104,16 @@ test("audit toolbar keeps mode filters and actions on one stable row", () => {
 
   assert.match(dialog, /class="wb-backup-toolbar wb-backup-audit-toolbar"/);
   assert.match(styles, /\.wb-backup-audit-toolbar\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
-  assert.match(styles, /\.wb-backup-audit-toolbar\s*\{[^}]*align-items:\s*end/s);
+  assert.match(styles, /\.wb-backup-audit-toolbar\s*\{[^}]*align-items:\s*center/s);
   assert.match(styles, /\.wb-backup-audit-mode\s*\{[^}]*display:\s*grid/s);
-  assert.match(styles, /\.wb-backup-audit-mode\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*88px\)/s);
+  // Both mode labels size to their content so translations never truncate.
+  assert.match(styles, /\.wb-backup-audit-mode\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(max-content,\s*1fr\)\)/s);
   assert.match(styles, /\.wb-backup-audit-mode\s+button\s*\{[^}]*width:\s*100%/s);
   assert.match(styles, /\.wb-backup-audit-toolbar\s+\.wb-backup-toolbar-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
   assert.match(styles, /@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*\.wb-backup-audit-toolbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  // Clearing all history is destructive and lives in Settings, not beside Refresh.
+  assert.doesNotMatch(dialog, /onClearAuditLogs/);
+  assert.match(read("./components/BackupSettingsPanel.vue"), /@click="onClearAuditLogs"/);
 });
 
 test("sync now refreshes the visible audit list after pushing the outbox", () => {
@@ -108,14 +126,13 @@ test("sync now refreshes the visible audit list after pushing the outbox", () =>
 
 test("snapshot range panels use readable database labels and dense rows", () => {
   const styles = read("./workbench.css");
+  const databaseLabel = styles.match(/\.wb-backup-enable-name,\s*\.wb-backup-selected-db\s*\{[^}]*\}/s)?.[0] || "";
 
   assert.match(styles, /\.wb-backup-enable-row\s*\{[^}]*min-height:\s*34px/s);
-  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*color:\s*var\(--wb-text\)/s);
-  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*font-weight:\s*600/s);
-  assert.match(styles, /\.wb-backup-enable-name\s*\{[^}]*text-overflow:\s*ellipsis/s);
-  assert.match(styles, /\.wb-backup-selected-row\s*\{[^}]*min-height:\s*46px/s);
-  assert.match(styles, /\.wb-backup-selected-db\s*\{[^}]*color:\s*var\(--wb-text\)/s);
-  assert.match(styles, /\.wb-backup-selected-db\s*\{[^}]*font-weight:\s*600/s);
+  assert.match(styles, /\.wb-backup-selected-row\s*\{[^}]*min-height:\s*44px/s);
+  assert.match(databaseLabel, /color:\s*var\(--wb-text\)/);
+  assert.match(databaseLabel, /font-weight:\s*600/);
+  assert.match(databaseLabel, /text-overflow:\s*ellipsis/);
 });
 
 test("header shows the current user identity", () => {
