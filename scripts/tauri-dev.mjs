@@ -10,6 +10,7 @@ import {
   buildDevServerUrl,
   findAvailablePort,
 } from "./dev-port.mjs";
+import { privateBuildEnvironment } from "./build-privacy.mjs";
 import { ensureNode } from "./ensure-node.mjs";
 import { ensureSvn } from "./ensure-svn.mjs";
 
@@ -43,7 +44,7 @@ const child = spawn(process.execPath, [tauriBin, ...tauriArgs], {
   stdio: "inherit",
   cwd: rootDir,
   env: {
-    ...process.env,
+    ...privateBuildEnvironment({ root: rootDir }),
     VITE_DEV_PORT: String(port),
     VITE_DEV_HOST: host,
   },

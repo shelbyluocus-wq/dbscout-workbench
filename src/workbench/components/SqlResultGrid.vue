@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, reactive, ref, watch } from "vue";
 import { ClipboardCopy, Download, Filter, Rows3, TableProperties } from "lucide-vue-next";
 
@@ -140,14 +141,14 @@ watch(filter, clearSelection);
 <template>
   <section class="wb-sql-result-grid">
     <header class="wb-sql-result-tools">
-      <label><Filter :size="14" /><input v-model="filter" type="search" placeholder="筛选当前结果" /></label>
-      <span><Rows3 :size="14" />{{ filteredRows.length }} 行</span>
-      <button type="button" title="复制所选数据；无选择时复制全部" @click="copyRows(false)"><ClipboardCopy :size="15" /></button>
-      <button type="button" title="复制所选数据并带表头；无选择时复制全部" @click="copyRows(true)"><TableProperties :size="15" /></button>
-      <button type="button" title="导出 CSV" @click="exportResult('csv')"><Download :size="15" /><small>CSV</small></button>
-      <button type="button" title="导出 Excel" @click="exportResult('xlsx')"><Download :size="15" /><small>XLSX</small></button>
+      <label><Filter :size="14" /><input v-model="filter" type="search" :placeholder="t('m_a429749e46ec')" /></label>
+      <span><Rows3 :size="14" />{{ filteredRows.length }} {{ t('m_4cc7b00050cb') }}</span>
+      <button type="button" :title="t('m_9b951e7dc6a1')" @click="copyRows(false)"><ClipboardCopy :size="15" /></button>
+      <button type="button" :title="t('m_c0f233284bee')" @click="copyRows(true)"><TableProperties :size="15" /></button>
+      <button type="button" :title="t('m_e40a628ffec7')" @click="exportResult('csv')"><Download :size="15" /><small>CSV</small></button>
+      <button type="button" :title="t('m_761a4d8532c9')" @click="exportResult('xlsx')"><Download :size="15" /><small>XLSX</small></button>
     </header>
-    <div ref="resultScrollRef" class="wb-sql-result-scroll" tabindex="0" aria-label="SQL 查询结果" @scroll="onScroll" @keydown="handleGridKeydown">
+    <div ref="resultScrollRef" class="wb-sql-result-scroll" tabindex="0" :aria-label="t('m_58a2323e2ef2')" @scroll="onScroll" @keydown="handleGridKeydown">
       <table :aria-rowcount="filteredRows.length" :aria-colcount="columns.length + 1" :style="{ minWidth: `${Math.max(1, columns.length) * 120}px` }">
         <thead><tr>
           <th class="wb-sql-row-number">#</th>

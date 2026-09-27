@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 
 const props = defineProps({
@@ -114,15 +115,15 @@ function pickDirectory() {
         type="button"
         class="wb-ai-btn wb-ai-btn-primary"
         @click="pickDirectory"
-      >选择 SVN 目录</button>
+      >{{ t('m_bb43a7fced6e') }}</button>
       <button
         v-else-if="condition === 'appUpdateRequired'"
         type="button"
         class="wb-ai-btn wb-ai-btn-primary"
         @click="emit('open-update')"
-      >查看软件更新</button>
+      >{{ t('m_1bd44f164934') }}</button>
       <button v-else type="button" class="wb-ai-btn wb-ai-btn-primary" @click="retry">
-        {{ condition === "needInstall" ? "安装 AI 组件" : "重新尝试" }}
+        {{ condition === "needInstall" ? t('m_9cdf3ab9198f') : t('m_7f6a8bd54106') }}
       </button>
     </div>
   </article>

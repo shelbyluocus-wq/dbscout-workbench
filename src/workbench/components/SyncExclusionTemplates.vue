@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, ref } from "vue";
 import { Pencil, RefreshCw, Trash2 } from "lucide-vue-next";
 import { useConfirm } from "../composables/useConfirm.js";
@@ -124,13 +125,13 @@ async function removeTemplate(template) {
 </script>
 
 <template>
-  <section class="wb-sync-templates" aria-label="排除模板">
+  <section class="wb-sync-templates" :aria-label="t('m_448d0a3b96e8')">
     <header class="wb-sync-templates-head">
       <div class="wb-database-sync-section-title">
-        <strong>排除模板</strong>
+        <strong>{{ t('m_448d0a3b96e8') }}</strong>
         <span v-if="templates.length">{{ templates.length }}</span>
       </div>
-      <span class="wb-sync-templates-tip">全局共用</span>
+      <span class="wb-sync-templates-tip">{{ t('m_bccf3c6aea09') }}</span>
     </header>
 
     <ul v-if="templates.length" class="wb-sync-templates-list">
@@ -147,13 +148,13 @@ async function removeTemplate(template) {
           class="wb-sync-template-rename"
           type="text"
           maxlength="40"
-          aria-label="重命名模板"
+          :aria-label="t('m_1bf7e836eb4c')"
           @keydown.enter.prevent="commitRename"
           @keydown.esc.prevent="cancelRename"
           @blur="commitRename"
         />
         <template v-else>
-          <label class="wb-sync-template-toggle" :title="template.tables.join('、') || '空模板'">
+          <label class="wb-sync-template-toggle" :title="template.tables.join('、') || t('m_cccef2da317e')">
             <input
               type="checkbox"
               :checked="isEnabled(template.id)"
@@ -162,39 +163,39 @@ async function removeTemplate(template) {
               @change="toggleTemplate(template.id, $event)"
             />
             <span class="wb-sync-template-name">{{ template.name }}</span>
-            <span class="wb-sync-template-count">{{ template.tables.length }} 表</span>
+            <span class="wb-sync-template-count">{{ template.tables.length }} {{ t('m_c35f80840b4b') }}</span>
           </label>
           <span class="wb-sync-template-actions">
             <button
               type="button"
-              title="用当前排除列表更新该模板"
+              :title="t('m_ea226f8cf662')"
               :disabled="busy || !effectiveCount"
               @click="updateTemplate(template)"
             >
               <RefreshCw :size="12" />
             </button>
-            <button type="button" title="重命名" :disabled="busy" @click="startRename(template)">
+            <button type="button" :title="t('m_0d0cbac2eee5')" :disabled="busy" @click="startRename(template)">
               <Pencil :size="12" />
             </button>
-            <button type="button" class="is-danger" title="删除模板" :disabled="busy" @click="removeTemplate(template)">
+            <button type="button" class="is-danger" :title="t('m_f5a3ec56b46f')" :disabled="busy" @click="removeTemplate(template)">
               <Trash2 :size="12" />
             </button>
           </span>
         </template>
       </li>
     </ul>
-    <p v-else class="wb-sync-templates-empty">还没有模板；把当前排除保存下来，任何连接都能一键启用。</p>
+    <p v-else class="wb-sync-templates-empty">{{ t('m_c7b0c455d999') }}</p>
 
     <form class="wb-sync-template-save" @submit.prevent="saveTemplate">
       <input
         v-model="templateName"
         type="text"
-        placeholder="新模板名称…"
-        aria-label="新模板名称"
+        :placeholder="t('m_b5ba288c8db8')"
+        :aria-label="t('m_3d6dff38b9fd')"
         maxlength="40"
         :disabled="busy"
       />
-      <button type="submit" :disabled="!canSave" :title="saveButtonTitle">存为模板</button>
+      <button type="submit" :disabled="!canSave" :title="saveButtonTitle">{{ t('m_741b2a592561') }}</button>
     </form>
     <p v-if="feedback" class="wb-sync-template-feedback" :class="{ 'is-error': feedbackIsError }">{{ feedback }}</p>
   </section>

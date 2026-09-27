@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -619,11 +620,11 @@ onBeforeUnmount(() => {
       tabindex="-1"
     >
       <header class="wb-find-replace-header" @mousedown="startDragMove">
-        <strong id="wb-find-replace-title" class="wb-find-replace-title">查找和替换</strong>
+        <strong id="wb-find-replace-title" class="wb-find-replace-title">{{ t('m_644df97760a6') }}</strong>
         <button
           type="button"
           class="wb-dialog-close"
-          aria-label="关闭查找替换"
+          :aria-label="t('m_edbac2c6e327')"
           :disabled="isBusy"
           @click="emit('close')"
         >
@@ -639,9 +640,7 @@ onBeforeUnmount(() => {
           :class="{ 'is-active': activeTab === 'find' }"
           :aria-selected="activeTab === 'find'"
           @click="switchTab('find')"
-        >
-          查找
-        </button>
+        > {{ t('m_3003318e729a') }} </button>
         <button
           type="button"
           role="tab"
@@ -649,14 +648,12 @@ onBeforeUnmount(() => {
           :class="{ 'is-active': activeTab === 'replace' }"
           :aria-selected="activeTab === 'replace'"
           @click="switchTab('replace')"
-        >
-          替换
-        </button>
+        > {{ t('m_131b13aa2659') }} </button>
       </nav>
 
       <div class="wb-dialog-body wb-find-replace-body">
         <label class="wb-dialog-field wb-replace-field">
-          <span>查找内容</span>
+          <span>{{ t('m_bf603c449cd8') }}</span>
           <input
             ref="findInputRef"
             v-model="query"
@@ -668,7 +665,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label v-if="activeTab === 'replace'" class="wb-dialog-field wb-replace-field">
-          <span>替换为</span>
+          <span>{{ t('m_7d37f059645b') }}</span>
           <input
             v-model="replacement"
             type="text"
@@ -682,36 +679,28 @@ onBeforeUnmount(() => {
         <div class="wb-find-replace-options">
           <label class="wb-replace-option">
             <input v-model="caseSensitive" type="checkbox" :disabled="isBusy" />
-            <span>区分大小写</span>
+            <span>{{ t('m_8c7e3447ec67') }}</span>
           </label>
           <span class="wb-find-replace-scope-text" :class="{ 'is-selection': scopeIsSelection }">
-            <template v-if="scopeIsSelection">范围：选区内 {{ selectionCellCount }} 个单元格（含新增行）</template>
-            <template v-else>范围：整张表（含未加载行）</template>
+            <template v-if="scopeIsSelection">{{ t('m_e0efb68c4a25') }} {{ selectionCellCount }} {{ t('m_5e6d00b1ff75') }}</template>
+            <template v-else>{{ t('m_21c41420e543') }}</template>
           </span>
         </div>
 
         <template v-if="listExpanded">
           <div ref="resultsRef" class="wb-find-results" :class="{ 'is-loading': listLoading }">
             <div class="wb-find-results-head" :style="gridTemplateStyle">
-              <span class="wb-find-results-head-cell">
-                行标识
-                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('identity', $event)" />
+              <span class="wb-find-results-head-cell"> {{ t('m_58e4aa4164f7') }} <i class="wb-find-results-col-resize" @mousedown="startColumnResize('identity', $event)" />
               </span>
-              <span class="wb-find-results-head-cell">
-                列
-                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('name', $event)" />
+              <span class="wb-find-results-head-cell"> {{ t('m_c06d21404eee') }} <i class="wb-find-results-col-resize" @mousedown="startColumnResize('name', $event)" />
               </span>
-              <span class="wb-find-results-head-cell">
-                值
-                <i class="wb-find-results-col-resize" @mousedown="startColumnResize('value', $event)" />
+              <span class="wb-find-results-head-cell"> {{ t('m_cda1d55c5231') }} <i class="wb-find-results-col-resize" @mousedown="startColumnResize('value', $event)" />
               </span>
               <span />
             </div>
             <div v-if="listError" class="wb-find-results-empty">{{ listError }}</div>
-            <div v-else-if="findText && !matches.length && !listLoading" class="wb-find-results-empty">
-              没有匹配内容
-            </div>
-            <div v-else-if="!findText" class="wb-find-results-empty">输入查找内容后显示全部命中</div>
+            <div v-else-if="findText && !matches.length && !listLoading" class="wb-find-results-empty"> {{ t('m_06e53a170b95') }} </div>
+            <div v-else-if="!findText" class="wb-find-results-empty">{{ t('m_76cd1a40f209') }}</div>
             <template v-else>
               <button
                 v-for="(match, index) in matches"
@@ -748,26 +737,22 @@ onBeforeUnmount(() => {
             :class="{ 'is-expanded': listExpanded }"
             :disabled="isBusy || !findText"
             @click="toggleFindAll"
-          >
-            查找全部
-            <span class="wb-find-all-caret" aria-hidden="true">{{ listExpanded ? "▴" : "▾" }}</span>
+          > {{ t('m_dde41ecd61f7') }} <span class="wb-find-all-caret" aria-hidden="true">{{ listExpanded ? "▴" : "▾" }}</span>
           </button>
-          <button type="button" :disabled="!canNavigate" @click="goToPrevious">上一个</button>
-          <button type="button" :disabled="!canNavigate" @click="goToNext">下一个</button>
+          <button type="button" :disabled="!canNavigate" @click="goToPrevious">{{ t('m_bd4b9718f1f0') }}</button>
+          <button type="button" :disabled="!canNavigate" @click="goToNext">{{ t('m_a898d7c3d78c') }}</button>
         </div>
         <div class="wb-replace-footer-right">
           <template v-if="activeTab === 'replace'">
-            <button type="button" :disabled="!canReplace" @click="replaceCurrent">替换</button>
+            <button type="button" :disabled="!canReplace" @click="replaceCurrent">{{ t('m_131b13aa2659') }}</button>
             <button
               type="button"
               class="wb-dialog-primary wb-replace-all-button"
               :disabled="!canReplace"
               @click="replaceAll"
-            >
-              全部替换
-            </button>
+            > {{ t('m_2357445f30da') }} </button>
           </template>
-          <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
+          <button type="button" :disabled="isBusy" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
         </div>
       </footer>
       <span

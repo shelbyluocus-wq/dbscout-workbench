@@ -246,6 +246,7 @@ try {
     viewport: { width: 1280, height: 820 },
     permissions: ["clipboard-read", "clipboard-write"],
   });
+  await context.addInitScript(() => localStorage.setItem("dbscout_language", "zh-CN"));
   const page = await context.newPage();
   const consoleErrors = [];
   page.on("console", (message) => {

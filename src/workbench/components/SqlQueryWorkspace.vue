@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref, watch } from "vue";
 import {
   AlignLeft, BookOpen, CircleStop, Database, FileInput, FileOutput, FlaskConical,
@@ -153,48 +154,48 @@ function reopenRecentFile(file) {
 <template>
   <section class="wb-sql-workspace">
     <header class="wb-sql-toolbar">
-      <label title="查询连接"><Database :size="15" /><select :value="tab.connectionId" :disabled="tab.running || hasTransaction" @change="changeConnection"><option v-for="connection in sqlConnections" :key="connection.id" :value="connection.id">{{ connection.label }}</option></select></label>
-      <label title="查询数据库"><select :value="tab.database" :disabled="tab.running || hasTransaction" @change="changeDatabase"><option v-for="database in (tab.availableDatabases || databases)" :key="database" :value="database">{{ database }}</option></select></label>
+      <label :title="t('m_1eb6f41a1e8a')"><Database :size="15" /><select :value="tab.connectionId" :disabled="tab.running || hasTransaction" @change="changeConnection"><option v-for="connection in sqlConnections" :key="connection.id" :value="connection.id">{{ connection.label }}</option></select></label>
+      <label :title="t('m_4f49c152713b')"><select :value="tab.database" :disabled="tab.running || hasTransaction" @change="changeDatabase"><option v-for="database in (tab.availableDatabases || databases)" :key="database" :value="database">{{ database }}</option></select></label>
       <span class="wb-sql-toolbar-separator"></span>
-      <button type="button" class="is-primary" title="执行选中内容或当前语句 (Ctrl+Enter)" :disabled="tab.running" @click="query.execute(editorRef?.executionContext(false))"><Play :size="15" /><span>执行</span></button>
-      <button type="button" title="按顺序执行全部语句 (F5)" :disabled="tab.running" @click="query.execute(editorRef?.executionContext(true))"><PlayCircle :size="15" /><span>全部</span></button>
-      <button type="button" class="is-danger" title="停止查询 (Esc)" :disabled="!tab.running" @click="query.cancel"><CircleStop :size="15" /></button>
-      <button type="button" title="查看执行计划" :disabled="tab.running" @click="query.execute({ ...editorRef?.executionContext(false), explain: true })"><FlaskConical :size="15" /><span>EXPLAIN</span></button>
-      <button type="button" title="格式化 SQL" @click="query.formatDocument"><AlignLeft :size="15" /></button>
+      <button type="button" class="is-primary" :title="t('m_18bddd92954e')" :disabled="tab.running" @click="query.execute(editorRef?.executionContext(false))"><Play :size="15" /><span>{{ t('m_32c8d373afe0') }}</span></button>
+      <button type="button" :title="t('m_2e834327f396')" :disabled="tab.running" @click="query.execute(editorRef?.executionContext(true))"><PlayCircle :size="15" /><span>{{ t('m_5c55a67935af') }}</span></button>
+      <button type="button" class="is-danger" :title="t('m_de0da8431fcf')" :disabled="!tab.running" @click="query.cancel"><CircleStop :size="15" /></button>
+      <button type="button" :title="t('m_a4b617faa8fa')" :disabled="tab.running" @click="query.execute({ ...editorRef?.executionContext(false), explain: true })"><FlaskConical :size="15" /><span>EXPLAIN</span></button>
+      <button type="button" :title="t('m_3e5d6050dde1')" @click="query.formatDocument"><AlignLeft :size="15" /></button>
       <span class="wb-sql-toolbar-separator"></span>
-      <label class="wb-sql-switch" title="关闭自动提交后，本标签使用专用事务连接"><input v-model="tab.autoCommit" type="checkbox" :disabled="hasTransaction" /><span></span>自动提交</label>
-      <button type="button" title="提交事务" :disabled="!hasTransaction" @click="query.commit"><ShieldCheck :size="15" /><span>提交</span></button>
-      <button type="button" title="回滚事务" :disabled="!hasTransaction" @click="query.rollback"><RotateCcw :size="15" /><span>回滚</span></button>
+      <label class="wb-sql-switch" :title="t('m_057034189d69')"><input v-model="tab.autoCommit" type="checkbox" :disabled="hasTransaction" /><span></span>{{ t('m_86c46618a6a2') }}</label>
+      <button type="button" :title="t('m_519efb833eec')" :disabled="!hasTransaction" @click="query.commit"><ShieldCheck :size="15" /><span>{{ t('m_08a85f4ab4ba') }}</span></button>
+      <button type="button" :title="t('m_90689a0b356a')" :disabled="!hasTransaction" @click="query.rollback"><RotateCcw :size="15" /><span>{{ t('m_6518e21a8e5f') }}</span></button>
       <span class="wb-sql-toolbar-spacer"></span>
-      <label title="结果行数上限"><span>上限</span><select v-model.number="tab.limit"><option v-for="limit in query.LIMIT_OPTIONS" :key="limit" :value="limit">{{ limit }}</option></select></label>
-      <button type="button" title="打开 SQL 文件" :disabled="tab.running" @click="query.openFile"><FileInput :size="15" /></button>
-      <button type="button" title="保存 SQL 文件 (Ctrl+S)" @click="query.saveFile()"><Save :size="15" /></button>
-      <button type="button" title="另存为" @click="query.saveFile({ saveAs: true })"><FileOutput :size="15" /></button>
-      <button type="button" title="查询历史" @click="query.refreshRecentFiles(); query.historyOpen.value = true; historyRef?.load()"><BookOpen :size="15" /></button>
+      <label :title="t('m_803caaca93cc')"><span>{{ t('m_8e7ddbeee310') }}</span><select v-model.number="tab.limit"><option v-for="limit in query.LIMIT_OPTIONS" :key="limit" :value="limit">{{ limit }}</option></select></label>
+      <button type="button" :title="t('m_fa8c496e0eb5')" :disabled="tab.running" @click="query.openFile"><FileInput :size="15" /></button>
+      <button type="button" :title="t('m_3e5730509acc')" @click="query.saveFile()"><Save :size="15" /></button>
+      <button type="button" :title="t('m_1232eb44296b')" @click="query.saveFile({ saveAs: true })"><FileOutput :size="15" /></button>
+      <button type="button" :title="t('m_e74d81c0d444')" @click="query.refreshRecentFiles(); query.historyOpen.value = true; historyRef?.load()"><BookOpen :size="15" /></button>
     </header>
     <div class="wb-sql-filebar">
-      <span :class="{ 'is-dirty': tab.dirty }">{{ tab.dirty ? '未保存' : '已保存' }}</span>
-      <code>{{ tab.filePath || `${tab.connectionId || '未选择连接'} / ${tab.database || '未选择数据库'}` }}</code>
-      <b v-if="hasTransaction">事务进行中</b>
-      <b v-if="tab.running" class="is-running">正在执行</b>
+      <span :class="{ 'is-dirty': tab.dirty }">{{ tab.dirty ? t('m_6a1be012c99c') : t('m_1bd91a7d0c53') }}</span>
+      <code>{{ tab.filePath || `${tab.connectionId || t('m_6ad3c3fd5540')} / ${tab.database || t('m_28410cb597bc')}` }}</code>
+      <b v-if="hasTransaction">{{ t('m_73e93e6e6b66') }}</b>
+      <b v-if="tab.running" class="is-running">{{ t('m_8f38fd93b5a0') }}</b>
     </div>
     <div class="wb-sql-editor-pane" :style="{ flexBasis: `${tab.editorRatio * 100}%` }">
       <SqlCodeEditor ref="editorRef" :model-value="tab.sql" :schema="completionSchema" :database="tab.database" :databases="tab.availableDatabases || databases" @update:model-value="query.updateSql" @execute="query.execute" @save="query.saveFile()" @stop="query.cancel" />
     </div>
-    <div class="wb-sql-resize" role="separator" tabindex="0" aria-label="调整编辑器和结果区高度" aria-orientation="horizontal" aria-valuemin="25" aria-valuemax="80" :aria-valuenow="Math.round(tab.editorRatio * 100)" @pointerdown.prevent="startResize" @keydown.up.prevent="resizeWithKeyboard(-0.05)" @keydown.down.prevent="resizeWithKeyboard(0.05)"><SplitSquareVertical :size="14" /></div>
+    <div class="wb-sql-resize" role="separator" tabindex="0" :aria-label="t('m_09d0f3fe4f13')" aria-orientation="horizontal" aria-valuemin="25" aria-valuemax="80" :aria-valuenow="Math.round(tab.editorRatio * 100)" @pointerdown.prevent="startResize" @keydown.up.prevent="resizeWithKeyboard(-0.05)" @keydown.down.prevent="resizeWithKeyboard(0.05)"><SplitSquareVertical :size="14" /></div>
     <section class="wb-sql-output">
       <nav class="wb-sql-output-tabs">
-        <button type="button" :class="{ active: tab.resultView === 'results' }" @click="tab.resultView = 'results'">结果集 <small>{{ resultTabs.length }}</small></button>
-        <button type="button" :class="{ active: tab.resultView === 'messages' }" @click="tab.resultView = 'messages'">消息 <small>{{ tab.messages.length }}</small></button>
-        <button type="button" :class="{ active: tab.resultView === 'plan' }" :disabled="!tab.executionPlan" @click="tab.resultView = 'plan'">执行计划</button>
-        <span v-if="tab.resultView === 'results' && resultTabs.length > 1" class="wb-sql-result-set-tabs"><button v-for="(result, index) in resultTabs" :key="result.statementIndex" type="button" :class="{ active: tab.activeResultIndex === index }" @click="tab.activeResultIndex = index">结果 {{ index + 1 }}</button></span>
+        <button type="button" :class="{ active: tab.resultView === 'results' }" @click="tab.resultView = 'results'">{{ t('m_10bc92e64134') }} <small>{{ resultTabs.length }}</small></button>
+        <button type="button" :class="{ active: tab.resultView === 'messages' }" @click="tab.resultView = 'messages'">{{ t('m_4da199fae933') }} <small>{{ tab.messages.length }}</small></button>
+        <button type="button" :class="{ active: tab.resultView === 'plan' }" :disabled="!tab.executionPlan" @click="tab.resultView = 'plan'">{{ t('m_2619ddf6f550') }}</button>
+        <span v-if="tab.resultView === 'results' && resultTabs.length > 1" class="wb-sql-result-set-tabs"><button v-for="(result, index) in resultTabs" :key="result.statementIndex" type="button" :class="{ active: tab.activeResultIndex === index }" @click="tab.activeResultIndex = index">{{ t('m_bb7ef73495dd') }} {{ index + 1 }}</button></span>
       </nav>
       <SqlResultGrid v-if="resultPane === 'grid'" :result="query.currentResult.value" :invoke-workbench="invokeWorkbench" />
-      <div v-else-if="resultPane === 'messages'" class="wb-sql-messages"><p v-for="(message, index) in tab.messages" :key="index" :class="`is-${message.type}`"><time>{{ message.durationMs ? `${message.durationMs} ms` : '' }}</time>{{ message.text }}</p><p v-if="!tab.messages.length">执行消息会显示在这里</p></div>
+      <div v-else-if="resultPane === 'messages'" class="wb-sql-messages"><p v-for="(message, index) in tab.messages" :key="index" :class="`is-${message.type}`"><time>{{ message.durationMs ? `${message.durationMs} ms` : '' }}</time>{{ message.text }}</p><p v-if="!tab.messages.length">{{ t('m_64fbe1d11eea') }}</p></div>
       <pre v-else-if="resultPane === 'plan'" class="wb-sql-plan">{{ typeof tab.executionPlan === 'string' ? tab.executionPlan : JSON.stringify(tab.executionPlan, null, 2) }}</pre>
       <div v-else-if="resultPane === 'summary'" class="wb-sql-result-summary" :class="{ 'is-failed': query.currentResult.value?.status === 'failed' }"><strong>{{ sqlResultStatusText(query.currentResult.value) }}</strong><code v-if="query.currentResult.value?.sql">{{ query.currentResult.value.sql }}</code></div>
-      <div v-else class="wb-sql-output-empty">执行查询后，结果会显示在这里</div>
-      <footer v-if="query.currentResult.value" class="wb-sql-result-status"><span>{{ sqlResultStatusText(query.currentResult.value) }}</span><b v-if="query.currentResult.value.truncated">结果已截断（上限 {{ tab.limit }} 行）</b></footer>
+      <div v-else class="wb-sql-output-empty">{{ t('m_083c76d3309e') }}</div>
+      <footer v-if="query.currentResult.value" class="wb-sql-result-status"><span>{{ sqlResultStatusText(query.currentResult.value) }}</span><b v-if="query.currentResult.value.truncated">{{ t('m_b3a1e0e714f8') }} {{ tab.limit }} {{ t('m_39aac487d527') }}</b></footer>
     </section>
     <SqlHistoryDialog ref="historyRef" :open="query.historyOpen.value" :invoke-workbench="invokeWorkbench" :connection-id="tab.connectionId" :recent-files="query.recentFiles.value" @close="query.historyOpen.value = false" @open-sql="reopenHistory" @open-file="reopenRecentFile" @remove-recent="query.removeRecentFile" />
   </section>

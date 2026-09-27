@@ -9,12 +9,12 @@ import {
 test("table import toolbar keeps batch import primary and current-table import in the menu", () => {
   const actions = createTableImportToolbarActions({ hasSession: true });
 
-  assert.equal(actions.menuLabel, "导入选项");
+  assert.equal(actions.menuLabel, "Import options");
   assert.deepEqual(
     actions.compactItems.map(({ id, label }) => ({ id, label })),
     [
-      { id: "batch-import", label: "批量导入" },
-      { id: "import-current", label: "导入" },
+      { id: "batch-import", label: "Batch import" },
+      { id: "import-current", label: "Import" },
     ],
   );
   assert.equal(actions.primary.id, "batch-import");
@@ -40,4 +40,14 @@ test("table import toolbar applies busy, session, and read-only states to the co
     assert.equal(actions.compactItems[0].disabled, primaryDisabled, JSON.stringify(state));
     assert.equal(actions.compactItems[1].disabled, menuDisabled, JSON.stringify(state));
   }
+});
+
+
+test("table import toolbar translates owned copy without changing action IDs", async () => {
+  const { default: zh } = await import("../i18n/zhCN.js");
+  const actions = createTableImportToolbarActions({ hasSession: true, translate: (key) => zh[key] });
+  assert.equal(actions.primary.label, "批量导入");
+  assert.equal(actions.menuItems[0].label, "导入");
+  assert.equal(actions.primary.id, "batch-import");
+  assert.equal(actions.menuItems[0].disabled, false);
 });

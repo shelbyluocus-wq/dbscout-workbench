@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ArrowLeft,
@@ -532,16 +533,14 @@ onBeforeUnmount(() => {
         'wb-floating-themed': isFullscreen,
       }"
       :data-theme="isFullscreen ? theme : undefined"
-      :aria-label="isTableStage ? `表对比：${focusedTableName}` : '批量导入变化对比'"
+      :aria-label="isTableStage ? `表对比：${focusedTableName}` : t('m_d268438c2df3')"
     >
       <header v-if="isTableStage" class="wb-table-stage-bar" data-tauri-drag-region>
         <button type="button" class="wb-table-stage-back" @click="exitTableStage">
-          <ArrowLeft :size="15" aria-hidden="true" />
-          返回全部表
-        </button>
+          <ArrowLeft :size="15" aria-hidden="true" /> {{ t('m_19a3c62feaa8') }} </button>
         <div class="wb-table-stage-identity" data-tauri-drag-region>
           <strong>{{ focusedTableName }}</strong>
-          <ul class="wb-table-stage-counts" aria-label="此表变化" data-tauri-drag-region>
+          <ul class="wb-table-stage-counts" :aria-label="t('m_e6a83055c18e')" data-tauri-drag-region>
             <li
               v-for="item in tableStageCounts"
               :key="item.key"
@@ -551,12 +550,12 @@ onBeforeUnmount(() => {
             </li>
           </ul>
         </div>
-        <div v-if="tableStageList.length > 1" class="wb-table-stage-switch" role="group" aria-label="切换对比表">
+        <div v-if="tableStageList.length > 1" class="wb-table-stage-switch" role="group" :aria-label="t('m_eaef9afa35d7')">
           <button
             type="button"
             :disabled="tableStageIndex <= 0"
-            aria-label="上一张表"
-            title="上一张表"
+            :aria-label="t('m_874968d08de3')"
+            :title="t('m_874968d08de3')"
             @click="focusAdjacentTable(-1)"
           >
             <ChevronLeft :size="15" aria-hidden="true" />
@@ -565,8 +564,8 @@ onBeforeUnmount(() => {
           <button
             type="button"
             :disabled="tableStageIndex >= tableStageList.length - 1"
-            aria-label="下一张表"
-            title="下一张表"
+            :aria-label="t('m_0518896c5d71')"
+            :title="t('m_0518896c5d71')"
             @click="focusAdjacentTable(1)"
           >
             <ChevronRight :size="15" aria-hidden="true" />
@@ -575,8 +574,8 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-table-stage-close"
-          aria-label="关闭此表对比"
-          title="关闭此表对比"
+          :aria-label="t('m_c2cc622f6da2')"
+          :title="t('m_c2cc622f6da2')"
           @click="exitTableStage"
         >
           <X :size="16" aria-hidden="true" />
@@ -588,26 +587,26 @@ onBeforeUnmount(() => {
         :class="`is-${comparison.status}`"
         :data-tauri-drag-region="isFullscreen || undefined"
       >
-        <div><strong>{{ comparison.summary.inserted }}</strong><span>预计新增</span></div>
-        <div><strong>{{ comparison.summary.updated }}</strong><span>预计修改</span></div>
-        <div><strong>{{ comparison.summary.deleted }}</strong><span>预计删除</span></div>
-        <div><strong>{{ comparison.summary.unchanged }}</strong><span>未变化</span></div>
-        <div><strong>{{ comparison.summary.errors }}</strong><span>异常</span></div>
+        <div><strong>{{ comparison.summary.inserted }}</strong><span>{{ t('m_9843ee0c9bdc') }}</span></div>
+        <div><strong>{{ comparison.summary.updated }}</strong><span>{{ t('m_e9ac2f6354da') }}</span></div>
+        <div><strong>{{ comparison.summary.deleted }}</strong><span>{{ t('m_3415337d0fe8') }}</span></div>
+        <div><strong>{{ comparison.summary.unchanged }}</strong><span>{{ t('m_43d477cc5ddb') }}</span></div>
+        <div><strong>{{ comparison.summary.errors }}</strong><span>{{ t('m_428fb8bfeecf') }}</span></div>
       </div>
 
       <div class="wb-batch-comparison-toolbar" :data-tauri-drag-region="isFullscreen || undefined">
         <div class="wb-batch-comparison-view-tools">
-          <div class="wb-batch-comparison-mode" role="group" aria-label="对比范围">
-            <button type="button" :class="{ 'is-active': viewMode === 'all' }" @click="switchMode('all')">全部行</button>
-            <button type="button" :class="{ 'is-active': viewMode === 'differences' }" @click="switchMode('differences')">只看差别</button>
+          <div class="wb-batch-comparison-mode" role="group" :aria-label="t('m_a71d3d253f7c')">
+            <button type="button" :class="{ 'is-active': viewMode === 'all' }" @click="switchMode('all')">{{ t('m_5ba072f49bd5') }}</button>
+            <button type="button" :class="{ 'is-active': viewMode === 'differences' }" @click="switchMode('differences')">{{ t('m_222ac5d1aeaa') }}</button>
           </div>
           <label class="wb-batch-comparison-pk-toggle">
             <input v-model="showPrimaryKeys" type="checkbox" />
-            <span>显示主键</span>
+            <span>{{ t('m_0588473ca74a') }}</span>
           </label>
         </div>
 
-        <div class="wb-batch-comparison-filters" role="tablist" aria-label="变化类型">
+        <div class="wb-batch-comparison-filters" role="tablist" :aria-label="t('m_17a7acd935b4')">
           <button
             v-for="option in filterOptions"
             :key="option.value"
@@ -637,19 +636,19 @@ onBeforeUnmount(() => {
             type="search"
             class="wb-table-search-field-input"
             :disabled="!canSearchCurrentTable"
-            :placeholder="isTableStage ? '搜索此表' : '搜索当前表'"
-            :title="canSearchCurrentTable || isTableStage ? '' : '先在左侧选择一张表'"
+            :placeholder="isTableStage ? t('m_afa8c38c8722') : t('m_ec5bc63d86be')"
+            :title="canSearchCurrentTable || isTableStage ? '' : t('m_96da20d125f4')"
             :aria-label="`搜索此表，当前使用${searchModeLabel}匹配`"
             @keydown.enter.prevent="goToNextSearchMatch"
           />
           <div class="wb-search-aux" aria-live="polite">
-            <span v-if="searchInProgress" class="wb-batch-comparison-searching">搜索中</span>
-            <span v-else-if="hasSearchMatches" class="wb-search-nav-inline" role="group" aria-label="命中导航">
+            <span v-if="searchInProgress" class="wb-batch-comparison-searching">{{ t('m_e3f404a27945') }}</span>
+            <span v-else-if="hasSearchMatches" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
               <button
                 type="button"
                 class="wb-search-nav-icon"
-                aria-label="上一个匹配"
-                title="上一个匹配"
+                :aria-label="t('m_64d57ad378df')"
+                :title="t('m_64d57ad378df')"
                 @click="goToPreviousSearchMatch"
               >
                 <ChevronUp :size="13" aria-hidden="true" />
@@ -657,8 +656,8 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="wb-search-nav-icon"
-                aria-label="下一个匹配"
-                title="下一个匹配"
+                :aria-label="t('m_84cb6a31b9f5')"
+                :title="t('m_84cb6a31b9f5')"
                 @click="goToNextSearchMatch"
               >
                 <ChevronDown :size="13" aria-hidden="true" />
@@ -673,7 +672,7 @@ onBeforeUnmount(() => {
           <ToolbarSplitButton
             class="wb-search-mode-control"
             :label="searchModeLabel"
-            menu-label="搜索匹配方式"
+            :menu-label="t('m_6ff93bc2bb48')"
             menu-class="wb-batch-comparison-search-menu"
             primary-opens-menu
             single-trigger
@@ -687,14 +686,14 @@ onBeforeUnmount(() => {
           />
         </div>
         <div class="wb-batch-comparison-icon-actions">
-          <button type="button" title="恢复默认列宽" aria-label="恢复默认列宽" @click="widthResetToken += 1">
+          <button type="button" :title="t('m_95902143ec62')" :aria-label="t('m_95902143ec62')" @click="widthResetToken += 1">
             <RotateCcw :size="15" aria-hidden="true" />
           </button>
           <button
             v-if="!isTableStage"
             type="button"
-            :title="isFullscreen ? '退出全屏' : '全屏对比'"
-            :aria-label="isFullscreen ? '退出全屏' : '全屏对比'"
+            :title="isFullscreen ? t('m_0f1505b6ad3f') : t('m_9216be4724a9')"
+            :aria-label="isFullscreen ? t('m_0f1505b6ad3f') : t('m_9216be4724a9')"
             @click="toggleFullscreen"
           >
             <Minimize2 v-if="isFullscreen" :size="15" aria-hidden="true" />
@@ -709,14 +708,14 @@ onBeforeUnmount(() => {
         :class="{ 'is-table-nav-resizing': isTableNavResizing }"
         :style="tableNavBodyStyle"
       >
-        <nav v-if="!isTableStage" class="wb-batch-comparison-tables" aria-label="按目标表筛选">
+        <nav v-if="!isTableStage" class="wb-batch-comparison-tables" :aria-label="t('m_2b76cec42b33')">
           <button
             v-if="viewMode === 'differences'"
             type="button"
             :class="{ 'is-active': activeTable === '' }"
             @click="selectTable('')"
           >
-            <span>全部目标表</span>
+            <span>{{ t('m_5b3cada47ef8') }}</span>
             <strong>{{ comparison.detailTotal }}</strong>
           </button>
           <button
@@ -738,11 +737,11 @@ onBeforeUnmount(() => {
           role="separator"
           tabindex="0"
           aria-orientation="vertical"
-          aria-label="调整目标表列表宽度"
+          :aria-label="t('m_9271fcdc3e87')"
           :aria-valuemin="MIN_COMPARISON_TABLE_NAV_WIDTH"
           :aria-valuemax="MAX_COMPARISON_TABLE_NAV_WIDTH"
           :aria-valuenow="visibleTableNavWidth"
-          title="拖动调整表名单宽度，双击恢复默认"
+          :title="t('m_7b46cfaadaaa')"
           @pointerdown.stop.prevent="onTableNavResizerPointerDown"
           @dblclick.stop.prevent="resetTableNavWidth"
           @keydown="onTableNavResizerKeydown"
@@ -750,15 +749,13 @@ onBeforeUnmount(() => {
 
         <div class="wb-batch-comparison-details">
           <p v-if="statusNote" class="wb-batch-comparison-note" role="status">{{ statusNote }}</p>
-          <p v-if="viewMode === 'differences' && comparison.truncated" class="wb-batch-comparison-note" role="status">
-            明细显示前 {{ comparison.rows.length }} 条，共 {{ comparison.detailTotal }} 条变化或异常
-          </p>
+          <p v-if="viewMode === 'differences' && comparison.truncated" class="wb-batch-comparison-note" role="status"> {{ t('m_9ca66bc4cfb1') }} {{ comparison.rows.length }} {{ t('m_6bdb4d562bde') }} {{ comparison.detailTotal }} {{ t('m_007927466f3e') }} </p>
           <p v-if="viewMode !== 'all' && searchError" class="wb-batch-comparison-note is-error" role="status">
             {{ searchError }}
           </p>
           <div v-if="viewMode === 'all' && currentFullState" class="wb-batch-comparison-load-state" role="status">
-            <span>已加载 {{ currentFullState.rows.length }} / {{ currentFullState.total }} 行</span>
-            <span v-if="query && searchInProgress && !currentFullState.complete">正在读取剩余内容后搜索</span>
+            <span>{{ t('m_6bdcbfd2f640') }} {{ currentFullState.rows.length }} / {{ currentFullState.total }} {{ t('m_4cc7b00050cb') }}</span>
+            <span v-if="query && searchInProgress && !currentFullState.complete">{{ t('m_e75a8e933fad') }}</span>
             <span v-if="currentFullState.error" class="is-error">{{ currentFullState.error }}</span>
             <span v-else-if="searchError" class="is-error">{{ searchError }}</span>
             <button
@@ -767,7 +764,7 @@ onBeforeUnmount(() => {
               :disabled="currentFullState.loading"
               @click="loadSelectedFullRows"
             >
-              {{ currentFullState.loading ? "正在加载…" : (currentFullState.error ? "重试" : "继续加载") }}
+              {{ currentFullState.loading ? t('m_21bd738e0d71') : (currentFullState.error ? t('m_b8784c8dd563') : t('m_31274b7ae0f9')) }}
             </button>
           </div>
           <template v-if="visibleSections.length">
@@ -783,7 +780,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="wb-batch-diff-section-expand"
-                  title="全屏查看此表"
+                  :title="t('m_b8b2c74d49e7')"
                   :aria-label="`全屏查看 ${section.tableName}`"
                   @click="toggleTableFullscreen(section.sheetName)"
                 >
@@ -806,8 +803,8 @@ onBeforeUnmount(() => {
             </section>
           </template>
           <div v-else class="wb-batch-comparison-empty">
-            <span v-if="viewMode === 'all' && currentFullState?.loading">正在读取完整数据…</span>
-            <span v-else>{{ changeCount || comparison.summary.errors || viewMode === "all" ? "当前范围没有数据" : "没有需要写入的变化" }}</span>
+            <span v-if="viewMode === 'all' && currentFullState?.loading">{{ t('m_4a96c2a8690d') }}</span>
+            <span v-else>{{ changeCount || comparison.summary.errors || viewMode === "all" ? t('m_21c45450d03a') : t('m_45392bc56566') }}</span>
           </div>
         </div>
       </div>

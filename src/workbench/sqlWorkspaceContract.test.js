@@ -1,11 +1,11 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const read = (path) => readFileSync(join(here, path), "utf8");
+const read = (path) => readLocalizedContractSource(join(here, path), "utf8");
 
 test("SQL workspace locks transaction targets and refreshes completion schema", () => {
   const workspace = read("./components/SqlQueryWorkspace.vue");

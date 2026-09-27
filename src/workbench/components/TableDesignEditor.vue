@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
@@ -590,7 +591,7 @@ const colDefs = [
   <section
     ref="editorRef"
     class="wb-design-editor"
-    aria-label="表设计编辑器"
+    :aria-label="t('m_b5b964561870')"
     tabindex="-1"
   >
     <div class="wb-design-toast-layer" aria-live="polite" aria-atomic="true">
@@ -603,34 +604,34 @@ const colDefs = [
     </div>
     <header class="wb-design-header">
       <div class="wb-design-title">
-        <strong>表设计</strong>
+        <strong>{{ t('m_d9a122ddc940') }}</strong>
         <span :title="sourceTitle">{{ sourceTitle }}</span>
-        <em v-if="dirty" class="wb-design-dirty">未保存</em>
+        <em v-if="dirty" class="wb-design-dirty">{{ t('m_6a1be012c99c') }}</em>
       </div>
       <div class="wb-design-actions">
-        <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">刷新</button>
-        <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">重置</button>
-        <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? "取消字段检查" : "SQL 预览" }}</button>
-        <button type="button" class="wb-design-primary" :disabled="loading || previewing || saving || !dirty" @click="handleSave">{{ previewing ? "正在检查字段数据…" : "保存" }}</button>
+        <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">{{ t('m_aee887434131') }}</button>
+        <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">{{ t('m_cb5d682bac3d') }}</button>
+        <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? t('m_4e7a87eb2805') : t('m_5b294b6e8ed8') }}</button>
+        <button type="button" class="wb-design-primary" :disabled="loading || previewing || saving || !dirty" @click="handleSave">{{ previewing ? t('m_93108108fea5') : t('m_a3030bf8f16d') }}</button>
       </div>
     </header>
 
-    <div v-if="loading" class="wb-design-state">正在加载表设计…</div>
+    <div v-if="loading" class="wb-design-state">{{ t('m_3f6fb13a558d') }}</div>
     <div v-else class="wb-design-body">
-      <p v-if="previewing" class="wb-design-state" role="status" aria-live="polite">数据库正在严格模式下检查现有字段值；大表可能需要一些时间，可随时取消。</p>
+      <p v-if="previewing" class="wb-design-state" role="status" aria-live="polite">{{ t('m_66642c2f5c7c') }}</p>
       <p v-if="error" class="wb-design-error" role="alert">{{ error }}</p>
       <div v-if="previewHasConflicts" class="wb-design-conflict-banner" role="alert">
-        <strong>发现无法转换的字段值</strong>
-        <span>请先修正提示中的现有数据，再重新预览并保存字段类型。</span>
+        <strong>{{ t('m_842a962155a6') }}</strong>
+        <span>{{ t('m_e4c5dd0ccf6a') }}</span>
       </div>
       <div v-if="hasValidationMessages" class="wb-design-validation" role="alert">
-        <strong>请先修正以下问题</strong>
+        <strong>{{ t('m_d5079872e308') }}</strong>
         <span v-for="message in validationErrors.messages" :key="message">{{ message }}</span>
       </div>
 
       <label class="wb-design-comment">
-        <span>表备注</span>
-        <textarea v-model="draft.tableComment" name="tableComment" rows="2" placeholder="输入表备注"></textarea>
+        <span>{{ t('m_a00092e726d4') }}</span>
+        <textarea v-model="draft.tableComment" name="tableComment" rows="2" :placeholder="t('m_687694cbea0f')"></textarea>
       </label>
 
       <div class="wb-design-grid-wrap">
@@ -640,7 +641,7 @@ const colDefs = [
               <th
                 class="wb-design-select-col"
                 :style="{ width: colWidths.select + 'px', minWidth: colWidths.select + 'px' }"
-                title="点击选中字段，Shift 连选，Ctrl 多选"
+                :title="t('m_12814fa9f970')"
               >#</th>
               <th
                 v-for="col in colDefs"
@@ -674,7 +675,7 @@ const colDefs = [
               <td
                 class="wb-design-select-cell"
                 :style="{ width: colWidths.select + 'px' }"
-                title="点击选中字段，Shift 连选，Ctrl 多选"
+                :title="t('m_12814fa9f970')"
                 @mousedown.prevent="selectRow(index, $event)"
                 @click.prevent="selectRow(index, $event)"
               >{{ index + 1 }}</td>
@@ -684,12 +685,12 @@ const colDefs = [
                   <span
                     class="wb-design-drag-handle"
                     draggable="true"
-                    title="按住拖拽调整字段顺序"
-                    aria-label="拖拽调整字段顺序"
+                    :title="t('m_cd94bbd84d72')"
+                    :aria-label="t('m_bde502acb519')"
                     @dragstart.stop="onDragStart(index, $event)"
                     @dragend="onDragEnd"
                   >⋮⋮</span>
-                  <input v-model="column.name" aria-label="字段名" />
+                  <input v-model="column.name" :aria-label="t('m_2b018f9b1038')" />
                 </div>
                 <small v-if="validationErrors.columns?.[index]?.name">{{ validationErrors.columns[index].name }}</small>
               </td>
@@ -716,10 +717,10 @@ const colDefs = [
               <td :style="{ width: colWidths.type + 'px' }">
                 <select
                   :value="column.type"
-                  aria-label="字段类型"
+                  :aria-label="t('m_9eb4ed77634f')"
                   @change="onTypeChange(column, $event.target.value)"
                 >
-                  <option value="">请选择</option>
+                  <option value="">{{ t('m_da590a8fe3ce') }}</option>
                   <option v-for="t in MYSQL_COMMON_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
                 </select>
                 <small v-if="validationErrors.columns?.[index]?.type">{{ validationErrors.columns[index].type }}</small>
@@ -727,52 +728,50 @@ const colDefs = [
 
               <!-- 长度 -->
               <td :style="{ width: colWidths.length + 'px' }">
-                <input v-model="column.length" aria-label="字段长度" inputmode="numeric" />
+                <input v-model="column.length" :aria-label="t('m_a75e99080569')" inputmode="numeric" />
                 <small v-if="validationErrors.columns?.[index]?.length">{{ validationErrors.columns[index].length }}</small>
               </td>
 
               <!-- 小数位 -->
               <td :style="{ width: colWidths.scale + 'px' }">
-                <input v-model="column.scale" aria-label="小数位" inputmode="numeric" />
+                <input v-model="column.scale" :aria-label="t('m_571bf00dfd42')" inputmode="numeric" />
                 <small v-if="validationErrors.columns?.[index]?.scale">{{ validationErrors.columns[index].scale }}</small>
               </td>
 
               <!-- 允许 NULL -->
               <td class="wb-design-check-cell" :style="{ width: colWidths.nullable + 'px' }">
-                <input v-model="column.nullable" type="checkbox" :disabled="column.primaryKey" aria-label="允许 NULL" />
+                <input v-model="column.nullable" type="checkbox" :disabled="column.primaryKey" :aria-label="t('m_0693812e331c')" />
                 <small v-if="validationErrors.columns?.[index]?.nullable">{{ validationErrors.columns[index].nullable }}</small>
               </td>
 
               <!-- 默认值模式 -->
               <td :style="{ width: colWidths.defaultMode + 'px' }">
                 <select v-model="column.defaultMode" aria-label="defaultMode">
-                  <option value="none">无</option>
+                  <option value="none">{{ t('m_484d55613910') }}</option>
                   <option value="null">NULL</option>
-                  <option value="value">固定值</option>
-                  <option value="expression">表达式</option>
+                  <option value="value">{{ t('m_a92a585d1fbf') }}</option>
+                  <option value="expression">{{ t('m_ea2fc789884b') }}</option>
                 </select>
                 <small v-if="validationErrors.columns?.[index]?.defaultMode">{{ validationErrors.columns[index].defaultMode }}</small>
               </td>
 
               <!-- 默认值 -->
               <td :style="{ width: colWidths.defaultValue + 'px' }">
-                <input v-model="column.defaultValue" :disabled="column.defaultMode === 'none' || column.defaultMode === 'null'" aria-label="默认值" />
+                <input v-model="column.defaultValue" :disabled="column.defaultMode === 'none' || column.defaultMode === 'null'" :aria-label="t('m_306da767a461')" />
                 <small v-if="validationErrors.columns?.[index]?.defaultValue">{{ validationErrors.columns[index].defaultValue }}</small>
               </td>
 
               <!-- 备注 -->
               <td class="wb-design-comment-cell" :style="{ width: colWidths.comment + 'px' }">
                 <div class="wb-design-comment-input">
-                  <input v-model="column.comment" aria-label="字段备注" />
+                  <input v-model="column.comment" :aria-label="t('m_39230fff0eb1')" />
                   <button
                     type="button"
                     class="wb-design-comment-expand"
-                    title="编辑字段备注"
-                    aria-label="编辑字段备注"
+                    :title="t('m_df99e81b3dea')"
+                    :aria-label="t('m_df99e81b3dea')"
                     @click="openCommentDialog(index)"
-                  >
-                    编辑
-                  </button>
+                  > {{ t('m_051836569928') }} </button>
                 </div>
                 <small v-if="validationErrors.columns?.[index]?.comment">{{ validationErrors.columns[index].comment }}</small>
               </td>
@@ -783,8 +782,8 @@ const colDefs = [
                   type="button"
                   class="wb-design-row-remove"
                   :disabled="draft.columns.length <= 1"
-                  :title="draft.columns.length <= 1 ? '表中至少需要保留一个字段' : (isNewColumn(column) ? '移除新增字段' : '删除字段（保存时生效）')"
-                  aria-label="删除字段"
+                  :title="draft.columns.length <= 1 ? t('m_8367b93e3ec1') : (isNewColumn(column) ? t('m_1987ca219327') : t('m_d88366de4c06'))"
+                  :aria-label="t('m_32025c825b14')"
                   @click="removeColumn(index)"
                 ><Trash2 :size="14" /></button>
               </td>
@@ -795,12 +794,12 @@ const colDefs = [
                   type="button"
                   class="wb-design-add-column"
                   :disabled="loading || previewing || saving"
-                  title="新增字段"
-                  aria-label="新增字段"
+                  :title="t('m_628de21eae14')"
+                  :aria-label="t('m_628de21eae14')"
                   @click="addColumn()"
                 >
                   <Plus :size="16" />
-                  <span>新增字段</span>
+                  <span>{{ t('m_628de21eae14') }}</span>
                 </button>
               </td>
             </tr>
@@ -811,16 +810,16 @@ const colDefs = [
 
     <!-- 修改预览 Dialog -->
     <div v-if="previewOpen" class="wb-design-preview">
-      <section ref="previewDialogRef" class="wb-design-preview-card" role="dialog" aria-modal="true" aria-label="修改预览" tabindex="-1">
+      <section ref="previewDialogRef" class="wb-design-preview-card" role="dialog" aria-modal="true" :aria-label="t('m_e95dd315e43a')" tabindex="-1">
         <header class="wb-design-preview-header">
-          <strong>修改预览</strong>
-          <button type="button" :disabled="saving" @click="closePreviewDialog">✕ 关闭</button>
+          <strong>{{ t('m_e95dd315e43a') }}</strong>
+          <button type="button" :disabled="saving" @click="closePreviewDialog">{{ t('m_484533ab89b8') }}</button>
         </header>
 
         <!-- 冲突提示（阻止保存） -->
         <div v-if="preview.conflicts?.length" class="wb-design-conflicts wb-design-conflicts-critical" role="alert">
-          <div class="wb-design-conflicts-title">发现 {{ preview.conflicts.length }} 个字段存在无法转换的值</div>
-          <div class="wb-design-conflicts-subtitle">请先修正这些现有数据，再重新预览并保存：</div>
+          <div class="wb-design-conflicts-title">{{ t('m_10493d06b90f') }} {{ preview.conflicts.length }} {{ t('m_1b9ce5b85eb9') }}</div>
+          <div class="wb-design-conflicts-subtitle">{{ t('m_ae9f3f2f2301') }}</div>
           <ul>
             <li v-for="(conflict, idx) in preview.conflicts" :key="'conflict-' + idx">{{ idx + 1 }}. {{ conflict }}</li>
           </ul>
@@ -833,44 +832,42 @@ const colDefs = [
 
         <!-- 中文修改说明 -->
         <div v-if="preview.humanDescriptions?.length" class="wb-design-human-list">
-          <div class="wb-design-human-title">将要执行的修改：</div>
+          <div class="wb-design-human-title">{{ t('m_f8c752ebfdcd') }}</div>
           <ul>
             <li v-for="(desc, idx) in preview.humanDescriptions" :key="'desc-' + idx">{{ desc }}</li>
           </ul>
         </div>
-        <div v-else-if="!preview.conflicts?.length" class="wb-design-no-changes">
-          没有检测到修改。
-        </div>
+        <div v-else-if="!preview.conflicts?.length" class="wb-design-no-changes"> {{ t('m_170b2e1477c3') }} </div>
 
         <!-- 原始 SQL（可折叠，供高级用户参考） -->
         <details class="wb-design-sql-details">
-          <summary>查看原始 SQL 语句</summary>
+          <summary>{{ t('m_605bf486a7ae') }}</summary>
           <pre class="wb-design-sql"><code>{{ (preview.statements || []).join(";\n") }}</code></pre>
         </details>
 
         <footer class="wb-design-preview-actions">
-          <button type="button" @click="exportErrors">导出报错信息</button>
-          <button type="button" :disabled="saving" @click="closePreviewDialog">取消</button>
-          <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">数据不兼容，无法执行</button>
-          <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">执行 ALTER TABLE</button>
+          <button type="button" @click="exportErrors">{{ t('m_15730403e341') }}</button>
+          <button type="button" :disabled="saving" @click="closePreviewDialog">{{ t('m_2cd0f3be8738') }}</button>
+          <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">{{ t('m_0656d19dd4a5') }}</button>
+          <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">{{ t('m_881f5971987d') }}</button>
         </footer>
       </section>
     </div>
 
     <!-- Comment Dialog -->
     <div v-if="commentDialog.open" class="wb-design-comment-dialog-overlay">
-      <div ref="commentDialogRef" class="wb-design-comment-dialog" role="dialog" aria-modal="true" aria-label="编辑备注" tabindex="-1">
+      <div ref="commentDialogRef" class="wb-design-comment-dialog" role="dialog" aria-modal="true" :aria-label="t('m_2d22af42a79f')" tabindex="-1">
         <header class="wb-design-comment-dialog-header">
-          <span>编辑字段备注</span>
+          <span>{{ t('m_df99e81b3dea') }}</span>
           <button type="button" class="wb-dialog-close" @click="closeCommentDialog(false)">&times;</button>
         </header>
         <div class="wb-design-comment-dialog-body">
           <div class="wb-design-comment-dialog-edit">
-            <label class="wb-design-comment-dialog-label">编辑 (支持 Markdown)</label>
-            <textarea v-model="commentDialog.value" placeholder="输入备注内容，支持 Markdown 格式…"></textarea>
+            <label class="wb-design-comment-dialog-label">{{ t('m_ea9008f9e495') }}</label>
+            <textarea v-model="commentDialog.value" :placeholder="t('m_5d8a2f9fc808')"></textarea>
           </div>
           <div class="wb-design-comment-dialog-preview">
-            <label class="wb-design-comment-dialog-label">实时预览</label>
+            <label class="wb-design-comment-dialog-label">{{ t('m_a76fdaad7519') }}</label>
             <div
               class="wb-design-comment-dialog-preview-content"
               v-html="commentPreviewHtml"
@@ -878,8 +875,8 @@ const colDefs = [
           </div>
         </div>
         <footer class="wb-design-comment-dialog-actions">
-          <button type="button" @click="closeCommentDialog(false)">取消</button>
-          <button type="button" class="wb-design-primary" @click="closeCommentDialog(true)">保存备注</button>
+          <button type="button" @click="closeCommentDialog(false)">{{ t('m_2cd0f3be8738') }}</button>
+          <button type="button" class="wb-design-primary" @click="closeCommentDialog(true)">{{ t('m_4f8b0ab088ec') }}</button>
         </footer>
       </div>
     </div>

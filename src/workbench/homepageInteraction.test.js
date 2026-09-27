@@ -1,11 +1,11 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const read = (path) => readFileSync(join(__dirname, path), "utf8");
+const read = (path) => readLocalizedContractSource(join(__dirname, path), "utf8");
 
 test("homepage tab stays first across restoration and tab dragging", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
@@ -182,7 +182,7 @@ test("homepage context menu deletes the complete multi-table selection after con
   const home = read("./components/DatabaseHome.vue");
   const orchestrator = read("./MySqlWorkbench.vue");
 
-  assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*`删除 \$\{menu\.selectedNames\.length\} 张表`\s*:\s*"删除表"\)/);
+  assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*`删除 \$\{menu\.selectedNames\.length\} 张表`\s*:\s*["']删除表["']\)/);
   assert.match(home, /menu\.selectedNames\s*=\s*\[\.\.\.controller\.selectedNames\.value\]/);
   assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*><Trash2 :size="14" class="wb-context-icon"[^>]*\/>\{\{ deleteMenuLabel \}\}<\/button>/);
   assert.match(home, /if\s*\(tableName\s*&&\s*!controller\.selectedSet\.value\.has\(tableName\)\)\s*controller\.selectTable\(tableName,\s*\{\}\)/);

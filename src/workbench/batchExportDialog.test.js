@@ -1,12 +1,12 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dialog = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
-const transfer = readFileSync(join(__dirname, "composables", "useBatchTransfer.js"), "utf8");
+const dialog = readLocalizedContractSource(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
+const transfer = readLocalizedContractSource(join(__dirname, "composables", "useBatchTransfer.js"), "utf8");
 
 test("batch export can replace its selection with the current search results", () => {
   assert.match(dialog, /仅选搜索结果/);

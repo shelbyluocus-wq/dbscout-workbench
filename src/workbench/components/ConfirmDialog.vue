@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { ref } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 
@@ -36,7 +37,7 @@ useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
         <button
           type="button"
           class="wb-dialog-close"
-          aria-label="关闭"
+          :aria-label="t('m_3fd47edce45b')"
           @click="emit('cancel')"
         >
           ×
@@ -44,7 +45,7 @@ useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
       </header>
       <div class="wb-confirm-body">
         <p v-if="message" class="wb-confirm-message">{{ message }}</p>
-        <ul v-if="items.length" class="wb-confirm-item-list" aria-label="操作对象列表">
+        <ul v-if="items.length" class="wb-confirm-item-list" :aria-label="t('m_6c8b6da2e9f5')">
           <li v-for="item in items" :key="item" :title="item">{{ item }}</li>
         </ul>
         <p v-if="note" class="wb-confirm-note">{{ note }}</p>

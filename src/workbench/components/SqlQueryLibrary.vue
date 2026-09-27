@@ -1,4 +1,5 @@
 <script setup>
+import { language, t } from "../i18n/index.js";
 import { computed, nextTick, onMounted, ref } from "vue";
 import {
   ArrowRight,
@@ -111,7 +112,7 @@ function updatedLabel(value) {
   if (elapsed < hour) return `${Math.floor(elapsed / minute)} 分钟前`;
   if (elapsed < day) return `${Math.floor(elapsed / hour)} 小时前`;
   if (elapsed < 7 * day) return `${Math.floor(elapsed / day)} 天前`;
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" }).format(timestamp);
+  return new Intl.DateTimeFormat(language.intlLocale.value, { month: "2-digit", day: "2-digit" }).format(timestamp);
 }
 
 function startRename(document) {
@@ -166,17 +167,17 @@ onMounted(() => {
   <section class="wb-sql-library">
     <header class="wb-sql-library-header">
       <div>
-        <h2>SQL 查询</h2>
-        <p>{{ documents.length }} 个查询文档</p>
+        <h2>{{ t('m_6369c8800ff1') }}</h2>
+        <p>{{ documents.length }} {{ t('m_17f2688f41dd') }}</p>
       </div>
       <div class="wb-sql-library-header-actions">
-        <button type="button" title="打开 SQL 文件" @click="emit('open-file', { path: '' })">
+        <button type="button" :title="t('m_fa8c496e0eb5')" @click="emit('open-file', { path: '' })">
           <FileInput :size="15" />
-          <span>打开文件</span>
+          <span>{{ t('m_4c8a4e3da39e') }}</span>
         </button>
         <button type="button" class="is-primary" @click="emit('new-query', {})">
           <Plus :size="15" />
-          <span>新建查询</span>
+          <span>{{ t('m_342c248eb6b7') }}</span>
         </button>
       </div>
     </header>
@@ -184,26 +185,26 @@ onMounted(() => {
     <div class="wb-sql-library-toolbar">
       <label class="wb-sql-library-search">
         <Search :size="15" aria-hidden="true" />
-        <input v-model="query" type="search" placeholder="搜索查询名称或 SQL" />
-        <button v-if="query" type="button" title="清空搜索" aria-label="清空搜索" @click="query = ''"><X :size="14" /></button>
+        <input v-model="query" type="search" :placeholder="t('m_38059436f49a')" />
+        <button v-if="query" type="button" :title="t('m_b6f00afa6537')" :aria-label="t('m_b6f00afa6537')" @click="query = ''"><X :size="14" /></button>
       </label>
       <label class="wb-sql-library-filter">
-        <span>连接</span>
+        <span>{{ t('m_a5574109f020') }}</span>
         <select v-model="connectionFilter">
-          <option value="">全部连接</option>
+          <option value="">{{ t('m_dbb2c7b44300') }}</option>
           <option v-for="option in connectionOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
         </select>
       </label>
       <button type="button" class="wb-sql-library-history-button" @click="openHistory">
         <BookOpen :size="15" />
-        <span>查询历史</span>
+        <span>{{ t('m_e74d81c0d444') }}</span>
       </button>
     </div>
 
     <div class="wb-sql-library-scroll">
       <section class="wb-sql-library-section" aria-labelledby="sql-document-heading">
         <div class="wb-sql-library-section-heading">
-          <h3 id="sql-document-heading">查询文档</h3>
+          <h3 id="sql-document-heading">{{ t('m_815a013f4853') }}</h3>
           <span>{{ filteredDocuments.length }}</span>
         </div>
 
@@ -234,7 +235,7 @@ onMounted(() => {
                     ref="renameInputRef"
                     v-model="renameDraft"
                     maxlength="120"
-                    aria-label="查询名称"
+                    :aria-label="t('m_4f4017307cfc')"
                     @keydown.enter.prevent.stop="finishRename(document)"
                     @keydown.esc.prevent.stop="cancelRename"
                     @blur="finishRename(document)"
@@ -249,24 +250,24 @@ onMounted(() => {
               </span>
             </div>
             <div class="wb-sql-library-row-actions">
-              <button type="button" title="重命名" aria-label="重命名查询" @click="startRename(document)"><Pencil :size="14" /></button>
-              <button type="button" title="复制查询" aria-label="复制查询" @click="emit('duplicate-query', { documentId: document.id })"><Copy :size="14" /></button>
-              <button type="button" class="is-danger" title="删除查询" aria-label="删除查询" @click="emit('delete-query', { documentId: document.id })"><Trash2 :size="14" /></button>
-              <button type="button" title="打开查询" aria-label="打开查询" @click="emit('open-query', { documentId: document.id })"><ArrowRight :size="15" /></button>
+              <button type="button" :title="t('m_0d0cbac2eee5')" :aria-label="t('m_b82664404744')" @click="startRename(document)"><Pencil :size="14" /></button>
+              <button type="button" :title="t('m_67f297ef42b8')" :aria-label="t('m_67f297ef42b8')" @click="emit('duplicate-query', { documentId: document.id })"><Copy :size="14" /></button>
+              <button type="button" class="is-danger" :title="t('m_1b755b369241')" :aria-label="t('m_1b755b369241')" @click="emit('delete-query', { documentId: document.id })"><Trash2 :size="14" /></button>
+              <button type="button" :title="t('m_3ad1a90f4275')" :aria-label="t('m_3ad1a90f4275')" @click="emit('open-query', { documentId: document.id })"><ArrowRight :size="15" /></button>
             </div>
           </article>
         </div>
 
         <div v-else class="wb-sql-library-empty">
           <FileCode2 :size="24" aria-hidden="true" />
-          <p>{{ query || connectionFilter ? '没有匹配的查询文档' : '暂无查询文档' }}</p>
-          <button v-if="!query && !connectionFilter" type="button" @click="emit('new-query', {})"><Plus :size="15" />新建查询</button>
+          <p>{{ query || connectionFilter ? t('m_c526e3c5207b') : t('m_efe148ec41c6') }}</p>
+          <button v-if="!query && !connectionFilter" type="button" @click="emit('new-query', {})"><Plus :size="15" />{{ t('m_342c248eb6b7') }}</button>
         </div>
       </section>
 
       <section v-if="filteredRecentFiles.length" class="wb-sql-library-section is-recent" aria-labelledby="sql-recent-heading">
         <div class="wb-sql-library-section-heading">
-          <h3 id="sql-recent-heading">最近文件</h3>
+          <h3 id="sql-recent-heading">{{ t('m_a686e6436452') }}</h3>
           <span>{{ filteredRecentFiles.length }}</span>
         </div>
         <div class="wb-sql-library-recent-list">
@@ -276,7 +277,7 @@ onMounted(() => {
               <span><strong>{{ file.fileName }}</strong><code>{{ file.path }}</code></span>
               <small>{{ updatedLabel(file.openedAt) }}</small>
             </button>
-            <button type="button" title="从最近文件移除" aria-label="从最近文件移除" @click="removeRecentFile(file)"><X :size="14" /></button>
+            <button type="button" :title="t('m_0249523e3886')" :aria-label="t('m_0249523e3886')" @click="removeRecentFile(file)"><X :size="14" /></button>
           </article>
         </div>
       </section>

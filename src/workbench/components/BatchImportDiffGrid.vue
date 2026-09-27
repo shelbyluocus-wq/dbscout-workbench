@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   CirclePlus,
@@ -731,7 +732,7 @@ function placeholderText(side) {
       <div class="wb-batch-diff-heads" :style="splitGridStyle">
         <div v-for="side in ['after', 'before']" :key="side" class="wb-batch-diff-pane-head" :class="{ 'is-before': side === 'before' }">
           <div class="wb-batch-diff-caption" :class="`is-${side}`">
-            {{ side === "after" ? "Excel 导入数据（新）" : "数据库当前数据（旧）" }}
+            {{ side === "after" ? t('m_1118de4dafc8') : t('m_a9b6c69f91f2') }}
           </div>
           <div class="wb-batch-diff-headrow">
             <span class="wb-batch-diff-status-head" aria-hidden="true"></span>
@@ -746,7 +747,7 @@ function placeholderText(side) {
                   :aria-valuemin="MIN_COL_WIDTH"
                   :aria-valuemax="MAX_COL_WIDTH"
                   :aria-valuenow="widthFor(column.name)"
-                  title="拖动调整列宽，双击自动适配"
+                  :title="t('m_3d2777fc846a')"
                   @pointerdown.stop.prevent="beginColumnResize(column.name, $event)"
                   @dblclick.stop.prevent="autoFitColumn(column.name)"
                   @keydown="resizeColumnWithKeyboard(column.name, $event)"
@@ -765,7 +766,7 @@ function placeholderText(side) {
                     :aria-valuemin="MIN_COL_WIDTH"
                     :aria-valuemax="MAX_COL_WIDTH"
                     :aria-valuenow="widthFor(column.name)"
-                    title="拖动调整列宽，双击自动适配"
+                    :title="t('m_3d2777fc846a')"
                     @pointerdown.stop.prevent="beginColumnResize(column.name, $event)"
                     @dblclick.stop.prevent="autoFitColumn(column.name)"
                     @keydown="resizeColumnWithKeyboard(column.name, $event)"
@@ -864,7 +865,7 @@ function placeholderText(side) {
               >
                 <span v-if="row.status === 'error'" class="wb-batch-diff-cell is-error-text">{{ side === "after" ? row.error : "" }}</span>
                 <span v-else-if="!hasSide(row, side)" class="wb-batch-diff-cell is-placeholder-row">— {{ placeholderText(side) }} —</span>
-                <span v-else-if="!scrollColumns.length" class="wb-batch-diff-cell is-placeholder-row">没有可显示的普通字段</span>
+                <span v-else-if="!scrollColumns.length" class="wb-batch-diff-cell is-placeholder-row">{{ t('m_3b9cfdf1328e') }}</span>
                 <span
                   v-for="column in scrollColumns"
                   v-else
@@ -895,8 +896,8 @@ function placeholderText(side) {
           class="wb-batch-diff-detail-resizer"
           role="separator"
           aria-orientation="horizontal"
-          aria-label="调整详情区高度"
-          title="拖动调整详情区高度，双击恢复默认"
+          :aria-label="t('m_1c4a2e14f068')"
+          :title="t('m_745b1e3652e8')"
           tabindex="0"
           @mousedown="onDetailResizerMouseDown"
           @dblclick="resetDetailHeight"
@@ -906,22 +907,22 @@ function placeholderText(side) {
           <template v-if="selectedCell">
             <strong>{{ selectedCell.column }}</strong>
             <span>{{ identityText(selectedCell.row) }} · {{ locationText(selectedCell.row) }}</span>
-            <button type="button" aria-label="清除单元格选择" @click="selectedCell = null">×</button>
+            <button type="button" :aria-label="t('m_4c881b28045b')" @click="selectedCell = null">×</button>
           </template>
-          <span v-else class="wb-batch-diff-detail-hint">点击单元格或按方向键，在这里查看完整内容</span>
+          <span v-else class="wb-batch-diff-detail-hint">{{ t('m_dd1843e49dd2') }}</span>
         </header>
         <div v-if="selectedCell" class="wb-batch-diff-detail-panes" :style="splitGridStyle">
           <section v-if="hasSide(selectedCell.row, 'after')">
-            <label>Excel 导入数据（新）</label>
+            <label>{{ t('m_1118de4dafc8') }}</label>
             <pre v-html="cellSearchResult(selectedCell.row, selectedCell.column, 'after').fullHtml"></pre>
           </section>
           <section v-if="hasSide(selectedCell.row, 'before')">
-            <label>数据库当前数据（旧）</label>
+            <label>{{ t('m_a9b6c69f91f2') }}</label>
             <pre v-html="cellSearchResult(selectedCell.row, selectedCell.column, 'before').fullHtml"></pre>
           </section>
         </div>
         <div v-else class="wb-batch-diff-detail-panes is-empty">
-          <p>新旧两侧的完整值会在这里对照显示</p>
+          <p>{{ t('m_3085ccddc0f2') }}</p>
         </div>
       </div>
       <div
@@ -930,11 +931,11 @@ function placeholderText(side) {
         role="separator"
         tabindex="0"
         aria-orientation="vertical"
-        aria-label="调整左右对照栏宽度"
+        :aria-label="t('m_2602e5c4fad3')"
         :aria-valuemin="20"
         :aria-valuemax="80"
         :aria-valuenow="Math.round(paneRatio * 100)"
-        title="拖动调整左右宽度，双击恢复对半"
+        :title="t('m_0b53f39d2f29')"
         @pointerdown.stop.prevent="onPaneResizerPointerDown"
         @dblclick.stop.prevent="resetPaneRatio"
         @keydown="onPaneResizerKeydown"
@@ -950,8 +951,6 @@ function placeholderText(side) {
       </p>
     </div>
 
-    <button v-if="hiddenCount" type="button" class="wb-batch-diff-more" @click="visibleCount += PAGE_SIZE">
-      显示更多（剩余 {{ hiddenCount }} 条）
-    </button>
+    <button v-if="hiddenCount" type="button" class="wb-batch-diff-more" @click="visibleCount += PAGE_SIZE"> {{ t('m_51a5f415b032') }} {{ hiddenCount }} {{ t('m_34265e57698b') }} </button>
   </div>
 </template>

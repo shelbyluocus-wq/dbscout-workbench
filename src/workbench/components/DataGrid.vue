@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
@@ -111,47 +112,48 @@ const canImport = computed(() => connectionHasCapability(props.engineKind || "my
 const canFindReplace = computed(() => connectionHasCapability(props.engineKind || "mysql", "findReplace") && !activeTabReadOnly.value);
 const activeFilterMode = computed(() => normalizeTableFilterMode(props.tab?.filterMode));
 const activeFilterModeLabel = computed(() => ({
-  exact: "精确",
-  continuous: "连续",
-  fuzzy: "模糊",
+  exact: t('m_235532a9c16b'),
+  continuous: t('m_53b333e7b09d'),
+  fuzzy: t('m_36bab7a3de7f'),
 })[activeFilterMode.value]);
 const filterModeItems = computed(() => ([
   {
     id: "filter-continuous",
-    label: "连续",
-    hint: "单元格内连续包含整段文字",
+    label: t('m_53b333e7b09d'),
+    hint: t('m_93fe28912909'),
     checkable: true,
     checked: activeFilterMode.value === "continuous",
   },
   {
     id: "filter-exact",
-    label: "精确",
-    hint: "单元格内容完全相等",
+    label: t('m_235532a9c16b'),
+    hint: t('m_6b3862236d51'),
     checkable: true,
     checked: activeFilterMode.value === "exact",
   },
   {
     id: "filter-fuzzy",
-    label: "模糊",
-    hint: "允许字符分散出现或近似匹配",
+    label: t('m_36bab7a3de7f'),
+    hint: t('m_518505e811fe'),
     checkable: true,
     checked: activeFilterMode.value === "fuzzy",
   },
 ]));
 const exportItems = computed(() => ([
-  { id: "batch-export", label: "批量导出", hint: "导出多张表", icon: "export", disabled: props.busy },
+  { id: "batch-export", label: t('m_d2fcdde81f06'), hint: t('m_5a41196d9d96'), icon: "export", disabled: props.busy },
 ]));
 const importActions = computed(() => createTableImportToolbarActions({
   busy: props.busy,
   hasSession: Boolean(props.tab?.sessionId),
   readOnly: activeTabReadOnly.value,
   canImport: canImport.value,
+  translate: t,
 }));
 const importItems = computed(() => importActions.value.menuItems);
-const splitItems = [
-  { id: "split-right", label: "左右分屏", hint: "在右侧打开", icon: "split-right" },
-  { id: "split-down", label: "上下分屏", hint: "在下方打开", icon: "split-down" },
-];
+const splitItems = computed(() => [
+  { id: "split-right", label: t('m_62ed1b06404f'), hint: t('m_f4c8bce46e1b'), icon: "split-right" },
+  { id: "split-down", label: t('m_3d63360a3d6e'), hint: t('m_6c7496f180d1'), icon: "split-down" },
+]);
 const hasActiveCellSearch = computed(() => Boolean(
   String(props.tab?.searchQuery ?? props.tab?.filter ?? "").trim(),
 ));
@@ -170,15 +172,15 @@ const loadedRangeLabel = computed(() => {
   const start = rowWindowOffset.value + 1;
   const end = rowWindowOffset.value + loadedRowCount.value;
   const total = Math.max(0, Math.floor(Number(props.tab?.totalRows) || 0));
-  if (!loadedRowCount.value) return "暂无数据";
-  if (rowWindowOffset.value > 0) return `已到最后一行 · 第 ${start}–${end} 行 / 共 ${total} 行`;
-  return `已加载全部 ${loadedRowCount.value} 行`;
+  if (!loadedRowCount.value) return t('m_497c85690c4c');
+  if (rowWindowOffset.value > 0) return t('m_ec3adf524ae4', { start, end, total });
+  return t('m_ff9c1fbf5115', { count: loadedRowCount.value });
 });
 const boundaryNavigationDisabledReason = computed(() => {
   if (!props.tab?.searchResultMode) return "";
   return props.tab?.searchResultComplete
-    ? "搜索结果视图中不可用，请先清除搜索"
-    : "正在扫描全表，完成或清除搜索后可用";
+    ? t('m_99858e1da8a9')
+    : t('m_9b2de0a6ccd0');
 });
 
 function dataRowKey(tab, row, rowIndex) {
@@ -295,47 +297,47 @@ const freezeTarget = computed(() => resolveFreezeTarget({
 const freezeItems = computed(() => ([
   {
     id: "freeze-cell",
-    label: "冻结到当前单元格",
+    label: t('m_4fddbab9e400'),
     icon: "freeze-cell",
     disabled: freezeTarget.value?.kind !== "cell",
   },
   {
     id: "freeze-row",
-    label: "冻结到当前行",
+    label: t('m_77fe132643d6'),
     icon: "freeze-row",
     disabled: freezeTarget.value?.kind !== "cell",
   },
   {
     id: "freeze-column",
-    label: "冻结到当前列",
+    label: t('m_1ad2aff90018'),
     icon: "freeze-column",
     disabled: !freezeTarget.value,
   },
-  { id: "freeze-top-row", label: "冻结首行", icon: "freeze-row" },
-  { id: "freeze-first-column", label: "冻结首列", icon: "freeze-column" },
-  { id: "unfreeze", label: "取消冻结", icon: "unfreeze", disabled: !hasFreeze.value },
+  { id: "freeze-top-row", label: t('m_d1ec96b9a1c9'), icon: "freeze-row" },
+  { id: "freeze-first-column", label: t('m_e6f957238ec6'), icon: "freeze-column" },
+  { id: "unfreeze", label: t('m_0592dd0b34a5'), icon: "unfreeze", disabled: !hasFreeze.value },
 ]));
 const compactActionItems = computed(() => ([
   ...freezeItems.value,
   {
     id: "replace",
-    label: "查找替换",
-    hint: "在当前表内查找并替换 (Ctrl+H)",
+    label: t('m_d688f871711e'),
+    hint: t('m_a89a70b335c6'),
     icon: "replace",
     disabled: props.busy || !props.tab?.sessionId || !canFindReplace.value,
     separatorBefore: true,
   },
   {
     id: "export-current",
-    label: "导出当前表",
-    hint: "导出当前打开的数据表",
+    label: t('m_4a964617f078'),
+    hint: t('m_4c3fa3b8f8c2'),
     icon: "export",
     disabled: props.busy,
     separatorBefore: true,
   },
   ...exportItems.value,
   ...importActions.value.compactItems,
-  ...splitItems.map((item, index) => ({
+  ...splitItems.value.map((item, index) => ({
     ...item,
     separatorBefore: index === 0,
   })),
@@ -1165,18 +1167,18 @@ function handleTableContextMenu(event) {
           ref="searchInputRef"
           :value="searchInputValue"
           class="wb-table-search-field-input"
-          placeholder="搜索当前表"
-          :aria-label="'搜索当前表，当前使用' + activeFilterModeLabel + '匹配'"
+          :placeholder="t('m_ec5bc63d86be')"
+          :aria-label="t('m_b5cc536d9b6a') + activeFilterModeLabel + t('m_fd047ccb2020')"
           @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
         <div class="wb-search-aux">
-          <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" aria-label="命中导航">
+          <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
             <button
               class="wb-search-nav-icon"
               type="button"
-              aria-label="上一个匹配"
-              title="上一个匹配"
+              :aria-label="t('m_64d57ad378df')"
+              :title="t('m_64d57ad378df')"
               @click="emit('search-previous')"
             >
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1186,8 +1188,8 @@ function handleTableContextMenu(event) {
             <button
               class="wb-search-nav-icon"
               type="button"
-              aria-label="下一个匹配"
-              title="下一个匹配"
+              :aria-label="t('m_84cb6a31b9f5')"
+              :title="t('m_84cb6a31b9f5')"
               @click="emit('search-next')"
             >
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1199,13 +1201,13 @@ function handleTableContextMenu(event) {
             v-if="searchHitSummary.label"
             class="wb-search-hit-count"
             aria-live="polite"
-            :title="'当前命中 / 命中总数：' + searchHitSummary.label"
+            :title="t('m_99d286bd4d75') + searchHitSummary.label"
           >{{ searchHitSummary.label }}</span>
         </div>
         <ToolbarSplitButton
           class="wb-search-mode-control"
           :label="activeFilterModeLabel"
-          menu-label="搜索匹配方式"
+          :menu-label="t('m_6ff93bc2bb48')"
           primary-opens-menu
           single-trigger
           :open="openToolbarMenu === 'filter'"
@@ -1215,18 +1217,18 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
       </div>
-      <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? '降序' : '升序'}，点击清除`">
+      <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? t('m_4b77c3546823') : t('m_ca715c0d8d83')}，点击清除`">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
-        <button type="button" class="wb-sort-chip-clear" aria-label="清除排序" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
+        <button type="button" class="wb-sort-chip-clear" :aria-label="t('m_cdf8bcd4bfe2')" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
       </span>
-      <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" aria-label="结构命中导航">
+      <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" :aria-label="t('m_c580b133f2e9')">
         <span>{{ schemaSearchSummary }}</span>
         <button
           class="wb-search-nav-icon"
           type="button"
-          aria-label="上一个结构命中"
-          title="上一个结构命中"
+          :aria-label="t('m_203b7b74375d')"
+          :title="t('m_203b7b74375d')"
           @click="emit('schema-search-previous')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1236,8 +1238,8 @@ function handleTableContextMenu(event) {
         <button
           class="wb-search-nav-icon"
           type="button"
-          aria-label="下一个结构命中"
-          title="下一个结构命中"
+          :aria-label="t('m_5664cc626e5c')"
+          :title="t('m_5664cc626e5c')"
           @click="emit('schema-search-next')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1245,22 +1247,22 @@ function handleTableContextMenu(event) {
           </svg>
         </button>
       </span>
-      <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" aria-label="表操作">
+      <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" :aria-label="t('m_e3244d705db7')">
         <button
           type="button"
           class="wb-toolbar-action-button wb-table-action-button"
-          aria-label="查找替换"
-          title="查找替换 (Ctrl+H)"
+          :aria-label="t('m_d688f871711e')"
+          :title="t('m_73f15c6f54f1')"
           :disabled="busy || !tab.sessionId || !canFindReplace"
           @click="emit('replace')"
         >
           <ToolbarActionIcon name="replace" />
-          <span class="wb-toolbar-action-label">替换</span>
+          <span class="wb-toolbar-action-label">{{ t('m_131b13aa2659') }}</span>
         </button>
         <ToolbarSplitButton
-          label="冻结"
+          :label="t('m_0eafcb149bcd')"
           icon="freeze"
-          menu-label="冻结选项"
+          :menu-label="t('m_4684f4302165')"
           :active="hasFreeze"
           :open="openToolbarMenu === 'freeze'"
           :items="freezeItems"
@@ -1270,9 +1272,9 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
-          label="导出"
+          :label="t('m_76420433f22d')"
           icon="export"
-          menu-label="导出选项"
+          :menu-label="t('m_afa1ad958c25')"
           :open="openToolbarMenu === 'export'"
           :items="exportItems"
           :primary-disabled="busy"
@@ -1296,9 +1298,9 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
-          label="分屏"
+          :label="t('m_666ec3442af3')"
           icon="split-right"
-          menu-label="分屏选项"
+          :menu-label="t('m_6f718069947d')"
           :open="openToolbarMenu === 'split'"
           :items="splitItems"
           @primary="emit('split-pane', 'right')"
@@ -1309,9 +1311,9 @@ function handleTableContextMenu(event) {
       </div>
       <ToolbarSplitButton
         class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"
-        label="更多"
+        :label="t('m_38844b135cf7')"
         icon="more"
-        menu-label="表操作"
+        :menu-label="t('m_e3244d705db7')"
         primary-opens-menu
         single-trigger
         :open="openToolbarMenu === 'compact'"
@@ -1333,7 +1335,7 @@ function handleTableContextMenu(event) {
         :aria-activedescendant="activeCellDomId || undefined"
         :aria-busy="tab.loading || tab.loadingMore || busy"
         aria-multiselectable="true"
-        :aria-label="`${tab.tableName || '数据表'} 数据网格`"
+        :aria-label="`${tab.tableName || t('m_187288e87023')} 数据网格`"
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
@@ -1341,7 +1343,7 @@ function handleTableContextMenu(event) {
       >
         <div v-if="tab.loading" class="wb-grid-loading">
           <span class="wb-grid-loading-spinner" aria-hidden="true"></span>
-          <span class="wb-grid-loading-text">加载中…</span>
+          <span class="wb-grid-loading-text">{{ t('m_4927a53bcc88') }}</span>
         </div>
         <div v-else-if="tab.loadError" class="wb-grid-error">
           <svg class="wb-grid-error-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1349,9 +1351,9 @@ function handleTableContextMenu(event) {
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
-          <p class="wb-grid-error-title">加载失败</p>
+          <p class="wb-grid-error-title">{{ t('m_d1d044826a45') }}</p>
           <p class="wb-grid-error-detail">{{ tab.loadError }}</p>
-          <button type="button" class="wb-grid-error-retry" @click="emit('retry-load', tab)">重试</button>
+          <button type="button" class="wb-grid-error-retry" @click="emit('retry-load', tab)">{{ t('m_b8784c8dd563') }}</button>
         </div>
         <table class="wb-grid" :data-grid-id="gridInstanceId">
         <thead>
@@ -1360,7 +1362,7 @@ function handleTableContextMenu(event) {
               class="wb-row-index wb-row-index-corner"
               role="columnheader"
               :class="{ 'row-selected': loadedRowCount + visibleInsertRowCount > 0 && tab.selectedRowKeys.size === loadedRowCount + visibleInsertRowCount }"
-              title="选择全部行"
+              :title="t('m_b82fe8d0afb1')"
               @click="emit('toggle-all-rows', tab)"
             ></th>
             <template v-for="columnMeta in renderCellColumns" :key="columnMeta.name">
@@ -1420,12 +1422,12 @@ function handleTableContextMenu(event) {
               <button
                 type="button"
                 class="wb-field-comments-toggle"
-                :title="fieldCommentsExpanded ? '收起字段备注' : '展开字段备注'"
-                :aria-label="fieldCommentsExpanded ? '收起字段备注' : '展开字段备注'"
+                :title="fieldCommentsExpanded ? t('m_384f890e67df') : t('m_e83e4573c434')"
+                :aria-label="fieldCommentsExpanded ? t('m_384f890e67df') : t('m_e83e4573c434')"
                 :aria-expanded="fieldCommentsExpanded ? 'true' : 'false'"
                 @click.stop="toggleFieldComments"
               >
-                <span>注</span>
+                <span>{{ t('m_7d053f4bf3af') }}</span>
                 <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <polyline :points="fieldCommentsExpanded ? '2,5.5 4.5,3 7,5.5' : '2,3.5 4.5,6 7,3.5'" />
                 </svg>
@@ -1434,8 +1436,8 @@ function handleTableContextMenu(event) {
                 class="wb-row-resize-handle wb-field-comments-resize-handle"
                 role="separator"
                 aria-orientation="horizontal"
-                aria-label="拖动调整字段备注行高度，双击恢复默认"
-                title="拖动调整字段备注行高度 · 双击恢复默认"
+                :aria-label="t('m_377b68b9f7f3')"
+                :title="t('m_a699e7805a43')"
                 @pointerdown="startRowResize($event, 'fieldComment')"
                 @dblclick.stop.prevent="resetRowHeight('fieldComment')"
               ></span>
@@ -1452,7 +1454,7 @@ function handleTableContextMenu(event) {
                 'frozen-col-edge': isLastFrozenColumn(columnMeta.columnIndex),
               }"
               :style="mergeStyles(colStyle(tab, columnMeta.name), frozenColumnStyle(columnMeta.columnIndex))"
-              :title="columnMeta.comment || '暂无字段备注'"
+              :title="columnMeta.comment || t('m_d631217b36b5')"
               @click.stop="selectFieldComment(columnMeta)"
             >
               <span
@@ -1515,8 +1517,8 @@ function handleTableContextMenu(event) {
                 class="wb-row-index wb-row-insert-marker wb-row-header"
                 role="rowheader"
                 :class="{ 'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)) }"
-                title="新增未保存"
-                aria-label="新增未保存行"
+                :title="t('m_055443fb169a')"
+                :aria-label="t('m_6146d3f24846')"
                 @mousedown.left.stop.prevent="onRowSelectStart(tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex), $event)"
                 @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), anchoredInsertVisualIndex(originalIndex, insertRowIndex))"
@@ -1526,8 +1528,8 @@ function handleTableContextMenu(event) {
                   <button
                     type="button"
                     :disabled="isInsertRowSaving(tab, insertRow.id)"
-                    aria-label="保存新增行"
-                    title="保存新增行"
+                    :aria-label="t('m_647ca7fb1e5c')"
+                    :title="t('m_647ca7fb1e5c')"
                     @click.stop="emit('save-insert-row', tab, insertRow.id)"
                   >
                     <LoaderCircle v-if="isInsertRowSaving(tab, insertRow.id)" class="is-spinning" :size="13" aria-hidden="true" />
@@ -1536,8 +1538,8 @@ function handleTableContextMenu(event) {
                   <button
                     type="button"
                     :disabled="isInsertRowSaving(tab, insertRow.id)"
-                    aria-label="取消新增行"
-                    title="取消新增行"
+                    :aria-label="t('m_ce86ba72a588')"
+                    :title="t('m_ce86ba72a588')"
                     @click.stop="emit('cancel-insert-row', tab, insertRow.id)"
                   ><X :size="13" aria-hidden="true" /></button>
                 </span>
@@ -1545,8 +1547,8 @@ function handleTableContextMenu(event) {
                   class="wb-row-resize-handle"
                   role="separator"
                   aria-orientation="horizontal"
-                  aria-label="拖动调整全部数据行高度，双击恢复默认"
-                  title="拖动调整全部数据行高度 · 双击恢复默认"
+                  :aria-label="t('m_50393189c2e8')"
+                  :title="t('m_aff65da3daa5')"
                   @pointerdown="startRowResize($event, 'data')"
                   @dblclick.stop.prevent="resetRowHeight('data')"
                 ></span>
@@ -1636,16 +1638,14 @@ function handleTableContextMenu(event) {
           <!-- 0 行空状态：表加载成功但无数据 -->
           <tr v-if="!tab.loading && !tab.loadError && loadedRowCount === 0 && !hasInsertRows" class="wb-grid-empty-row">
             <td :colspan="1 + renderCellColumns.length" class="wb-grid-empty-cell">
-              <span>{{ tab.filter || tab.sort ? '没有匹配的数据' : '暂无数据' }}</span>
+              <span>{{ tab.filter || tab.sort ? t('m_c8e843a2735a') : t('m_497c85690c4c') }}</span>
               <button
                 v-if="!tab.filter && !tab.sort && !activeTabReadOnly"
                 type="button"
                 class="wb-grid-empty-action"
                 @click.stop="emit('insert-first-row', tab)"
               >
-                <Plus :size="14" aria-hidden="true" />
-                新增第一行
-              </button>
+                <Plus :size="14" aria-hidden="true" /> {{ t('m_189a33254417') }} </button>
             </td>
           </tr>
           <tr
@@ -1664,8 +1664,8 @@ function handleTableContextMenu(event) {
               class="wb-row-index wb-row-insert-marker wb-row-header"
               role="rowheader"
               :class="{ 'row-selected': tab.selectedRowKeys.has(insertRowKey(tab, insertRow)) }"
-              title="新增未保存"
-              aria-label="新增未保存行"
+              :title="t('m_055443fb169a')"
+              :aria-label="t('m_6146d3f24846')"
               @mousedown.left.stop.prevent="onRowSelectStart(tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex), $event)"
               @click.stop="emit('insert-row-select', tab, insertRow.id, $event)"
               @contextmenu.prevent.stop="emit('row-contextmenu', $event, tab, insertRowObject(insertRow), trailingInsertVisualIndex(insertRowIndex))"
@@ -1675,8 +1675,8 @@ function handleTableContextMenu(event) {
                 <button
                   type="button"
                   :disabled="isInsertRowSaving(tab, insertRow.id)"
-                  aria-label="保存新增行"
-                  title="保存新增行"
+                  :aria-label="t('m_647ca7fb1e5c')"
+                  :title="t('m_647ca7fb1e5c')"
                   @click.stop="emit('save-insert-row', tab, insertRow.id)"
                 >
                   <LoaderCircle v-if="isInsertRowSaving(tab, insertRow.id)" class="is-spinning" :size="13" aria-hidden="true" />
@@ -1685,8 +1685,8 @@ function handleTableContextMenu(event) {
                 <button
                   type="button"
                   :disabled="isInsertRowSaving(tab, insertRow.id)"
-                  aria-label="取消新增行"
-                  title="取消新增行"
+                  :aria-label="t('m_ce86ba72a588')"
+                  :title="t('m_ce86ba72a588')"
                   @click.stop="emit('cancel-insert-row', tab, insertRow.id)"
                 ><X :size="13" aria-hidden="true" /></button>
               </span>
@@ -1694,8 +1694,8 @@ function handleTableContextMenu(event) {
                 class="wb-row-resize-handle"
                 role="separator"
                 aria-orientation="horizontal"
-                aria-label="拖动调整全部数据行高度，双击恢复默认"
-                title="拖动调整全部数据行高度 · 双击恢复默认"
+                :aria-label="t('m_50393189c2e8')"
+                :title="t('m_aff65da3daa5')"
                 @pointerdown="startRowResize($event, 'data')"
                 @dblclick.stop.prevent="resetRowHeight('data')"
               ></span>
@@ -1762,12 +1762,12 @@ function handleTableContextMenu(event) {
               <button
                 type="button"
                 class="wb-grid-append-action"
-                title="在表格末尾新增一行"
-                aria-label="在表格末尾新增一行"
+                :title="t('m_e0f80cb19890')"
+                :aria-label="t('m_e0f80cb19890')"
                 @click.stop="emit('append-row', tab)"
               >
                 <Plus :size="14" aria-hidden="true" />
-                <span>新增一行</span>
+                <span>{{ t('m_e712bb66258e') }}</span>
               </button>
             </td>
           </tr>
@@ -1775,7 +1775,7 @@ function handleTableContextMenu(event) {
           <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
             <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell">
               <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
-              <span>加载更多…</span>
+              <span>{{ t('m_58be224a15bb') }}</span>
             </td>
           </tr>
           <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
@@ -1799,13 +1799,13 @@ function handleTableContextMenu(event) {
             type="button"
             class="wb-grid-boundary-pill wb-grid-boundary-pill--top"
             :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
-            title="跳到首行"
-            aria-label="跳到首行"
+            :title="t('m_5fc2469ddd0b')"
+            :aria-label="t('m_5fc2469ddd0b')"
             @click="emit('jump-boundary', 'top')"
           >
             <LoaderCircle v-if="tab.boundaryLoading === 'top'" class="is-spinning" :size="13" aria-hidden="true" />
             <ArrowUpToLine v-else :size="13" aria-hidden="true" />
-            <span>首行</span>
+            <span>{{ t('m_a18bb798f70e') }}</span>
           </button>
         </Transition>
         <Transition name="wb-boundary-pop">
@@ -1814,13 +1814,13 @@ function handleTableContextMenu(event) {
             type="button"
             class="wb-grid-boundary-pill wb-grid-boundary-pill--bottom"
             :disabled="Boolean(tab.boundaryLoading) || tab.loading || !tab.sessionId"
-            title="跳到末行"
-            aria-label="跳到末行"
+            :title="t('m_51857aae27ea')"
+            :aria-label="t('m_51857aae27ea')"
             @click="emit('jump-boundary', 'bottom')"
           >
             <LoaderCircle v-if="tab.boundaryLoading === 'bottom'" class="is-spinning" :size="13" aria-hidden="true" />
             <ArrowDownToLine v-else :size="13" aria-hidden="true" />
-            <span>末行</span>
+            <span>{{ t('m_cea06f008053') }}</span>
           </button>
         </Transition>
       </div>
@@ -1853,8 +1853,8 @@ function handleTableContextMenu(event) {
           v-if="showFillHandle && !isFilling && !isFillDragging"
           type="button"
           class="wb-fill-handle"
-          aria-label="拖动填充"
-          title="拖动填充"
+          :aria-label="t('m_83dfa4b49abe')"
+          :title="t('m_83dfa4b49abe')"
           @mousedown.left.stop.prevent="onFillHandleMouseDown"
         ></button>
         <div v-if="fillOptions && !isFilling && !isFillDragging" class="wb-fill-options">
@@ -1863,8 +1863,8 @@ function handleTableContextMenu(event) {
             class="wb-fill-options-trigger"
             :aria-expanded="fillOptionsOpen"
             aria-haspopup="menu"
-            aria-label="自动填充选项"
-            title="自动填充选项"
+            :aria-label="t('m_062fc75e44bd')"
+            :title="t('m_062fc75e44bd')"
             @mousedown.stop.prevent
             @click.stop="toggleFillOptionsMenu"
           >
@@ -1876,17 +1876,13 @@ function handleTableContextMenu(event) {
               class="wb-fill-options-item"
               :class="{ active: fillOptions.appliedMode === 'series' }"
               @click.stop="chooseFillOption('series')"
-            >
-              填充序列
-            </button>
+            > {{ t('m_8d4a33b55299') }} </button>
             <button
               type="button"
               class="wb-fill-options-item"
               :class="{ active: fillOptions.appliedMode === 'copy' }"
               @click.stop="chooseFillOption('copy')"
-            >
-              复制单元格
-            </button>
+            > {{ t('m_59d8cc2898d8') }} </button>
           </menu>
         </div>
       </div>
@@ -1894,7 +1890,5 @@ function handleTableContextMenu(event) {
 
   </section>
 
-  <section v-else class="wb-empty">
-    从左侧打开一张表，或使用快捷搜索定位。
-  </section>
+  <section v-else class="wb-empty"> {{ t('m_5f6d133c282b') }} </section>
 </template>

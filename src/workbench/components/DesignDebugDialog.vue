@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { nextTick, reactive, ref, watch } from "vue";
 import {
   BORDER_ALPHA_RANGE,
@@ -151,14 +152,14 @@ function onKeydown(event) {
       :data-theme="theme"
       role="dialog"
       aria-modal="false"
-      aria-label="设计调试"
+      :aria-label="t('m_0fe0c819b123')"
       tabindex="-1"
       @keydown="onKeydown"
     >
       <header class="wb-design-debug-header">
-        <strong>设计调试</strong>
-        <span class="wb-design-debug-mode">{{ theme === "dark" ? "深色" : "浅色" }}模式</span>
-        <button type="button" class="wb-design-debug-close" aria-label="关闭" @click="emit('close')">✕</button>
+        <strong>{{ t('m_0fe0c819b123') }}</strong>
+        <span class="wb-design-debug-mode">{{ theme === "dark" ? t('m_a6b75d068032') : t('m_aa0819dfc4d8') }}{{ t('m_47a270081ab2') }}</span>
+        <button type="button" class="wb-design-debug-close" :aria-label="t('m_3fd47edce45b')" @click="emit('close')">✕</button>
       </header>
 
       <div class="wb-design-debug-body">
@@ -174,56 +175,56 @@ function onKeydown(event) {
         </label>
 
         <label class="wb-design-debug-row">
-          <span class="wb-design-debug-label">画布圆角（仅左上角）</span>
+          <span class="wb-design-debug-label">{{ t('m_9315c04282f8') }}</span>
           <input
             v-model.number="radius"
             type="range"
             :min="RADIUS_RANGE.min"
             :max="RADIUS_RANGE.max"
             :step="RADIUS_RANGE.step"
-            aria-label="画布圆角"
+            :aria-label="t('m_0948593eb54f')"
             @input="onRadiusInput"
           />
           <code class="wb-design-debug-value">{{ radius }}px</code>
         </label>
 
         <label class="wb-design-debug-row">
-          <span class="wb-design-debug-label">发丝线浓度</span>
+          <span class="wb-design-debug-label">{{ t('m_3d1630c80dd4') }}</span>
           <input
             v-model.number="borderAlpha"
             type="range"
             :min="BORDER_ALPHA_RANGE.min"
             :max="BORDER_ALPHA_RANGE.max"
             :step="BORDER_ALPHA_RANGE.step"
-            aria-label="发丝线浓度"
+            :aria-label="t('m_3d1630c80dd4')"
             @input="onBorderInput"
           />
           <code class="wb-design-debug-value">{{ borderAlpha.toFixed(2) }}</code>
         </label>
 
         <label class="wb-design-debug-row">
-          <span class="wb-design-debug-label">虚影强度（外框投影）</span>
+          <span class="wb-design-debug-label">{{ t('m_0be82c47974e') }}</span>
           <input
             v-model.number="shadowStrength"
             type="range"
             :min="SHADOW_RANGE.min"
             :max="SHADOW_RANGE.max"
             :step="SHADOW_RANGE.step"
-            aria-label="虚影强度"
+            :aria-label="t('m_b5584ff20d2a')"
             @input="onShadowInput"
           />
           <code class="wb-design-debug-value">{{ shadowStrength.toFixed(2) }}</code>
         </label>
 
         <label class="wb-design-debug-row">
-          <span class="wb-design-debug-label">填充点大小</span>
+          <span class="wb-design-debug-label">{{ t('m_c8e75bb10658') }}</span>
           <input
             v-model.number="fillSize"
             type="range"
             :min="FILL_HANDLE_SIZE_RANGE.min"
             :max="FILL_HANDLE_SIZE_RANGE.max"
             :step="FILL_HANDLE_SIZE_RANGE.step"
-            aria-label="填充点大小"
+            :aria-label="t('m_c8e75bb10658')"
             @input="onFillSizeInput"
           />
           <code class="wb-design-debug-value">{{ fillSize }}px</code>
@@ -231,26 +232,26 @@ function onKeydown(event) {
 
         <div class="wb-design-debug-fill">
           <div class="wb-design-debug-fill-copy">
-            <span class="wb-design-debug-label">填充点坐标</span>
+            <span class="wb-design-debug-label">{{ t('m_baa3de1b0d69') }}</span>
             <code class="wb-design-debug-value">left {{ fillLeft }}px · top {{ fillTop }}px</code>
           </div>
-          <div class="wb-design-debug-fill-pad" role="group" aria-label="方向键微调填充点坐标">
-            <button type="button" class="is-up" aria-label="上移 1 像素" @click="nudgeFill('y', -1)">↑</button>
-            <button type="button" class="is-left" aria-label="左移 1 像素" @click="nudgeFill('x', -1)">←</button>
-            <button type="button" class="is-down" aria-label="下移 1 像素" @click="nudgeFill('y', 1)">↓</button>
-            <button type="button" class="is-right" aria-label="右移 1 像素" @click="nudgeFill('x', 1)">→</button>
+          <div class="wb-design-debug-fill-pad" role="group" :aria-label="t('m_aca777cc23b8')">
+            <button type="button" class="is-up" :aria-label="t('m_5c4e94f926cb')" @click="nudgeFill('y', -1)">↑</button>
+            <button type="button" class="is-left" :aria-label="t('m_7ee4742a6090')" @click="nudgeFill('x', -1)">←</button>
+            <button type="button" class="is-down" :aria-label="t('m_d83a75edea0d')" @click="nudgeFill('y', 1)">↓</button>
+            <button type="button" class="is-right" :aria-label="t('m_a0d36517ab7a')" @click="nudgeFill('x', 1)">→</button>
           </div>
-          <p class="wb-design-debug-fill-hint">方向键每次 1px，范围 {{ FILL_HANDLE_OFFSET_RANGE.min }}～{{ FILL_HANDLE_OFFSET_RANGE.max }}</p>
+          <p class="wb-design-debug-fill-hint">{{ t('m_e9a3aa5cc13d') }} {{ FILL_HANDLE_OFFSET_RANGE.min }}～{{ FILL_HANDLE_OFFSET_RANGE.max }}</p>
         </div>
       </div>
 
       <footer class="wb-design-debug-footer">
         <button type="button" class="wb-design-debug-primary" @click="copyValues">
-          {{ copied ? "已复制 ✓" : "复制当前值" }}
+          {{ copied ? t('m_22240d44ce46') : t('m_86ecb1b34f50') }}
         </button>
-        <button type="button" @click="resetAll">重置</button>
+        <button type="button" @click="resetAll">{{ t('m_cb5d682bac3d') }}</button>
       </footer>
-      <p class="wb-design-debug-hint">仅调试模式显示，改动不保存；调好后点「复制当前值」发给我回填。</p>
+      <p class="wb-design-debug-hint">{{ t('m_13e172af0241') }}</p>
     </section>
   </Teleport>
 </template>

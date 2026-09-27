@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 defineProps({
   tabId: String,
   row: Object,
@@ -47,7 +48,7 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                 role="rowheader"
                 :style="frozenStyle"
                 :class="{ 'wb-frozen-row-index': Boolean(frozenStyle), 'row-selected': rowSelected }"
-                title="选择整行"
+                :title="t('m_c95d805368bd')"
                 @mousedown.left.stop.prevent="emit('row-select-start', row, visualIndex, $event)"
                 @click.stop="emit('toggle-row-select', row, $event)"
                 @contextmenu.prevent.stop="emit('row-contextmenu', $event, row, originalIndex)"
@@ -57,8 +58,8 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                   class="wb-row-resize-handle"
                   role="separator"
                   aria-orientation="horizontal"
-                  aria-label="拖动调整全部数据行高度，双击恢复默认"
-                  title="拖动调整全部数据行高度 · 双击恢复默认"
+                  :aria-label="t('m_50393189c2e8')"
+                  :title="t('m_aff65da3daa5')"
                   @pointerdown="emit('row-resize-start', $event)"
                   @dblclick.stop.prevent="emit('row-resize-reset')"
                 ></span>
@@ -110,7 +111,7 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
-                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" aria-label="SQL NULL；复制时为空白">NULL</span>
+                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" :aria-label="t('m_122f6009c477')">NULL</span>
                 <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightHtml(row, columnMeta.name, rowKey)"></span>
                 <span v-else class="wb-cell-text">{{ displayText(row, columnMeta.name, rowKey) }}</span>
               </td>

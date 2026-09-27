@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 
 const props = defineProps({
@@ -70,12 +71,8 @@ function deny() {
     </div>
 
     <div class="wb-ai-approval-actions">
-      <button type="button" class="wb-ai-btn wb-ai-btn-secondary" @click="deny">
-        拒绝
-      </button>
-      <button type="button" class="wb-ai-btn wb-ai-btn-primary" @click="approve">
-        批准
-      </button>
+      <button type="button" class="wb-ai-btn wb-ai-btn-secondary" @click="deny"> {{ t('m_136de7a8c46f') }} </button>
+      <button type="button" class="wb-ai-btn wb-ai-btn-primary" @click="approve"> {{ t('m_8cbe697b1573') }} </button>
     </div>
   </article>
 </template>

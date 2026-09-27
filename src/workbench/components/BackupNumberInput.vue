@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onUnmounted, ref } from "vue";
 
 import { parseBackupNumberInput, stepBackupNumberValue } from "../utils/backupNumberInput.js";
@@ -95,7 +96,7 @@ onUnmounted(clearLongPressTimers);
         type="button"
         class="wb-backup-number-step"
         tabindex="-1"
-        aria-label="增加"
+        :aria-label="t('m_bce53fe72c92')"
         @mousedown.prevent="onStepPress(1, $event)"
         @mouseup="onStepRelease"
         @mouseleave="onStepRelease"
@@ -107,7 +108,7 @@ onUnmounted(clearLongPressTimers);
         type="button"
         class="wb-backup-number-step"
         tabindex="-1"
-        aria-label="减少"
+        :aria-label="t('m_43c9f2ba7404')"
         @mousedown.prevent="onStepPress(-1, $event)"
         @mouseup="onStepRelease"
         @mouseleave="onStepRelease"

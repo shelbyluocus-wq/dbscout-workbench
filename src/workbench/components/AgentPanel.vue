@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AgentHeader from "./AgentHeader.vue";
 import AgentSettings from "./AgentSettings.vue";
@@ -376,7 +377,7 @@ const agentStatusLabel = computed(() => {
 </script>
 
 <template>
-  <aside class="wb-inspector wb-ai-panel wb-info-pane" aria-label="数据库 Agent">
+  <aside class="wb-inspector wb-ai-panel wb-info-pane" :aria-label="t('m_6da4bc29728a')">
     <AgentOnboarding v-if="needsOnboarding" :assistant="assistant" />
 
     <template v-else>
@@ -449,7 +450,7 @@ const agentStatusLabel = computed(() => {
         type="button"
         class="wb-ai-scroll-bottom"
         @click="scrollConversationToBottom"
-      >跳到底部</button>
+      >{{ t('m_6d9531c45921') }}</button>
 
       <div
         v-if="assistant.messages.value.length > 0 && (assistant.error.value || agentStatusLabel)"
@@ -480,7 +481,7 @@ const agentStatusLabel = computed(() => {
       />
     </div>
 
-    <section v-if="hasActiveSelectedCell" class="wb-ai-cell-panel" aria-label="当前单元格信息">
+    <section v-if="hasActiveSelectedCell" class="wb-ai-cell-panel" :aria-label="t('m_bbc5c9feaa4c')">
       <SelectedCellIdentity
         class="wb-ai-cell-identity"
         :tab="activeTab"

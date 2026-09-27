@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from "vue";
 import { Search } from "lucide-vue-next";
 import {
@@ -651,7 +652,7 @@ onBeforeUnmount(() => {
       :data-theme="theme"
       role="dialog"
       aria-modal="true"
-      aria-label="快速打开表"
+      :aria-label="t('m_c5c9896dae48')"
     >
       <div ref="cardRef" class="wb-quick-open" :class="{ 'is-resizing': resizingAxis }" :style="cardStyle" tabindex="-1" @mousedown.stop>
         <div class="wb-quick-open-header">
@@ -661,7 +662,7 @@ onBeforeUnmount(() => {
             class="wb-quick-open-scope-btn"
             :class="{ 'is-open': dbDropdownOpen }"
             :aria-expanded="dbDropdownOpen ? 'true' : 'false'"
-            :title="database ? `当前：${connLabel(connectionId)} / ${database}` : '选择数据库'"
+            :title="database ? `当前：${connLabel(connectionId)} / ${database}` : t('m_7d5d498a63e8')"
             @click="toggleDbDropdown"
           >
             <svg class="wb-quick-open-scope-db-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
@@ -669,7 +670,7 @@ onBeforeUnmount(() => {
               <path d="M2.5 3.2v7.6c0 .9 2 1.6 4.5 1.6s4.5-.7 4.5-1.6V3.2" />
               <path d="M2.5 7c0 .9 2 1.6 4.5 1.6s4.5-.7 4.5-1.6" />
             </svg>
-            <span class="wb-quick-open-scope-label">{{ database || "选择数据库" }}</span>
+            <span class="wb-quick-open-scope-label">{{ database || t('m_7d5d498a63e8') }}</span>
             <svg class="wb-quick-open-scope-caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="2,3.5 5,6.5 8,3.5" />
             </svg>
@@ -681,33 +682,33 @@ onBeforeUnmount(() => {
               :value="query"
               autocomplete="off"
               spellcheck="false"
-              :placeholder="tables.length ? '筛选表名、表备注、字段或字段备注' : '当前数据库暂无表'"
-              aria-label="筛选表范围"
+              :placeholder="tables.length ? t('m_0ada9390aa84') : t('m_b0ae2ecf1ac5')"
+              :aria-label="t('m_4932987e6d33')"
               aria-controls="wb-quick-open-list"
               @input="emit('update:query', $event.target.value)"
               @keydown="handleKeydown"
             />
           </div>
-          <div class="wb-quick-open-match-mode" role="group" aria-label="结构搜索方式">
+          <div class="wb-quick-open-match-mode" role="group" :aria-label="t('m_3c6aaeb415f7')">
             <button
               type="button"
               :class="{ 'is-active': matchMode === 'fuzzy' }"
               :aria-pressed="matchMode === 'fuzzy' ? 'true' : 'false'"
-              title="模糊搜索：支持连续、分散和少量乱序字符"
+              :title="t('m_cdad9e7103ea')"
               @click="setMatchMode('fuzzy')"
-            >模糊</button>
+            >{{ t('m_36bab7a3de7f') }}</button>
             <button
               type="button"
               :class="{ 'is-active': matchMode === 'continuous' }"
               :aria-pressed="matchMode === 'continuous' ? 'true' : 'false'"
-              title="连续搜索：只显示连续包含搜索词的内容"
+              :title="t('m_08461057b9ae')"
               @click="setMatchMode('continuous')"
-            >连续</button>
+            >{{ t('m_53b333e7b09d') }}</button>
           </div>
           <button
             type="button"
             class="wb-quick-open-close"
-            aria-label="关闭"
+            :aria-label="t('m_3fd47edce45b')"
             tabindex="-1"
             @click="close"
           >
@@ -725,13 +726,13 @@ onBeforeUnmount(() => {
               :data-theme="theme"
               :style="dbDropdownStyle"
               role="listbox"
-              aria-label="切换数据库"
+              :aria-label="t('m_9fa99195c7c0')"
               tabindex="-1"
               @mousedown.stop
             >
             <!-- 常驻库（当前连接 + 跨连接混合）：一键快速切换，无需钻进连接子菜单 -->
             <div v-if="currentConnectionPinned.length || crossConnectionPinned.length" class="wb-quick-open-db-pinned">
-              <header class="wb-quick-open-db-section-title">常驻</header>
+              <header class="wb-quick-open-db-section-title">{{ t('m_300b6634fef3') }}</header>
               <button
                 v-for="entry in currentConnectionPinned"
                 :key="`pin-${entry.connectionId}-${entry.database}`"
@@ -748,7 +749,7 @@ onBeforeUnmount(() => {
                 <svg
                   class="wb-quick-open-db-pin is-pinned"
                   width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"
-                  title="取消常驻"
+                  :title="t('m_a9f57bff3578')"
                   @click="togglePin(entry.connectionId, entry.database, $event)"
                 ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
               </button>
@@ -768,7 +769,7 @@ onBeforeUnmount(() => {
                 <svg
                   class="wb-quick-open-db-pin is-pinned"
                   width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"
-                  title="取消常驻"
+                  :title="t('m_a9f57bff3578')"
                   @click="togglePin(entry.connectionId, entry.database, $event)"
                 ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
               </button>
@@ -776,7 +777,7 @@ onBeforeUnmount(() => {
 
             <!-- 级联两栏：左栏连接列表，右栏 hover 连接的库列表 -->
             <div v-if="connectionRows.length" class="wb-quick-open-db-cascade">
-              <header v-if="currentConnectionPinned.length || crossConnectionPinned.length" class="wb-quick-open-db-section-title">所有连接</header>
+              <header v-if="currentConnectionPinned.length || crossConnectionPinned.length" class="wb-quick-open-db-section-title">{{ t('m_3af17da71ef0') }}</header>
               <div class="wb-quick-open-db-cascade-body">
                 <!-- 左栏：连接 -->
                 <ul class="wb-quick-open-db-conn-list" role="list">
@@ -800,7 +801,7 @@ onBeforeUnmount(() => {
                       v-if="conn.needsReconnect"
                       class="wb-quick-open-db-conn-warn"
                       width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"
-                      title="需要重新连接"
+                      :title="t('m_2a7573e8891b')"
                     ><path d="M6 1.5L11 10.5H1z"/><line x1="6" y1="5" x2="6" y2="7.5"/><circle cx="6" cy="9" r="0.4" fill="currentColor"/></svg>
                   </li>
                 </ul>
@@ -812,7 +813,7 @@ onBeforeUnmount(() => {
                       type="button"
                       class="wb-quick-open-db-reconnect"
                       @click="reconnectHoveredConnection"
-                    >重新连接</button>
+                    >{{ t('m_68891ab35cab') }}</button>
                   </template>
                   <template v-else-if="hoveredConnectionError">
                     <p class="wb-quick-open-db-empty">{{ hoveredConnectionError.message }}</p>
@@ -836,19 +837,17 @@ onBeforeUnmount(() => {
                         width="13" height="13" viewBox="0 0 14 14"
                         :fill="isPinned(hoveredConnectionId, db) ? 'currentColor' : 'none'"
                         stroke="currentColor" stroke-width="1.3" aria-hidden="true"
-                        :title="isPinned(hoveredConnectionId, db) ? '取消常驻' : '设为常驻'"
+                        :title="isPinned(hoveredConnectionId, db) ? t('m_a9f57bff3578') : t('m_7fc29c837b7b')"
                         @click="togglePin(hoveredConnectionId, db, $event)"
                       ><path d="M9.5 1.5l3 3-2 1.2-.8 3.5-2-2-3 3-.7-.7 3-3-2-2 3.5-.8z"/></svg>
                     </button>
                   </template>
-                  <p v-else class="wb-quick-open-db-empty">该连接暂无可用数据库</p>
+                  <p v-else class="wb-quick-open-db-empty">{{ t('m_5de336bcef14') }}</p>
                 </div>
               </div>
             </div>
 
-            <p v-if="!hasAnyDatabase" class="wb-quick-open-db-empty">
-              暂无可用连接或数据库
-            </p>
+            <p v-if="!hasAnyDatabase" class="wb-quick-open-db-empty"> {{ t('m_b04ccd016069') }} </p>
           </div>
           </Teleport>
         </div>
@@ -856,17 +855,17 @@ onBeforeUnmount(() => {
         <div class="wb-quick-open-body">
           <section
             class="wb-quick-open-scope-panel"
-            aria-label="表范围"
+            :aria-label="t('m_a1594fbd419e')"
             :aria-busy="searchRunning ? 'true' : 'false'"
           >
             <header class="wb-quick-open-section-header">
-              <span>表范围</span>
+              <span>{{ t('m_a1594fbd419e') }}</span>
               <QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" />
               <span class="wb-quick-open-scope-summary">
-                <template v-if="searchRunning">搜索中…</template>
+                <template v-if="searchRunning">{{ t('m_cc50237edca2') }}</template>
                 <template v-else>
                   {{ hasQuery ? `已选 ${selectedScopeCount}` : `全部 ${selectedScopeCount}` }}
-                  · {{ scopeState.mode === "custom" ? "自定义范围" : "自动范围" }}
+                  · {{ scopeState.mode === "custom" ? t('m_aefac3869b51') : t('m_4a246a75ac8c') }}
                 </template>
               </span>
               <button
@@ -874,7 +873,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="wb-quick-open-reset-scope"
                 @click="resetScopeSelection"
-              >使用当前结果重新选择</button>
+              >{{ t('m_5fc55f0ca4c5') }}</button>
             </header>
             <ul
               v-if="results.length"
@@ -934,14 +933,14 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-else-if="!searchRunning" class="wb-quick-open-empty">
-              {{ matchMode === 'continuous' ? '没有连续匹配的表或字段' : '没有匹配的表或字段' }}
+              {{ matchMode === 'continuous' ? t('m_41d30d076e85') : t('m_63d858907b2c') }}
             </p>
           </section>
 
-          <section class="wb-quick-open-value-panel" aria-label="值条件">
+          <section class="wb-quick-open-value-panel" :aria-label="t('m_a6c677ee925e')">
             <header class="wb-quick-open-section-header">
-              <span>值条件</span>
-              <span class="wb-quick-open-scope-summary">扫描所选表全部字段</span>
+              <span>{{ t('m_a6c677ee925e') }}</span>
+              <span class="wb-quick-open-scope-summary">{{ t('m_d5339e5d38da') }}</span>
             </header>
             <div class="wb-quick-open-value-input-row">
               <div class="wb-quick-open-value-field">
@@ -952,8 +951,8 @@ onBeforeUnmount(() => {
                   autocomplete="off"
                   spellcheck="false"
                   enterkeyhint="search"
-                  placeholder="输入要查找的具体值"
-                  aria-label="值关键词"
+                  :placeholder="t('m_cf299fa4a460')"
+                  :aria-label="t('m_041d9c270bcd')"
                   aria-keyshortcuts="Enter Control+Enter Meta+Enter"
                   @keydown="handleValueKeydown"
                 />
@@ -967,10 +966,10 @@ onBeforeUnmount(() => {
                 @click="runValueSearch"
               >
                 <Search :size="14" :stroke-width="2" aria-hidden="true" />
-                <span>{{ valueSearchState?.valueLoading ? "搜索中" : "搜索值" }}</span>
+                <span>{{ valueSearchState?.valueLoading ? t('m_e3f404a27945') : t('m_bb952af82ffc') }}</span>
               </button>
             </div>
-            <p v-if="valueSearchScopeEmpty" class="wb-quick-open-value-error">当前表范围为空，请重新选择后再搜索值。</p>
+            <p v-if="valueSearchScopeEmpty" class="wb-quick-open-value-error">{{ t('m_2c0209b7a263') }}</p>
             <div v-if="valueSearchState?.valueLoading" class="wb-value-search-progress-wrap">
               <div class="wb-value-search-progress" role="progressbar" :aria-valuenow="progressPercent" aria-valuemin="0" aria-valuemax="100" :style="progressStyle">
                 <span class="wb-value-search-progress-fill"></span>
@@ -997,20 +996,14 @@ onBeforeUnmount(() => {
                 </button>
               </li>
             </ul>
-            <p v-else-if="hasFreshValues && !valueSearchState?.valueLoading" class="wb-quick-open-empty">当前范围没有匹配的值</p>
-            <p v-else-if="!valueSearchState?.valueLoading" class="wb-quick-open-value-guidance">
-              范围条件为空时扫描整个数据库；输入范围后，只扫描左侧勾选的表。
-            </p>
+            <p v-else-if="hasFreshValues && !valueSearchState?.valueLoading" class="wb-quick-open-empty">{{ t('m_0082d5f24dcc') }}</p>
+            <p v-else-if="!valueSearchState?.valueLoading" class="wb-quick-open-value-guidance"> {{ t('m_c87b93d0b4c8') }} </p>
           </section>
         </div>
 
         <footer class="wb-quick-open-footer">
           <span class="wb-quick-open-hint">
-            <kbd>↑</kbd><kbd>↓</kbd> 选择
-            <kbd>Enter</kbd> 打开
-            <kbd>Ctrl+Enter</kbd> 搜值
-            <kbd>Esc</kbd> 关闭
-          </span>
+            <kbd>↑</kbd><kbd>↓</kbd> {{ t('m_c11330b85234') }} <kbd>Enter</kbd> {{ t('m_c771248e511f') }} <kbd>Ctrl+Enter</kbd> {{ t('m_64c250df225f') }} <kbd>Esc</kbd> {{ t('m_3fd47edce45b') }} </span>
         </footer>
         <span class="wb-quick-open-resize-handle is-right" aria-hidden="true" @pointerdown="startResize($event, 'x')"></span>
         <span class="wb-quick-open-resize-handle is-bottom" aria-hidden="true" @pointerdown="startResize($event, 'y')"></span>

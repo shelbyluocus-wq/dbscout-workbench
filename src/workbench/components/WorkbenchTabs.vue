@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
 import { computed, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -149,9 +150,9 @@ function normalizeDropPosition(tabId, position) {
 }
 
 function tabTitle(tab) {
-  if (tabKind(tab) === "home") return "首页";
-  if (tabKind(tab) === "sql-library") return "SQL 查询";
-  if (tabKind(tab) === "sql") return tab.title || tab.fileName || "SQL 查询";
+  if (tabKind(tab) === "home") return t('m_203c08e0d44a');
+  if (tabKind(tab) === "sql-library") return t('m_6369c8800ff1');
+  if (tabKind(tab) === "sql") return tab.title || tab.fileName || t('m_6369c8800ff1');
   return formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
 }
 
@@ -188,13 +189,13 @@ function hasTabSubtitle(tab) {
 }
 
 function tabSourceTitle(tab) {
-  if (tabKind(tab) === "home") return "首页";
-  if (tabKind(tab) === "sql-library") return "SQL 查询文档";
+  if (tabKind(tab) === "home") return t('m_203c08e0d44a');
+  if (tabKind(tab) === "sql-library") return t('m_7eb481889026');
   if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
   const display = formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
   const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
   const detail = display && display !== source ? `${display}\n${source}` : source;
-  return tab.opening ? `${detail} · 正在打开` : detail;
+  return tab.opening ? t('m_88ce9bfd24f4', { detail }) : detail;
 }
 
 function canCloseTab(tab) {
@@ -317,7 +318,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
           <template v-if="hasTabSubtitle(tab)">
             <span class="wb-tab-line wb-tab-line-primary">
               <span class="wb-tab-name">{{ tab.tableName || tabTitle(tab) }}</span>
-              <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
+              <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
             </span>
             <span class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
               <component
@@ -339,8 +340,8 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
           <template v-else>
             <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>
             <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
-            <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">正在打开</small>
-            <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">设计</small>
+            <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">{{ t('m_48de9f48a703') }}</small>
+            <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
             <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
             <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
           </template>
@@ -355,7 +356,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
           type="button"
           class="wb-tab-close"
           draggable="false"
-          aria-label="关闭表标签"
+          :aria-label="t('m_31ff143e6168')"
           @mousedown.stop="stopTabClosePointer"
           @dragstart.prevent.stop="stopTabClosePointer"
           @click.stop="emit('close-tab', tab.id)"
@@ -367,8 +368,8 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
           type="button"
           class="wb-tab-close wb-pane-close-button"
           draggable="false"
-          aria-label="关闭当前分屏"
-          title="关闭当前分屏"
+          :aria-label="t('m_fd6f188d325a')"
+          :title="t('m_fd6f188d325a')"
           @mousedown.stop="stopTabClosePointer"
           @click.stop="emit('close-pane')"
         >

@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref, watch } from "vue";
 import {
   DATABASE_DECORATION_ICONS,
@@ -77,24 +78,22 @@ function submit() {
     >
       <header class="wb-dialog-header wb-database-display-header">
         <div class="wb-database-display-heading">
-          <strong id="wb-database-display-title">数据库名称与标记</strong>
+          <strong id="wb-database-display-title">{{ t('m_26405be9f416') }}</strong>
           <small>
-            <span class="wb-database-display-realname">{{ realName }}</span>
-            · 仅修改本地显示
-          </small>
+            <span class="wb-database-display-realname">{{ realName }}</span> {{ t('m_95f3f880f33d') }} </small>
         </div>
-        <button type="button" class="wb-dialog-close" aria-label="关闭数据库名称与标记" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :aria-label="t('m_c16631543b43')" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-database-display-body">
         <section class="wb-database-display-section">
-          <label class="wb-database-display-label" for="wb-database-alias-input">本地别名</label>
+          <label class="wb-database-display-label" for="wb-database-alias-input">{{ t('m_2871d4fba1f4') }}</label>
           <input
             id="wb-database-alias-input"
             v-model="aliasDraft"
             class="wb-database-display-alias"
             type="text"
-            placeholder="留空显示真实库名"
+            :placeholder="t('m_61b7d536f5fa')"
             maxlength="60"
             autocomplete="off"
             autofocus
@@ -102,7 +101,7 @@ function submit() {
         </section>
 
         <section class="wb-database-display-section">
-          <span class="wb-database-display-label">树形预览</span>
+          <span class="wb-database-display-label">{{ t('m_f57efbef3c73') }}</span>
           <div class="wb-database-marker-preview" aria-hidden="true">
             <div class="wb-database-marker-row">
               <span class="wb-database-marker-chevron"></span>
@@ -111,14 +110,14 @@ function submit() {
             </div>
             <div class="wb-database-marker-row is-child">
               <component :is="previewTableIcon" :size="15" :style="{ color: previewColor }" />
-              <span :style="{ color: previewTextColor }">子表继承图标、图标色与名称色</span>
+              <span :style="{ color: previewTextColor }">{{ t('m_7d95111891b3') }}</span>
             </div>
           </div>
         </section>
 
         <section class="wb-database-display-section">
-          <span class="wb-database-display-label">图标</span>
-          <div class="wb-database-icon-options" role="radiogroup" aria-label="数据库图标">
+          <span class="wb-database-display-label">{{ t('m_0d720eeea264') }}</span>
+          <div class="wb-database-icon-options" role="radiogroup" :aria-label="t('m_e6f2f2ac73f2')">
             <button
               v-for="option in DATABASE_DECORATION_ICONS"
               :key="option.id"
@@ -136,22 +135,22 @@ function submit() {
         </section>
 
         <section class="wb-database-display-section wb-database-display-colors">
-          <DatabaseColorPicker v-model="colorDraft" label="图标颜色" hint="库、首页、子表" />
+          <DatabaseColorPicker v-model="colorDraft" :label="t('m_52c15454e268')" :hint="t('m_5b07d5e4ac53')" />
           <DatabaseColorPicker
             v-model="textColorDraft"
-            label="名称颜色"
-            hint="库、首页、子表"
+            :label="t('m_248e3cd3006a')"
+            :hint="t('m_5b07d5e4ac53')"
             :presets="DATABASE_TEXT_COLOR_PRESETS"
-            custom-warning="自定义颜色不会随主题切换，请确认明暗模式下都清晰"
+            :custom-warning="t('m_265fd6b4d8e9')"
           />
         </section>
       </div>
 
       <footer class="wb-dialog-actions wb-database-display-actions">
-        <button type="button" class="wb-database-display-reset" @click="resetMarker">恢复默认标记</button>
+        <button type="button" class="wb-database-display-reset" @click="resetMarker">{{ t('m_30ff0944adcf') }}</button>
         <span class="wb-database-display-actions-spacer"></span>
-        <button type="button" @click="emit('close')">取消</button>
-        <button type="submit" class="wb-dialog-primary">保存</button>
+        <button type="button" @click="emit('close')">{{ t('m_2cd0f3be8738') }}</button>
+        <button type="submit" class="wb-dialog-primary">{{ t('m_a3030bf8f16d') }}</button>
       </footer>
     </form>
   </div>

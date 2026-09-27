@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { nextTick, computed, onMounted, ref, watch } from "vue";
 import { Pencil, Search, Star, StarOff, Trash2, X } from "lucide-vue-next";
 
@@ -85,40 +86,40 @@ defineExpose({ load });
 <template>
   <Teleport to="body">
     <div v-if="open" class="wb-sql-history-overlay wb-floating-themed">
-      <aside ref="dialogRef" class="wb-sql-history" role="dialog" aria-modal="true" aria-label="SQL 查询历史" tabindex="-1">
-        <header><strong>查询历史</strong><button type="button" title="关闭" @click="emit('close')"><X :size="17" /></button></header>
-        <nav class="wb-sql-history-views" aria-label="查询资料类型">
-          <button type="button" :class="{ active: view === 'history' }" @click="view = 'history'">历史 <small>{{ rows.length }}</small></button>
-          <button type="button" :class="{ active: view === 'favorites' }" @click="view = 'favorites'">收藏 <small>{{ favoriteCount }}</small></button>
-          <button type="button" :class="{ active: view === 'recent' }" @click="view = 'recent'">最近文件 <small>{{ recentFiles.length }}</small></button>
+      <aside ref="dialogRef" class="wb-sql-history" role="dialog" aria-modal="true" :aria-label="t('m_2bb8b6e184d6')" tabindex="-1">
+        <header><strong>{{ t('m_e74d81c0d444') }}</strong><button type="button" :title="t('m_3fd47edce45b')" @click="emit('close')"><X :size="17" /></button></header>
+        <nav class="wb-sql-history-views" :aria-label="t('m_954687267f95')">
+          <button type="button" :class="{ active: view === 'history' }" @click="view = 'history'">{{ t('m_b0385cfe4b42') }} <small>{{ rows.length }}</small></button>
+          <button type="button" :class="{ active: view === 'favorites' }" @click="view = 'favorites'">{{ t('m_60a53514eb92') }} <small>{{ favoriteCount }}</small></button>
+          <button type="button" :class="{ active: view === 'recent' }" @click="view = 'recent'">{{ t('m_a686e6436452') }} <small>{{ recentFiles.length }}</small></button>
         </nav>
-        <div class="wb-sql-history-search"><Search :size="15" /><input ref="searchRef" v-model="query" type="search" :placeholder="view === 'recent' ? '搜索文件名或路径' : '搜索名称、SQL 或数据库'" @keydown.enter="view === 'recent' ? null : load()" /></div>
+        <div class="wb-sql-history-search"><Search :size="15" /><input ref="searchRef" v-model="query" type="search" :placeholder="view === 'recent' ? t('m_a15dd3e4d894') : t('m_905fe566fdd6')" @keydown.enter="view === 'recent' ? null : load()" /></div>
         <div class="wb-sql-history-list">
           <article v-for="row in (view === 'recent' ? [] : filtered)" :key="row.id" class="wb-sql-history-item" :class="{ 'is-renaming': editingFavoriteId === row.id }">
             <button type="button" class="wb-sql-history-open" :aria-label="`重新打开查询：${row.sql}`" @click="emit('open-sql', row.sql)">
-              <span class="wb-sql-history-meta"><b :class="`is-${row.status}`">{{ row.status === 'success' ? '成功' : '失败' }}</b>{{ row.database || '默认库' }} · {{ row.durationMs }} ms · {{ row.executedAt }}</span>
+              <span class="wb-sql-history-meta"><b :class="`is-${row.status}`">{{ row.status === 'success' ? t('m_053461ce86d2') : t('m_28384d7afd2e') }}</b>{{ row.database || t('m_1796340673c6') }} · {{ row.durationMs }} ms · {{ row.executedAt }}</span>
               <strong v-if="row.favorite && row.name" class="wb-sql-favorite-title">{{ row.name }}</strong>
               <code>{{ row.sql }}</code>
             </button>
-            <label v-if="editingFavoriteId === row.id" class="wb-sql-favorite-editor"><span>收藏名称</span><input ref="renameInputRef" v-model="row.name" maxlength="80" @keydown.enter.prevent="finishRename(row)" @keydown.esc.prevent="cancelRename(row)" @blur="finishRename(row)" /></label>
+            <label v-if="editingFavoriteId === row.id" class="wb-sql-favorite-editor"><span>{{ t('m_71d9ea75f5c8') }}</span><input ref="renameInputRef" v-model="row.name" maxlength="80" @keydown.enter.prevent="finishRename(row)" @keydown.esc.prevent="cancelRename(row)" @blur="finishRename(row)" /></label>
             <span class="wb-sql-history-actions">
-              <button type="button" :title="row.favorite ? '取消收藏' : '收藏'" :aria-label="row.favorite ? '取消收藏' : '收藏'" @click="toggleFavorite(row)"><StarOff v-if="row.favorite" :size="15" /><Star v-else :size="15" /></button>
-              <button v-if="row.favorite" type="button" title="重命名收藏" aria-label="重命名收藏" @click="startRename(row)"><Pencil :size="14" /></button>
-              <button type="button" title="删除" aria-label="删除" @click="remove(row)"><Trash2 :size="15" /></button>
+              <button type="button" :title="row.favorite ? t('m_dca60869e7d2') : t('m_60a53514eb92')" :aria-label="row.favorite ? t('m_dca60869e7d2') : t('m_60a53514eb92')" @click="toggleFavorite(row)"><StarOff v-if="row.favorite" :size="15" /><Star v-else :size="15" /></button>
+              <button v-if="row.favorite" type="button" :title="t('m_d34e449e652f')" :aria-label="t('m_d34e449e652f')" @click="startRename(row)"><Pencil :size="14" /></button>
+              <button type="button" :title="t('m_2f9daa828907')" :aria-label="t('m_2f9daa828907')" @click="remove(row)"><Trash2 :size="15" /></button>
             </span>
           </article>
           <article v-for="file in (view === 'recent' ? filteredRecentFiles : [])" :key="file.path" class="wb-sql-history-item wb-sql-recent-file">
             <button type="button" class="wb-sql-history-open" :aria-label="`打开最近文件：${file.fileName}`" @click="emit('open-file', file)">
-              <span class="wb-sql-history-meta">最近打开 · {{ file.openedAt }}</span>
+              <span class="wb-sql-history-meta">{{ t('m_99143164a516') }} {{ file.openedAt }}</span>
               <strong class="wb-sql-favorite-title">{{ file.fileName }}</strong>
               <code>{{ file.path }}</code>
             </button>
-            <span class="wb-sql-history-actions"><button type="button" title="从最近文件移除" aria-label="从最近文件移除" @click="emit('remove-recent', file)"><Trash2 :size="15" /></button></span>
+            <span class="wb-sql-history-actions"><button type="button" :title="t('m_0249523e3886')" :aria-label="t('m_0249523e3886')" @click="emit('remove-recent', file)"><Trash2 :size="15" /></button></span>
           </article>
-          <p v-if="!loading && view !== 'recent' && !filtered.length">{{ view === 'favorites' ? '暂无收藏查询' : '暂无查询历史' }}</p>
-          <p v-if="view === 'recent' && !filteredRecentFiles.length">暂无最近文件</p>
+          <p v-if="!loading && view !== 'recent' && !filtered.length">{{ view === 'favorites' ? t('m_bf764ff9805f') : t('m_86284993c825') }}</p>
+          <p v-if="view === 'recent' && !filteredRecentFiles.length">{{ t('m_902be115a3fd') }}</p>
         </div>
-        <footer><button v-if="view === 'history'" type="button" @click="clearAll">清空普通历史</button><span>{{ view === 'recent' ? '单击文件重新打开' : view === 'favorites' ? '收藏项不会自动清理' : '单击记录重新打开' }}</span></footer>
+        <footer><button v-if="view === 'history'" type="button" @click="clearAll">{{ t('m_f6cb980bb77b') }}</button><span>{{ view === 'recent' ? t('m_a050ddb7fb19') : view === 'favorites' ? t('m_3084cce5d51f') : t('m_e3776f2f3898') }}</span></footer>
       </aside>
     </div>
   </Teleport>

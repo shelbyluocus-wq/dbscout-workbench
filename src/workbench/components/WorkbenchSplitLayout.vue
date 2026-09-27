@@ -3,6 +3,7 @@ export default { name: "WorkbenchSplitLayout" };
 </script>
 
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { listPaneIds } from "../paneLayoutState.js";
@@ -271,7 +272,7 @@ onBeforeUnmount(finishResize);
       role="separator"
       tabindex="0"
       :aria-orientation="layout.direction === 'vertical' ? 'horizontal' : 'vertical'"
-      :aria-label="layout.direction === 'vertical' ? '调整上下分屏高度' : '调整左右分屏宽度'"
+      :aria-label="layout.direction === 'vertical' ? t('m_fcabb353b4d0') : t('m_ee83e528db57')"
       aria-valuemin="18"
       aria-valuemax="82"
       :aria-valuenow="Math.round((Number(layout.ratio) || 0.5) * 100)"

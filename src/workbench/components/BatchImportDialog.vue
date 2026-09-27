@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -238,15 +239,15 @@ onBeforeUnmount(() => {
     >
       <header class="wb-dialog-header">
         <div>
-          <strong id="wb-batch-import-title">批量导入</strong>
+          <strong id="wb-batch-import-title">{{ t('m_fd7719273970') }}</strong>
           <small>{{ batch.database }}</small>
         </div>
-        <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭批量导入" @click="emit('close')">
+        <button type="button" class="wb-dialog-close" :disabled="isBusy" :aria-label="t('m_0f5e47d36b9c')" @click="emit('close')">
           <X :size="16" aria-hidden="true" />
         </button>
       </header>
 
-      <div class="wb-batch-mode-switch" role="radiogroup" aria-label="批量导入模式">
+      <div class="wb-batch-mode-switch" role="radiogroup" :aria-label="t('m_8d8a776d9ff2')">
         <button
           v-for="option in modeOptions"
           :key="option.value"
@@ -265,9 +266,7 @@ onBeforeUnmount(() => {
         <span v-if="!batch.fileName">{{ filePrompt }}</span>
         <span v-else>{{ batch.fileName }}</span>
       </button>
-      <p v-if="batch.ignoredSheetCount" class="wb-import-info" role="status">
-        已自动忽略 {{ batch.ignoredSheetCount }} 个字段备注工作表
-      </p>
+      <p v-if="batch.ignoredSheetCount" class="wb-import-info" role="status"> {{ t('m_d1ff9f3343ad') }} {{ batch.ignoredSheetCount }} {{ t('m_a2710571dfe3') }} </p>
       <input
         ref="fileInput"
         type="file"
@@ -278,35 +277,31 @@ onBeforeUnmount(() => {
         @change="emit('file-selected', $event)"
       />
 
-      <div v-if="comparisonAvailable" class="wb-batch-import-view-switch" role="tablist" aria-label="批量导入视图">
+      <div v-if="comparisonAvailable" class="wb-batch-import-view-switch" role="tablist" :aria-label="t('m_31644d74d930')">
         <button
           type="button"
           role="tab"
           :class="{ 'is-active': viewMode === 'scope' }"
           :aria-selected="viewMode === 'scope'"
           @click="viewMode = 'scope'"
-        >
-          导入范围
-        </button>
+        > {{ t('m_8c99578d0d05') }} </button>
         <button
           type="button"
           role="tab"
           :class="{ 'is-active': viewMode === 'comparison' }"
           :aria-selected="viewMode === 'comparison'"
           @click="viewMode = 'comparison'"
-        >
-          变化对比
-          <span>{{ comparisonChangeCount }}</span>
+        > {{ t('m_745edd3e58e9') }} <span>{{ comparisonChangeCount }}</span>
         </button>
       </div>
 
       <div v-if="viewMode === 'scope'" class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
           <input v-model="allSelected" type="checkbox" :disabled="isBusy || !batch.sheets.length" />
-          <span>全选匹配项</span>
+          <span>{{ t('m_7ca9de237a29') }}</span>
         </label>
         <input v-model="query" type="text" :placeholder="searchPlaceholder" :disabled="isBusy || !batch.sheets.length" />
-        <span>已选 {{ selectedCount }} / 匹配 {{ matchedSheets }}</span>
+        <span>{{ t('m_7ecf1cde6486') }} {{ selectedCount }} {{ t('m_1263443e3785') }} {{ matchedSheets }}</span>
       </div>
 
       <div v-if="viewMode === 'scope' && filteredSheets.length" class="wb-batch-transfer-list">
@@ -326,18 +321,18 @@ onBeforeUnmount(() => {
             :disabled="isBusy"
             @change="transfer.setImportSheetTarget(sheet.sheetName, $event.target.value)"
           >
-            <option value="">跳过</option>
+            <option value="">{{ t('m_fc50a99caae0') }}</option>
             <option v-for="tableName in targetTables" :key="tableName" :value="tableName">{{ tableName }}</option>
           </select>
-          <span class="wb-batch-transfer-comment">{{ sheet.rowCount }} 行</span>
+          <span class="wb-batch-transfer-comment">{{ sheet.rowCount }} {{ t('m_4cc7b00050cb') }}</span>
           <span class="wb-batch-transfer-state" :class="`is-${sheet.status}`" :title="sheet.message || sheet.status">{{ sheet.message || sheet.status }}</span>
         </label>
       </div>
       <div v-else-if="viewMode === 'scope' && !batch.fileName" class="wb-batch-transfer-empty">
-        {{ batch.mode === "separate" ? "请选择要导入的 Excel 文件" : "请选择要导入的 XLSX 文件" }}
+        {{ batch.mode === "separate" ? t('m_64a778987ced') : t('m_2f986fa711a4') }}
       </div>
       <div v-else-if="viewMode === 'scope'" class="wb-batch-transfer-empty">
-        {{ batch.mode === "separate" ? "没有匹配的 Excel 文件" : "没有匹配的工作表" }}
+        {{ batch.mode === "separate" ? t('m_a7ad4c5e0dd9') : t('m_30255b8d4191') }}
       </div>
 
       <BatchImportComparison
@@ -358,18 +353,17 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-if="batch.result" class="wb-batch-result-summary wb-batch-import-summary" :class="`is-${batch.status}`" role="status" aria-live="polite">
-        <div><strong>{{ batch.result.inserted }}</strong><span>新增</span></div>
-        <div><strong>{{ batch.result.updated }}</strong><span>更新</span></div>
-        <div><strong>{{ batch.result.deleted }}</strong><span>删除</span></div>
-        <div><strong>{{ batch.result.unchanged }}</strong><span>未变化</span></div>
-        <div><strong>{{ batch.result.skipped }}</strong><span>跳过</span></div>
-        <div><strong>{{ batch.result.errors.length }}</strong><span>失败</span></div>
+        <div><strong>{{ batch.result.inserted }}</strong><span>{{ t('m_0006d696d8e1') }}</span></div>
+        <div><strong>{{ batch.result.updated }}</strong><span>{{ t('m_3055a035f0eb') }}</span></div>
+        <div><strong>{{ batch.result.deleted }}</strong><span>{{ t('m_2f9daa828907') }}</span></div>
+        <div><strong>{{ batch.result.unchanged }}</strong><span>{{ t('m_43d477cc5ddb') }}</span></div>
+        <div><strong>{{ batch.result.skipped }}</strong><span>{{ t('m_fc50a99caae0') }}</span></div>
+        <div><strong>{{ batch.result.errors.length }}</strong><span>{{ t('m_28384d7afd2e') }}</span></div>
       </section>
 
       <p v-if="batch.status === 'failed'" class="wb-dialog-error">{{ batch.errorMessage }}</p>
       <p v-if="batch.progress.errors.length" class="wb-batch-transfer-warning">
-        {{ batch.progress.errors.length }} 个错误，未成功的行保持原样。
-      </p>
+        {{ batch.progress.errors.length }} {{ t('m_31a024a6af1d') }} </p>
 
       <footer class="wb-dialog-actions wb-batch-transfer-actions">
         <button
@@ -377,17 +371,15 @@ onBeforeUnmount(() => {
           type="button"
           :disabled="isBusy"
           @click="transfer.exportBatchImportErrors()"
-        >
-          导出错误日志
-        </button>
-        <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
+        > {{ t('m_a4984fdbb494') }} </button>
+        <button type="button" :disabled="isBusy" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
         <button
           v-if="batch.comparison.running"
           type="button"
           :disabled="batch.comparison.cancelRequested"
           @click="transfer.cancelBatchImportComparison()"
         >
-          {{ batch.comparison.cancelRequested ? "正在取消…" : "取消对比" }}
+          {{ batch.comparison.cancelRequested ? t('m_e8e08b0f61dd') : t('m_715bbfc14da2') }}
         </button>
         <button
           v-if="batch.importing"
@@ -395,7 +387,7 @@ onBeforeUnmount(() => {
           :disabled="batch.cancelRequested"
           @click="transfer.cancelBatchImport()"
         >
-          {{ batch.cancelRequested ? "正在取消…" : "取消导入" }}
+          {{ batch.cancelRequested ? t('m_e8e08b0f61dd') : t('m_26bff7125c63') }}
         </button>
         <button
           v-else-if="!batch.comparison.running"
@@ -405,7 +397,7 @@ onBeforeUnmount(() => {
           @click="transfer.compareBatchImportChanges()"
         >
           <GitCompareArrows :size="15" aria-hidden="true" />
-          {{ comparisonAvailable ? "重新对比" : "对比变化" }}
+          {{ comparisonAvailable ? t('m_1e4cfe2a5930') : t('m_c9b3a8e7059a') }}
         </button>
         <button
           v-if="!batch.importing && !batch.comparison.running"

@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { ref, computed } from "vue";
 import { renderMarkdown } from "../utils/markdown.js";
 
@@ -33,12 +34,12 @@ function deny() {
           <path d="M12 12L4 7.5" />
         </svg>
       </span>
-      <strong>执行计划</strong>
+      <strong>{{ t('m_2619ddf6f550') }}</strong>
       <button
         type="button"
         class="wb-ai-plan-toggle"
         :aria-expanded="expanded"
-        :aria-label="expanded ? '收起计划' : '展开计划'"
+        :aria-label="expanded ? t('m_65bd96eda3c7') : t('m_4128911608b9')"
         @click="expanded = !expanded"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -50,24 +51,20 @@ function deny() {
 
     <div v-show="expanded" class="wb-ai-plan-body">
       <div v-if="rendered" class="wb-ai-plan-text wb-md" v-html="rendered"></div>
-      <p v-else class="wb-ai-plan-empty">Agent 没有提供具体计划文本。</p>
+      <p v-else class="wb-ai-plan-empty">{{ t('m_5ad74b314c3e') }}</p>
 
       <label class="wb-ai-plan-feedback">
-        <span>反馈（可选）</span>
+        <span>{{ t('m_5bb844c18517') }}</span>
         <textarea
           v-model="feedback"
           rows="2"
-          placeholder="需要调整什么？留空直接拒绝。"
+          :placeholder="t('m_80f2b0ee2c19')"
         ></textarea>
       </label>
 
       <div class="wb-ai-plan-actions">
-        <button type="button" class="wb-ai-btn wb-ai-btn-secondary" @click="deny">
-          拒绝
-        </button>
-        <button type="button" class="wb-ai-btn wb-ai-btn-primary" @click="approve">
-          批准执行
-        </button>
+        <button type="button" class="wb-ai-btn wb-ai-btn-secondary" @click="deny"> {{ t('m_136de7a8c46f') }} </button>
+        <button type="button" class="wb-ai-btn wb-ai-btn-primary" @click="approve"> {{ t('m_2769e7199035') }} </button>
       </div>
     </div>
   </article>

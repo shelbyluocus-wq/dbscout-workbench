@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 
 const props = defineProps({
@@ -24,15 +25,15 @@ const notes = computed(() =>
   <aside class="wb-update-notice" :class="{ 'has-notes': notes.length }" role="status" aria-live="polite" aria-atomic="true">
     <span class="wb-update-notice-mark" aria-hidden="true"></span>
     <div class="wb-update-notice-copy">
-      <strong v-if="hasAppUpdate">发现新版本 {{ update?.version }}</strong>
-      <strong v-else>AI 组件 v{{ agentUpdate?.version }} 可更新</strong>
+      <strong v-if="hasAppUpdate">{{ t('m_ac217e4d1ca4') }} {{ update?.version }}</strong>
+      <strong v-else>{{ t('m_b7f4a1cf74bb') }}{{ agentUpdate?.version }} {{ t('m_08d43bdc4dcb') }}</strong>
       <ul v-if="hasAppUpdate && notes.length" class="wb-update-notice-notes">
         <li v-for="(note, index) in notes" :key="index">{{ note }}</li>
       </ul>
-      <span v-else-if="hasAppUpdate">更新已经准备好，可随时查看并安装。</span>
-      <span v-else>将在后台更新，不影响数据库功能。</span>
+      <span v-else-if="hasAppUpdate">{{ t('m_f6f4b26b0385') }}</span>
+      <span v-else>{{ t('m_31eab2f3aa78') }}</span>
     </div>
-    <button type="button" class="wb-update-notice-action" @click="emit('open')">查看更新</button>
-    <button type="button" class="wb-update-notice-close" title="关闭提醒" aria-label="关闭更新提醒" @click="emit('close')">×</button>
+    <button type="button" class="wb-update-notice-action" @click="emit('open')">{{ t('m_2a55c0f908c5') }}</button>
+    <button type="button" class="wb-update-notice-close" :title="t('m_56f252b08c5a')" :aria-label="t('m_cba14f04be04')" @click="emit('close')">×</button>
   </aside>
 </template>

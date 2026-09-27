@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 
@@ -112,7 +113,7 @@ onBeforeUnmount(() => {
       :aria-controls="menuId"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-label="`筛选表范围命中类型：${currentOption.label}`"
-      title="仅筛选左侧结构命中的来源；右侧仍扫描命中表的全部字段值"
+      :title="t('m_2aee15f9baab')"
       @click="toggleMenu"
       @keydown="onTriggerKeydown"
     >
@@ -134,7 +135,7 @@ onBeforeUnmount(() => {
         :data-theme="theme"
         :style="menuStyle"
         role="listbox"
-        aria-label="筛选表范围命中类型"
+        :aria-label="t('m_515fc5fb89b6')"
         tabindex="-1"
         @pointerdown.stop
         @keydown.esc.prevent.stop="closeAndFocus"

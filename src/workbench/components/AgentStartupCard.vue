@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 
 const props = defineProps({
@@ -26,7 +27,7 @@ const stageLabel = computed(() => {
       <span></span>
     </div>
     <div class="wb-ai-startup-copy">
-      <div class="wb-ai-startup-kicker">首次启动会稍慢，后续会复用已启动的进程</div>
+      <div class="wb-ai-startup-kicker">{{ t('m_45fabf003173') }}</div>
       <h2>{{ progress.title }}</h2>
       <p>{{ progress.detail }}</p>
     </div>

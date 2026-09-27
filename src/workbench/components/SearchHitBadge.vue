@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 const props = defineProps({
   kind: { type: String, default: "tableName" },
   subtle: { type: Boolean, default: false },
@@ -18,5 +19,5 @@ const labels = {
   <span
     class="wb-search-hit-badge"
     :class="[`is-${props.kind}`, { 'is-subtle': props.subtle }]"
-  >{{ props.label || labels[props.kind] || "结构" }}</span>
+  >{{ props.label || labels[props.kind] || t('m_3b15fa5b2ac0') }}</span>
 </template>

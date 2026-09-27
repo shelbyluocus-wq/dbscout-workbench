@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import AgentProjectPicker from "./AgentProjectPicker.vue";
 
 const props = defineProps({
@@ -17,8 +18,8 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
       <button
         type="button"
         class="wb-ai-icon-button"
-        title="新会话"
-        aria-label="新会话"
+        :title="t('m_c57c30bc05f7')"
+        :aria-label="t('m_c57c30bc05f7')"
         :disabled="isBusy"
         @click="emit('new-session')"
       >
@@ -31,8 +32,8 @@ const emit = defineEmits(["new-session", "toggle-settings"]);
         type="button"
         class="wb-ai-icon-button"
         :class="{ 'is-active': settingsOpen }"
-        title="Agent 设置"
-        aria-label="Agent 设置"
+        :title="t('m_8532a0fa68db')"
+        :aria-label="t('m_8532a0fa68db')"
         :aria-expanded="settingsOpen"
         @click="emit('toggle-settings')"
       >

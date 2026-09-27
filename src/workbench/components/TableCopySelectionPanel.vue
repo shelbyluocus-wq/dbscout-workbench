@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { ListChecks, X } from "lucide-vue-next";
 import {
   computed,
@@ -87,7 +88,7 @@ watch(
   <section class="wb-table-copy-selection-panel" aria-labelledby="wb-table-copy-selection-title">
     <header class="wb-table-copy-selection-header">
       <div class="wb-table-copy-selection-title">
-        <strong id="wb-table-copy-selection-title">已选表</strong>
+        <strong id="wb-table-copy-selection-title">{{ t('m_a498dec97547') }}</strong>
         <span aria-live="polite">{{ tables.length }}</span>
       </div>
       <button
@@ -95,9 +96,7 @@ watch(
         class="wb-table-copy-selection-clear"
         :disabled="busy || tables.length === 0"
         @click="emit('clear')"
-      >
-        清空
-      </button>
+      > {{ t('m_1ef3de06b32e') }} </button>
     </header>
 
     <div
@@ -105,7 +104,7 @@ watch(
       ref="viewportRef"
       class="wb-table-copy-selection-list"
       role="list"
-      aria-label="当前已选择的表"
+      :aria-label="t('m_a25e89ac41e1')"
       @scroll.passive="onScroll"
     >
       <div class="wb-table-copy-selection-virtual" :style="{ height: totalHeight + 'px' }">
@@ -141,8 +140,8 @@ watch(
 
     <div v-else class="wb-table-copy-selection-empty" role="status">
       <ListChecks :size="24" aria-hidden="true" />
-      <strong>尚未选择表</strong>
-      <span>从左侧勾选后，表名会显示在这里。</span>
+      <strong>{{ t('m_0510264f41f0') }}</strong>
+      <span>{{ t('m_8c7154e3b974') }}</span>
     </div>
   </section>
 </template>

@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { Star } from "lucide-vue-next";
 import {
@@ -77,11 +78,11 @@ const renderedSelectedSet = computed(() => new Set([...props.selectedNames, ...b
 const tableIcon = computed(() => databaseTableIconComponent(props.databaseDecoration));
 const columns = computed(() => columnLayout.value.map((item) => {
   const definition = homeColumnDefinition(item.key);
-  return { ...definition, width: columnWidths.value[item.key] };
+  return { ...definition, label: t(({ name: 'm_699c6d62a836', size: 'm_7640eaa08b0c', modified: 'm_257bbcc44c83', comment: 'm_daede9881787' })[item.key]), width: columnWidths.value[item.key] };
 }));
 const columnWidths = computed(() => {
   const maxName = props.tables.reduce((max, table) => Math.max(max, textWidth(tableName(table), 13)), 0);
-  const maxComment = props.tables.reduce((max, table) => Math.max(max, textWidth(tableComment(table) || "无备注", 12.5)), 0);
+  const maxComment = props.tables.reduce((max, table) => Math.max(max, textWidth(tableComment(table) || t('m_8445d1bad03f'), 12.5)), 0);
   const automatic = {
     name: clampWidth(maxName + (props.readOnly ? 126 : 76), 160, 520),
     size: 116,
@@ -144,7 +145,7 @@ function matchedFieldRanges(table, queries, kind, mode = "fuzzy") {
 }
 
 function highlightedTableField(table, kind) {
-  const value = kind === "tableComment" ? tableComment(table) || "无备注" : tableName(table);
+  const value = kind === "tableComment" ? tableComment(table) || t('m_8445d1bad03f') : tableName(table);
   const ranges = visibleSearchMatches.value.get(tableName(table))?.[kind] || [];
   return highlightSearchRanges(value, ranges);
 }
@@ -152,7 +153,7 @@ function highlightedTableField(table, kind) {
 function columnCellValue(table, key) {
   if (key === "size") return formatDataSize(table?.dataSizeBytes ?? table?.data_size_bytes);
   if (key === "modified") return formatModifiedAt(table?.modifiedAt ?? table?.modified_at);
-  if (key === "comment") return tableComment(table) || "无备注";
+  if (key === "comment") return tableComment(table) || t('m_8445d1bad03f');
   return tableName(table);
 }
 
@@ -170,8 +171,8 @@ function sortDirection(column) {
 
 function sortLabel(column) {
   const direction = sortDirection(column);
-  if (direction === "asc") return "升序";
-  if (direction === "desc") return "降序";
+  if (direction === "asc") return t('m_ca715c0d8d83');
+  if (direction === "desc") return t('m_4b77c3546823');
   return "";
 }
 
@@ -543,7 +544,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
     class="wb-dbhome-table-surface"
     tabindex="0"
     role="listbox"
-    aria-label="表对象"
+    :aria-label="t('m_ad3702d6aeb7')"
     :aria-multiselectable="true"
     @scroll="onScroll"
     @keydown="handleKeydown"
@@ -552,12 +553,12 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
     @contextmenu.prevent.stop="emit('blank-contextmenu', $event)"
   >
     <div v-if="loading" class="wb-dbhome-empty-list is-loading" role="status" aria-live="polite">
-      <strong>正在读取表列表…</strong>
-      <span>数据库准备完成后会自动显示</span>
+      <strong>{{ t('m_133b5069fbfb') }}</strong>
+      <span>{{ t('m_de615c77a92d') }}</span>
     </div>
     <div v-else-if="!tables.length" class="wb-dbhome-empty-list">
-      <strong>当前数据库暂无表</strong>
-      <span>可以从其它数据库复制表后在这里粘贴。</span>
+      <strong>{{ t('m_b0ae2ecf1ac5') }}</strong>
+      <span>{{ t('m_ca3e16dc2317') }}</span>
     </div>
     <template v-else>
       <div class="wb-dbhome-table-header" :style="{ gridTemplateColumns, width: `${tableWidth}px` }" role="row">
@@ -582,8 +583,8 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           <span
             class="wb-dbhome-column-drag-handle"
             draggable="true"
-            title="拖动调整列顺序"
-            aria-label="拖动调整列顺序"
+            :title="t('m_d4770aa6ef7b')"
+            :aria-label="t('m_d4770aa6ef7b')"
             @click.stop
             @dragstart.stop="beginColumnDrag(column, $event)"
             @dragend="endColumnDrag"
@@ -668,7 +669,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 type="button"
                 class="wb-dbhome-favorite-button"
                 :class="{ 'is-favorite': favoriteSet.has(tableName(table)) }"
-                :title="favoriteSet.has(tableName(table)) ? '取消收藏' : '收藏并置顶'"
+                :title="favoriteSet.has(tableName(table)) ? t('m_dca60869e7d2') : t('m_616b6280465e')"
                 :aria-label="favoriteSet.has(tableName(table)) ? `取消收藏 ${tableName(table)}` : `收藏并置顶 ${tableName(table)}`"
                 :aria-pressed="favoriteSet.has(tableName(table)) ? 'true' : 'false'"
                 @pointerdown.stop.prevent
@@ -682,11 +683,11 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                   aria-hidden="true"
                 />
               </button>
-              <span v-if="readOnly" class="wb-dbhome-readonly">只读</span>
+              <span v-if="readOnly" class="wb-dbhome-readonly">{{ t('m_3b5ec3533b0e') }}</span>
             </template>
             <template v-else-if="column.key === 'comment'">
               <span v-if="renamingName === tableName(table) && renameError" :id="renameErrorId" class="wb-dbhome-rename-error" role="alert" :title="renameError">{{ renameError }}</span>
-              <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">正在重命名…</span>
+              <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">{{ t('m_f5dee69cca2b') }}</span>
               <span v-else class="wb-dbhome-object-comment-text" v-html="highlightedTableField(table, 'tableComment')"></span>
             </template>
             <span v-else>{{ columnCellValue(table, column.key) }}</span>
@@ -713,7 +714,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           role="menu"
           @click.stop
         >
-          <button type="button" role="menuitem" @click="resetColumnLayout">恢复默认列布局</button>
+          <button type="button" role="menuitem" @click="resetColumnLayout">{{ t('m_a902179d4a5a') }}</button>
         </menu>
       </Teleport>
     </template>

@@ -5,6 +5,7 @@ const base = process.env.DBSCOUT_GRID_TEST_URL || "http://127.0.0.1:8099";
 const browser = await chromium.launch({ headless: true });
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, permissions: ["clipboard-read", "clipboard-write"] });
+  await context.addInitScript(() => localStorage.setItem("dbscout_language", "zh-CN"));
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));

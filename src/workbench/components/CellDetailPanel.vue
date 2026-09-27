@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
@@ -363,18 +364,18 @@ onBeforeUnmount(finishResize);
     ref="rootRef"
     class="wb-cell-detail"
     :class="{ 'is-resizing': isResizing, 'is-collapsed': isPanelCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
-    aria-label="单元格详情"
+    :aria-label="t('m_946f88c2a713')"
   >
     <div
       class="wb-cell-detail-header"
       :class="{ 'is-collapsed': isPanelCollapsed }"
       @click="onHeaderClick"
     >
-      <span v-if="!selectionStatItems.length" class="wb-cell-detail-title">单元格内容</span>
+      <span v-if="!selectionStatItems.length" class="wb-cell-detail-title">{{ t('m_891aaf102229') }}</span>
       <div
         v-else
         class="wb-cell-detail-stats"
-        aria-label="选区统计"
+        :aria-label="t('m_63aec19ea490')"
       >
         <span
           v-for="item in selectionStats.items"
@@ -385,28 +386,28 @@ onBeforeUnmount(finishResize);
           <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
         </span>
       </div>
-      <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">SQL NULL · 编辑后保存为空字符串</span>
+      <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
       <div class="wb-cell-detail-header-actions">
         <div
           v-if="showJsonFormatToggle"
           class="wb-cell-detail-format"
           role="group"
-          aria-label="JSON 显示"
+          :aria-label="t('m_d74ba3d54a21')"
         >
           <button
             type="button"
             :class="{ 'is-active': !jsonPretty }"
             :aria-pressed="String(!jsonPretty)"
-            title="显示原始 JSON"
+            :title="t('m_4126e3b37b7a')"
             @click.stop="setJsonPretty(false)"
-          >原始</button>
+          >{{ t('m_8cb7c0a54b21') }}</button>
           <button
             type="button"
             :class="{ 'is-active': jsonPretty }"
             :aria-pressed="String(jsonPretty)"
-            title="格式化 JSON"
+            :title="t('m_9d1a0cae95c8')"
             @click.stop="setJsonPretty(true)"
-          >格式化</button>
+          >{{ t('m_f69273dbbebf') }}</button>
         </div>
         <button
           type="button"
@@ -429,7 +430,7 @@ onBeforeUnmount(finishResize);
       <div
         class="wb-cell-detail-handle"
         role="separator"
-        aria-label="拖动调整详情区域高度（拖到底部附近可收起）"
+        :aria-label="t('m_42f1b42584a7')"
         aria-orientation="horizontal"
         :tabindex="isPanelCollapsed ? -1 : 0"
         @mousedown="onDividerMouseDown"
@@ -455,7 +456,7 @@ onBeforeUnmount(finishResize);
             :readonly="readOnly"
             :placeholder="detailPlaceholder"
             :tabindex="isPanelCollapsed ? -1 : 0"
-            :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : '单元格详情'"
+            :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : t('m_946f88c2a713')"
             @input="updateDetailDraft"
             @scroll="syncDetailScroll"
             @blur="onDetailBlur"

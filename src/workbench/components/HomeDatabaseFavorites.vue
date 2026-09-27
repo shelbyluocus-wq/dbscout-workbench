@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
 import { Check, Database, Keyboard, Plus, Search, Trash2, X } from "lucide-vue-next";
 
@@ -332,7 +333,7 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
       :data-theme="theme"
       :style="panelStyle"
       role="menu"
-      aria-label="收藏数据库"
+      :aria-label="t('m_b2772946e700')"
       @pointerenter="cancelScheduledHide"
       @pointerleave="scheduleHide"
       @focusin="cancelScheduledHide"
@@ -340,8 +341,8 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
       @keydown.esc.stop.prevent="hide"
     >
       <header class="wb-home-favorites-header">
-        <span>收藏数据库</span>
-        <small>快速切换</small>
+        <span>{{ t('m_b2772946e700') }}</span>
+        <small>{{ t('m_e4f1d2269712') }}</small>
       </header>
 
       <div v-if="favorites.length" class="wb-home-favorites-list">
@@ -364,13 +365,13 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
               <strong>{{ displayedDatabaseLabel(entry) }}</strong>
               <small>{{ displayedConnectionLabel(entry.connectionId) }}</small>
             </span>
-            <span v-if="isCurrent(entry)" class="wb-home-favorite-state">当前</span>
-            <span v-else-if="!isConnected(entry)" class="wb-home-favorite-state is-warning">需重连</span>
+            <span v-if="isCurrent(entry)" class="wb-home-favorite-state">{{ t('m_cb62ebd689ee') }}</span>
+            <span v-else-if="!isConnected(entry)" class="wb-home-favorite-state is-warning">{{ t('m_4c6e1211eefb') }}</span>
           </button>
           <button
             type="button"
             class="wb-home-favorite-shortcut"
-            :title="entry.shortcut ? `修改快捷键 ${entry.shortcut}` : '设置应用内快捷键'"
+            :title="entry.shortcut ? `修改快捷键 ${entry.shortcut}` : t('m_cc90d49bb5ea')"
             :aria-label="entry.shortcut ? `修改 ${displayedDatabaseLabel(entry)} 的快捷键` : `设置 ${displayedDatabaseLabel(entry)} 的快捷键`"
             @click="beginShortcutCapture(entry)"
           >
@@ -381,7 +382,7 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
             type="button"
             class="wb-home-favorite-remove"
             :aria-label="`移除收藏 ${displayedDatabaseLabel(entry)}`"
-            title="移除收藏"
+            :title="t('m_179c8a7b4e98')"
             @click="removeFavorite(entry)"
           ><Trash2 :size="14" aria-hidden="true" /></button>
 
@@ -393,9 +394,9 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
             data-wb-shortcut-capture="true"
             @keydown="captureShortcut(entry, $event)"
           >
-            <span><Keyboard :size="14" aria-hidden="true" />按下新的组合键</span>
-            <button v-if="entry.shortcut" type="button" @click="clearShortcut(entry)">清除</button>
-            <button type="button" @click="cancelShortcutCapture">取消</button>
+            <span><Keyboard :size="14" aria-hidden="true" />{{ t('m_2eb8242117e2') }}</span>
+            <button v-if="entry.shortcut" type="button" @click="clearShortcut(entry)">{{ t('m_bce2377283c2') }}</button>
+            <button type="button" @click="cancelShortcutCapture">{{ t('m_2cd0f3be8738') }}</button>
             <small v-if="shortcutError">{{ shortcutError }}</small>
           </div>
         </div>
@@ -403,13 +404,13 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
 
       <div v-else class="wb-home-favorites-empty">
         <span class="wb-home-favorites-empty-icon" aria-hidden="true"><Database :size="20" /></span>
-        <strong>把常用数据库放在这里</strong>
-        <small>从首页标签快速切换连接和数据库</small>
+        <strong>{{ t('m_6d17ac1d6abe') }}</strong>
+        <small>{{ t('m_476bb2e3992e') }}</small>
       </div>
 
       <button type="button" class="wb-home-favorites-add" role="menuitem" @click="openPicker">
         <Plus :size="15" aria-hidden="true" />
-        <span>{{ favorites.length ? "添加数据库" : "添加收藏数据库" }}</span>
+        <span>{{ favorites.length ? t('m_4bc747d7b2ad') : t('m_a04bbc820041') }}</span>
       </button>
     </section>
 
@@ -421,14 +422,14 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
       <section ref="pickerDialogRef" class="wb-home-favorite-picker" role="dialog" aria-modal="true" aria-labelledby="wb-home-favorite-picker-title" tabindex="-1">
         <header class="wb-home-favorite-picker-header">
           <div>
-            <strong id="wb-home-favorite-picker-title">收藏数据库</strong>
-            <small>选择一个已连接的数据库</small>
+            <strong id="wb-home-favorite-picker-title">{{ t('m_b2772946e700') }}</strong>
+            <small>{{ t('m_448853913ebd') }}</small>
           </div>
-          <button type="button" aria-label="关闭" @click="closePicker()"><X :size="17" aria-hidden="true" /></button>
+          <button type="button" :aria-label="t('m_3fd47edce45b')" @click="closePicker()"><X :size="17" aria-hidden="true" /></button>
         </header>
 
         <div v-if="connectedConnections.length" class="wb-home-favorite-picker-body">
-          <nav class="wb-home-favorite-connections" aria-label="已连接的数据库服务">
+          <nav class="wb-home-favorite-connections" :aria-label="t('m_afc6c5fa1cc6')">
             <button
               v-for="connection in connectedConnections"
               :key="connection.id"
@@ -445,7 +446,7 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
             </button>
           </nav>
 
-          <section class="wb-home-favorite-databases" aria-label="数据库列表">
+          <section class="wb-home-favorite-databases" :aria-label="t('m_0c97af60e950')">
             <header>
               <div>
                 <strong>{{ displayedConnectionLabel(pickerConnectionId) }}</strong>
@@ -458,17 +459,17 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
                   v-model="pickerQuery"
                   type="search"
                   autocomplete="off"
-                  placeholder="筛选数据库"
-                  aria-label="筛选数据库"
+                  :placeholder="t('m_09c6ab25139a')"
+                  :aria-label="t('m_09c6ab25139a')"
                 />
               </label>
             </header>
 
-            <div v-if="pickerLoading && !pickerDatabaseRows.length" class="wb-home-favorite-picker-status">正在读取数据库…</div>
+            <div v-if="pickerLoading && !pickerDatabaseRows.length" class="wb-home-favorite-picker-status">{{ t('m_ad78b6232786') }}</div>
             <div v-else-if="databaseFetchErrors[pickerConnectionId]" class="wb-home-favorite-picker-status is-error">
-              {{ databaseFetchErrors[pickerConnectionId].message || "数据库读取失败" }}
+              {{ databaseFetchErrors[pickerConnectionId].message || t('m_503077568da6') }}
             </div>
-            <div v-else-if="pickerDatabaseRows.length" class="wb-home-favorite-database-list" role="listbox" aria-label="选择数据库">
+            <div v-else-if="pickerDatabaseRows.length" class="wb-home-favorite-database-list" role="listbox" :aria-label="t('m_7d5d498a63e8')">
               <button
                 v-for="row in pickerDatabaseRows"
                 :key="row.database"
@@ -485,29 +486,28 @@ defineExpose({ show, hide, scheduleShow, scheduleHide });
                   <strong>{{ row.label }}</strong>
                   <small v-if="row.label !== row.database">{{ row.database }}</small>
                 </span>
-                <em v-if="row.favorite"><Check :size="13" aria-hidden="true" />已收藏</em>
+                <em v-if="row.favorite"><Check :size="13" aria-hidden="true" />{{ t('m_471dd4d7f869') }}</em>
               </button>
             </div>
             <div v-else class="wb-home-favorite-picker-status">
-              {{ pickerQuery ? "没有匹配的数据库" : "该连接暂无可用数据库" }}
+              {{ pickerQuery ? t('m_de811daa9218') : t('m_5de336bcef14') }}
             </div>
           </section>
         </div>
 
         <div v-else class="wb-home-favorite-picker-empty">
           <Database :size="24" aria-hidden="true" />
-          <strong>当前没有已连接的数据库服务</strong>
-          <span>请先在左侧连接一个数据库服务，再回来添加收藏。</span>
+          <strong>{{ t('m_5b36b9797749') }}</strong>
+          <span>{{ t('m_3bdea090f4db') }}</span>
         </div>
 
         <footer class="wb-home-favorite-picker-footer">
-          <span v-if="pickerDatabase">
-            将收藏 <strong>{{ databaseLabel(pickerConnectionId, pickerDatabase) || pickerDatabase }}</strong>
+          <span v-if="pickerDatabase"> {{ t('m_09f7fef95e4e') }} <strong>{{ databaseLabel(pickerConnectionId, pickerDatabase) || pickerDatabase }}</strong>
           </span>
-          <span v-else>请选择具体数据库</span>
+          <span v-else>{{ t('m_8f92a3c01b95') }}</span>
           <div>
-            <button type="button" @click="closePicker()">取消</button>
-            <button type="button" class="is-primary" :disabled="!canAddSelection" @click="confirmPicker">添加收藏</button>
+            <button type="button" @click="closePicker()">{{ t('m_2cd0f3be8738') }}</button>
+            <button type="button" class="is-primary" :disabled="!canAddSelection" @click="confirmPicker">{{ t('m_6cc691884fe7') }}</button>
           </div>
         </footer>
       </section>

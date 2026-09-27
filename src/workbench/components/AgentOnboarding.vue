@@ -1,27 +1,15 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { t } from "../i18n/index.js";
+import { computed, ref } from "vue";
 
 const props = defineProps({
   assistant: { type: Object, required: true },
 });
 
-// Available preset configurations the user can pick from. Selecting a non-
-// custom preset prefills Base URL and Model. Editing either field manually
-// switches the dropdown to "自定义" automatically because the values no
-// longer match.
+// Endpoints are configured explicitly. Never connect to an organization-specific
+// proxy automatically on a fresh installation.
 const PRESETS = [
-  {
-    id: "company",
-    label: "公司代理",
-    apiUrl: "http://43.166.227.111:8080",
-    model: "gpt-5.5",
-  },
-  {
-    id: "custom",
-    label: "自定义",
-    apiUrl: "",
-    model: "",
-  },
+  { id: "custom", get label() { return t('m_4eafa9e925b3'); }, apiUrl: "", model: "" },
 ];
 
 const showApiKey = ref(false);
@@ -49,17 +37,6 @@ function selectPreset(id) {
   props.assistant.model.value = preset.model;
 }
 
-// On first mount, if the user has nothing configured at all, default to the
-// company preset. If they had any existing values from a previous session,
-// leave them untouched.
-onMounted(() => {
-  const url = (props.assistant.apiUrl.value || "").trim();
-  const model = (props.assistant.model.value || "").trim();
-  if (!url && !model) {
-    selectPreset("company");
-  }
-});
-
 function handleStart() {
   // Refs are auto-persisted by the watcher in useAgent — nothing else to do.
   // The parent (AgentPanel) reactively hides this onboarding screen as soon
@@ -69,16 +46,16 @@ function handleStart() {
 </script>
 
 <template>
-  <section class="wb-ai-onboarding" aria-label="AI 助手初始设置">
+  <section class="wb-ai-onboarding" :aria-label="t('m_264210612146')">
     <header class="wb-ai-onboarding-hero">
       <span class="wb-ai-onboarding-emoji" aria-hidden="true">👋</span>
-      <h2>配置 Database Agent</h2>
-      <p>未检测到可用的本机 Claude Code 配置。请填写 API Key 和请求地址，或修复本机 Claude Code 后重试。</p>
+      <h2>{{ t('m_0d6b6cd6372b') }}</h2>
+      <p>{{ t('m_7723b1be5e50') }}</p>
     </header>
 
     <div class="wb-ai-onboarding-form">
       <label class="wb-ai-onboarding-field">
-        <span>接入方式</span>
+        <span>{{ t('m_2374e5d33f7e') }}</span>
         <select
           :value="selectedPresetId"
           @change="selectPreset($event.target.value)"
@@ -101,13 +78,13 @@ function handleStart() {
       </label>
 
       <label class="wb-ai-onboarding-field">
-        <span>模型</span>
+        <span>{{ t('m_c98e118e0a43') }}</span>
         <input
           v-model="assistant.model.value"
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="模型名称"
+          :placeholder="t('m_cb2f1709f983')"
         />
       </label>
 
@@ -119,14 +96,14 @@ function handleStart() {
             :type="showApiKey ? 'text' : 'password'"
             autocomplete="off"
             spellcheck="false"
-            placeholder="输入 API Key…"
+            :placeholder="t('m_45c0a22d6463')"
             @keydown.enter.prevent="handleStart"
           />
           <button
             type="button"
             class="wb-ai-onboarding-key-toggle"
-            :title="showApiKey ? '隐藏' : '显示'"
-            :aria-label="showApiKey ? '隐藏 API Key' : '显示 API Key'"
+            :title="showApiKey ? t('m_145219e726b8') : t('m_4e1449e7d5e5')"
+            :aria-label="showApiKey ? t('m_86b7355ec3bd') : t('m_f2bdc88464c5')"
             @click="showApiKey = !showApiKey"
           >
             <svg v-if="showApiKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -145,17 +122,13 @@ function handleStart() {
         type="button"
         class="wb-ai-onboarding-start"
         @click="handleStart"
-      >
-        保存并开始使用
-      </button>
+      > {{ t('m_0df040503b19') }} </button>
 
       <button
         type="button"
         class="wb-ai-onboarding-skip"
         @click="assistant.useLocalClaudeCodeConfig()"
-      >
-        使用本机 Claude Code 重试
-      </button>
+      > {{ t('m_b8845e51c330') }} </button>
     </div>
   </section>
 </template>

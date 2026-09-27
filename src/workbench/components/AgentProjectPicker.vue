@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 const props = defineProps({
@@ -116,7 +117,7 @@ onBeforeUnmount(() => {
       class="wb-ai-project-trigger"
       :disabled="disabled"
       :aria-expanded="open"
-      aria-label="选择 Agent 项目文件夹"
+      :aria-label="t('m_e457c1a009c7')"
       @click="toggleOpen"
     >
       <svg
@@ -136,7 +137,7 @@ onBeforeUnmount(() => {
         <strong>{{ statusText }}</strong>
         <small>{{ detailText }}</small>
       </span>
-      <span v-if="currentProject" class="wb-ai-project-readonly">只读</span>
+      <span v-if="currentProject" class="wb-ai-project-readonly">{{ t('m_3b5ec3533b0e') }}</span>
       <svg
         class="wb-ai-project-chevron"
         viewBox="0 0 24 24"
@@ -157,9 +158,9 @@ onBeforeUnmount(() => {
         ref="menuRef"
         class="wb-ai-project-menu"
         :style="menuStyle"
-        aria-label="项目文件夹列表"
+        :aria-label="t('m_49e7dd731453')"
       >
-        <p v-if="disabled" class="wb-ai-project-disabled-note">Agent 完成后可切换项目</p>
+        <p v-if="disabled" class="wb-ai-project-disabled-note">{{ t('m_0283efc4b6b8') }}</p>
         <button
           type="button"
           class="wb-ai-project-add"
@@ -177,7 +178,7 @@ onBeforeUnmount(() => {
           >
             <path d="M12 5v14M5 12h14" />
           </svg>
-          {{ isPicking ? "正在选择…" : "添加项目文件夹" }}
+          {{ isPicking ? t('m_07b9d2a60922') : t('m_ac89b3fb9d29') }}
         </button>
 
         <div v-if="items.length" class="wb-ai-project-list">
@@ -192,21 +193,21 @@ onBeforeUnmount(() => {
           >
             <span class="wb-ai-project-current-dot" aria-hidden="true"></span>
             <span class="wb-ai-project-item-copy">
-              <strong>{{ project.available === false ? "项目不可用" : project.name }}</strong>
+              <strong>{{ project.available === false ? t('m_f35faa2194fb') : project.name }}</strong>
               <small>{{ project.error || project.shortPath || project.path }}</small>
             </span>
-            <span class="wb-ai-project-readonly">只读</span>
+            <span class="wb-ai-project-readonly">{{ t('m_3b5ec3533b0e') }}</span>
             <span
               class="wb-ai-project-remove"
               role="button"
               tabindex="0"
-              aria-label="移除项目文件夹"
+              :aria-label="t('m_b12adc0c4a9c')"
               @click="removeProject(project.id, $event)"
               @keydown="onRemoveKeydown(project.id, $event)"
-            >移除</span>
+            >{{ t('m_6135d4159e89') }}</span>
           </button>
         </div>
-        <p v-else class="wb-ai-project-empty">添加项目后，Agent 可以读取项目内文件并辅助理解代码。</p>
+        <p v-else class="wb-ai-project-empty">{{ t('m_49eb8bda396f') }}</p>
       </section>
     </Teleport>
   </div>

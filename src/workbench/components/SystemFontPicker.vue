@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref, watch } from "vue";
 import {
   DEFAULT_FONT_PREFERENCE,
@@ -101,8 +102,8 @@ defineExpose({ focus });
 <template>
   <div class="wb-system-font-picker">
     <div class="wb-system-font-picker-meta">
-      <span>本机字体</span>
-      <span>{{ loading ? "读取中…" : `${fonts.length} 个` }}</span>
+      <span>{{ t('m_7bf17a5944f4') }}</span>
+      <span>{{ loading ? t('m_346ff60e6c7c') : `${fonts.length} 个` }}</span>
     </div>
 
     <input
@@ -110,8 +111,8 @@ defineExpose({ focus });
       v-model="query"
       class="wb-font-search"
       type="search"
-      aria-label="搜索本机字体"
-      placeholder="搜索本机字体"
+      :aria-label="t('m_7a662df227d7')"
+      :placeholder="t('m_7a662df227d7')"
       autocomplete="off"
       spellcheck="false"
       @keydown.down.prevent="focusList"
@@ -119,8 +120,8 @@ defineExpose({ focus });
     />
 
     <label class="wb-font-weight-field">
-      <span>字重</span>
-      <select aria-label="界面字体字重" :value="weight" @change="chooseWeight">
+      <span>{{ t('m_c69ead895a51') }}</span>
+      <select :aria-label="t('m_918e7060d25b')" :value="weight" @change="chooseWeight">
         <option v-for="optionWeight in availableWeights" :key="optionWeight" :value="optionWeight">
           {{ fontWeightLabel(optionWeight) }}
         </option>
@@ -131,11 +132,11 @@ defineExpose({ focus });
       ref="listRef"
       class="wb-font-family-list"
       size="7"
-      aria-label="本机字体列表"
+      :aria-label="t('m_9ded05466aed')"
       :value="selectedValue"
       @change="choose"
     >
-      <option :value="DEFAULT_FONT_PREFERENCE">系统默认</option>
+      <option :value="DEFAULT_FONT_PREFERENCE">{{ t('m_04b77083689b') }}</option>
       <option
         v-for="font in filteredFonts"
         :key="font.family"
@@ -143,20 +144,19 @@ defineExpose({ focus });
       >
         {{ font.family }}
       </option>
-      <option v-if="customQueryPreference" :value="customQueryPreference">
-        使用 “{{ customQueryFamily }}”
+      <option v-if="customQueryPreference" :value="customQueryPreference"> {{ t('m_736c5fd2d331') }}{{ customQueryFamily }}”
       </option>
-      <option v-if="loading && !fonts.length" value="" disabled>正在读取本机字体…</option>
+      <option v-if="loading && !fonts.length" value="" disabled>{{ t('m_11a42d22579b') }}</option>
       <option
         v-else-if="!filteredFonts.length && !customQueryPreference && !error"
         value=""
         disabled
-      >没有匹配字体</option>
+      >{{ t('m_98ed7474b881') }}</option>
     </select>
 
     <div v-if="error" class="wb-system-font-error" role="alert" :title="error">
-      <span>本机字体读取失败</span>
-      <button type="button" @click="emit('retry')">重试</button>
+      <span>{{ t('m_0217538fd34e') }}</span>
+      <button type="button" @click="emit('retry')">{{ t('m_b8784c8dd563') }}</button>
     </div>
   </div>
 </template>

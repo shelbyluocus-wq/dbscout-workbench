@@ -1,4 +1,6 @@
 <script setup>
+import { t } from "../i18n/index.js";
+import LanguageSettings from "./LanguageSettings.vue";
 import { Server } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
@@ -26,6 +28,11 @@ import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { computeTableBranchMinHeight, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
+
+function themeLabel(theme) {
+  const keys = { slate: "theme.slate", teal: "theme.teal", azure: "theme.azure" };
+  return keys[theme.id] ? t(keys[theme.id]) : theme.label;
+}
 
 const props = defineProps({
   selectedConnectionId: { type: String, default: "" },
@@ -588,8 +595,8 @@ defineExpose({ focusSearch });
         <button
           type="button"
           class="wb-header-btn"
-          :aria-label="areAllCollapsed ? '展开全部连接' : '折叠全部连接'"
-          :title="areAllCollapsed ? '展开全部' : '折叠全部'"
+          :aria-label="areAllCollapsed ? t('m_a49b9e3cc423') : t('m_809ec93960dd')"
+          :title="areAllCollapsed ? t('m_695704a261cb') : t('m_2fabdc5d8190')"
           @click="toggleCollapseAll"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -604,8 +611,8 @@ defineExpose({ focusSearch });
         <button
           type="button"
           class="wb-header-btn wb-connection-add"
-          aria-label="连接数据库服务器"
-          title="连接数据库服务器"
+          :aria-label="t('m_441ba9e5a9b7')"
+          :title="t('m_441ba9e5a9b7')"
           @click="emit('open-connection')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -616,8 +623,8 @@ defineExpose({ focusSearch });
         <button
           type="button"
           class="wb-header-btn"
-          aria-label="备份中心"
-          title="备份中心：变更日志与快照还原"
+          :aria-label="t('m_965320c43727')"
+          :title="t('m_19bf68f5c8f5')"
           @click="emit('open-backup-center')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -628,8 +635,8 @@ defineExpose({ focusSearch });
         <button
           type="button"
           class="wb-header-btn"
-          aria-label="一键转表"
-          title="一键转表（Ctrl+Shift+T）：运行转表脚本并覆盖进工程 assets"
+          :aria-label="t('m_a36603b169a6')"
+          :title="t('m_1297961df9a3')"
           @click="emit('open-table-transfer')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -647,7 +654,7 @@ defineExpose({ focusSearch });
       ref="treeNavRef"
       class="wb-source-tree"
       :style="{ '--wb-tree-table-min-h': tableBranchMinHeight }"
-      aria-label="连接、数据库与表"
+      :aria-label="t('m_46770f47d1a3')"
     >
       <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">
         <section
@@ -770,10 +777,8 @@ defineExpose({ focusSearch });
                     </div>
 
                     <p v-if="busy && !filteredTables.length" class="wb-tree-loading">
-                      <span class="wb-tree-loading-spinner" aria-hidden="true"></span>
-                      加载中…
-                    </p>
-                    <p v-else-if="!filteredTables.length" class="wb-tree-empty">没有匹配的表</p>
+                      <span class="wb-tree-loading-spinner" aria-hidden="true"></span> {{ t('m_4927a53bcc88') }} </p>
+                    <p v-else-if="!filteredTables.length" class="wb-tree-empty">{{ t('m_4034e355eb62') }}</p>
                   </template>
                   </div>
                 </section>
@@ -781,9 +786,7 @@ defineExpose({ focusSearch });
               </section>
             </TransitionGroup>
             <p v-if="busy && !previewDatabases.length" class="wb-tree-loading">
-              <span class="wb-tree-loading-spinner" aria-hidden="true"></span>
-              加载中…
-            </p>
+              <span class="wb-tree-loading-spinner" aria-hidden="true"></span> {{ t('m_4927a53bcc88') }} </p>
             </div>
           </section>
           </Transition>
@@ -798,8 +801,8 @@ defineExpose({ focusSearch });
         class="wb-sidebar-settings-trigger"
         :aria-expanded="settingsOpen"
         aria-controls="wb-sidebar-settings-sheet"
-        title="设置"
-        aria-label="设置"
+        :title="t('m_df3d58c7d84b')"
+        :aria-label="t('m_df3d58c7d84b')"
         @click.stop="toggleSettings"
       >
         <svg
@@ -822,21 +825,20 @@ defineExpose({ focusSearch });
         v-if="settingsOpen"
         id="wb-sidebar-settings-sheet"
         class="wb-sidebar-settings-sheet"
-        aria-label="设置"
+        :aria-label="t('m_df3d58c7d84b')"
         :aria-hidden="!settingsOpen"
         :inert="!settingsOpen"
       >
+        <LanguageSettings />
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="3.6" />
               <path d="M12 2.7v2.4M12 18.9v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.7 12h2.4M18.9 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7" />
-            </svg>
-            外观
-          </span>
-          <div class="wb-sidebar-theme-segment" role="group" aria-label="外观主题">
-            <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">浅色</button>
-            <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">深色</button>
+            </svg> {{ t('m_86a63f23a076') }} </span>
+          <div class="wb-sidebar-theme-segment" role="group" :aria-label="t('m_d32fff09b9ab')">
+            <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">{{ t('m_aa0819dfc4d8') }}</button>
+            <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">{{ t('m_a6b75d068032') }}</button>
           </div>
         </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
@@ -844,10 +846,8 @@ defineExpose({ focusSearch });
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="8.5" />
               <path d="M8.5 10.5h.01M12 8.5h.01M15.5 10.5h.01M9.5 14.5h.01M13 15.5h.01" />
-            </svg>
-            主题
-          </span>
-          <div class="wb-sidebar-theme-options" role="group" aria-label="界面主题">
+            </svg> {{ t('m_788db1cfec2a') }} </span>
+          <div class="wb-sidebar-theme-options" role="group" :aria-label="t('m_8f29293906e7')">
             <button
               v-for="theme in colorThemes"
               :key="theme.id"
@@ -858,7 +858,7 @@ defineExpose({ focusSearch });
               @click.stop="emit('set-color-theme', theme.id)"
             >
               <span class="wb-sidebar-theme-swatch" aria-hidden="true"><i :style="{ background: theme.swatch[1] }"></i><i :style="{ background: theme.swatch[0] }"></i><i :style="{ background: theme.swatch[2] }"></i></span>
-              {{ theme.label }}
+              {{ themeLabel(theme) }}
             </button>
           </div>
         </div>
@@ -866,23 +866,21 @@ defineExpose({ focusSearch });
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 5.5h14M5 9.5h9M5 13.5h11M5 17.5h7" />
-            </svg>
-            字段备注
-          </span>
+            </svg> {{ t('m_39230fff0eb1') }} </span>
           <span class="wb-sidebar-highlight-picker">
             <input
               type="color"
               :value="fieldCommentColor || (isDark ? '#c2c8d0' : '#3f4650')"
-              aria-label="字段备注颜色"
+              :aria-label="t('m_268035c4ed59')"
               @input="setFieldCommentColor($event.target.value)"
             />
             <button
               v-if="fieldCommentColor"
               type="button"
               class="wb-sidebar-settings-action"
-              title="恢复默认"
+              :title="t('m_ba2e93e73037')"
               @click.stop="clearFieldCommentColor"
-            >默认</button>
+            >{{ t('m_844b8cc8dff7') }}</button>
           </span>
         </div>
         <div class="wb-sidebar-settings-row">
@@ -892,23 +890,21 @@ defineExpose({ focusSearch });
               <rect x="13" y="4" width="7" height="7" rx="1.5" />
               <rect x="4" y="13" width="7" height="7" rx="1.5" />
               <rect x="13" y="13" width="7" height="7" rx="1.5" />
-            </svg>
-            行列高亮
-          </span>
+            </svg> {{ t('m_5395b35f3101') }} </span>
           <span class="wb-sidebar-highlight-picker">
             <input
               type="color"
               :value="cellHighlightColor || '#3b82f6'"
-              aria-label="行列高亮颜色"
+              :aria-label="t('m_3081c51ef3c7')"
               @input="setCellHighlightColor($event.target.value)"
             />
             <button
               v-if="cellHighlightColor"
               type="button"
               class="wb-sidebar-settings-action"
-              title="恢复默认"
+              :title="t('m_ba2e93e73037')"
               @click.stop="clearCellHighlightColor"
-            >默认</button>
+            >{{ t('m_844b8cc8dff7') }}</button>
           </span>
         </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
@@ -916,10 +912,8 @@ defineExpose({ focusSearch });
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16" />
               <path d="M8 12.5h8" />
-            </svg>
-            切库流光
-          </span>
-          <div class="wb-sidebar-glow-options" role="group" aria-label="切库流光颜色">
+            </svg> {{ t('m_94f283676114') }} </span>
+          <div class="wb-sidebar-glow-options" role="group" :aria-label="t('m_8072d90fc108')">
             <button
               v-for="preset in glowColorPresets"
               :key="preset.value"
@@ -935,51 +929,45 @@ defineExpose({ focusSearch });
               <input
                 type="color"
                 :value="glowColorHex"
-                aria-label="自定义流光颜色"
-                title="自定义颜色"
+                :aria-label="t('m_60aea9656c75')"
+                :title="t('m_781b07fdcb56')"
                 @input="setGlowColor($event.target.value)"
               />
               <button
                 v-if="glowColor"
                 type="button"
                 class="wb-sidebar-settings-action"
-                title="恢复默认"
+                :title="t('m_ba2e93e73037')"
                 @click.stop="clearGlowColor"
-              >默认</button>
+              >{{ t('m_844b8cc8dff7') }}</button>
             </span>
           </div>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
-            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span>
-            界面字体
-          </span>
+            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span> {{ t('m_52a039f438fd') }} </span>
           <button
             type="button"
             class="wb-sidebar-settings-action wb-sidebar-font-action"
-            :title="fontLabel"
+            :title="fontPreference === 'system' ? t('settings.systemFont') : fontLabel"
             @click.stop="openFontSettings"
-          >{{ fontLabel }}</button>
+          >{{ fontPreference === 'system' ? t('settings.systemFont') : fontLabel }}</button>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <rect x="3" y="7" width="18" height="11" rx="2.5" />
               <path d="M7 11h2M7 14h1M11 11h2M11 14h3M16 11h1M16 14h2" />
-            </svg>
-            快捷键
-          </span>
-          <button type="button" class="wb-sidebar-settings-action" @click.stop="shortcutsOpen = true">修改…</button>
+            </svg> {{ t('m_ee2638183d3e') }} </span>
+          <button type="button" class="wb-sidebar-settings-action" @click.stop="shortcutsOpen = true">{{ t('m_1eff9b7d894c') }}</button>
         </div>
         <div v-if="isDev" class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="8.5" />
               <path d="M8.5 10.5h.01M15.5 10.5h.01M8.5 14.5h7" />
-            </svg>
-            设计调试
-          </span>
-          <button type="button" class="wb-sidebar-settings-action" @click.stop="openDesignDebug">打开…</button>
+            </svg> {{ t('m_0fe0c819b123') }} </span>
+          <button type="button" class="wb-sidebar-settings-action" @click.stop="openDesignDebug">{{ t('m_3429a4778824') }}</button>
         </div>
       </section>
       </Transition>

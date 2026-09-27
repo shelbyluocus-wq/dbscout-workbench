@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref, watch } from 'vue';
 import {
   ArrowDownToLine,
@@ -93,38 +94,38 @@ const contextMenuStyle = computed(() => ({
 </script>
 
 <template>
-  <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" aria-label="上下文菜单" @mousedown.stop @click.stop>
+  <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" :aria-label="t('m_1a94fed1be72')" @mousedown.stop @click.stop>
     <template v-if="showClipboardActions">
-      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
-      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
-      <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />设为 NULL</button>
+      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}</button>
+      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}</button>
+      <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
       <hr class="wb-context-separator" role="separator" />
     </template>
     <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
-      <div class="wb-context-insert-count" role="group" aria-label="新增行数">
-        <span>新增行数</span>
+      <div class="wb-context-insert-count" role="group" :aria-label="t('m_82a6458dac05')">
+        <span>{{ t('m_82a6458dac05') }}</span>
         <span class="wb-context-count-control">
-          <button type="button" class="wb-context-count-step" aria-label="减少新增行数" :disabled="normalizedInsertRowCount <= 1" @click.stop="stepInsertRowCount(-1)"><Minus :size="12" aria-hidden="true" /></button>
+          <button type="button" class="wb-context-count-step" :aria-label="t('m_ad2fc8dd1f96')" :disabled="normalizedInsertRowCount <= 1" @click.stop="stepInsertRowCount(-1)"><Minus :size="12" aria-hidden="true" /></button>
           <input
             :value="insertRowCount"
             type="number"
             min="1"
             max="99"
             inputmode="numeric"
-            aria-label="新增行数"
+            :aria-label="t('m_82a6458dac05')"
             @input="insertRowCount = $event.target.value"
             @blur="commitInsertRowCount"
             @keydown.stop
             @click.stop
           />
-          <button type="button" class="wb-context-count-step" aria-label="增加新增行数" :disabled="normalizedInsertRowCount >= 99" @click.stop="stepInsertRowCount(1)"><Plus :size="12" aria-hidden="true" /></button>
+          <button type="button" class="wb-context-count-step" :aria-label="t('m_ca4c4074c035')" :disabled="normalizedInsertRowCount >= 99" @click.stop="stepInsertRowCount(1)"><Plus :size="12" aria-hidden="true" /></button>
         </span>
       </div>
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-above', normalizedInsertRowCount)"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />往上新增 {{ normalizedInsertRowCount }} 行</button>
-      <button type="button" role="menuitem" @click="emit('grid-row-insert-below', normalizedInsertRowCount)"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />往下新增 {{ normalizedInsertRowCount }} 行</button>
-      <button v-if="canInsertCopiedRows" type="button" role="menuitem" @click="emit('grid-row-paste-above')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴整行到当前行上方</button>
-      <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />设为 NULL</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-above', normalizedInsertRowCount)"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_48e4de4ac636') }} {{ normalizedInsertRowCount }} {{ t('m_4cc7b00050cb') }}</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-below', normalizedInsertRowCount)"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_5232ad2f35aa') }} {{ normalizedInsertRowCount }} {{ t('m_4cc7b00050cb') }}</button>
+      <button v-if="canInsertCopiedRows" type="button" role="menuitem" @click="emit('grid-row-paste-above')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_9b8d86c405fe') }}</button>
+      <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
       <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}</button>
       <hr v-if="tableScoped || canFreezeRow || canFreezeColumn || canFreezeCell || hasFreeze" class="wb-context-separator" role="separator" />
     </template>
@@ -133,24 +134,24 @@ const contextMenuStyle = computed(() => ({
       <button v-if="canFreezeCell" type="button" role="menuitem" @click="emit('freeze-cell')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeCellLabel }}</button>
       <button v-if="canFreezeRow" type="button" role="menuitem" @click="emit('freeze-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeRowLabel }}</button>
       <button v-if="canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ freezeColumnLabel }}</button>
-      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首行</button>
-      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />冻结首列</button>
-      <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')"><PinOff :size="14" class="wb-context-icon" aria-hidden="true" />取消冻结</button>
-      <button v-if="canResetColumnOrder" type="button" role="menuitem" @click="emit('reset-column-order')"><ListRestart :size="14" class="wb-context-icon" aria-hidden="true" />恢复默认列顺序</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-top-row')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d1ec96b9a1c9') }}</button>
+      <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e6f957238ec6') }}</button>
+      <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')"><PinOff :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0592dd0b34a5') }}</button>
+      <button v-if="canResetColumnOrder" type="button" role="menuitem" @click="emit('reset-column-order')"><ListRestart :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_3ac8482b6eb7') }}</button>
       <hr v-if="showTableActions" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名</button>
-    <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
-    <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />覆盖同步…</button>
-    <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? '关闭命中结果分栏' : '命中结果分栏' }}</button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}</button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}</button>
+    <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
+    <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_623281e9dfdb') }}</button>
+    <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? t('m_5d43a2115ed9') : t('m_d7898968a0a2') }}</button>
     <hr v-if="showTableActions || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
-    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名（本地别名）</button>
-    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />名称与标记…</button>
-    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
+    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
+    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}</button>
     <!-- 危险操作放最后 -->
-    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />移除连接</button>
+    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e4e4e0ad5de1') }}</button>
   </menu>
 </template>

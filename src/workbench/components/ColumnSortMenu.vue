@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, ref } from "vue";
 
 const props = defineProps({
@@ -17,7 +18,7 @@ const menuPosition = ref({ left: 8, top: 8 });
 const isSorted = computed(() => props.sort?.columnName === props.column);
 const currentLabel = computed(() => {
   if (!isSorted.value) return "";
-  return props.sort?.descending ? "降序" : "升序";
+  return props.sort?.descending ? t('m_4b77c3546823') : t('m_ca715c0d8d83');
 });
 const menuStyle = computed(() => ({
   left: `${menuPosition.value.left}px`,
@@ -130,19 +131,19 @@ onBeforeUnmount(closeMenu);
             role="menuitem"
             :class="{ active: isSorted && !sort?.descending }"
             @click="apply('ascending')"
-          >升序排序</button>
+          >{{ t('m_4eee42bb07d1') }}</button>
           <button
             type="button"
             role="menuitem"
             :class="{ active: isSorted && sort?.descending }"
             @click="apply('descending')"
-          >降序排序</button>
+          >{{ t('m_d587546d90f2') }}</button>
           <button
             type="button"
             role="menuitem"
             :disabled="!isSorted"
             @click="apply('none')"
-          >移除排序</button>
+          >{{ t('m_acae948f157d') }}</button>
         </menu>
       </Transition>
     </Teleport>

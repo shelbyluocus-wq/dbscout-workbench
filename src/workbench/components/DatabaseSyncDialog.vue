@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { ArrowRight, ListFilter, TriangleAlert, X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -265,19 +266,19 @@ function targetChanged(event) {
       <!-- Header -->
       <header class="wb-dialog-header wb-database-sync-header">
         <div>
-          <h2 id="wb-database-sync-title">覆盖同步数据库</h2>
-          <p>用源库完整覆盖目标库的结构和数据，开始前会自动创建本地安全快照。</p>
+          <h2 id="wb-database-sync-title">{{ t('m_b9b4628bbb61') }}</h2>
+          <p>{{ t('m_76fd1ad96290') }}</p>
         </div>
-        <button type="button" class="wb-dialog-close" aria-label="关闭覆盖同步窗口" :disabled="isBusy" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :aria-label="t('m_cd671991d690')" :disabled="isBusy" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-database-sync-body">
         <!-- Route bar -->
         <div class="wb-database-sync-route">
           <div class="wb-database-sync-route-node">
-            <span class="wb-database-sync-route-label">源库</span>
-            <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" aria-label="源数据库" @change="sourceChanged">
-              <option value="" disabled>请选择源数据库</option>
+            <span class="wb-database-sync-route-label">{{ t('m_cf2822d76732') }}</span>
+            <select :value="sync.dialog.sourceDatabase" :disabled="isBusy" :aria-label="t('m_0dac5130800b')" @change="sourceChanged">
+              <option value="" disabled>{{ t('m_5df294867f62') }}</option>
               <option v-for="database in sync.sourceDatabaseOptions.value" :key="database" :value="database">{{ database }}</option>
             </select>
           </div>
@@ -285,9 +286,9 @@ function targetChanged(event) {
             <ArrowRight :size="15" />
           </span>
           <div class="wb-database-sync-route-node">
-            <span class="wb-database-sync-route-label">目标库（将被覆盖）</span>
-            <select :value="sync.dialog.targetDatabase" :disabled="isBusy" aria-label="目标数据库" @change="targetChanged">
-              <option value="" disabled>请选择目标数据库</option>
+            <span class="wb-database-sync-route-label">{{ t('m_f0bd5073f5c5') }}</span>
+            <select :value="sync.dialog.targetDatabase" :disabled="isBusy" :aria-label="t('m_6c7424a6b8a4')" @change="targetChanged">
+              <option value="" disabled>{{ t('m_287e8652c4ad') }}</option>
               <option v-for="database in sync.availableTargetDatabases.value" :key="database" :value="database">{{ database }}</option>
             </select>
           </div>
@@ -296,7 +297,7 @@ function targetChanged(event) {
         <!-- Danger hint -->
         <div class="wb-database-sync-danger-hint">
           <TriangleAlert :size="13" aria-hidden="true" />
-          <span>目标库内容将被源库完全覆盖；开始前会自动创建本地安全快照，失败可恢复。</span>
+          <span>{{ t('m_fdd013cbdf3a') }}</span>
         </div>
 
         <!-- Two-column content -->
@@ -304,15 +305,15 @@ function targetChanged(event) {
           <section class="wb-database-sync-catalog" aria-labelledby="wb-database-sync-catalog-title">
             <div class="wb-database-sync-toolbar">
               <div class="wb-database-sync-section-title">
-                <strong id="wb-database-sync-catalog-title">源库表</strong>
+                <strong id="wb-database-sync-catalog-title">{{ t('m_700a743ca5ef') }}</strong>
                 <span>{{ sourceTableCount }}</span>
               </div>
               <div class="wb-database-sync-search">
                 <input
                   v-model="searchQuery"
                   type="search"
-                  placeholder="搜索表名或备注…"
-                  aria-label="搜索可排除的源库表"
+                  :placeholder="t('m_42cfb91efcb1')"
+                  :aria-label="t('m_625194ce86f8')"
                   autocomplete="off"
                   :disabled="isBusy"
                 />
@@ -320,9 +321,9 @@ function targetChanged(event) {
             </div>
 
             <div v-if="filteredTables.length" class="wb-database-sync-columns">
-              <span>排除</span>
-              <span>表名</span>
-              <span>备注</span>
+              <span>{{ t('m_ac83d3972fe9') }}</span>
+              <span>{{ t('m_699c6d62a836') }}</span>
+              <span>{{ t('m_daede9881787') }}</span>
             </div>
 
             <div
@@ -363,11 +364,11 @@ function targetChanged(event) {
             </div>
 
             <div v-else-if="!sourceTables.length" class="wb-database-sync-empty">
-              <span>源库暂无表。</span>
+              <span>{{ t('m_e5bba38ef5b5') }}</span>
             </div>
             <div v-else class="wb-database-sync-empty">
-              <span>未找到匹配的表</span>
-              <small>尝试调整搜索关键词</small>
+              <span>{{ t('m_f16bdd20e5a1') }}</span>
+              <small>{{ t('m_da5e3101a989') }}</small>
             </div>
           </section>
 
@@ -375,21 +376,19 @@ function targetChanged(event) {
             <section class="wb-database-sync-excluded" aria-labelledby="wb-database-sync-excluded-title">
               <header class="wb-database-sync-excluded-header">
                 <div class="wb-database-sync-section-title">
-                  <strong id="wb-database-sync-excluded-title">已排除的表</strong>
+                  <strong id="wb-database-sync-excluded-title">{{ t('m_623e4ec796e8') }}</strong>
                   <span aria-live="polite">{{ effectiveExclusions.length }}</span>
                 </div>
                 <button
                   type="button"
                   class="wb-database-sync-excluded-clear"
                   :disabled="isBusy || !manualExclusions.size"
-                  title="移除所有手动排除（模板提供的排除保持不变）"
+                  :title="t('m_8633ecfce870')"
                   @click="clearManualExclusions"
-                >
-                  清空
-                </button>
+                > {{ t('m_1ef3de06b32e') }} </button>
               </header>
 
-              <div v-if="effectiveExclusions.length" class="wb-database-sync-excluded-list" role="list" aria-label="当前已排除的表">
+              <div v-if="effectiveExclusions.length" class="wb-database-sync-excluded-list" role="list" :aria-label="t('m_db29627d970c')">
                 <div
                   v-for="tableName in effectiveExclusions"
                   :key="tableName"
@@ -402,7 +401,7 @@ function targetChanged(event) {
                     v-if="isTemplateOnly(tableName)"
                     class="wb-database-sync-excluded-source"
                     :title="templateSourceTitle(tableName)"
-                  >模板</span>
+                  >{{ t('m_62b95daecb7f') }}</span>
                   <button
                     v-else
                     type="button"
@@ -418,8 +417,8 @@ function targetChanged(event) {
 
               <div v-else class="wb-database-sync-excluded-empty" role="status">
                 <ListFilter :size="22" aria-hidden="true" />
-                <strong>未排除任何表</strong>
-                <span>在左侧勾选要排除的表，或启用下方模板。</span>
+                <strong>{{ t('m_683ebd92dd16') }}</strong>
+                <span>{{ t('m_08a370859180') }}</span>
               </div>
             </section>
 
@@ -432,7 +431,7 @@ function targetChanged(event) {
           <section v-if="['running', 'cancelling', 'restoring'].includes(sync.dialog.status)" class="wb-database-sync-progress-section">
             <div class="wb-database-sync-progress-heading">
               <strong><span class="wb-database-sync-activity" aria-hidden="true"></span>{{ stageLabel }}</strong>
-              <span v-if="sync.dialog.progress.total">{{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }} 张表</span>
+              <span v-if="sync.dialog.progress.total">{{ sync.dialog.progress.done }} / {{ sync.dialog.progress.total }} {{ t('m_a2b22d3a5ca3') }}</span>
             </div>
             <div
               class="wb-database-sync-progress"
@@ -446,38 +445,32 @@ function targetChanged(event) {
             >
               <span class="wb-database-sync-progress-fill"></span>
             </div>
-            <p v-if="sync.dialog.progress.currentTable" class="wb-database-sync-current-table" :title="sync.dialog.progress.currentTable">
-              当前表：<strong>{{ sync.dialog.progress.currentTable }}</strong>
+            <p v-if="sync.dialog.progress.currentTable" class="wb-database-sync-current-table" :title="sync.dialog.progress.currentTable"> {{ t('m_5f9a50d385ff') }}<strong>{{ sync.dialog.progress.currentTable }}</strong>
             </p>
-            <p v-if="hasRowProgress">数据行：{{ sync.dialog.progress.completedRows }} / {{ sync.dialog.progress.totalRows }}</p>
+            <p v-if="hasRowProgress">{{ t('m_9b50059c8481') }}{{ sync.dialog.progress.completedRows }} / {{ sync.dialog.progress.totalRows }}</p>
             <p v-if="sync.dialog.progress.message" class="wb-database-sync-muted">{{ sync.dialog.progress.message }}</p>
-            <p class="wb-database-sync-progress-meta">已运行 {{ elapsed }} · {{ lastUpdate }}</p>
+            <p class="wb-database-sync-progress-meta">{{ t('m_1add43f79816') }} {{ elapsed }} · {{ lastUpdate }}</p>
           </section>
 
           <section v-if="restoreResult" class="wb-database-sync-restore-result" :class="{ 'is-restored': restoreResult.restored }">
-            <strong v-if="restoreResult.restored && restoreResult.cancelled">同步已停止，目标库已从本地安全快照恢复。</strong>
-            <strong v-else-if="restoreResult.restored">同步失败，已从本地安全快照恢复目标库。</strong>
-            <strong v-else-if="restoreResult.cancelled">同步已停止，但自动恢复失败，需要手动恢复。</strong>
-            <strong v-else>同步失败且自动恢复失败，需要手动恢复。</strong>
-            <p v-if="restoreResult.snapshotPath">本地安全快照：{{ restoreResult.snapshotPath }}</p>
-            <p v-if="restoreResult.restored">目标库已从本地安全快照恢复，请检查错误信息后再重试。</p>
-            <p v-else>请保留本地安全快照并进行人工恢复，确认目标库状态后再继续操作。</p>
+            <strong v-if="restoreResult.restored && restoreResult.cancelled">{{ t('m_dc9d1da2cc6d') }}</strong>
+            <strong v-else-if="restoreResult.restored">{{ t('m_d22980079578') }}</strong>
+            <strong v-else-if="restoreResult.cancelled">{{ t('m_954e2d393b7f') }}</strong>
+            <strong v-else>{{ t('m_e65e9b1f5cc3') }}</strong>
+            <p v-if="restoreResult.snapshotPath">{{ t('m_ead9e5642dc3') }}{{ restoreResult.snapshotPath }}</p>
+            <p v-if="restoreResult.restored">{{ t('m_815e783afb8f') }}</p>
+            <p v-else>{{ t('m_f61a89d212ec') }}</p>
           </section>
 
-          <p v-if="sync.dialog.status === 'cancelled' && !restoreResult" class="wb-database-sync-muted">覆盖同步已停止，当前任务不会再继续处理。</p>
+          <p v-if="sync.dialog.status === 'cancelled' && !restoreResult" class="wb-database-sync-muted">{{ t('m_0bace3988481') }}</p>
 
           <template v-if="sync.dialog.status === 'succeeded' && !restoreResult">
             <p class="wb-database-sync-success">
-              <template v-if="effectiveExclusions.length">
-                覆盖同步完成，已确认所有未排除表与源库一致；排除表保持目标库原状。
-              </template>
-              <template v-else>
-                覆盖同步完成，已确认目标库与源库的基础表结构和数据完全相同。
-              </template>
-              <template v-if="syncSnapshotPath"> 本地安全快照已保存。</template>
+              <template v-if="effectiveExclusions.length"> {{ t('m_1154068aef79') }} </template>
+              <template v-else> {{ t('m_5707e1e2e574') }} </template>
+              <template v-if="syncSnapshotPath"> {{ t('m_d344cbf782c6') }}</template>
             </p>
-            <p v-if="syncSnapshotPath" class="wb-database-sync-muted" :title="syncSnapshotPath">
-              快照路径：{{ syncSnapshotPath }}
+            <p v-if="syncSnapshotPath" class="wb-database-sync-muted" :title="syncSnapshotPath"> {{ t('m_a829a383ae41') }}{{ syncSnapshotPath }}
             </p>
           </template>
           <p v-if="sync.dialog.status === 'failed'" class="wb-dialog-error">{{ sync.dialog.errorMessage }}</p>
@@ -487,20 +480,18 @@ function targetChanged(event) {
       <!-- Footer -->
       <footer class="wb-dialog-actions wb-database-sync-footer">
         <div class="wb-database-sync-footer-left">
-          <template v-if="sourceTableCount">
-            将同步 <strong>{{ syncedTableCount }}</strong> 张表 · 排除 <strong>{{ effectiveExclusions.length }}</strong> 张
-          </template>
-          <template v-else>请选择不同的源库与目标库</template>
+          <template v-if="sourceTableCount"> {{ t('m_2fda58625860') }} <strong>{{ syncedTableCount }}</strong> {{ t('m_acd38ccc17a2') }} <strong>{{ effectiveExclusions.length }}</strong> {{ t('m_f56a049fcc23') }} </template>
+          <template v-else>{{ t('m_f18b5ed97755') }}</template>
         </div>
         <div class="wb-database-sync-footer-right">
-          <button v-if="!isBusy" type="button" @click="emit('close')">关闭</button>
+          <button v-if="!isBusy" type="button" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
           <button
             v-else
             type="button"
             :disabled="!sync.canCancel.value"
             @click="emit('cancel')"
           >
-            {{ sync.dialog.status === 'cancelling' ? '正在停止…' : sync.dialog.status === 'restoring' ? '正在恢复…' : '停止同步' }}
+            {{ sync.dialog.status === 'cancelling' ? t('m_8a99be840844') : sync.dialog.status === 'restoring' ? t('m_72d43fc16d53') : t('m_771d26797da4') }}
           </button>
           <span class="wb-database-sync-execute-hint" :title="executeDisabledReason">
             <button
@@ -508,9 +499,7 @@ function targetChanged(event) {
               class="wb-dialog-primary danger"
               :disabled="!sync.canExecute.value || isBusy"
               @click="emit('execute')"
-            >
-              开始覆盖同步
-            </button>
+            > {{ t('m_73c5b64988dc') }} </button>
           </span>
         </div>
       </footer>

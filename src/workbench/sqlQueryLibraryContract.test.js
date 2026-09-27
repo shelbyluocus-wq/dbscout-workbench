@@ -1,10 +1,10 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function read(relativePath) {
-  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+  return readLocalizedContractSource(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
 }
 
 test("database homepage exposes the SQL query library beside table search", () => {

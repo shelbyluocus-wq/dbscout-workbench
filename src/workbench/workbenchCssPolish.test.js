@@ -1,29 +1,29 @@
-import { readFileSync } from "node:fs";
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(__dirname, "workbench.css"), "utf8");
-const orchestratorVue = readFileSync(join(__dirname, "MySqlWorkbench.vue"), "utf8");
-const paneVue = readFileSync(join(__dirname, "components", "WorkbenchPane.vue"), "utf8");
-const splitLayoutVue = readFileSync(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
-const tabsVue = readFileSync(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
-const dataGridVue = readFileSync(join(__dirname, "components", "DataGrid.vue"), "utf8");
-const toolbarSplitButtonVue = readFileSync(join(__dirname, "components", "ToolbarSplitButton.vue"), "utf8");
-const quickOpenPaletteVue = readFileSync(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
-const quickOpenKindFilterVue = readFileSync(join(__dirname, "components", "QuickOpenKindFilter.vue"), "utf8");
-const sidebarSearchPanelVue = readFileSync(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
-const confirmDialogVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
-const tableCopyDialogVue = readFileSync(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
-const databaseSyncDialogVue = readFileSync(join(__dirname, "components", "DatabaseSyncDialog.vue"), "utf8");
-const tableCopySelectionPanelVue = readFileSync(join(__dirname, "components", "TableCopySelectionPanel.vue"), "utf8");
-const batchExportDialogVue = readFileSync(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
-const databaseDisplayDialogVue = readFileSync(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
-const databaseColorPickerVue = readFileSync(join(__dirname, "components", "DatabaseColorPicker.vue"), "utf8");
-const databaseHomeVue = readFileSync(join(__dirname, "components", "DatabaseHome.vue"), "utf8");
-const databaseTableListVue = readFileSync(join(__dirname, "components", "DatabaseTableList.vue"), "utf8");
+const css = readLocalizedContractSource(join(__dirname, "workbench.css"), "utf8");
+const orchestratorVue = readLocalizedContractSource(join(__dirname, "MySqlWorkbench.vue"), "utf8");
+const paneVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchPane.vue"), "utf8");
+const splitLayoutVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
+const tabsVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchTabs.vue"), "utf8");
+const dataGridVue = readLocalizedContractSource(join(__dirname, "components", "DataGrid.vue"), "utf8");
+const toolbarSplitButtonVue = readLocalizedContractSource(join(__dirname, "components", "ToolbarSplitButton.vue"), "utf8");
+const quickOpenPaletteVue = readLocalizedContractSource(join(__dirname, "components", "QuickOpenPalette.vue"), "utf8");
+const quickOpenKindFilterVue = readLocalizedContractSource(join(__dirname, "components", "QuickOpenKindFilter.vue"), "utf8");
+const sidebarSearchPanelVue = readLocalizedContractSource(join(__dirname, "components", "SidebarSearchPanel.vue"), "utf8");
+const confirmDialogVue = readLocalizedContractSource(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
+const tableCopyDialogVue = readLocalizedContractSource(join(__dirname, "components", "TableCopyDialog.vue"), "utf8");
+const databaseSyncDialogVue = readLocalizedContractSource(join(__dirname, "components", "DatabaseSyncDialog.vue"), "utf8");
+const tableCopySelectionPanelVue = readLocalizedContractSource(join(__dirname, "components", "TableCopySelectionPanel.vue"), "utf8");
+const batchExportDialogVue = readLocalizedContractSource(join(__dirname, "components", "BatchExportDialog.vue"), "utf8");
+const databaseDisplayDialogVue = readLocalizedContractSource(join(__dirname, "components", "DatabaseDisplayDialog.vue"), "utf8");
+const databaseColorPickerVue = readLocalizedContractSource(join(__dirname, "components", "DatabaseColorPicker.vue"), "utf8");
+const databaseHomeVue = readLocalizedContractSource(join(__dirname, "components", "DatabaseHome.vue"), "utf8");
+const databaseTableListVue = readLocalizedContractSource(join(__dirname, "components", "DatabaseTableList.vue"), "utf8");
 
 function ruleBodies(selector) {
   const bodies = [];
@@ -1190,7 +1190,7 @@ test("settings drawer uses an opaque dialog surface", () => {
 });
 
 test("collapsed settings drawer is removed from keyboard and screen-reader navigation", () => {
-  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
   const sheet = sidebarVue.match(/<section[\s\S]{0,240}id="wb-sidebar-settings-sheet"[\s\S]*?>/)?.[0] || "";
 
   assert.match(sidebarVue, /<Transition name="wb-sidebar-settings-sheet">\s*<section/);
@@ -1210,7 +1210,7 @@ test("save errors remain visible for four seconds while success feedback stays b
 });
 
 test("sidebar settings gear is an inline SVG instead of theme-switched bitmaps", () => {
-  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.doesNotMatch(sidebarVue, /settings(-white)?\.png/);
   assert.doesNotMatch(sidebarVue, /<img[\s\S]{0,200}wb-sidebar-settings-icon/);
@@ -1253,7 +1253,7 @@ test("cell detail collapse bar uses theme tokens and pane-collapse motion", () =
 });
 
 test("confirm dialog danger button binds the class the stylesheet actually styles", () => {
-  const confirmVue = readFileSync(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
+  const confirmVue = readLocalizedContractSource(join(__dirname, "components", "ConfirmDialog.vue"), "utf8");
 
   // Regression: the component used to bind `wb-dialog-danger`, a class with no
   // rules anywhere, so destructive confirms looked identical to normal ones.
@@ -1289,7 +1289,7 @@ test("batch export exposes a reversible homepage-selection focus and an export-l
 });
 
 test("database display separates icon and name colors with theme-following defaults", () => {
-  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.match(databaseDisplayDialogVue, /v-model="textColorDraft"[\s\S]*label="名称颜色"/);
   assert.match(databaseDisplayDialogVue, /v-model="colorDraft" label="图标颜色"/);
@@ -1351,7 +1351,7 @@ test("context menu items lay out icon + label in a flex row", () => {
 });
 
 test("context menu row group combines a bounded count with above and below insertion", () => {
-  const menuVue = readFileSync(join(__dirname, "components", "ContextMenu.vue"), "utf8");
+  const menuVue = readLocalizedContractSource(join(__dirname, "components", "ContextMenu.vue"), "utf8");
 
   assert.match(menuVue, /grid-row-insert-below/);
   assert.doesNotMatch(menuVue, /grid-row-insert-multiple/);
@@ -1377,7 +1377,7 @@ test("numeric columns render right-aligned with tabular figures", () => {
 });
 
 test("settings drawer offers a color-theme picker row", () => {
-  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.match(sidebarVue, /wb-sidebar-theme-options/);
   assert.match(sidebarVue, /emit\('set-color-theme', theme\.id\)/);
@@ -1387,7 +1387,7 @@ test("settings drawer offers a color-theme picker row", () => {
 });
 
 test("sidebar tree nodes use lucide icons for connection, database, and table", () => {
-  const sidebarVue = readFileSync(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.match(sidebarVue, /<Server :size="15" class="wb-tree-kind-icon"/);
   assert.match(sidebarVue, /:is="databaseTreeIcon\(connection\.id, database\)"/);

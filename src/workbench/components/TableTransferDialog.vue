@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { Cloud, FileText, FolderOpen, FolderSearch, HardDrive, LoaderCircle, TriangleAlert, User, X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -125,13 +126,13 @@ const runDisabledReason = computed(() => {
       <!-- Header -->
       <header class="wb-dialog-header wb-table-transfer-header">
         <div>
-          <h2 id="wb-table-transfer-title">一键转表(一键导出客户端prop)</h2>
-          <p>运行转表脚本生成配置包，先 SVN 更新游戏工程，再覆盖配置表到 assets。</p>
+          <h2 id="wb-table-transfer-title">{{ t('m_510ce8f45357') }}</h2>
+          <p>{{ t('m_200516ae1204') }}</p>
         </div>
         <button
           type="button"
           class="wb-dialog-close"
-          aria-label="关闭一键转表窗口"
+          :aria-label="t('m_3da29c4a3338')"
           :disabled="isRunning"
           @click="emit('close')"
         >
@@ -141,7 +142,7 @@ const runDisabledReason = computed(() => {
 
       <div class="wb-table-transfer-body">
         <!-- 模板页签 -->
-        <div class="wb-table-transfer-tabs" role="tablist" aria-label="转表模板">
+        <div class="wb-table-transfer-tabs" role="tablist" :aria-label="t('m_fc621ca9bf0b')">
           <button
             v-for="template in templates"
             :key="template.id"
@@ -160,62 +161,54 @@ const runDisabledReason = computed(() => {
         <!-- 配置项 -->
         <div class="wb-table-transfer-form">
           <div class="wb-table-transfer-field">
-            <span class="wb-table-transfer-label">转表脚本</span>
+            <span class="wb-table-transfer-label">{{ t('m_df3b0c3feaf7') }}</span>
             <div class="wb-table-transfer-path">
               <input
                 type="text"
                 :value="activeTemplate.scriptPath"
                 readonly
-                placeholder="选择 .exe / .bat / .lnk 转表脚本"
-                aria-label="转表脚本路径"
+                :placeholder="t('m_c6aadb8f03ed')"
+                :aria-label="t('m_56675578a75d')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickScript">
-                <FileText :size="13" aria-hidden="true" />
-                选择脚本…
-              </button>
+                <FileText :size="13" aria-hidden="true" /> {{ t('m_b902d80b8b41') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
-                title="在资源管理器中打开"
-                aria-label="浏览转表脚本所在位置"
+                :title="t('m_d10ec81b9024')"
+                :aria-label="t('m_d9b35c1d0873')"
                 :disabled="isRunning || !activeTemplate.scriptPath"
                 @click="browseScript"
               >
-                <FolderSearch :size="13" aria-hidden="true" />
-                浏览
-              </button>
+                <FolderSearch :size="13" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
-            <span class="wb-table-transfer-label">游戏工程</span>
+            <span class="wb-table-transfer-label">{{ t('m_e82d96ad7002') }}</span>
             <div class="wb-table-transfer-path">
               <input
                 type="text"
                 :value="activeTemplate.projectRoot"
                 readonly
-                placeholder="选择游戏工程文件夹（或其中的 assets 目录）"
-                aria-label="游戏工程路径"
+                :placeholder="t('m_6ff1b0c2db35')"
+                :aria-label="t('m_6fff77983833')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickProjectDir">
-                <FolderOpen :size="13" aria-hidden="true" />
-                选择文件夹…
-              </button>
+                <FolderOpen :size="13" aria-hidden="true" /> {{ t('m_93e76151bbeb') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
-                title="在资源管理器中打开"
-                aria-label="浏览游戏工程文件夹"
+                :title="t('m_d10ec81b9024')"
+                :aria-label="t('m_c2af1dee9520')"
                 :disabled="isRunning || !activeTemplate.projectRoot"
                 @click="browseProject"
               >
-                <FolderSearch :size="13" aria-hidden="true" />
-                浏览
-              </button>
+                <FolderSearch :size="13" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
-            <span class="wb-table-transfer-label">冲突处理</span>
-            <div class="wb-table-transfer-strategy" role="radiogroup" aria-label="SVN 冲突处理策略">
+            <span class="wb-table-transfer-label">{{ t('m_60a33016fc13') }}</span>
+            <div class="wb-table-transfer-strategy" role="radiogroup" :aria-label="t('m_930b09549775')">
               <label>
                 <input
                   type="radio"
@@ -224,9 +217,7 @@ const runDisabledReason = computed(() => {
                   :disabled="isRunning"
                   @change="setConflictStrategy('theirs')"
                 />
-                <Cloud :size="13" aria-hidden="true" />
-                冲突以云端为准
-              </label>
+                <Cloud :size="13" aria-hidden="true" /> {{ t('m_d59a850d6c4c') }} </label>
               <label>
                 <input
                   type="radio"
@@ -235,9 +226,7 @@ const runDisabledReason = computed(() => {
                   :disabled="isRunning"
                   @change="setConflictStrategy('mine')"
                 />
-                <HardDrive :size="13" aria-hidden="true" />
-                冲突以本地为准
-              </label>
+                <HardDrive :size="13" aria-hidden="true" /> {{ t('m_71983c02ba0c') }} </label>
               <label>
                 <input
                   type="radio"
@@ -246,9 +235,7 @@ const runDisabledReason = computed(() => {
                   :disabled="isRunning"
                   @change="setConflictStrategy('manual')"
                 />
-                <User :size="13" aria-hidden="true" />
-                遇到冲突由我处理
-              </label>
+                <User :size="13" aria-hidden="true" /> {{ t('m_8350ce67f10f') }} </label>
             </div>
           </div>
         </div>
@@ -268,17 +255,17 @@ const runDisabledReason = computed(() => {
             {{ dialog.errorMessage }}
           </p>
           <div v-if="dialog.status === 'succeeded' && result" class="wb-table-transfer-result">
-            <span>产出目录：{{ result.outputDir }}</span>
-            <span>覆盖文件：{{ result.copiedFiles }} 个</span>
+            <span>{{ t('m_08bd6fa642d3') }}{{ result.outputDir }}</span>
+            <span>{{ t('m_37ca6a80dc6f') }}{{ result.copiedFiles }} {{ t('m_3a116815bc9d') }}</span>
           </div>
-          <pre v-if="showLog" ref="logRef" class="wb-table-transfer-log" aria-label="转表日志">{{ logText }}</pre>
+          <pre v-if="showLog" ref="logRef" class="wb-table-transfer-log" :aria-label="t('m_b3d188484e57')">{{ logText }}</pre>
         </div>
       </div>
 
       <!-- Footer -->
       <footer class="wb-dialog-actions wb-table-transfer-footer">
-        <button v-if="isRunning" type="button" @click="cancelRun">取消运行</button>
-        <button v-else type="button" @click="emit('close')">关闭</button>
+        <button v-if="isRunning" type="button" @click="cancelRun">{{ t('m_15a3277ed96d') }}</button>
+        <button v-else type="button" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
         <span :title="runDisabledReason">
           <button
             type="button"
@@ -286,7 +273,7 @@ const runDisabledReason = computed(() => {
             :disabled="!canRun"
             @click="start"
           >
-            {{ isRunning ? "转表进行中…" : "开始转表" }}
+            {{ isRunning ? t('m_38a2d609f30b') : t('m_1e95990832d3') }}
           </button>
         </span>
       </footer>

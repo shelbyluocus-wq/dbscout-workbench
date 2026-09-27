@@ -1,10 +1,11 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
+const read = (p) => readLocalizedContractSource(new URL(p, import.meta.url), "utf8");
 const visibleTextSnippets = (source) => [
   ...source.matchAll(/>([^<>{}\r\n]*(?:\.\.\.)[^<>{}\r\n]*)</g),
   ...source.matchAll(/\b(?:placeholder|title|aria-label)=["']([^"']*(?:\.\.\.)[^"']*)["']/g),
@@ -23,7 +24,7 @@ function cssRuleBody(css, selector) {
 function readAllComponents() {
   const dir = fileURLToPath(new URL("./components", import.meta.url));
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".vue"));
-  return files.map((f) => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
+  return files.map((f) => readLocalizedContractSource(path.join(dir, f), "utf8")).join("\n");
 }
 
 test("main.js mounts the MySQL workbench as the first screen", () => {

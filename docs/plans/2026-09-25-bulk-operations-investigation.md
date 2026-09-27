@@ -2,7 +2,7 @@
 
 ## 范围与证据等级
 
-- 调查日期：2026-09-25，Asia/Shanghai。
+- 调查日期：2026-09-25。
 - 源码基线：`1170250ff29888a431b2425750e4962c7a3737fc`。开始及写文档前工作区均干净；本地仓库不是 shallow clone。历史结论限于本地可见 Git 历史，没有 fetch。
 - 本支调查范围：批量删行 `delete_rows`、批量删表 `drop_tables` / `drop_tables_mysql`、首页 `deleteHomeTables`，以及直接依赖的审计和测试。
 - 授权边界：没有连接真实数据库、操作真实数据、修改程序或测试、提交 Git。主线运行了本地模拟应用、临时验证脚本及已有测试；删除分支的模拟验证不涉及真实数据库。唯一持久化写入是本文。
@@ -23,12 +23,12 @@
 
 ### 当前流程：源码确定
 
-- 前端先确认并准备待删行，然后只发一次 `delete_rows`，身份由所选已保存行生成；本地未保存草稿另行移除。完成后读取列表，刷新失败有单独提示。见 [useRowSelection.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/composables/useRowSelection.js:294)，294-350 行。这里只确认删除入口边界，不研究分页实现。
-- 后端取得表会话、拒绝只读连接，MongoDB 提前分流，MySQL 空请求返回 0。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6192)，6192-6225 行。以下成本与事务结论只针对 MySQL，不能套用到 MongoDB。
-- MySQL 先确保本地审计库可用、取得当前表结构，排除生成列，生成删除计划，再开启一笔事务。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6227)，6227-6265 行。
-- 循环读取每行前镜像并逐条写 pending 审计。前镜像 SQL 是 `SELECT ... LIMIT 1 FOR UPDATE`，与 DELETE 使用同一 MySQL 事务；字段转成字符串并保留 NULL。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:573)，573-620、6267-6327 行。
-- 再循环执行每行 DELETE，要求每条恰好影响 1 行；否则回滚整批并尝试将审计标记 aborted。全部删除成功后逐条完成 committed 审计，最后提交 MySQL。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6329)，6329-6386 行。
-- DELETE 是带身份条件的 `LIMIT 1`，不是一个批量 IN 语句。空身份被拒绝，NULL 与空字符串区分，标识符转义、值绑定。见 [audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:900)，900-911 行；[db.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/db.rs:322)，322-343 行。
+- 前端先确认并准备待删行，然后只发一次 `delete_rows`，身份由所选已保存行生成；本地未保存草稿另行移除。完成后读取列表，刷新失败有单独提示。见 [useRowSelection.js](../../src/workbench/composables/useRowSelection.js:294)，294-350 行。这里只确认删除入口边界，不研究分页实现。
+- 后端取得表会话、拒绝只读连接，MongoDB 提前分流，MySQL 空请求返回 0。见 [commands.rs](../../src-tauri/src/commands.rs:6192)，6192-6225 行。以下成本与事务结论只针对 MySQL，不能套用到 MongoDB。
+- MySQL 先确保本地审计库可用、取得当前表结构，排除生成列，生成删除计划，再开启一笔事务。见 [commands.rs](../../src-tauri/src/commands.rs:6227)，6227-6265 行。
+- 循环读取每行前镜像并逐条写 pending 审计。前镜像 SQL 是 `SELECT ... LIMIT 1 FOR UPDATE`，与 DELETE 使用同一 MySQL 事务；字段转成字符串并保留 NULL。见 [commands.rs](../../src-tauri/src/commands.rs:573)，573-620、6267-6327 行。
+- 再循环执行每行 DELETE，要求每条恰好影响 1 行；否则回滚整批并尝试将审计标记 aborted。全部删除成功后逐条完成 committed 审计，最后提交 MySQL。见 [commands.rs](../../src-tauri/src/commands.rs:6329)，6329-6386 行。
+- DELETE 是带身份条件的 `LIMIT 1`，不是一个批量 IN 语句。空身份被拒绝，NULL 与空字符串区分，标识符转义、值绑定。见 [audit.rs](../../src-tauri/src/audit.rs:900)，900-911 行；[db.rs](../../src-tauri/src/db.rs:322)，322-343 行。
 
 ### 串行成本
 
@@ -42,25 +42,25 @@
 | 本地审计完成 | N 次独立 UPDATE，逐次 await |
 | 事务 | 一次 MySQL begin / commit；失败另有回滚及审计清理 |
 
-证据：[commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6267)，6267-6377 行；[audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:254)，254-295、386-390、431-440 行。审计连接池最多一个连接并开启 WAL，见同文件 108-143 行。
+证据：[commands.rs](../../src-tauri/src/commands.rs:6267)，6267-6377 行；[audit.rs](../../src-tauri/src/audit.rs:254)，254-295、386-390、431-440 行。审计连接池最多一个连接并开启 WAL，见同文件 108-143 行。
 
 **未实测推断**：可用 `准备 + Σ(读前镜像 + pending写入) + ΣDELETE + Σ审计完成 + 提交` 描述关键路径。网络延迟、磁盘持久化、数据库锁等待均可能放大逐条成本；1000 行意味着约 2000 条 MySQL 业务语句和 2000 条 SQLite 写语句，不意味着已经测得 2000 次网络 RTT 或特定 fsync 次数。不能据此承诺耗时或提速倍数。较早锁定的行会持续等待后续串行工作，是锁持有时间的潜在放大项。
 
-已有批量审计能力：[audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:297)，297-357 行的 `record_pending_batch` 将多个 INSERT 放进一个 SQLite 事务；394-428 行提供批量强制状态更新。它们仍逐条执行 SQL，但减少独立提交边界。删行当前未调用这些函数，属于确定的可优化点，不等于已有速度回归证据。
+已有批量审计能力：[audit.rs](../../src-tauri/src/audit.rs:297)，297-357 行的 `record_pending_batch` 将多个 INSERT 放进一个 SQLite 事务；394-428 行提供批量强制状态更新。它们仍逐条执行 SQL，但减少独立提交边界。删行当前未调用这些函数，属于确定的可优化点，不等于已有速度回归证据。
 
 ### 安全边界
 
 - 必须保留整批 MySQL 事务、事务内前镜像锁定、先保存可恢复内容再删除、审计失败不提交、逐行身份与影响行数校验。不能为了速度分批提交或把必要审计改成异步 best-effort。
-- “整批回滚”是当前代码的设计路径，不是对所有数据库条件的实测保证：该函数没有检查表存储引擎；异常分支忽略了 rollback 自身和 aborted 状态写入的错误。非事务表、连接中断等边界仍待隔离测试。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6283)，6283-6295、6319-6324、6353-6375 行。
-- committed 审计在 MySQL commit 之前完成，因此两套存储并不是共同原子事务。此窗口崩溃、提交响应不确定或补偿失败时的状态一致性仍待验证；不能把“有审计记录”说成“崩溃时也必定和业务库一致”。源码也明确未采用跨库 2PC，见 [audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:9)，9-12 行。
-- FULL 持久性应保留，不能靠改 NORMAL 提速。[既有性能报告](/Users/louis/Documents/GitHub/dbscout-workbench/docs/plans/2026-09-20-grid-performance-results.md:43)，43-45 行写明保持 FULL。当前 `ensure_audit_pool` 没显式设置 synchronous，使用依赖默认值；本机 sqlx-sqlite 0.8.6 的 [options/mod.rs](/Users/louis/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-sqlite-0.8.6/src/options/mod.rs:187)，187-189、325-330 行说明默认 FULL。这是本地依赖源码说明，未读取运行中数据库 PRAGMA，也未验证已安装包的实际依赖版本。
+- “整批回滚”是当前代码的设计路径，不是对所有数据库条件的实测保证：该函数没有检查表存储引擎；异常分支忽略了 rollback 自身和 aborted 状态写入的错误。非事务表、连接中断等边界仍待隔离测试。见 [commands.rs](../../src-tauri/src/commands.rs:6283)，6283-6295、6319-6324、6353-6375 行。
+- committed 审计在 MySQL commit 之前完成，因此两套存储并不是共同原子事务。此窗口崩溃、提交响应不确定或补偿失败时的状态一致性仍待验证；不能把“有审计记录”说成“崩溃时也必定和业务库一致”。源码也明确未采用跨库 2PC，见 [audit.rs](../../src-tauri/src/audit.rs:9)，9-12 行。
+- FULL 持久性应保留，不能靠改 NORMAL 提速。[既有性能报告](../../docs/plans/2026-09-20-grid-performance-results.md:43)，43-45 行写明保持 FULL。当前 `ensure_audit_pool` 没显式设置 synchronous，使用依赖默认值；本机 sqlx-sqlite 0.8.6 的 [options/mod.rs](<CARGO_HOME>/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-sqlite-0.8.6/src/options/mod.rs:187)，187-189、325-330 行说明默认 FULL。这是本地依赖源码说明，未读取运行中数据库 PRAGMA，也未验证已安装包的实际依赖版本。
 - 合并 SQL 的后续方案需要覆盖复合键、NULL、无主键重复行、生成列、二进制前镜像、外键/触发器及每行结果核验。当前两个 `LIMIT 1` 并不能单独证明身份条件唯一，不能贸然替换为宽泛 IN/OR 条件。
 
 ### 审计附带发现：整批复用 client_id
 
 **源码确定的契约冲突，未连中心服务复现**：删行只在循环外生成一次 `client_id`，每行审计均绑定相同值。中心服务以它为审计表主键，并用 `INSERT OR IGNORE` 去重；如果部署的是仓库内这套服务且启用同步，一批多行记录会被当作重复推送，无法保证逐行出现在共享日志中。本地 SQLite 的自增 id 不受这一去重逻辑影响，不能说成本地回滚记录丢失。
 
-证据：[commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:6240)，6240-6249、6317 行；[audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:289)，289-291 行；[account.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/account.rs:82)，82-90 行；[server/src/db.rs](/Users/louis/Documents/GitHub/dbscout-workbench/server/src/db.rs:18)，18-19 行；[server/src/handlers.rs](/Users/louis/Documents/GitHub/dbscout-workbench/server/src/handlers.rs:99)，99-109、134-140 行。历史 `817732a` 的 `commands.rs:2232-2248` 已是循环外创建该上下文。
+证据：[commands.rs](../../src-tauri/src/commands.rs:6240)，6240-6249、6317 行；[audit.rs](../../src-tauri/src/audit.rs:289)，289-291 行；[account.rs](../../src-tauri/src/account.rs:82)，82-90 行；[server/src/db.rs](../../server/src/db.rs:18)，18-19 行；[server/src/handlers.rs](../../server/src/handlers.rs:99)，99-109、134-140 行。历史 `817732a` 的 `commands.rs:2232-2248` 已是循环外创建该上下文。
 
 这一点应进入审计优化验收：每行有稳定且独立的幂等键，重试同一行不制造重复。现有 `record_pending_batch` 同样绑定共享上下文的 client_id（audit.rs:338），不能只替换函数就宣称共享审计安全完整。删表目前每表生成独立 UUID，见 commands.rs:1694，优化时也不要错误地把整套上下文挪到循环外复用。
 
@@ -68,18 +68,18 @@
 
 ### 当前流程与成本：源码确定
 
-- 请求结构为 `request: { connectionId, database, tables }`；响应为 `{ dropped: [{ tableName }], failed: [{ tableName, reason }] }`。见 [types.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/types.rs:812)，812-833 行。
-- 后端仅修剪表名并过滤空值，没有去重；拒绝只读连接及 MongoDB。MySQL 处理完后只失效成功对象的表结构和计数缓存。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:1572)，1572-1619 行。
-- 每表顺序执行“生成身份及 pending 审计 -> `DROP TABLE IF EXISTS` -> committed/aborted 审计”。失败写入 failed 后继续下一表，最终一律 `Ok(DropTablesResponse)`，不因 failed 非空而返回 Err。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:1677)，1677-1735 行。
-- T 张表通常有 T 次 DROP、T 次 pending INSERT、T 次审计状态 UPDATE，均在该循环中 await；审计不可用时写入数量会更少。函数没有整批事务或逐表进度事件。首页 busy 直到删除、关标签、刷新全部走完才解除，见 [MySqlWorkbench.vue](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/MySqlWorkbench.vue:3109)，3109-3133 行。
-- `mark_audit` 每次成功都会触发同步信号，但信号使用 `try_send`，不是等待中心 HTTP 返回。不能把 T 次同步通知写成 T 次阻塞的远程同步。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:557)，557-568 行；[audit_sync.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit_sync.rs:267)，267-273 行。
+- 请求结构为 `request: { connectionId, database, tables }`；响应为 `{ dropped: [{ tableName }], failed: [{ tableName, reason }] }`。见 [types.rs](../../src-tauri/src/types.rs:812)，812-833 行。
+- 后端仅修剪表名并过滤空值，没有去重；拒绝只读连接及 MongoDB。MySQL 处理完后只失效成功对象的表结构和计数缓存。见 [commands.rs](../../src-tauri/src/commands.rs:1572)，1572-1619 行。
+- 每表顺序执行“生成身份及 pending 审计 -> `DROP TABLE IF EXISTS` -> committed/aborted 审计”。失败写入 failed 后继续下一表，最终一律 `Ok(DropTablesResponse)`，不因 failed 非空而返回 Err。见 [commands.rs](../../src-tauri/src/commands.rs:1677)，1677-1735 行。
+- T 张表通常有 T 次 DROP、T 次 pending INSERT、T 次审计状态 UPDATE，均在该循环中 await；审计不可用时写入数量会更少。函数没有整批事务或逐表进度事件。首页 busy 直到删除、关标签、刷新全部走完才解除，见 [MySqlWorkbench.vue](../../src/workbench/MySqlWorkbench.vue:3109)，3109-3133 行。
+- `mark_audit` 每次成功都会触发同步信号，但信号使用 `try_send`，不是等待中心 HTTP 返回。不能把 T 次同步通知写成 T 次阻塞的远程同步。见 [commands.rs](../../src-tauri/src/commands.rs:557)，557-568 行；[audit_sync.rs](../../src-tauri/src/audit_sync.rs:267)，267-273 行。
 
 **未实测推断**：远程 DROP 往返、数据库内部 DDL/锁等待、本地审计以及最后刷新都可能贡献用户等待时间。必须分段采样才能确认主瓶颈，不能仅因看到 for/await 就认定数据库执行本身很快或前端完全卡死。
 
 ### 可以先修的确定问题
 
-1. **结果误报与错误关标签**。`deleteHomeTables` 未接收后端结果，以原 tableNames 关闭所有标签、清理最近记录、清空选中，并显示原请求数量成功。失败表可能依然存在，其标签却被关闭。见 [MySqlWorkbench.vue](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/MySqlWorkbench.vue:3111)，3111-3128 行；对照 commands.rs:1723-1735。
-2. **刷新错误覆盖真实删除结果**。`loadTables` 抛错进入同一个“删除表失败”提示；此前成功的 DROP 不会因此撤回。见 [MySqlWorkbench.vue](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/MySqlWorkbench.vue:3124)，3124-3130 行。改进应把删除结果和刷新结果分开表达，不能通过重试整次 DROP 来修复列表刷新。
+1. **结果误报与错误关标签**。`deleteHomeTables` 未接收后端结果，以原 tableNames 关闭所有标签、清理最近记录、清空选中，并显示原请求数量成功。失败表可能依然存在，其标签却被关闭。见 [MySqlWorkbench.vue](../../src/workbench/MySqlWorkbench.vue:3111)，3111-3128 行；对照 commands.rs:1723-1735。
+2. **刷新错误覆盖真实删除结果**。`loadTables` 抛错进入同一个“删除表失败”提示；此前成功的 DROP 不会因此撤回。见 [MySqlWorkbench.vue](../../src/workbench/MySqlWorkbench.vue:3124)，3124-3130 行。改进应把删除结果和刷新结果分开表达，不能通过重试整次 DROP 来修复列表刷新。
 3. **重复请求计数边界**。后端不去重，加上 IF EXISTS 和“执行 Ok 即放进 dropped”，重复表名或已不存在的表不能被当成“确实移除了这么多不同对象”的证明。见 commands.rs:1578-1583、1688-1693、1723-1726。可做保持输入顺序的精确去重；不要未经确认就按大小写合并 MySQL 表名。主线正常选择是否会产生重复值未验证，此项是请求边界加固，不认定正常 UI 必现。
 
 第一项的修复原则：按 dropped 清理成功对象，保留失败对象的标签与可重试选择；部分成功、全失败分别显示数量和原因。即便没有异常，也必须检查 failed。第二项单独报告“已删除，但列表刷新失败”。这些建议均未实施。
@@ -87,7 +87,7 @@
 ### 不可越过的安全边界
 
 - 当前不是整批 all-or-nothing。逐表执行后会保留前面已经成功的结果；不能用一个事务包装或多连接并发的表面改写来宣称跨表原子性。改变为多表一条 DDL 或并行执行前，需单独确认外键依赖、锁行为、错误归属和部分成功语义。
-- **审计失败目前不阻止 DROP**：`best_effort_audit` 把错误转换成 None；`mark_audit` 没有向调用者返回状态写入错误。见 [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:488)，488-568、1694-1730 行。因此“所有成功写入必有已提交审计”的项目原则不能当作这个入口已经满足的事实。
+- **审计失败目前不阻止 DROP**：`best_effort_audit` 把错误转换成 None；`mark_audit` 没有向调用者返回状态写入错误。见 [commands.rs](../../src-tauri/src/commands.rs:488)，488-568、1694-1730 行。因此“所有成功写入必有已提交审计”的项目原则不能当作这个入口已经满足的事实。
 - 审计只保存 DDL、表名及“请通过快照恢复”说明，无 inverse SQL；`drop_tables` / `drop_tables_mysql` 调用链本身不创建删除前保护快照。已有定时快照是否存在、是否足够新、能否恢复所删表均未确认。见 commands.rs:1572-1735，特别是 1716-1719 行。
 - 安全改进可先考虑审计准备失败时拒绝破坏性操作、显式区分“DROP 成功但审计落定失败”。但后者不能谎称数据库已回滚；自动快照会改变耗时与恢复承诺，需要明确产品策略和隔离验证。
 
@@ -126,12 +126,12 @@
 
 **只读检查到的现有覆盖，未在本支运行：**
 
-- [useRowSelection.test.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/useRowSelection.test.js:458)，458-491、543-596 行：删除身份传递、准备取消、列表刷新重试与删除成功/刷新失败的区别。调用使用 harness，不验证真实 MySQL 删除事务。
-- [homepageInteraction.test.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/homepageInteraction.test.js:181)，181-197 行，以及 [workbenchShell.test.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/workbenchShell.test.js:511)，511-515 行：源码正则检查确认框、多选与请求包装，不能证明首页正确处理 failed。
-- [mockBackend.test.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/mockBackend.test.js:2016)，2016-2048 行：mock 删两表的全部成功。mock 对不存在的表返回 failed，而 MySQL 使用 IF EXISTS，存在语义差异，见 [mockBackend.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/mock/mockBackend.js:2304)，2304-2329 行。
-- [commands.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/commands.rs:7465)，7465-7501 行：通过 include_str 检查 required audit、rollback/commit 文字，未实际注入事务故障，也没有验证其执行顺序。
-- [audit.rs](/Users/louis/Documents/GitHub/dbscout-workbench/src-tauri/src/audit.rs:1252)，1252-1318 行：批量审计写入及中途失败回滚的 SQLite 辅助函数测试；不能替代整个删除命令与业务库的联合验证。
-- [9 月 20 日性能报告](/Users/louis/Documents/GitHub/dbscout-workbench/docs/plans/2026-09-20-grid-performance-results.md:5)，5-8、26-27、62-65 行：原有测量使用 mock，明确没有真实 MySQL 执行计划和端到端验证。不能拿网格指标当成批量删除基线。
+- [useRowSelection.test.js](../../src/workbench/useRowSelection.test.js:458)，458-491、543-596 行：删除身份传递、准备取消、列表刷新重试与删除成功/刷新失败的区别。调用使用 harness，不验证真实 MySQL 删除事务。
+- [homepageInteraction.test.js](../../src/workbench/homepageInteraction.test.js:181)，181-197 行，以及 [workbenchShell.test.js](../../src/workbench/workbenchShell.test.js:511)，511-515 行：源码正则检查确认框、多选与请求包装，不能证明首页正确处理 failed。
+- [mockBackend.test.js](../../src/workbench/mockBackend.test.js:2016)，2016-2048 行：mock 删两表的全部成功。mock 对不存在的表返回 failed，而 MySQL 使用 IF EXISTS，存在语义差异，见 [mockBackend.js](../../src/workbench/mock/mockBackend.js:2304)，2304-2329 行。
+- [commands.rs](../../src-tauri/src/commands.rs:7465)，7465-7501 行：通过 include_str 检查 required audit、rollback/commit 文字，未实际注入事务故障，也没有验证其执行顺序。
+- [audit.rs](../../src-tauri/src/audit.rs:1252)，1252-1318 行：批量审计写入及中途失败回滚的 SQLite 辅助函数测试；不能替代整个删除命令与业务库的联合验证。
+- [9 月 20 日性能报告](../../docs/plans/2026-09-20-grid-performance-results.md:5)，5-8、26-27、62-65 行：原有测量使用 mock，明确没有真实 MySQL 执行计划和端到端验证。不能拿网格指标当成批量删除基线。
 
 **后续需要补齐，但本次不执行：**
 
@@ -150,13 +150,13 @@
 - 集成复现：`useTableSession.loadPreviousPage` + `useGridEditor`，矩形选中 2001..2005，前插 1000 行后复制变为 1001..1005；按 key 的整行选择仍复制 2001..2005；普通 append 不改变选区。
 - 实际 Playwright / Chromium / mock 浏览器复现：`rows-10k-20-pk` fixture，跳到末行，点击 9997 ID，再 Shift 点击 9999 ID，Cmd+C 为 `9997\n9998\n9999`；滚动到 `9000*28` 触发向上读取，再 Cmd+C 为 `8997\n8998\n8999`。无 pageerror。仅模拟数据，未连接真实数据库。
 - 主线定位：`src/workbench/composables/useGridEditor.js:2156-2183` 的 `getSelectedClipboardData` 直接按 `model.at(bounds.top + rowOffset)` 相对下标取值；该范围 blame 为 `72c10a355ee0b710e82602e7d6e2cb8d47862e25`，2026-08-18 07:44:19 +08:00。
-- 主线定位：[WorkbenchPane.vue](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/components/WorkbenchPane.vue:1127) 的 `maybeLoadPreviousRows` 只执行 loadPrevious 与记录 scroll，未重映射选区；1561 附近 watch 仅涉及 tab/view revision 恢复，其他所查 watch 为 emit/search。前插改变加载窗口内相对下标，复制仍按旧下标取值，导致已复现的错行。
+- 主线定位：[WorkbenchPane.vue](../../src/workbench/components/WorkbenchPane.vue:1127) 的 `maybeLoadPreviousRows` 只执行 loadPrevious 与记录 scroll，未重映射选区；1561 附近 watch 仅涉及 tab/view revision 恢复，其他所查 watch 为 emit/search。前插改变加载窗口内相对下标，复制仍按旧下标取值，导致已复现的错行。
 - 向前加载功能历史：`f357a961f381ea852e86500bf5304801138f42ca`，2026-07-30 07:27:21 +08:00。主线判断 `366875a` 未改分页/复制取值，仅加列窗口坐标判断。**功能首次出现与当前 blame 不是缺陷首次可复现的证明**，不直接宣称自 7 月起已有该 bug；仍需历史基线。
 - 主线已运行：useTableSession/useRowSelection/useGridEditor 共 354 项通过，另 utils/gridClipboardStore.test.js 3 项通过，合计 **357 项通过**。主线指出该“前插加载 + 矩形复制”组合未被现有测试覆盖。此数字不是本支执行结果。
 
 ### 复制失败反馈与删除结果的故障注入
 
-- 在真实 `useGridEditor` 逻辑的测试环境中，注入 `clipboard.writeText` 拒绝，复制调用抛出错误，但状态文本为空、反馈列表为空。这证明复制写入失败缺少提示，不证明用户当时就是权限拒绝。见 [useGridEditor.js](/Users/louis/Documents/GitHub/dbscout-workbench/src/workbench/composables/useGridEditor.js:4302)。
+- 在真实 `useGridEditor` 逻辑的测试环境中，注入 `clipboard.writeText` 拒绝，复制调用抛出错误，但状态文本为空、反馈列表为空。这证明复制写入失败缺少提示，不证明用户当时就是权限拒绝。见 [useGridEditor.js](../../src/workbench/composables/useGridEditor.js:4302)。
 - 提取真实 `deleteHomeTables` 函数，在模拟后端返回成功 a、失败 b 时，实际显示“已删除 2 张表”，并关闭 a、b 两个标签。期望保留失败对象的断言失败，证明结果误报。
 - 既有测试执行：`node --test src/workbench/useTableSession.test.js src/workbench/useRowSelection.test.js src/workbench/useGridEditor.test.js` 对应 354 项通过；`node --test src/workbench/utils/gridClipboardStore.test.js` 为 3 项通过。已有测试全通过并不能覆盖新复现的前插错位和故障提示缺口。
 

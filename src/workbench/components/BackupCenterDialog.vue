@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref, watch } from "vue";
 
 import AuditTableHistory from "./AuditTableHistory.vue";
@@ -546,8 +547,8 @@ async function onPruneSnapshots() {
     <section ref="dialogRef" class="wb-dialog wb-backup-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-backup-title" tabindex="-1">
       <header class="wb-backup-header">
         <div class="wb-backup-heading">
-          <strong id="wb-backup-title">备份中心</strong>
-          <p class="wb-backup-subtitle">变更日志与快照还原，数据保存在本机，与目标数据库隔离。</p>
+          <strong id="wb-backup-title">{{ t('m_965320c43727') }}</strong>
+          <p class="wb-backup-subtitle">{{ t('m_1c161224847e') }}</p>
         </div>
         <div class="wb-backup-user" :data-logged-in="isLoggedIn">
           <template v-if="isLoggedIn">
@@ -555,13 +556,13 @@ async function onPruneSnapshots() {
             <span class="wb-backup-user-name">{{ displayName }}<em>@{{ username }}</em></span>
           </template>
           <template v-else>
-            <span class="wb-backup-user-name wb-backup-user-guest">未登录</span>
+            <span class="wb-backup-user-name wb-backup-user-guest">{{ t('m_c1f658373079') }}</span>
           </template>
         </div>
-        <button type="button" class="wb-dialog-close wb-backup-close" :disabled="isBusy" aria-label="关闭备份中心" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close wb-backup-close" :disabled="isBusy" :aria-label="t('m_9859381ba96b')" @click="emit('close')">×</button>
       </header>
 
-      <nav class="wb-backup-tabs" :inert="busy.restoring" role="tablist" aria-label="备份中心视图">
+      <nav class="wb-backup-tabs" :inert="busy.restoring" role="tablist" :aria-label="t('m_2a5a3ca85415')">
         <button
           type="button"
           role="tab"
@@ -569,7 +570,7 @@ async function onPruneSnapshots() {
           :aria-selected="dialog.tab === 'audit'"
           aria-controls="wb-backup-panel-audit"
           @click="switchTab('audit')"
-        >变更日志</button>
+        >{{ t('m_7bf9d4a5d756') }}</button>
         <button
           type="button"
           role="tab"
@@ -577,7 +578,7 @@ async function onPruneSnapshots() {
           :aria-selected="dialog.tab === 'snapshot'"
           aria-controls="wb-backup-panel-snapshot"
           @click="switchTab('snapshot')"
-        >快照还原</button>
+        >{{ t('m_df6017193d6d') }}</button>
         <button
           type="button"
           role="tab"
@@ -585,56 +586,56 @@ async function onPruneSnapshots() {
           :aria-selected="dialog.tab === 'config'"
           aria-controls="wb-backup-panel-config"
           @click="switchTab('config')"
-        >设置</button>
+        >{{ t('m_df3d58c7d84b') }}</button>
       </nav>
 
       <div v-if="dialog.tab === 'audit'" id="wb-backup-panel-audit" class="wb-backup-panel" role="tabpanel" aria-labelledby="wb-backup-title">
         <div class="wb-backup-toolbar wb-backup-audit-toolbar" :inert="busy.restoring">
-          <div class="wb-backup-audit-mode" role="group" aria-label="变更日志视图范围">
+          <div class="wb-backup-audit-mode" role="group" :aria-label="t('m_abfcfbe5dac3')">
             <button
               type="button"
               :class="{ active: !isSharedMode }"
               :aria-pressed="!isSharedMode"
               @click="onSwitchAuditMode('local')"
-            >仅本机</button>
+            >{{ t('m_5a51f9817528') }}</button>
             <button
               type="button"
               :class="{ active: isSharedMode }"
               :aria-pressed="isSharedMode"
               :disabled="!isLoggedIn"
-              :title="isLoggedIn ? '查看所有用户的改动' : '请先在设置中登录'"
+              :title="isLoggedIn ? t('m_a24d3bbb258d') : t('m_9150140d1161')"
               @click="onSwitchAuditMode('shared')"
-            >全员可见</button>
+            >{{ t('m_62f97aa58516') }}</button>
           </div>
           <div class="wb-backup-filter-fields">
             <label class="wb-backup-filter">
-              <span>连接</span>
-              <select v-model="filters.connectionId" aria-label="按连接筛选" @change="onConnectionFilterChange">
-                <option value="">全部连接</option>
+              <span>{{ t('m_a5574109f020') }}</span>
+              <select v-model="filters.connectionId" :aria-label="t('m_8bec5f76301e')" @change="onConnectionFilterChange">
+                <option value="">{{ t('m_dbb2c7b44300') }}</option>
                 <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
               </select>
             </label>
             <label class="wb-backup-filter">
-              <span>数据库</span>
+              <span>{{ t('m_263200d7d529') }}</span>
               <select
                 v-model="filters.database"
-                aria-label="按数据库筛选"
+                :aria-label="t('m_a6bb90d7e9ea')"
                 :disabled="!filters.connectionId || busy.filterOptions"
                 @change="onDatabaseFilterChange"
               >
-                <option value="">全部数据库</option>
+                <option value="">{{ t('m_d3ea59fd4532') }}</option>
                 <option v-for="database in filterDatabases" :key="database" :value="database">{{ database }}</option>
               </select>
             </label>
             <label class="wb-backup-filter">
-              <span>表名</span>
+              <span>{{ t('m_699c6d62a836') }}</span>
               <select
                 v-model="filters.tableName"
-                aria-label="按表名筛选"
+                :aria-label="t('m_1408973f34e3')"
                 :disabled="!filters.connectionId || !filters.database || busy.filterOptions"
                 @change="applyFilters"
               >
-                <option value="">全部表</option>
+                <option value="">{{ t('m_f974e44668ed') }}</option>
                 <option v-for="tableName in filterTables" :key="tableName" :value="tableName">{{ tableName }}</option>
               </select>
             </label>
@@ -645,20 +646,20 @@ async function onPruneSnapshots() {
               type="button"
               class="wb-backup-action-danger"
               :disabled="busy.listing || busy.deleting"
-              title="清空本机记录的所有变更日志"
+              :title="t('m_492827885e5c')"
               @click="onClearAuditLogs"
             >
-              {{ busy.deleting ? "清空中…" : "清除" }}
+              {{ busy.deleting ? t('m_191f6e5642c2') : t('m_bce2377283c2') }}
             </button>
             <button
               v-if="isSharedMode"
               type="button"
               :disabled="!isLoggedIn || accountBusy.syncing"
-              title="立即把本机待同步记录推送到中心服务"
+              :title="t('m_6a8aa8247031')"
               @click="onSyncNow"
-            >{{ accountBusy.syncing ? "同步中…" : "立即同步" }}</button>
+            >{{ accountBusy.syncing ? t('m_4e2238b74ec7') : t('m_36e7a43a1c67') }}</button>
             <button type="button" class="wb-dialog-primary" :disabled="busy.listing || busy.deleting" @click="applyFilters()">
-              {{ busy.listing ? "查询中…" : "刷新" }}
+              {{ busy.listing ? t('m_d302f90b0996') : t('m_aee887434131') }}
             </button>
           </div>
         </div>
@@ -672,8 +673,8 @@ async function onPruneSnapshots() {
               <line x1="13" y1="20" x2="27" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               <line x1="13" y1="26" x2="22" y2="26" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <strong>{{ isSharedMode ? "暂无共享变更记录" : "暂无变更记录" }}</strong>
-            <span>{{ isSharedMode ? "其他用户通过本应用修改数据后，记录会出现在这里。" : "通过本应用修改数据后会自动记录到这里，可一键回滚。" }}</span>
+            <strong>{{ isSharedMode ? t('m_cb9612a9181a') : t('m_8fc1fbd37765') }}</strong>
+            <span>{{ isSharedMode ? t('m_0b856c6ee3f3') : t('m_d30bcd545898') }}</span>
           </div>
           <article
             v-for="row in visibleAuditRows"
@@ -688,9 +689,9 @@ async function onPruneSnapshots() {
               <span
                 class="wb-backup-diff wb-backup-change-summary"
                 :class="{ empty: !row.summary }"
-                :title="row.summary || '这条历史记录没有保存字段级详情'"
+                :title="row.summary || t('m_ebfb90ae7a95')"
               >
-                <b>具体改动：</b>{{ row.summary || "历史记录未保存详情" }}
+                <b>{{ t('m_a26529f8c3a1') }}</b>{{ row.summary || t('m_12964a9ef161') }}
               </span>
               <span v-if="isSharedMode" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(row.entry)">{{ actorLabel(row.entry) }}</span>
               <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(row.entry.source) }}</span>
@@ -698,8 +699,8 @@ async function onPruneSnapshots() {
               <span v-if="!isSharedMode" class="wb-backup-chip" data-kind="strategy" :data-strategy="row.entry.rollbackStrategy">{{ strategyLabel(row.entry.rollbackStrategy) }}</span>
             </div>
             <div class="wb-backup-audit-meta">
-              <span v-if="identityText(row.entry)" class="wb-backup-identity">行：{{ identityText(row.entry) }}</span>
-              <span v-if="row.entry.isRollback" class="wb-backup-rollback-tag">回滚操作</span>
+              <span v-if="identityText(row.entry)" class="wb-backup-identity">{{ t('m_a9e8c256cb93') }}{{ identityText(row.entry) }}</span>
+              <span v-if="row.entry.isRollback" class="wb-backup-rollback-tag">{{ t('m_dd194f08e2f4') }}</span>
             </div>
             <div v-if="row.hasDetails || !isSharedMode || isLocalRow(row.entry)" class="wb-backup-row-actions">
               <button
@@ -708,31 +709,31 @@ async function onPruneSnapshots() {
                 class="wb-backup-action-btn wb-backup-details-btn"
                 :aria-expanded="isAuditExpanded(row.key)"
                 @click="toggleAuditDetails(row.key)"
-              >{{ isAuditExpanded(row.key) ? "收起详情" : "详细信息" }}</button>
+              >{{ isAuditExpanded(row.key) ? t('m_0ae7312510f4') : t('m_1932da4d4dba') }}</button>
               <button
                 v-if="!isSharedMode"
                 type="button"
                 class="wb-backup-action-btn"
                 :disabled="!canRollback(row.entry) || busy.rollingBack"
-                :title="canRollback(row.entry) ? '回滚该修改' : '该记录不可自动回滚'"
+                :title="canRollback(row.entry) ? t('m_db40aa237dd5') : t('m_356545d1c7cf')"
                 @click="onRollback(row.entry)"
-              >{{ busy.rollingBack ? "回滚中…" : "回滚" }}</button>
+              >{{ busy.rollingBack ? t('m_43172ac13531') : t('m_6518e21a8e5f') }}</button>
             </div>
             <section
               v-if="row.hasDetails && isAuditExpanded(row.key)"
               class="wb-backup-change-details"
-              aria-label="变更详细信息"
+              :aria-label="t('m_62a0d24eab2e')"
             >
               <div class="wb-backup-change-details-head">
-                <strong>具体改动</strong>
-                <span v-if="row.changeItems.length">{{ row.changeItems.length }} 项</span>
+                <strong>{{ t('m_c7cec0185b47') }}</strong>
+                <span v-if="row.changeItems.length">{{ row.changeItems.length }} {{ t('m_49ccde43a154') }}</span>
               </div>
               <ul v-if="row.changeItems.length">
                 <li v-for="(item, index) in row.changeItems" :key="`${row.key}-change-${index}`">{{ item }}</li>
               </ul>
-              <p v-if="row.entry.notes" class="wb-backup-change-note"><b>说明：</b>{{ row.entry.notes }}</p>
+              <p v-if="row.entry.notes" class="wb-backup-change-note"><b>{{ t('m_3e633a204a63') }}</b>{{ row.entry.notes }}</p>
               <details v-if="row.sql" class="wb-backup-change-sql">
-                <summary>查看原始 SQL</summary>
+                <summary>{{ t('m_036ad51c02f9') }}</summary>
                 <pre><code>{{ row.sql }}</code></pre>
               </details>
             </section>
@@ -744,34 +745,34 @@ async function onPruneSnapshots() {
         <div class="wb-backup-toolbar wb-backup-snapshot-toolbar">
           <div class="wb-backup-filter-fields">
             <label class="wb-backup-filter">
-              <span>连接</span>
-              <select v-model="filters.connectionId" aria-label="快照按连接筛选" @change="onConnectionFilterChange">
-                <option value="">全部连接</option>
+              <span>{{ t('m_a5574109f020') }}</span>
+              <select v-model="filters.connectionId" :aria-label="t('m_2463a8cac346')" @change="onConnectionFilterChange">
+                <option value="">{{ t('m_dbb2c7b44300') }}</option>
                 <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
               </select>
             </label>
             <label class="wb-backup-filter">
-              <span>数据库</span>
+              <span>{{ t('m_263200d7d529') }}</span>
               <select
                 v-model="filters.database"
-                aria-label="快照按数据库筛选"
+                :aria-label="t('m_d2b71553b714')"
                 :disabled="!filters.connectionId || busy.filterOptions"
                 @change="onDatabaseFilterChange"
               >
-                <option value="">全部数据库</option>
+                <option value="">{{ t('m_d3ea59fd4532') }}</option>
                 <option v-for="database in filterDatabases" :key="database" :value="database">{{ database }}</option>
               </select>
             </label>
           </div>
           <div class="wb-backup-toolbar-actions">
             <button type="button" class="wb-dialog-primary" :disabled="busy.snapshotting" @click="onCreateSnapshot">
-              {{ busy.snapshotting ? "快照中…" : "立即创建快照" }}
+              {{ busy.snapshotting ? t('m_59f718698ac4') : t('m_57d83fa495ec') }}
             </button>
             <button type="button" :disabled="busy.snapshotting || busy.restoring || busy.pruning" @click="onPruneSnapshots">
-              {{ busy.pruning ? "清理中…" : "清理旧快照" }}
+              {{ busy.pruning ? t('m_248e8cfc2116') : t('m_855f69b1a700') }}
             </button>
             <button type="button" :disabled="busy.inspecting || busy.importing" @click="onImportSnapshot">
-              {{ busy.inspecting ? "选择文件…" : "导入快照…" }}
+              {{ busy.inspecting ? t('m_29d75b8eb886') : t('m_b11bb27929db') }}
             </button>
           </div>
           <p v-if="progress.active" class="wb-backup-progress-text" aria-live="polite">
@@ -779,54 +780,51 @@ async function onPruneSnapshots() {
           </p>
         </div>
 
-        <section v-if="importHasDraft" class="wb-backup-import" aria-label="导入快照">
+        <section v-if="importHasDraft" class="wb-backup-import" :aria-label="t('m_b7641d80b645')">
           <div class="wb-backup-import-head">
-            <strong>导入快照</strong>
+            <strong>{{ t('m_b7641d80b645') }}</strong>
             <span class="wb-backup-import-file" :title="importDraft.sourcePath">
               {{ importDraft.fileName }} · {{ formatSize(importDraft.sizeBytes) }}
             </span>
           </div>
-          <p v-if="importDraft.originConnectionId" class="wb-backup-import-origin">
-            文件来源：{{ importDraft.originConnectionId }} / {{ importDraft.originDatabase }}<template v-if="importDraft.originTs">（{{ formatTs(importDraft.originTs) }}）</template>
+          <p v-if="importDraft.originConnectionId" class="wb-backup-import-origin"> {{ t('m_7b032a06750e') }}{{ importDraft.originConnectionId }} / {{ importDraft.originDatabase }}<template v-if="importDraft.originTs">（{{ formatTs(importDraft.originTs) }}）</template>
           </p>
-          <p v-else class="wb-backup-import-origin">
-            该文件不包含快照来源信息，请手动选择导入目标。
-          </p>
+          <p v-else class="wb-backup-import-origin"> {{ t('m_4c3966f740be') }} </p>
           <div class="wb-backup-import-fields">
             <label class="wb-backup-filter">
-              <span>目标连接</span>
-              <select :value="importDraft.connectionId" aria-label="导入目标连接" @change="onImportConnectionChange">
-                <option value="">请选择连接</option>
+              <span>{{ t('m_37b9835a7d78') }}</span>
+              <select :value="importDraft.connectionId" :aria-label="t('m_2a2161d84a2b')" @change="onImportConnectionChange">
+                <option value="">{{ t('m_f85168b69fc0') }}</option>
                 <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
               </select>
             </label>
             <label class="wb-backup-filter">
-              <span>目标数据库</span>
+              <span>{{ t('m_6c7424a6b8a4') }}</span>
               <select
                 :value="importDraft.database"
-                aria-label="导入目标数据库"
+                :aria-label="t('m_08018dd88b90')"
                 :disabled="!importDraft.connectionId"
                 @change="onImportDatabaseChange"
               >
-                <option value="">请选择数据库</option>
+                <option value="">{{ t('m_916097b963aa') }}</option>
                 <option v-for="database in importDraft.databases" :key="database" :value="database">{{ database }}</option>
               </select>
             </label>
             <div class="wb-backup-import-actions">
               <button type="button" class="wb-dialog-primary" :disabled="!importCanConfirm" @click="onConfirmImport">
-                {{ busy.importing ? "导入中…" : "导入" }}
+                {{ busy.importing ? t('m_2f58b6eddc08') : t('m_576d81bb0631') }}
               </button>
-              <button type="button" :disabled="busy.importing" @click="onCancelImport">取消</button>
+              <button type="button" :disabled="busy.importing" @click="onCancelImport">{{ t('m_2cd0f3be8738') }}</button>
             </div>
           </div>
         </section>
 
         <div class="wb-backup-snapshot-layout">
-          <section class="wb-backup-enable-panel" aria-label="快照范围设置">
+          <section class="wb-backup-enable-panel" :aria-label="t('m_17f4ce2edaf4')">
             <div class="wb-backup-enable-head">
               <div class="wb-backup-enable-head-text">
-                <strong>定时快照范围</strong>
-                <p>定时快照仅对下方勾选的数据库执行；未勾选的库不会自动快照，但仍可手动创建快照。</p>
+                <strong>{{ t('m_f1d1e541f7ad') }}</strong>
+                <p>{{ t('m_a7b230525d19') }}</p>
               </div>
             </div>
 
@@ -836,15 +834,11 @@ async function onPruneSnapshots() {
                   <circle cx="20" cy="16" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
                   <path d="M10 34 C10 26 14 22 20 22 C26 22 30 26 30 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
-                <strong>选择连接</strong>
-                <span>先选择一个连接，再勾选需要自动快照的数据库。</span>
+                <strong>{{ t('m_1020f3cc2c1b') }}</strong>
+                <span>{{ t('m_db845ade9920') }}</span>
               </div>
-              <div v-else-if="busy.filterOptions" class="wb-backup-enable-empty">
-                正在加载数据库列表…
-              </div>
-              <div v-else-if="!enableDatabases.length" class="wb-backup-enable-empty">
-                该连接暂无可快照的数据库。
-              </div>
+              <div v-else-if="busy.filterOptions" class="wb-backup-enable-empty"> {{ t('m_ce0c5d040535') }} </div>
+              <div v-else-if="!enableDatabases.length" class="wb-backup-enable-empty"> {{ t('m_03e09d05c0fa') }} </div>
               <label
                 v-for="database in enableDatabases"
                 :key="database"
@@ -866,11 +860,11 @@ async function onPruneSnapshots() {
             </div>
           </section>
 
-          <section class="wb-backup-selected-panel" aria-label="已选择自动快照的数据库">
+          <section class="wb-backup-selected-panel" :aria-label="t('m_132899150376')">
             <div class="wb-backup-selected-head">
               <div class="wb-backup-selected-head-text">
-                <strong>已选择自动快照的数据库</strong>
-                <p>勾选的数据库会按设置中的间隔自动创建快照。</p>
+                <strong>{{ t('m_132899150376') }}</strong>
+                <p>{{ t('m_e6c122e54ca9') }}</p>
               </div>
               <span
                 class="wb-backup-selected-count"
@@ -886,8 +880,8 @@ async function onPruneSnapshots() {
                   <rect x="8" y="18" width="16" height="3" rx="1.5" fill="currentColor" opacity="0.4"/>
                   <rect x="8" y="26" width="20" height="3" rx="1.5" fill="currentColor" opacity="0.4"/>
                 </svg>
-                <strong>尚未选择数据库</strong>
-                <span>在左侧勾选数据库后，它们会出现在这里。</span>
+                <strong>{{ t('m_1e8f5b7485b7') }}</strong>
+                <span>{{ t('m_2df96d2c5450') }}</span>
               </div>
               <div
                 v-for="item in selectedBackupDatabases"
@@ -904,8 +898,8 @@ async function onPruneSnapshots() {
                   type="button"
                   class="wb-backup-selected-remove"
                   :disabled="busy.togglingDb"
-                  title="取消该数据库的自动快照"
-                  aria-label="取消该数据库的自动快照"
+                  :title="t('m_93d5cb2bb76e')"
+                  :aria-label="t('m_93d5cb2bb76e')"
                   @click.stop="onToggleSnapshotEnabled(item.connectionId, item.database, false)"
                 >×</button>
               </div>
@@ -926,7 +920,7 @@ async function onPruneSnapshots() {
         </div>
 
         <div class="wb-backup-list-header">
-          <strong>快照列表</strong>
+          <strong>{{ t('m_6c534bd7e43f') }}</strong>
           <span class="wb-backup-list-count" :data-empty="!snapshots.length">{{ snapshots.length }}</span>
         </div>
 
@@ -937,15 +931,15 @@ async function onPruneSnapshots() {
               <path d="M10 14 H30" fill="none" stroke="currentColor" stroke-width="1.5"/>
               <rect x="16" y="20" width="8" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
             </svg>
-            <strong>暂无快照</strong>
-            <span>可手动创建，或等待定时自动快照。</span>
+            <strong>{{ t('m_cf028e868970') }}</strong>
+            <span>{{ t('m_e990ba921088') }}</span>
           </div>
           <article v-for="snapshot in snapshots" :key="snapshot.path" class="wb-backup-snapshot-row">
             <div class="wb-backup-snapshot-main">
               <span class="wb-backup-ts">{{ formatTs(snapshot.ts) }}</span>
               <span class="wb-backup-loc">{{ snapshot.connectionId }} · {{ snapshot.database }}</span>
-              <span v-if="snapshot.location === 'legacy'" class="wb-backup-loc-tag">旧位置</span>
-              <span class="wb-backup-meta">{{ snapshot.tableCount }} 表 · {{ formatSize(snapshot.sizeBytes) }}</span>
+              <span v-if="snapshot.location === 'legacy'" class="wb-backup-loc-tag">{{ t('m_81472bc14c2b') }}</span>
+              <span class="wb-backup-meta">{{ snapshot.tableCount }} {{ t('m_09c5e5e83c29') }} {{ formatSize(snapshot.sizeBytes) }}</span>
             </div>
             <div class="wb-backup-row-actions">
               <button
@@ -953,42 +947,42 @@ async function onPruneSnapshots() {
                 class="wb-backup-action-btn"
                 :disabled="busy.openingPath"
                 @click="onOpenSnapshotFolder(snapshot)"
-              >打开资源管理器</button>
+              >{{ t('m_4b4d6c35f5f7') }}</button>
               <button
                 type="button"
                 class="wb-backup-action-btn"
                 :disabled="busy.restoring || busy.deleting"
                 @click="onRestore(snapshot)"
-              >{{ busy.restoring ? "还原中…" : "还原" }}</button>
+              >{{ busy.restoring ? t('m_7398723bff4f') : t('m_ddde08946298') }}</button>
               <button
                 type="button"
                 class="wb-backup-action-btn wb-backup-action-danger"
                 :disabled="busy.restoring || busy.deleting"
                 @click="onDelete(snapshot)"
-              >{{ busy.deleting ? "删除中…" : "删除" }}</button>
+              >{{ busy.deleting ? t('m_5e8e7af57abb') : t('m_2f9daa828907') }}</button>
             </div>
           </article>
         </div>
       </div>
 
       <div v-else id="wb-backup-panel-config" class="wb-backup-panel wb-backup-config" role="tabpanel" aria-labelledby="wb-backup-title">
-        <section class="wb-account-section" aria-label="用户账号">
+        <section class="wb-account-section" :aria-label="t('m_082edb693d65')">
           <div class="wb-account-head">
-            <strong>用户账号</strong>
-            <p>登录后，你的改动会同步到全员可见的变更日志，其他同事也能看到是谁改了什么。</p>
+            <strong>{{ t('m_082edb693d65') }}</strong>
+            <p>{{ t('m_a7ef24167da2') }}</p>
           </div>
 
           <label class="wb-dialog-field wb-account-field">
-            <span>中心服务地址</span>
+            <span>{{ t('m_937c4d303733') }}</span>
             <span class="wb-account-server-control">
               <input
                 v-model="accountDraft.serverUrl"
                 type="text"
-                placeholder="http://192.168.1.193:8765"
-                aria-label="中心服务地址"
+                placeholder="https://audit.example.com"
+                :aria-label="t('m_937c4d303733')"
               />
               <button type="button" :disabled="accountBusy.savingServer" @click="onSaveServerUrl">
-                {{ accountBusy.savingServer ? "保存中…" : "保存" }}
+                {{ accountBusy.savingServer ? t('m_ff509c9ba052') : t('m_a3030bf8f16d') }}
               </button>
             </span>
           </label>
@@ -1006,93 +1000,91 @@ async function onPruneSnapshots() {
               class="wb-backup-action-danger"
               :disabled="accountBusy.loggingOut"
               @click="onLogout"
-            >{{ accountBusy.loggingOut ? "退出中…" : "退出登录" }}</button>
+            >{{ accountBusy.loggingOut ? t('m_4803e2da0873') : t('m_3ab8cc15939f') }}</button>
           </div>
 
           <div v-else class="wb-account-login-form">
             <label class="wb-dialog-field wb-account-field">
-              <span>用户名</span>
+              <span>{{ t('m_1a3f0617d6de') }}</span>
               <input
                 v-model="accountDraft.username"
                 type="text"
-                placeholder="用于登录的用户名"
-                aria-label="用户名"
+                :placeholder="t('m_243b4d9f1f88')"
+                :aria-label="t('m_1a3f0617d6de')"
               />
             </label>
             <label class="wb-dialog-field wb-account-field">
-              <span>昵称（可选）</span>
+              <span>{{ t('m_72e6ce1c561e') }}</span>
               <input
                 v-model="accountDraft.displayName"
                 type="text"
-                placeholder="变更日志中显示的名称"
-                aria-label="昵称"
+                :placeholder="t('m_2ee067611e30')"
+                :aria-label="t('m_7a1e2b964b67')"
               />
             </label>
             <p v-if="accountError" class="wb-dialog-error">{{ accountError }}</p>
             <div class="wb-account-actions">
               <button type="button" :disabled="accountBusy.registering" @click="onRegister">
-                {{ accountBusy.registering ? "注册中…" : "注册" }}
+                {{ accountBusy.registering ? t('m_0debc065262a') : t('m_c4fb62202bad') }}
               </button>
               <button type="button" class="wb-dialog-primary" :disabled="accountBusy.loggingIn" @click="onLogin">
-                {{ accountBusy.loggingIn ? "登录中…" : "登录" }}
+                {{ accountBusy.loggingIn ? t('m_3f06ed8f8c38') : t('m_1e2df9c3075a') }}
               </button>
             </div>
-            <p class="wb-account-hint">仅用户名即可登录（无需密码）。新用户请先「注册」，已注册用户直接「登录」。</p>
+            <p class="wb-account-hint">{{ t('m_e7c4c138ba05') }}</p>
           </div>
         </section>
 
         <div class="wb-backup-config-fields">
           <div class="wb-backup-config-field wb-backup-storage-field">
-            <span>存储位置</span>
+            <span>{{ t('m_6d8627b2f68e') }}</span>
             <div class="wb-backup-storage-control">
               <code class="wb-backup-storage-path" :title="storageDirDisplay">{{ storageDirDisplay }}</code>
-              <button type="button" :disabled="busy.openingPath || isBusy" @click="onOpenStorageDir">打开</button>
+              <button type="button" :disabled="busy.openingPath || isBusy" @click="onOpenStorageDir">{{ t('m_c771248e511f') }}</button>
               <button type="button" :disabled="busy.pickingDir || isBusy" @click="onPickStorageDir">
-                {{ busy.pickingDir ? "选择中…" : "更改…" }}
+                {{ busy.pickingDir ? t('m_71732f06ad09') : t('m_d7392d66de94') }}
               </button>
             </div>
           </div>
           <label class="wb-dialog-field wb-backup-config-field">
-            <span>启用定时快照</span>
+            <span>{{ t('m_f5079b1a5842') }}</span>
             <input v-model="draftConfig.enabled" type="checkbox" />
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
-            <span>快照间隔</span>
+            <span>{{ t('m_d736ef109829') }}</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.intervalMinutes" :min="1" aria-label="快照间隔（分钟）" />
-              <em>分钟</em>
+              <BackupNumberInput v-model="draftConfig.intervalMinutes" :min="1" :aria-label="t('m_0b6164b73611')" />
+              <em>{{ t('m_bd957bc497aa') }}</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
-            <span>大表阈值</span>
+            <span>{{ t('m_4675c6ffb1cd') }}</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.largeTableThreshold" :min="0" aria-label="大表阈值（行数）" />
-              <em>行，超过则跳过</em>
+              <BackupNumberInput v-model="draftConfig.largeTableThreshold" :min="0" :aria-label="t('m_071ad1e6027c')" />
+              <em>{{ t('m_b34873f22860') }}</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
-            <span>保留数量</span>
+            <span>{{ t('m_1a8ecd08a549') }}</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.maxPerDb" :min="1" aria-label="每库最多保留快照数" />
-              <em>个 / 库</em>
+              <BackupNumberInput v-model="draftConfig.maxPerDb" :min="1" :aria-label="t('m_a2c28526a4fd')" />
+              <em>{{ t('m_80d496aa8259') }}</em>
             </span>
           </label>
           <label class="wb-dialog-field wb-backup-config-field">
-            <span>日志保留</span>
+            <span>{{ t('m_73ee420285b4') }}</span>
             <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.auditRetentionDays" :min="1" aria-label="审计日志保留天数" />
-              <em>天</em>
+              <BackupNumberInput v-model="draftConfig.auditRetentionDays" :min="1" :aria-label="t('m_a3ce04787765')" />
+              <em>{{ t('m_49da61ceeea2') }}</em>
             </span>
           </label>
         </div>
 
-        <aside class="wb-backup-hint">
-          设置保存在本地。更改存储位置后，旧位置快照仍可在列表中查看和删除，但新快照只写入新位置。审计日志与快照与目标数据库隔离——即使目标库被误删也不会丢失。
-        </aside>
+        <aside class="wb-backup-hint"> {{ t('m_0d76d263a7c9') }} </aside>
 
         <footer class="wb-dialog-actions wb-backup-config-actions">
           <button type="button" class="wb-dialog-primary" :disabled="busy.savingConfig" @click="onSaveConfig">
-            {{ busy.savingConfig ? "保存中…" : "保存设置" }}
+            {{ busy.savingConfig ? t('m_ff509c9ba052') : t('m_c8550237ba70') }}
           </button>
         </footer>
       </div>

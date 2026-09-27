@@ -27,7 +27,7 @@ technical details separately.
 
 ## Project Overview
 
-DB Scout Workbench (product name **黑猫**, `com.dbscout.workbench`) is a
+DB Scout Workbench (product name **Blackcat**, `com.dbscout.workbench`) is a
 cross-platform desktop database workbench (Windows + macOS) built with Tauri 2 +
 Vue 3 + Vite + Rust. It is independent from the original `dbsearch` project.
 
@@ -53,8 +53,8 @@ capabilities:
 - **Table copy / rename**, batch transfer. Sending tables to another
   connection/database offers two modes: create a copy (duplicate names gain
   a `_copy` suffix) or overwrite same-named target tables in place.
-- **Safety layers** — full-database logical **snapshots/backup** (层1, GFS
-  retention + restore) and a **change-audit + rollback** trail (层2, isolated
+- **Safety layers** — full-database logical **snapshots/backup** (layer 1, GFS
+  retention + restore) and a **change-audit + rollback** trail (layer 2, isolated
   SQLite).
 - **Accounts + central server** — optional login to a central server that
   aggregates a **shared audit log** across workstations.
@@ -63,13 +63,13 @@ capabilities:
   on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
-- **Switch-database glow (切库流光)** — when open tabs span ≥2 databases,
+- **Switch-database glow** — when open tabs span ≥2 databases,
   switching to another database's tab plays a traveling glow along the center
   pane's left/top/right edges and floats "<connection name> · <database label>"
   (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
-- **One-click table transfer (一键转表)** — a topbar button next to the backup
-  center (or `Ctrl+Shift+T`) opens the dialog; the user clicks 开始转表 to run
+- **One-click table transfer** — a topbar button next to the backup
+  center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
   the conversion script
   (`.exe/.bat/.cmd/.lnk`; `.lnk` resolved via PowerShell COM, script stdin is
   nulled so a trailing `pause` can't hang it), locates the produced
@@ -78,17 +78,17 @@ capabilities:
   selected game project folder (same as right-click → SVN Update on that
   folder, not only `assets/props` + `assets/src/props`) with automatic conflict
   handling (cleanup, `--accept theirs-full/mine-full` per template, tree
-  conflicts on 云端为准 use cleanup + revert, or postpone and stop before copy
-  when the template is 遇到冲突由我处理), then merge-copies
+  conflicts on Prefer remote use cleanup + revert, or postpone and stop before copy
+  when the template is Resolve conflicts manually), then merge-copies
   the package into the project `assets` without deleting extras. Two fixed
-  localStorage templates (决胜1/决胜2) remember script path, project root, and
+  localStorage templates (Game 1/Game 2) remember script path, project root, and
   conflict strategy. Opening the dialog auto-discovers script/project paths on
   non-C drives using the SVN relative layout (`chengxu/client/jswz` +
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
-  Path rows have a 浏览 button that reveals the script/project in Explorer.
+  Path rows have a Browse button that reveals the script/project in Explorer.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
-  (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal 猫眼青 /
+  (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based
   in-app updater.
 
@@ -121,7 +121,7 @@ Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
 "<text>"`) to write real release notes into the `latest.json` `notes` field —
 they surface in the in-app update notice and dialog. The
 `.agents/skills/blackcat-release` skill automates the everyday flow (version
-bump + notes summary + package + commit/push to main) when the user asks to 打包. Lower-level helpers are
+bump + notes summary + package + commit/push to main) when the user requests a release. Lower-level helpers are
 `npm run release:sync-version` (sync application versions) and
 `npm run release:svn-manifest` (generate the SVN updater manifest). There is no
 lint script defined in `package.json`. `release:package` rejects a Windows
@@ -162,7 +162,7 @@ downgrade automatically.
   need an installed runtime. `npm run build` does not fetch or bundle Node.
 - `npm run fetch-node` prepares the local Node source explicitly and accepts
   `--target=win32-x64|darwin-arm64|...`. Mirrors are tried in the order
-  Tsinghua → npmmirror → Aliyun → nodejs.org; override with
+  the official nodejs.org host; override with
   `DBSCOUT_NODE_MIRROR=https://your-mirror/`.
 
 ## Architecture
@@ -210,7 +210,7 @@ from UI):
   effect-color preference (`dbscout_glow_color_{light,dark}` →
   `--wb-glow-custom` root override, `useCellHighlight.js` pattern)
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
-- Table transfer: `useTableTransfer.js` — one-click 转表 templates
+- Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
@@ -245,7 +245,7 @@ from UI):
 `BatchImportDialog.vue`, both with the side-by-side
 `BatchImportComparison.vue` / `BatchImportDiffGrid.vue` change-diff view),
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
-`BackupCenterDialog.vue`, `TableTransferDialog.vue` (one-click 转表),
+`BackupCenterDialog.vue`, `TableTransferDialog.vue` (one-click table transfer),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the
@@ -312,22 +312,22 @@ The Rust backend is split by concern:
   (read-only match list) and `replace_in_table` (writes executed through the
   `update_cells` atomic + audited path)
 - **`validation.rs`** — Row/primary-key validation shared by write paths
-- **`backup.rs`** — Full-database logical snapshots (层1): dump, GFS retention,
+- **`backup.rs`** — Full-database logical snapshots (layer 1): dump, GFS retention,
   restore (with a pre-restore snapshot), import of external .sql snapshot files
   into the snapshot store, exact sync-failure recovery from local protection
   snapshots, plus the background scheduler
-- **`audit.rs`** — Change-audit trail (层2): before-image + inverse SQL in an
+- **`audit.rs`** — Change-audit trail (layer 2): before-image + inverse SQL in an
   isolated SQLite DB, with rollback that is itself audited
 - **`audit_sync.rs`** — Background outbox that pushes local audit rows to the
   central server (offline-first, idempotent on `client_id`)
 - **`account.rs`** — Account/session persistence + central-server client
 - **`svn_updater.rs`** — SVN-based in-app updater (config, check, install).
-  If no update folder is saved, auto-discovers `开发工具/Navicat Pro` (leaf
+  If no update folder is saved, auto-discovers a `Navicat Pro` release folder under a tools directory (leaf
   must contain `navicat` and include `latest.json`) on non-C drives. When
   several copies exist, pick the one whose latest.json version is newest.
   Windows `resolve_svn_exe` prefers local TortoiseSVN, then PATH `svn.exe`,
   then the bundled client.
-- **`table_transfer.rs`** — One-click 转表: runs the user's conversion script,
+- **`table_transfer.rs`** — One-click table transfer: runs the user's conversion script,
   locates the timestamped output package, svn-updates the selected game
   project folder (same as a manual SVN Update on that folder) with automatic
   conflict resolution, and merge-copies the package into `assets`. Commands:
@@ -456,7 +456,7 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
 - **Optimistic editing** — Cell saves apply immediately in the frontend, then
   commit to the backend. On failure the optimistic value is cleared and a
   per-cell error is recorded.
-- **Safety layers** — Writes flow through backup (层1) + audit (层2); a
+- **Safety layers** — Writes flow through backup (layer 1) + audit (layer 2); a
   successful mutation always has a committed audit row so it can be rolled back.
 - **Node.js test runner** — JS/sidecar tests use `node:test` and
   `node:assert/strict`, not Jest/Vitest. Run with `node --test`.
@@ -499,3 +499,23 @@ Checks: `node --test src/workbench/useAuditHistory.test.js`,
 `node scripts/test-audit-history-browser.mjs` against a fresh Vite dev server
 (`DBSCOUT_AUDIT_TEST_URL`, default `http://127.0.0.1:1431`). Browser test screenshots
 use `DBSCOUT_AUDIT_SCREENSHOTS` (default `/tmp/blackcat-audit-review`).
+
+### Localization and privacy
+
+The interface supports English, Simplified Chinese and Traditional Chinese (Taiwan) through
+`src/workbench/i18n/`. New installations default to English; an existing
+workbench preference without an explicit language preserves Chinese.
+The sidebar settings switch language without reloading database sessions.
+Translate application-owned copy only, never query text, database values,
+connection names, user aliases or file paths. Catalog key parity and live
+switching are regression-tested. Some legacy dynamic/native messages still
+need catalog migration; do not claim complete English coverage.
+
+SVN is the application and AI-runtime update channel. Do not reintroduce a
+GitHub/Gitee release updater. Ordinary dependency sources and issue-tracker
+links are unrelated to the updater and remain valid. The legacy installed
+product name and application identifier are retained for upgrade continuity.
+Use English for new comments and developer documentation, and keep personal
+paths, author identity and organization-specific default endpoints out of source.
+The Tauri CLI wrapper remaps Rust source paths in future builds; old binaries
+are not sanitized retroactively.

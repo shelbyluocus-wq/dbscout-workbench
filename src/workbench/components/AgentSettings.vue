@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import AgentSessionList from "./AgentSessionList.vue";
 
@@ -88,21 +89,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="wb-ai-config-panel" aria-label="Agent 设置">
+  <section class="wb-ai-config-panel" :aria-label="t('m_8532a0fa68db')">
     <Transition name="wb-ai-saved">
       <span v-if="savedVisible" class="wb-ai-config-saved" aria-live="polite">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12" />
-        </svg>
-        已保存
-      </span>
+        </svg> {{ t('m_1bd91a7d0c53') }} </span>
     </Transition>
 
     <div class="wb-ai-config-group">
-      <strong class="wb-ai-config-title">端点与模型</strong>
-      <p class="wb-ai-config-hint">
-        留空时使用内置/环境中的 Claude Code 认证与默认设置。
-        <button type="button" class="wb-ai-config-link" @click="assistant.useLocalClaudeCodeConfig()">一键清空</button>
+      <strong class="wb-ai-config-title">{{ t('m_ce637685876c') }}</strong>
+      <p class="wb-ai-config-hint"> {{ t('m_afacb008ea44') }} <button type="button" class="wb-ai-config-link" @click="assistant.useLocalClaudeCodeConfig()">{{ t('m_aad79a51296a') }}</button>
       </p>
 
       <label class="wb-ai-config-field">
@@ -123,7 +120,7 @@ onBeforeUnmount(() => {
           type="password"
           autocomplete="off"
           spellcheck="false"
-          placeholder="Bearer token，可留空"
+          :placeholder="t('m_06fa179bce30')"
         />
       </label>
 
@@ -139,28 +136,28 @@ onBeforeUnmount(() => {
       </label>
 
       <label class="wb-ai-config-field">
-        <span>模型</span>
+        <span>{{ t('m_c98e118e0a43') }}</span>
         <input
           v-model="assistant.model.value"
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="留空使用默认模型"
+          :placeholder="t('m_08ca5aac6b5d')"
         />
       </label>
     </div>
 
     <div class="wb-ai-config-group">
-      <strong class="wb-ai-config-title">行为</strong>
+      <strong class="wb-ai-config-title">{{ t('m_d92ffbeedfac') }}</strong>
 
       <label class="wb-ai-config-field">
-        <span>模式</span>
+        <span>{{ t('m_47a270081ab2') }}</span>
         <select
           :value="assistant.permissionMode.value"
           @change="assistant.setMode($event.target.value)"
         >
-          <option value="default">执行模式 — 直接回答，写入需批准</option>
-          <option value="plan">计划模式 — 先出计划，批准后再执行</option>
+          <option value="default">{{ t('m_636a565315cd') }}</option>
+          <option value="plan">{{ t('m_f8a0d92d5e9a') }}</option>
         </select>
       </label>
 
@@ -170,21 +167,21 @@ onBeforeUnmount(() => {
           type="checkbox"
           @change="assistant.setAutoApprove($event.target.checked)"
         />
-        <span>自动批准写入/修改操作</span>
+        <span>{{ t('m_3c1b781a9ef6') }}</span>
       </label>
     </div>
 
     <div class="wb-ai-config-group wb-ai-mcp-group">
       <div class="wb-ai-mcp-heading">
         <div>
-          <strong class="wb-ai-config-title">外部 MCP</strong>
-          <p class="wb-ai-config-hint">让 Codex、Claude Code 等外部 AI 读取数据库，并在黑猫中打开或定位表。</p>
+          <strong class="wb-ai-config-title">{{ t('m_41fcd7d9b28a') }}</strong>
+          <p class="wb-ai-config-hint">{{ t('m_619d296e3972') }}</p>
         </div>
         <span
           class="wb-ai-mcp-status"
           :class="{ 'is-active': assistant.externalMcpStatus.value?.enabled }"
         >
-          {{ assistant.externalMcpStatus.value?.enabled ? "已开启" : "已关闭" }}
+          {{ assistant.externalMcpStatus.value?.enabled ? t('m_8a4ef3e48e4e') : t('m_6744b4c6a9aa') }}
         </span>
       </div>
 
@@ -195,24 +192,20 @@ onBeforeUnmount(() => {
           type="checkbox"
           @change="assistant.setExternalMcpEnabled($event.target.checked)"
         />
-        <span>允许本机外部 AI 连接</span>
+        <span>{{ t('m_a61c60113cfb') }}</span>
       </label>
 
-      <p class="wb-ai-mcp-safety">
-        不提供任意写 SQL、改单元格或改表结构。唯一写入能力是经显式确认的整表导入；每次导入前必须先把原表数据备份为本地 XLSX，备份失败则取消导入。
-      </p>
+      <p class="wb-ai-mcp-safety"> {{ t('m_0c0c688c50c9') }} </p>
 
-      <p class="wb-ai-mcp-safety">
-        黑猫未运行时，外部 AI 会按需启动隐藏后台实例，不会主动弹出窗口；调用“打开表”或“显示黑猫”时才会显示软件界面。电脑上仍需有一个后台进程实际执行 MCP 请求。
-      </p>
+      <p class="wb-ai-mcp-safety"> {{ t('m_ce93ad12e810') }} </p>
 
       <div v-if="assistant.externalMcpStatus.value?.enabled" class="wb-ai-mcp-details">
         <div class="wb-ai-mcp-runtime">
-          <span>后台控制服务 {{ assistant.externalMcpStatus.value?.running ? "运行中" : "未运行" }}</span>
-          <span>已连接 {{ assistant.externalMcpStatus.value?.connectedClients || 0 }}</span>
+          <span>{{ t('m_f0642a808f14') }} {{ assistant.externalMcpStatus.value?.running ? t('m_1f0eb99b7ed0') : t('m_62cdc8713bcf') }}</span>
+          <span>{{ t('m_5be0323e8adc') }} {{ assistant.externalMcpStatus.value?.connectedClients || 0 }}</span>
         </div>
         <label class="wb-ai-config-field">
-          <span>Codex 注册命令</span>
+          <span>{{ t('m_c6fd552b6aed') }}</span>
           <textarea
             :value="assistant.externalMcpStatus.value?.codexInstallCommand || ''"
             rows="3"
@@ -221,10 +214,10 @@ onBeforeUnmount(() => {
           />
         </label>
         <button type="button" class="wb-ai-mcp-copy" @click="copyMcpInstallCommand('codex')">
-          {{ mcpCopiedTarget === "codex" ? "已复制" : "复制 Codex 命令" }}
+          {{ mcpCopiedTarget === "codex" ? t('m_8f6f8d979c98') : t('m_685e3d12e56e') }}
         </button>
         <label class="wb-ai-config-field">
-          <span>Claude Code 注册命令</span>
+          <span>{{ t('m_a02299dd496a') }}</span>
           <textarea
             :value="assistant.externalMcpStatus.value?.installCommand || ''"
             rows="3"
@@ -233,10 +226,10 @@ onBeforeUnmount(() => {
           />
         </label>
         <button type="button" class="wb-ai-mcp-copy" @click="copyMcpInstallCommand('claude')">
-          {{ mcpCopiedTarget === "claude" ? "已复制" : "复制 Claude Code 命令" }}
+          {{ mcpCopiedTarget === "claude" ? t('m_8f6f8d979c98') : t('m_b30c0a6045d3') }}
         </button>
         <label class="wb-ai-config-field">
-          <span>其他 stdio MCP 客户端</span>
+          <span>{{ t('m_d37776c322a2') }}</span>
           <textarea
             :value="genericMcpConfig"
             rows="7"

@@ -36,7 +36,7 @@ Remove or stop using these Gitee-specific pieces:
 - Gitee-only missing-manifest error translation.
 - `release:gitee-manifest` script and Gitee attachment-size checks.
 - Tests that require the updater to point at
-  `shelbylouis/dbscout-workbench-release`.
+  the retired release repository.
 
 The Tauri updater plugin may also be removed if the final implementation runs
 the local installer directly. The `process` plugin can stay if it is still used

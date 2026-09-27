@@ -1,10 +1,11 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { useContextMenu } from "./composables/useContextMenu.js";
 
-const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
+const read = (path) => readLocalizedContractSource(new URL(path, import.meta.url), "utf8");
 
 function createMenu(statusText = { value: "" }) {
   return useContextMenu(

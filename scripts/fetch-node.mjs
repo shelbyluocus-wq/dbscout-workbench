@@ -24,20 +24,10 @@ import https from "node:https";
 
 const NODE_VERSION = "22.11.0"; // Active LTS at time of writing.
 
-// Mirror order. The official nodejs.org host can be slow or blocked from some
-// networks (notably mainland China), so we try a small set of well-known
-// mirrors before giving up. Set DBSCOUT_NODE_MIRROR to prepend a custom one.
-//
-// Each entry is the prefix that gets `v<NODE_VERSION>/<archive>` appended.
-// Order rationale: npmmirror is reliably available and fast from CN; Tsinghua
-// occasionally 403s on specific release archives (seen on v22.11.0), so it's
-// kept as a secondary rather than first.
-const DEFAULT_MIRRORS = [
-  "https://npmmirror.com/mirrors/node/",                  // Aliyun (CN)
-  "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", // Tsinghua (CN)
-  "https://mirrors.aliyun.com/nodejs-release/",           // Aliyun raw (CN)
-  "https://nodejs.org/dist/",                             // Official (global)
-];
+// Use the official distribution host by default. DBSCOUT_NODE_MIRROR can
+// prepend an explicitly configured mirror; every URL receives the pinned
+// version and archive name.
+const DEFAULT_MIRRORS = ["https://nodejs.org/dist/"];
 
 function resolveMirrors() {
   const override = process.env.DBSCOUT_NODE_MIRROR;

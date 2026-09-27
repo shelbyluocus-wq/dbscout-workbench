@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { ArrowRight, TriangleAlert } from "lucide-vue-next";
 import {
   computed,
@@ -262,19 +263,19 @@ watch(searchQuery, () => {
       class="wb-dialog wb-table-copy-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label="发送表"
+      :aria-label="t('m_9ddb4fb54fcc')"
       tabindex="-1"
     >
       <!-- Header -->
       <header class="wb-dialog-header wb-table-copy-header">
         <div>
-          <h2>发送表</h2>
-          <p>复制完整表结构和数据，可创建副本或覆盖同名表。</p>
+          <h2>{{ t('m_9ddb4fb54fcc') }}</h2>
+          <p>{{ t('m_a712f27f8ec8') }}</p>
         </div>
         <button
           type="button"
           class="wb-dialog-close"
-          aria-label="关闭发送窗口"
+          :aria-label="t('m_2a8d4d081bda')"
           :disabled="isBusy"
           @click="emit('close')"
         >
@@ -286,7 +287,7 @@ watch(searchQuery, () => {
         <!-- Route bar -->
         <div class="wb-table-copy-route">
           <div class="wb-table-copy-route-node">
-            <span class="wb-table-copy-route-label">源</span>
+            <span class="wb-table-copy-route-label">{{ t('m_f4e2ebc162b2') }}</span>
             <div class="wb-table-copy-route-info">
               <strong :title="sourceConnectionLabel">{{ sourceConnectionLabel }}</strong>
               <span :title="copy.dialog.sourceDatabase">{{ copy.dialog.sourceDatabase }}</span>
@@ -296,15 +297,15 @@ watch(searchQuery, () => {
             <ArrowRight :size="15" />
           </span>
           <div class="wb-table-copy-route-node is-target">
-            <span class="wb-table-copy-route-label">目标</span>
+            <span class="wb-table-copy-route-label">{{ t('m_57060c88a36b') }}</span>
             <div class="wb-table-copy-target-selects">
               <select
                 :value="copy.dialog.targetConnectionId"
                 :disabled="isBusy"
-                aria-label="目标连接"
+                :aria-label="t('m_37b9835a7d78')"
                 @change="handleTargetConnectionChange"
               >
-                <option value="" disabled>请选择目标连接</option>
+                <option value="" disabled>{{ t('m_4c90fc42fd94') }}</option>
                 <option
                   v-for="conn in copy.targetConnectionOptions.value"
                   :key="conn.id"
@@ -316,23 +317,22 @@ watch(searchQuery, () => {
               <select
                 :value="copy.dialog.targetDatabase"
                 :disabled="isBusy || !copy.dialog.targetConnectionId || copy.dialog.targetDatabaseLoading"
-                aria-label="目标数据库"
+                :aria-label="t('m_6c7424a6b8a4')"
                 @change="copy.dialog.targetDatabase = $event.target.value"
               >
                 <option value="" disabled>
-                  {{ copy.dialog.targetDatabaseLoading ? "正在读取数据库…" : "请选择目标数据库" }}
+                  {{ copy.dialog.targetDatabaseLoading ? t('m_ad78b6232786') : t('m_287e8652c4ad') }}
                 </option>
                 <option v-for="db in targetDatabases" :key="db" :value="db">{{ db }}</option>
               </select>
             </div>
-            <p v-if="copy.dialog.targetDatabaseError" class="wb-table-copy-route-warning">
-              目标连接不可用：{{ copy.dialog.targetDatabaseError }}
+            <p v-if="copy.dialog.targetDatabaseError" class="wb-table-copy-route-warning"> {{ t('m_84a1faa717d8') }}{{ copy.dialog.targetDatabaseError }}
             </p>
           </div>
         </div>
 
         <!-- Send mode -->
-        <div class="wb-table-copy-mode" role="radiogroup" aria-label="发送模式">
+        <div class="wb-table-copy-mode" role="radiogroup" :aria-label="t('m_a4406e917060')">
           <label
             class="wb-table-copy-mode-option"
             :class="{ 'is-active': copy.dialog.mode === 'copy' }"
@@ -344,8 +344,8 @@ watch(searchQuery, () => {
               :disabled="isBusy"
             />
             <span class="wb-table-copy-mode-text">
-              <strong>创建副本</strong>
-              <small>保留目标库已有表，重名时自动添加 _copy 后缀</small>
+              <strong>{{ t('m_f6825f1e73a1') }}</strong>
+              <small>{{ t('m_6a9cebbef50a') }}</small>
             </span>
           </label>
           <label
@@ -359,8 +359,8 @@ watch(searchQuery, () => {
               :disabled="isBusy"
             />
             <span class="wb-table-copy-mode-text">
-              <strong>覆盖同名表</strong>
-              <small>目标库中的同名表将被源表完全替换</small>
+              <strong>{{ t('m_6956048f974f') }}</strong>
+              <small>{{ t('m_07a32b9c7861') }}</small>
             </span>
           </label>
         </div>
@@ -370,15 +370,15 @@ watch(searchQuery, () => {
             <!-- Toolbar -->
             <div class="wb-table-copy-toolbar">
               <div class="wb-table-copy-section-title">
-                <strong id="wb-table-copy-catalog-title">全部表</strong>
+                <strong id="wb-table-copy-catalog-title">{{ t('m_f974e44668ed') }}</strong>
                 <span>{{ sourceTableCount }}</span>
               </div>
               <div class="wb-table-copy-search">
                 <input
                   v-model="searchQuery"
                   type="text"
-                  placeholder="搜索表名或备注…"
-                  aria-label="搜索可发送的表"
+                  :placeholder="t('m_42cfb91efcb1')"
+                  :aria-label="t('m_7efe69240055')"
                   autocomplete="off"
                   :disabled="isBusy"
                 />
@@ -388,22 +388,22 @@ watch(searchQuery, () => {
             <!-- Danger hint -->
             <div v-if="selectedCount > 50" class="wb-table-copy-danger-hint">
               <TriangleAlert :size="13" aria-hidden="true" />
-              <span>已选择 {{ selectedCount }} 张表，跨连接复制可能需要较长时间。</span>
+              <span>{{ t('m_3f4ebc4aad97') }} {{ selectedCount }} {{ t('m_f44e6e9a942f') }}</span>
             </div>
 
             <!-- Column header -->
             <div v-if="filteredTables.length" class="wb-table-copy-columns">
-              <label class="wb-table-copy-check" title="全选">
+              <label class="wb-table-copy-check" :title="t('m_3a5040b68abf')">
                 <input
                   v-model="allSelected"
                   type="checkbox"
                   :indeterminate="selectionIsPartial"
                   :disabled="isBusy || !sourceTableCount"
-                  aria-label="全选"
+                  :aria-label="t('m_3a5040b68abf')"
                 />
               </label>
-              <span>表名</span>
-              <span>备注</span>
+              <span>{{ t('m_699c6d62a836') }}</span>
+              <span>{{ t('m_daede9881787') }}</span>
             </div>
 
             <!-- Virtual scroll viewport -->
@@ -445,14 +445,14 @@ watch(searchQuery, () => {
 
             <!-- Empty state -->
             <div v-else-if="copy.dialog.sourceTableLoading" class="wb-table-copy-empty">
-              <span>正在读取源表…</span>
+              <span>{{ t('m_86be2828b82d') }}</span>
             </div>
             <div v-else-if="!sourceTableCount" class="wb-table-copy-empty">
-              <span>暂无表数据。</span>
+              <span>{{ t('m_a9d739e0ab1f') }}</span>
             </div>
             <div v-else class="wb-table-copy-empty">
-              <span>未找到匹配的表</span>
-              <small>尝试调整搜索关键词</small>
+              <span>{{ t('m_f16bdd20e5a1') }}</span>
+              <small>{{ t('m_da5e3101a989') }}</small>
             </div>
           </section>
 
@@ -469,9 +469,7 @@ watch(searchQuery, () => {
           v-if="copy.dialog.status === 'succeeded' || copy.dialog.status === 'failed' || resultWarnings.length"
           class="wb-table-copy-status"
         >
-          <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success">
-            发送完成。已复制 {{ copy.result.value?.copied?.length || 0 }} 张表、{{ copiedRowCount }} 行数据。
-          </p>
+          <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success"> {{ t('m_1243c70e0c7c') }} {{ copy.result.value?.copied?.length || 0 }} {{ t('m_08c0d40c3ef3') }}{{ copiedRowCount }} {{ t('m_a27a3956cf9c') }} </p>
           <p
             v-for="warning in resultWarnings"
             :key="warning"
@@ -488,19 +486,17 @@ watch(searchQuery, () => {
       <!-- Footer -->
       <footer class="wb-dialog-actions wb-table-copy-footer">
         <div class="wb-table-copy-footer-left">
-          <span>将发送 <strong>{{ selectedCount }}</strong> 张表</span>
+          <span>{{ t('m_54f6a4c3417f') }} <strong>{{ selectedCount }}</strong> {{ t('m_a2b22d3a5ca3') }}</span>
         </div>
         <div class="wb-table-copy-footer-right">
-          <button type="button" :disabled="isBusy" @click="emit('close')">取消</button>
+          <button type="button" :disabled="isBusy" @click="emit('close')">{{ t('m_2cd0f3be8738') }}</button>
           <span class="wb-table-copy-send-hint" :title="sendDisabledReason">
             <button
               type="button"
               class="wb-dialog-primary"
               :disabled="!copy.canExecute.value || isBusy"
               @click="confirmAndExecute"
-            >
-              发送所选表
-            </button>
+            > {{ t('m_2c69c0bcb53b') }} </button>
           </span>
         </div>
       </footer>

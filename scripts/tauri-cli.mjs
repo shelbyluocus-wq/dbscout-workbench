@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
 
+import { privateBuildEnvironment } from "./build-privacy.mjs";
 import { ensureSvn } from "./ensure-svn.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -12,6 +13,7 @@ function run(bin, args) {
   const child = spawn(process.execPath, [bin, ...args], {
     stdio: "inherit",
     cwd: rootDir,
+    env: privateBuildEnvironment({ root: rootDir }),
   });
   child.on("exit", (code, signal) => {
     if (signal) {

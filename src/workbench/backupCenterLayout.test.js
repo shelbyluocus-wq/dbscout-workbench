@@ -1,5 +1,5 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function read(path) {
-  return readFileSync(join(__dirname, path), "utf8");
+  return readLocalizedContractSource(join(__dirname, path), "utf8");
 }
 
 test("snapshot range follows the top connection filter without a duplicate selector", () => {

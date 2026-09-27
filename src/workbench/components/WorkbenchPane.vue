@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
@@ -1638,12 +1639,12 @@ onMounted(() => emitPaneState());
           @pointerdown.stop
           @click.stop
         >
-          <button type="button" :disabled="busy || !activeDataTab" @click="exportFromMenu">导出</button>
-          <button type="button" :disabled="busy || !activeDataTab?.sessionId || !canImportActive" @click="importFromMenu">导入</button>
-          <button type="button" :disabled="busy" @click="batchExportFromMenu">批量导出</button>
-          <button type="button" :disabled="busy || !canImportActive" @click="batchImportFromMenu">批量导入</button>
-          <button type="button" @click="splitPaneFromMenu('right')">左右分屏</button>
-          <button type="button" @click="splitPaneFromMenu('down')">上下分屏</button>
+          <button type="button" :disabled="busy || !activeDataTab" @click="exportFromMenu">{{ t('m_76420433f22d') }}</button>
+          <button type="button" :disabled="busy || !activeDataTab?.sessionId || !canImportActive" @click="importFromMenu">{{ t('m_576d81bb0631') }}</button>
+          <button type="button" :disabled="busy" @click="batchExportFromMenu">{{ t('m_d2fcdde81f06') }}</button>
+          <button type="button" :disabled="busy || !canImportActive" @click="batchImportFromMenu">{{ t('m_fd7719273970') }}</button>
+          <button type="button" @click="splitPaneFromMenu('right')">{{ t('m_62ed1b06404f') }}</button>
+          <button type="button" @click="splitPaneFromMenu('down')">{{ t('m_3d63360a3d6e') }}</button>
         </menu>
       </Transition>
     </Teleport>
@@ -1839,13 +1840,13 @@ onMounted(() => emitPaneState());
     />
 
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">
-      <div class="wb-pane-inline-actions" aria-label="分屏操作">
+      <div class="wb-pane-inline-actions" :aria-label="t('m_6011c42c053f')">
         <button
           ref="splitMenuAnchor"
           type="button"
           class="wb-split-more-btn"
-          title="更多选项"
-          aria-label="更多选项"
+          :title="t('m_c611656faf0c')"
+          :aria-label="t('m_c611656faf0c')"
           :aria-expanded="splitMenuOpen ? 'true' : 'false'"
           @click.stop="openSplitMenuFromToolbar($event)"
         >
@@ -1861,13 +1862,13 @@ onMounted(() => emitPaneState());
     </section>
 
     <section v-else class="wb-empty">
-      <div class="wb-pane-empty-actions" aria-label="分屏操作">
+      <div class="wb-pane-empty-actions" :aria-label="t('m_6011c42c053f')">
         <button
           ref="splitMenuAnchor"
           type="button"
           class="wb-split-more-btn"
-          title="更多选项"
-          aria-label="更多选项"
+          :title="t('m_c611656faf0c')"
+          :aria-label="t('m_c611656faf0c')"
           :aria-expanded="splitMenuOpen ? 'true' : 'false'"
           @click.stop="openSplitMenuFromToolbar($event)"
         >
@@ -1881,8 +1882,8 @@ onMounted(() => emitPaneState());
           <line x1="14" y1="24" x2="34" y2="24" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
           <line x1="14" y1="30" x2="28" y2="30" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
         </svg>
-        <strong>从左侧打开一张表</strong>
-        <span>或使用快捷搜索定位数据</span>
+        <strong>{{ t('m_e3dda0a00b28') }}</strong>
+        <span>{{ t('m_a47d889ebe6e') }}</span>
       </div>
     </section>
   </section>

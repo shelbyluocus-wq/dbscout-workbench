@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { FolderOpen } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -88,14 +89,14 @@ watch(
     <section ref="dialogRef" class="wb-dialog wb-batch-transfer-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-batch-export-title" tabindex="-1">
       <header class="wb-dialog-header">
         <div>
-          <strong id="wb-batch-export-title">批量导出</strong>
+          <strong id="wb-batch-export-title">{{ t('m_d2fcdde81f06') }}</strong>
           <small>{{ batch.database }}</small>
         </div>
-        <button type="button" class="wb-dialog-close" :disabled="isBusy" aria-label="关闭批量导出" @click="emit('close')">×</button>
+        <button type="button" class="wb-dialog-close" :disabled="isBusy" :aria-label="t('m_664c96506eec')" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-batch-export-settings">
-        <div class="wb-batch-mode-switch" role="radiogroup" aria-label="批量导出模式">
+        <div class="wb-batch-mode-switch" role="radiogroup" :aria-label="t('m_dbf362979287')">
           <button
             v-for="option in modeOptions"
             :key="option.value"
@@ -116,19 +117,17 @@ watch(
             :disabled="isBusy"
             @change="transfer.setBatchExportIncludeColumnComments($event.target.checked)"
           />
-          <span>导出字段备注</span>
+          <span>{{ t('m_bf567624c7db') }}</span>
         </label>
-        <small>每张表增加“表名字段备注”工作表</small>
+        <small>{{ t('m_64aedc153555') }}</small>
       </div>
 
       <div v-if="batch.homepageSelectionActive" class="wb-batch-selection-focus" role="status">
         <span>
-          <strong>仅显示首页预选的 {{ selectedCount }} 张表</strong>
-          <small>列表和导出范围已同步收窄</small>
+          <strong>{{ t('m_6e51f3cc4c6a') }} {{ selectedCount }} {{ t('m_a2b22d3a5ca3') }}</strong>
+          <small>{{ t('m_e9804285a132') }}</small>
         </span>
-        <button type="button" :disabled="isBusy" @click="cancelHomepageSelection">
-          取消预选，选择其他表
-        </button>
+        <button type="button" :disabled="isBusy" @click="cancelHomepageSelection"> {{ t('m_c6206066390c') }} </button>
       </div>
 
       <div class="wb-batch-transfer-toolbar">
@@ -158,7 +157,7 @@ watch(
           <span class="wb-batch-transfer-comment">{{ table.table_comment }}</span>
         </label>
       </div>
-      <div v-else class="wb-batch-transfer-empty">没有匹配的表</div>
+      <div v-else class="wb-batch-transfer-empty">{{ t('m_4034e355eb62') }}</div>
 
       <section v-if="isBusy || batch.progress.total > 0" class="wb-batch-transfer-progress">
         <div class="wb-batch-transfer-progress-line">
@@ -172,20 +171,20 @@ watch(
       </section>
 
       <section v-if="batch.result" class="wb-batch-result-summary" :class="`is-${batch.status}`" role="status" aria-live="polite">
-        <div><strong>{{ batch.result.tableCount }}</strong><span>{{ batch.status === "cancelled" ? "已读取表" : "成功表" }}</span></div>
-        <div><strong>{{ batch.result.fileCount }}</strong><span>文件</span></div>
-        <div><strong>{{ batch.result.rowCount }}</strong><span>{{ batch.status === "cancelled" ? "已读取行" : "数据行" }}</span></div>
+        <div><strong>{{ batch.result.tableCount }}</strong><span>{{ batch.status === "cancelled" ? t('m_25f58d22e552') : t('m_4e61430ee086') }}</span></div>
+        <div><strong>{{ batch.result.fileCount }}</strong><span>{{ t('m_39932f24fe11') }}</span></div>
+        <div><strong>{{ batch.result.rowCount }}</strong><span>{{ batch.status === "cancelled" ? t('m_246855db6b9f') : t('m_13b964a02492') }}</span></div>
         <div v-if="batch.result.savedPath" class="wb-batch-result-path">
-          <span :title="batch.result.savedPath">保存到 {{ batch.result.savedPath }}</span>
+          <span :title="batch.result.savedPath">{{ t('m_e31cccd7bba0') }} {{ batch.result.savedPath }}</span>
           <button
             type="button"
             :disabled="batch.openingSavedPath"
             :aria-busy="batch.openingSavedPath"
-            title="在资源管理器中显示导出结果"
+            :title="t('m_bf7300afe778')"
             @click="transfer.openBatchExportSavedPath"
           >
             <FolderOpen :size="14" aria-hidden="true" />
-            {{ batch.openingSavedPath ? "打开中…" : "打开位置" }}
+            {{ batch.openingSavedPath ? t('m_67d676d9a46e') : t('m_d8df668097e9') }}
           </button>
         </div>
       </section>
@@ -194,11 +193,10 @@ watch(
 
       <p v-if="batch.status === 'failed'" class="wb-dialog-error">{{ batch.errorMessage }}</p>
       <p v-if="batch.progress.errors.length" class="wb-batch-transfer-warning">
-        {{ batch.progress.errors.length }} 张表失败
-      </p>
+        {{ batch.progress.errors.length }} {{ t('m_d846c361c194') }} </p>
 
       <footer class="wb-dialog-actions wb-batch-transfer-actions">
-        <button type="button" :disabled="isBusy" @click="emit('close')">关闭</button>
+        <button type="button" :disabled="isBusy" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
         <button
           v-if="batch.exporting"
           type="button"
@@ -208,7 +206,7 @@ watch(
           :aria-busy="batch.cancelRequested"
           @click="transfer.cancelBatchExport()"
         >
-          {{ batch.cancelRequested ? "正在取消…" : "取消导出" }}
+          {{ batch.cancelRequested ? t('m_e8e08b0f61dd') : t('m_7eefaaff791f') }}
         </button>
         <button
           v-else
@@ -217,7 +215,7 @@ watch(
           :disabled="!transfer.canExecuteBatchExport.value"
           @click="emit('execute')"
         >
-          {{ batch.result ? "再次导出" : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
+          {{ batch.result ? t('m_8f822c358e75') : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
         </button>
       </footer>
     </section>

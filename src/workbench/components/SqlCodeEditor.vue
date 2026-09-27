@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { EditorState } from "@codemirror/state";
 import {
@@ -151,4 +152,4 @@ defineExpose({
 });
 </script>
 
-<template><div ref="host" class="wb-sql-code-editor" aria-label="SQL 编辑器"></div></template>
+<template><div ref="host" class="wb-sql-code-editor" :aria-label="t('m_7af65951e236')"></div></template>

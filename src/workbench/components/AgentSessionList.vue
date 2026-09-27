@@ -1,4 +1,5 @@
 <script setup>
+import { language, t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 
 const props = defineProps({
@@ -14,7 +15,7 @@ function formatDate(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(language.intlLocale.value, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -53,14 +54,14 @@ async function confirmDelete(session) {
 </script>
 
 <template>
-  <section class="wb-ai-session-list" aria-label="会话历史">
+  <section class="wb-ai-session-list" :aria-label="t('m_9ec4b7239920')">
     <header class="wb-ai-session-header">
-      <strong>会话历史</strong>
+      <strong>{{ t('m_9ec4b7239920') }}</strong>
       <button
         type="button"
         class="wb-ai-icon-button"
-        title="刷新列表"
-        aria-label="刷新列表"
+        :title="t('m_e28be7098db1')"
+        :aria-label="t('m_e28be7098db1')"
         @click="emit('refresh')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -90,8 +91,8 @@ async function confirmDelete(session) {
         <button
           type="button"
           class="wb-ai-session-delete"
-          title="删除会话"
-          aria-label="删除会话"
+          :title="t('m_d51250d14a51')"
+          :aria-label="t('m_d51250d14a51')"
           @click="confirmDelete(session)"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -102,6 +103,6 @@ async function confirmDelete(session) {
       </li>
     </ul>
 
-    <p v-else class="wb-ai-session-empty">暂无历史会话</p>
+    <p v-else class="wb-ai-session-empty">{{ t('m_9af387901abd') }}</p>
   </section>
 </template>

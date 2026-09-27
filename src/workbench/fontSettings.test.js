@@ -1,9 +1,9 @@
+import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 function read(relativePath) {
-  return readFileSync(new URL(relativePath, import.meta.url), "utf8");
+  return readLocalizedContractSource(new URL(relativePath, import.meta.url), "utf8");
 }
 
 test("workbench exposes the persisted font preference through settings", () => {

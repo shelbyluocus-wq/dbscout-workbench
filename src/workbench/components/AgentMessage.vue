@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 import AgentArtifactCard from "./AgentArtifactCard.vue";
 import { extractEvidenceReferences } from "../utils/agentEvidence.js";
@@ -159,12 +160,12 @@ function pairedSteps(toolUses, toolResults) {
     <div class="wb-ai-message-body">
       <!-- Thinking block -->
       <details v-if="hasThinking" class="wb-ai-thinking">
-        <summary>思考过程</summary>
+        <summary>{{ t('m_a62acb184f47') }}</summary>
         <pre class="wb-ai-thinking-content">{{ message.thinking }}</pre>
       </details>
 
       <!-- Tool steps -->
-      <details v-if="hasTools" class="wb-ai-tool-steps" aria-label="工具调用">
+      <details v-if="hasTools" class="wb-ai-tool-steps" :aria-label="t('m_a8ca3c13eb75')">
         <summary class="wb-ai-tool-summary">{{ toolSummaryLabel }}</summary>
         <div
           v-for="step in toolSteps"
@@ -205,7 +206,7 @@ function pairedSteps(toolUses, toolResults) {
             class="wb-ai-tool-status"
             :class="{ 'is-error': step.result?.isError, 'is-ok': step.result && !step.result.isError, 'is-running': !step.result }"
           >
-            {{ step.result ? (step.result.isError ? "失败" : "完成") : "运行中…" }}
+            {{ step.result ? (step.result.isError ? t('m_28384d7afd2e') : t('m_c0b3fbff51cc')) : t('m_14d9f2d830ad') }}
           </span>
           <code v-if="formatToolInput(step.input)" class="wb-ai-tool-input">{{ formatToolInput(step.input) }}</code>
           <span v-if="step.result?.summary" class="wb-ai-tool-result">
@@ -214,7 +215,7 @@ function pairedSteps(toolUses, toolResults) {
         </div>
       </details>
 
-      <div v-if="evidenceReferences.length" class="wb-ai-evidence-list" aria-label="可点击证据">
+      <div v-if="evidenceReferences.length" class="wb-ai-evidence-list" :aria-label="t('m_9e75bf0096fe')">
         <button
           v-for="reference in evidenceReferences"
           :key="reference.key"
@@ -227,7 +228,7 @@ function pairedSteps(toolUses, toolResults) {
         </button>
       </div>
 
-      <div v-if="artifacts.length" class="wb-ai-artifact-list" aria-label="已生成文件">
+      <div v-if="artifacts.length" class="wb-ai-artifact-list" :aria-label="t('m_b43e80fa2708')">
         <AgentArtifactCard
           v-for="artifact in artifacts"
           :key="artifact.path"
@@ -248,10 +249,10 @@ function pairedSteps(toolUses, toolResults) {
       <p v-if="contextLabel" class="wb-ai-context-label">{{ contextLabel }}</p>
 
       <footer v-if="canShowActions" class="wb-ai-message-actions">
-        <span v-if="formatElapsed(message.elapsedMs)" class="wb-ai-message-elapsed">耗时 {{ formatElapsed(message.elapsedMs) }}</span>
-        <button type="button" class="wb-ai-message-action" @click="emit('copy-message', { message, text: copyText })">{{ copied ? "已复制" : "复制" }}</button>
-        <button type="button" class="wb-ai-message-action" @click="emit('copy-message-markdown', { message, text: copyMarkdown })">复制 Markdown</button>
-        <button type="button" class="wb-ai-message-action" @click="emit('regenerate', message)">重新生成</button>
+        <span v-if="formatElapsed(message.elapsedMs)" class="wb-ai-message-elapsed">{{ t('m_e77e3d58b0dc') }} {{ formatElapsed(message.elapsedMs) }}</span>
+        <button type="button" class="wb-ai-message-action" @click="emit('copy-message', { message, text: copyText })">{{ copied ? t('m_8f6f8d979c98') : t('m_63d90d977348') }}</button>
+        <button type="button" class="wb-ai-message-action" @click="emit('copy-message-markdown', { message, text: copyMarkdown })">{{ t('m_f9c71ee4c435') }}</button>
+        <button type="button" class="wb-ai-message-action" @click="emit('regenerate', message)">{{ t('m_3221a042ea36') }}</button>
       </footer>
     </div>
   </article>

@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, ref, watch } from "vue";
 import { columnName } from "../utils/normalize.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
@@ -183,35 +184,35 @@ watch(
     class="wb-inspector wb-info-pane"
     @contextmenu.prevent.stop="emit('contextmenu', $event, selectedTextWithin(inspectorRef))"
   >
-    <header class="wb-inspector-table-status" aria-label="当前表信息">
+    <header class="wb-inspector-table-status" :aria-label="t('m_788e6a933525')">
       <div class="wb-inspector-table-meta">
         <strong
           v-if="activeTab"
           class="wb-inspector-table-source"
           :title="tableSource"
         >{{ tableSource }}</strong>
-        <strong v-else class="wb-inspector-table-source">未选择表</strong>
+        <strong v-else class="wb-inspector-table-source">{{ t('m_88ac482e6e23') }}</strong>
         <span
           v-if="tableComment"
           class="wb-inspector-table-comment"
           :title="tableComment"
         >{{ tableComment }}</span>
-        <span v-else class="wb-inspector-table-comment is-empty">无表备注</span>
+        <span v-else class="wb-inspector-table-comment is-empty">{{ t('m_dbc8f66df4fd') }}</span>
       </div>
     </header>
     <div class="wb-inspector-section-head">
-      <div class="wb-inspector-section-label">字段备注</div>
+      <div class="wb-inspector-section-label">{{ t('m_39230fff0eb1') }}</div>
       <span
         v-if="hasColumnSearchQuery"
         class="wb-inspector-search-nav"
         role="group"
-        aria-label="字段命中导航"
+        :aria-label="t('m_011770d2a98d')"
       >
         <button
           type="button"
           class="wb-search-nav-icon"
-          aria-label="上一个字段命中"
-          title="上一个字段命中"
+          :aria-label="t('m_bd64376553c6')"
+          :title="t('m_bd64376553c6')"
           :disabled="!schemaSearchMatches.length"
           @click="emit('schema-search-previous')"
         >
@@ -223,8 +224,8 @@ watch(
         <button
           type="button"
           class="wb-search-nav-icon"
-          aria-label="下一个字段命中"
-          title="下一个字段命中"
+          :aria-label="t('m_b339a2050e7f')"
+          :title="t('m_b339a2050e7f')"
           :disabled="!schemaSearchMatches.length"
           @click="emit('schema-search-next')"
         >
@@ -236,7 +237,7 @@ watch(
     </div>
     <div class="wb-inspector-search">
       <label class="wb-table-search" :class="{ 'has-query': hasColumnSearchQuery }">
-        <span class="wb-visually-hidden">搜索字段名或备注</span>
+        <span class="wb-visually-hidden">{{ t('m_145ea7868404') }}</span>
         <span class="wb-table-search-icon" aria-hidden="true">
           <svg viewBox="0 0 16 16" focusable="false">
             <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5" />
@@ -248,8 +249,8 @@ watch(
           :disabled="!activeTab"
           autocomplete="off"
           spellcheck="false"
-          placeholder="搜索字段名或备注"
-          aria-label="搜索字段名或备注"
+          :placeholder="t('m_145ea7868404')"
+          :aria-label="t('m_145ea7868404')"
           @input="onColumnSearchInput"
           @compositionend="emitColumnSearch($event.target.value)"
           @keydown="onColumnSearchKeydown"
@@ -258,7 +259,7 @@ watch(
           v-if="hasColumnSearchQuery"
           type="button"
           class="wb-table-search-clear"
-          aria-label="清除字段搜索"
+          :aria-label="t('m_6c91e67d0eff')"
           tabindex="-1"
           @mousedown.prevent
           @click.stop="emitColumnSearch('')"
@@ -298,7 +299,7 @@ watch(
           <span class="wb-schema-type-line">
             <em class="wb-schema-field-type">{{ columnType(column) }}</em>
             <span v-if="columnLength(column)" class="wb-schema-field-length">{{ columnLength(column) }}</span>
-            <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">主键</span>
+            <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">{{ t('m_ecfc9d2e0157') }}</span>
           </span>
           <small
             v-if="columnRemark(column)"
@@ -310,7 +311,7 @@ watch(
       <p
         v-if="hasColumnSearchQuery && !displayedColumns.length"
         class="wb-inspector-search-empty"
-      >没有匹配的字段</p>
+      >{{ t('m_18e034572849') }}</p>
     </section>
   </aside>
 </template>

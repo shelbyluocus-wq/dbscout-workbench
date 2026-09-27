@@ -8762,6 +8762,24 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
 
+/* Keep complete language names readable inside the narrow settings sheet. */
+.wb-language-settings-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.wb-language-segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-radius: 8px;
+}
+
+.wb-language-segment button {
+  flex: 1 0 auto;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
 .wb-sidebar-theme-segment button:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
@@ -14028,7 +14046,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dbhome-action-button > .wb-toolbar-action-label,
 .wb-dbhome-action-group .wb-toolbar-split-button-main > span:last-child {
   display: inline-block;
-  max-width: 5em;
+  max-width: 10em;
   overflow: hidden;
   opacity: 1;
   transform: translateX(0);

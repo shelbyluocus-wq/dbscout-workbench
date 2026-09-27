@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, ref } from "vue";
 import {
   buildVisibleSidebarSearchItems,
@@ -225,7 +226,7 @@ defineExpose({ focusSearch });
 <template>
   <div class="wb-table-search-wrap">
     <label class="wb-table-search" :class="{ 'has-query': hasQuery, 'is-history-open': showHistory }">
-      <span class="wb-visually-hidden">搜索表、备注、字段和值</span>
+      <span class="wb-visually-hidden">{{ t('m_5ea6a9cb8b5b') }}</span>
       <span class="wb-table-search-icon" aria-hidden="true">
         <svg viewBox="0 0 16 16" focusable="false">
           <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5" />
@@ -237,7 +238,7 @@ defineExpose({ focusSearch });
         :value="query"
         autocomplete="off"
         spellcheck="false"
-        placeholder="搜索表、备注、字段；Ctrl+Enter 搜索值"
+        :placeholder="t('m_e287730c90c3')"
         aria-controls="wb-sidebar-search-history"
         :aria-expanded="showHistory ? 'true' : 'false'"
         @input="emit('update:query', $event.target.value)"
@@ -249,7 +250,7 @@ defineExpose({ focusSearch });
         v-if="hasQuery"
         type="button"
         class="wb-table-search-clear"
-        aria-label="清除搜索"
+        :aria-label="t('m_ee32f25f7050')"
         tabindex="-1"
         @mousedown.prevent
         @click.stop="clearQuery"
@@ -264,7 +265,7 @@ defineExpose({ focusSearch });
       v-if="showHistory"
       id="wb-sidebar-search-history"
       class="wb-sidebar-search-history"
-      aria-label="搜索历史"
+      :aria-label="t('m_f244a2842f42')"
       @mousedown.prevent
     >
       <div class="wb-sidebar-search-history-list" role="list">
@@ -284,7 +285,7 @@ defineExpose({ focusSearch });
           <button
             type="button"
             class="wb-sidebar-search-history-delete"
-            aria-label="删除该搜索历史"
+            :aria-label="t('m_c4d2dd77ffd9')"
             tabindex="-1"
             @mousedown.stop.prevent
             @click.stop="removeHistoryItem(entry)"
@@ -299,8 +300,8 @@ defineExpose({ focusSearch });
   </div>
 
   <section class="wb-sidebar-search-panel">
-    <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">按 Ctrl+Enter 搜索具体值</p>
-    <p v-if="searchState.valueLoading" class="wb-search-hint">搜索值… 按 Esc 取消</p>
+    <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">{{ t('m_250f4c4e4955') }}</p>
+    <p v-if="searchState.valueLoading" class="wb-search-hint">{{ t('m_afd25dcb5cb5') }}</p>
     <div v-if="searchState.valueLoading" class="wb-value-search-progress-wrap">
       <div
         class="wb-value-search-progress"
@@ -316,8 +317,8 @@ defineExpose({ focusSearch });
     </div>
     <p v-if="searchState.valueError" class="wb-search-error">{{ searchState.valueError }}</p>
 
-    <section v-if="hasQuery && visibleSchemaResults.length" class="wb-search-result-group" aria-label="结构结果">
-      <header class="wb-search-group-title">结构结果</header>
+    <section v-if="hasQuery && visibleSchemaResults.length" class="wb-search-result-group" :aria-label="t('m_f84e720c924c')">
+      <header class="wb-search-group-title">{{ t('m_f84e720c924c') }}</header>
       <button
         v-for="(result, index) in visibleSchemaResults"
         :key="result.key"
@@ -343,14 +344,14 @@ defineExpose({ focusSearch });
               <span class="wb-column-hit-comment" v-html="highlightMatch(columnComment(column), column, 'columnComment', { excerpt: true })"></span>
             </template>
           </span>
-          <span v-if="result.hiddenColumnCount" class="wb-column-hit is-overflow">还有 {{ result.hiddenColumnCount }} 个字段命中</span>
+          <span v-if="result.hiddenColumnCount" class="wb-column-hit is-overflow">{{ t('m_83eec76b3911') }} {{ result.hiddenColumnCount }} {{ t('m_50065c68137d') }}</span>
         </span>
       </button>
     </section>
-    <p v-if="hasQuery && !valueModeActive && !visibleSchemaResults.length" class="wb-tree-empty">没有匹配的表或字段</p>
+    <p v-if="hasQuery && !valueModeActive && !visibleSchemaResults.length" class="wb-tree-empty">{{ t('m_63d858907b2c') }}</p>
 
-    <section v-if="hasFreshValues || searchState.valueLoading" class="wb-search-result-group" aria-label="值结果">
-      <header class="wb-search-group-title">值结果</header>
+    <section v-if="hasFreshValues || searchState.valueLoading" class="wb-search-result-group" :aria-label="t('m_bbf22c04e503')">
+      <header class="wb-search-group-title">{{ t('m_bbf22c04e503') }}</header>
       <button
         v-for="(result, index) in visibleValueResults"
         :key="`${result.tableName}:${result.columnName}`"
@@ -370,13 +371,12 @@ defineExpose({ focusSearch });
             <span v-html="highlight(result.tableComment)"></span>
           </span>
           <span class="wb-value-hit">
-            <SearchHitBadge kind="value" subtle label="值预览" />
-            至少 1 处 · <span class="wb-column-hit-name" v-html="highlight(result.columnName)"></span>:
+            <SearchHitBadge kind="value" subtle :label="t('m_4bbdb2811da6')" /> {{ t('m_98bbf62daaf9') }} <span class="wb-column-hit-name" v-html="highlight(result.columnName)"></span>:
             <span v-html="highlightValue(result.previewValue)"></span>
           </span>
         </span>
       </button>
-      <p v-if="hasFreshValues && !searchState.valueResults.length" class="wb-tree-empty">当前数据库没有匹配的值</p>
+      <p v-if="hasFreshValues && !searchState.valueResults.length" class="wb-tree-empty">{{ t('m_a46b18ebb96f') }}</p>
     </section>
   </section>
 </template>

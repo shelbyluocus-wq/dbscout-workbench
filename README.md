@@ -74,7 +74,7 @@ node scripts/fetch-node.mjs --target=win32-x64
 node scripts/fetch-node.mjs --target=darwin-arm64
 ```
 
-The script tries Tsinghua → npmmirror.com (Aliyun) → mirrors.aliyun.com → nodejs.org in order, so it works on networks where the official mirror is slow. Override with `DBSCOUT_NODE_MIRROR=https://your-mirror/` if needed.
+The script uses the official nodejs.org distribution host. Set `DBSCOUT_NODE_MIRROR=https://your-mirror/` to explicitly select another mirror.
 
 The resulting `resources/node/node[.exe]` is gitignored. `npm run tauri -- dev`
 fetches and uses it directly; installed production apps instead install the
@@ -103,3 +103,10 @@ For release packaging, place private credentials in gitignored `src-tauri/resour
 The checked-in `src-tauri/resources/agent-auth.json` is intentionally empty. Without an explicit override, DB Scout reuses the computer's working Claude Code credentials and endpoint settings. When `apiKey` or `authToken` is supplied through the release file, environment variables, or the Agent settings gear, DB Scout uses a DB Scout-owned Claude config directory and passes the credential to the embedded runtime, so the UI-provided endpoint is isolated from local Claude settings. If neither path is configured, the Agent opens DB Scout's own API configuration experience instead of asking the user to run `/login`.
 
 Users can still override API Key, Auth Token, Base URL, and model from the Agent settings gear; those overrides are saved in `localStorage`. Do not commit real credentials to `agent-auth.json`.
+
+## Interface languages
+
+Use the sidebar settings to choose **English**, **简体中文** or **繁體中文（台灣）**.
+Existing users keep their saved language; fresh installations default to English.
+Database content is not translated. Some legacy dynamic/native messages are still
+awaiting localization. SVN remains the sole application update channel.

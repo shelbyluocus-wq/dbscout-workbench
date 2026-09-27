@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, ref, watch } from "vue";
 import SystemFontPicker from "./SystemFontPicker.vue";
 import {
@@ -90,14 +91,14 @@ watch(
         @keydown="onKeydown"
       >
         <header class="wb-shortcut-dialog-header">
-          <strong id="wb-font-dialog-title">字体设置</strong>
-          <button type="button" class="wb-shortcut-dialog-close" aria-label="关闭" @click="close">✕</button>
+          <strong id="wb-font-dialog-title">{{ t('m_8076f0292e22') }}</strong>
+          <button type="button" class="wb-shortcut-dialog-close" :aria-label="t('m_3fd47edce45b')" @click="close">✕</button>
         </header>
 
         <div class="wb-font-dialog-body">
           <div class="wb-font-controls">
             <div class="wb-font-field">
-              <span>选择界面字体</span>
+              <span>{{ t('m_384f33f60cf6') }}</span>
               <SystemFontPicker
                 ref="fontPickerRef"
                 v-model="draftPreference"
@@ -110,21 +111,21 @@ watch(
             </div>
           </div>
 
-          <div class="wb-font-preview" :style="previewStyle" aria-label="字体预览">
-            <span class="wb-font-preview-label">效果预览</span>
+          <div class="wb-font-preview" :style="previewStyle" :aria-label="t('m_c977f732b279')">
+            <span class="wb-font-preview-label">{{ t('m_e8bd157d8b8e') }}</span>
             <div class="wb-font-preview-sample">
-              <strong>黑猫工作台</strong>
-              <span>客户订单表 · 数据库连接</span>
+              <strong>{{ t('m_42e209190475') }}</strong>
+              <span>{{ t('m_70101f5d12c5') }}</span>
               <span>Inventory 2026 · 0123456789</span>
             </div>
           </div>
         </div>
 
         <footer class="wb-shortcut-dialog-footer wb-font-dialog-footer">
-          <button type="button" class="wb-font-reset" @click="restoreDefault">恢复默认</button>
+          <button type="button" class="wb-font-reset" @click="restoreDefault">{{ t('m_ba2e93e73037') }}</button>
           <span class="wb-font-dialog-footer-actions">
-            <button type="button" @click="close">取消</button>
-            <button type="button" class="wb-shortcut-dialog-primary" @click="apply">应用</button>
+            <button type="button" @click="close">{{ t('m_2cd0f3be8738') }}</button>
+            <button type="button" class="wb-shortcut-dialog-primary" @click="apply">{{ t('m_63c73c4730f4') }}</button>
           </span>
         </footer>
       </section>

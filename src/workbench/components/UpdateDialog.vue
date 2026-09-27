@@ -1,4 +1,5 @@
 <script setup>
+import { language, t } from "../i18n/index.js";
 import { computed, ref } from "vue";
 
 import { formatBytes } from "../composables/useUpdater.js";
@@ -26,7 +27,7 @@ const downloadedLabel = computed(() => formatBytes(props.updater.downloadedBytes
 const totalLabel = computed(() => formatBytes(props.updater.contentLength.value));
 const checkedLabel = computed(() => {
   if (!props.updater.lastCheckedAt.value) return "尚未检查";
-  return new Date(props.updater.lastCheckedAt.value).toLocaleString("zh-CN");
+  return new Date(props.updater.lastCheckedAt.value).toLocaleString(language.intlLocale.value);
 });
 const progressStyle = computed(() => ({
   "--wb-update-progress-width": hasKnownLength.value ? `${props.updater.downloadPercent.value}%` : "42%",
@@ -37,33 +38,33 @@ const progressStyle = computed(() => ({
   <div class="wb-dialog-overlay">
     <section ref="dialogRef" class="wb-dialog wb-update-dialog" role="dialog" aria-modal="true" aria-labelledby="wb-update-title" tabindex="-1">
       <header class="wb-dialog-header">
-        <strong id="wb-update-title">应用更新</strong>
-        <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? '更新检查中，请等待完成' : '关闭'" aria-label="关闭更新窗口" @click="emit('close')">×</button>
+        <strong id="wb-update-title">{{ t('m_64c230d22567') }}</strong>
+        <button type="button" class="wb-dialog-close" :disabled="updater.isBusy.value" :title="updater.isBusy.value ? t('m_c1d284859a18') : t('m_3fd47edce45b')" :aria-label="t('m_c690cc3bf1bb')" @click="emit('close')">×</button>
       </header>
 
       <div class="wb-update-body">
         <p class="wb-update-version-line">
-          <span>当前版本</span>
+          <span>{{ t('m_837bc9576721') }}</span>
           <strong>{{ updater.currentVersion.value }}</strong>
         </p>
 
         <template v-if="hasAppUpdate">
           <p class="wb-update-version-line">
-            <span>最新版本</span>
+            <span>{{ t('m_c2a497830ef7') }}</span>
             <strong>{{ update?.version }}</strong>
           </p>
-          <p v-if="update?.date" class="wb-update-meta">发布时间：{{ new Date(update.date).toLocaleString("zh-CN") }}</p>
-          <p v-if="update?.directory" class="wb-update-meta">SVN 更新目录：{{ update.directory }}</p>
+          <p v-if="update?.date" class="wb-update-meta">{{ t('m_fe0f0c2253fe') }}{{ new Date(update.date).toLocaleString(language.intlLocale.value) }}</p>
+          <p v-if="update?.directory" class="wb-update-meta">{{ t('m_2243955f7737') }}{{ update.directory }}</p>
           <pre v-if="update?.body" class="wb-update-notes">{{ update.body }}</pre>
-          <p v-else class="wb-update-meta">此版本没有填写更新说明。</p>
+          <p v-else class="wb-update-meta">{{ t('m_658907c24641') }}</p>
         </template>
 
         <template v-else-if="updater.status.value === 'agentAvailable'">
-          <p class="wb-update-meta">主程序已经是最新版本。AI 组件可独立更新，不需要重新安装黑猫。</p>
+          <p class="wb-update-meta">{{ t('m_d3dd537a700e') }}</p>
         </template>
 
         <template v-else-if="updater.status.value === 'downloading'">
-          <p class="wb-update-meta">正在启动本地安装包：{{ downloadedLabel }}<template v-if="hasKnownLength"> / {{ totalLabel }}</template></p>
+          <p class="wb-update-meta">{{ t('m_fd8ab0ba832d') }}{{ downloadedLabel }}<template v-if="hasKnownLength"> / {{ totalLabel }}</template></p>
           <div
             class="wb-update-progress"
             :class="{ 'is-indeterminate': !hasKnownLength }"
@@ -77,24 +78,22 @@ const progressStyle = computed(() => ({
           </div>
         </template>
 
-        <p v-else-if="updater.status.value === 'installed'" class="wb-update-meta">安装包已启动。安装完成后可以重启应用。</p>
-        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">正在更新 SVN 目录并检查版本……</p>
+        <p v-else-if="updater.status.value === 'installed'" class="wb-update-meta">{{ t('m_82c2f4581914') }}</p>
+        <p v-else-if="updater.status.value === 'checking'" class="wb-update-meta">{{ t('m_3cb89dcaff73') }}</p>
         <p v-else-if="updater.status.value === 'error'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
         <p v-else-if="updater.status.value === 'unavailable'" class="wb-update-error">{{ updater.errorMessage.value }}</p>
-        <p v-else class="wb-update-meta">已是最新版本。上次检查：{{ checkedLabel }}</p>
+        <p v-else class="wb-update-meta">{{ t('m_a2612ab21d0a') }}{{ checkedLabel }}</p>
 
-        <p v-if="agentUpdate?.available" class="wb-update-agent-runtime">
-          本次包含 AI 组件更新 v{{ agentUpdate.version }}（约 {{ agentUpdateSize }}）。更新会在后台完成，不影响数据库功能。
-        </p>
+        <p v-if="agentUpdate?.available" class="wb-update-agent-runtime"> {{ t('m_a7dc2f668bb0') }}{{ agentUpdate.version }}{{ t('m_0d8697e8c40f') }} {{ agentUpdateSize }}{{ t('m_69df77d7ed81') }} </p>
       </div>
 
       <footer class="wb-dialog-actions">
-        <button type="button" :disabled="updater.isBusy.value" @click="emit('close')">稍后</button>
-        <button v-if="updater.canPickDirectory.value" type="button" :disabled="updater.isBusy.value" @click="emit('pickDirectory')">选择 SVN 更新目录</button>
-        <button v-if="hasAppUpdate" type="button" class="wb-update-primary" @click="emit('downloadAndInstall')">安装更新</button>
-        <button v-else-if="updater.status.value === 'agentAvailable'" type="button" class="wb-update-primary" @click="emit('close')">知道了</button>
-        <button v-else-if="updater.status.value === 'installed'" type="button" class="wb-update-primary" @click="emit('relaunch')">立即重启</button>
-        <button v-else type="button" :disabled="updater.isBusy.value" @click="emit('check')">重新检查</button>
+        <button type="button" :disabled="updater.isBusy.value" @click="emit('close')">{{ t('m_9d2ca261281a') }}</button>
+        <button v-if="updater.canPickDirectory.value" type="button" :disabled="updater.isBusy.value" @click="emit('pickDirectory')">{{ t('m_61b24b2458f7') }}</button>
+        <button v-if="hasAppUpdate" type="button" class="wb-update-primary" @click="emit('downloadAndInstall')">{{ t('m_7a6bafc9c853') }}</button>
+        <button v-else-if="updater.status.value === 'agentAvailable'" type="button" class="wb-update-primary" @click="emit('close')">{{ t('m_de32e20193ad') }}</button>
+        <button v-else-if="updater.status.value === 'installed'" type="button" class="wb-update-primary" @click="emit('relaunch')">{{ t('m_700b6c80d954') }}</button>
+        <button v-else type="button" :disabled="updater.isBusy.value" @click="emit('check')">{{ t('m_c25fb86b1e96') }}</button>
       </footer>
     </section>
   </div>

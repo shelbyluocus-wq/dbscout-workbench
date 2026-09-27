@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 import { buildSelectedCellIdentity } from "../utils/selectedCellIdentity.js";
 
@@ -20,16 +21,16 @@ const identity = computed(() =>
     class="wb-cell-identity"
     :class="{ 'is-panel': panel }"
     :title="identity.title"
-    aria-label="当前字段身份"
+    :aria-label="t('m_297cfa49116d')"
   >
-    <span class="wb-cell-identity-label">当前字段</span>
+    <span class="wb-cell-identity-label">{{ t('m_a77aad0b736a') }}</span>
     <strong class="wb-cell-identity-column">{{ identity.column }}</strong>
     <span class="wb-cell-identity-divider" aria-hidden="true"></span>
     <span class="wb-cell-identity-label">{{ identity.keyLabel }}</span>
     <strong v-if="identity.primaryKeyText" class="wb-cell-identity-key">{{ identity.primaryKeyText }}</strong>
     <template v-if="identity.selectedCount">
       <span class="wb-cell-identity-divider" aria-hidden="true"></span>
-      <span class="wb-cell-identity-count">已选 {{ identity.selectedCount }} 个单元格</span>
+      <span class="wb-cell-identity-count">{{ t('m_7ecf1cde6486') }} {{ identity.selectedCount }} {{ t('m_69194a31346f') }}</span>
     </template>
   </section>
 </template>

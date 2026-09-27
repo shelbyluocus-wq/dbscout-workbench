@@ -6,6 +6,7 @@ const output = process.env.DBSCOUT_AUDIT_SCREENSHOTS || '/tmp/blackcat-audit-rev
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+await page.addInitScript(() => localStorage.setItem("dbscout_language", "zh-CN"));
 page.setDefaultTimeout(15000);
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));

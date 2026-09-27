@@ -1,0 +1,105 @@
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { chromium } from "playwright";
+
+const base = process.env.DBSCOUT_I18N_TEST_URL || "http://127.0.0.1:1467";
+const output = process.env.DBSCOUT_I18N_SCREENSHOTS || "/tmp/blackcat-language-tests";
+await mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true });
+const errors = [];
+try {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await page.goto(base);
+  await page.locator('[role="option"]').first().waitFor();
+  assert.equal(await page.locator("html").getAttribute("lang"), "en");
+  assert.equal(await page.evaluate(() => localStorage.getItem("dbscout_language")), "en");
+  await page.locator('[role="option"]').filter({ hasText: /^player\b/ }).dblclick();
+  const grid = page.locator(".wb-grid-row");
+  await grid.first().waitFor();
+  const firstCell = page.locator('.wb-grid-row td[data-column-index="1"]').first();
+  await firstCell.click();
+  const readDataCells = () => Promise.all([0, 1, 2, 3].map((index) => page.locator(`.wb-grid-row td[data-column-index="${index}"]`).first().innerText()));
+  const dataCells = await readDataCells();
+  assert.ok(dataCells.some((text) => /\p{Script=Han}/u.test(text)), "fixture must include actual Chinese database data");
+  const cellText = await firstCell.innerText();
+  await page.evaluate(() => { window.languageSwitchSentinel = "same-document"; });
+  await page.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
+  await page.locator(".wb-sidebar-settings-trigger").click();
+  const settings = page.locator(".wb-sidebar-settings-sheet");
+  const language = settings.locator("[data-language-selector]");
+  await language.getByRole("button", { name: "简体中文", exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
+  assert.equal(await language.getByRole("button", { name: "简体中文", exact: true }).getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await readDataCells(), dataCells, "database content must not be translated");
+  assert.equal(await firstCell.innerText(), cellText);
+  await page.screenshot({ path: `${output}/chinese.png` });
+  const traditional = language.getByRole("button", { name: "繁體中文（台灣）", exact: true });
+  await traditional.click();
+  await page.waitForFunction(() => document.documentElement.lang === "zh-TW");
+  assert.equal(await traditional.getAttribute("aria-pressed"), "true");
+  assert.equal(await page.evaluate(() => localStorage.getItem("dbscout_language")), "zh-TW");
+  assert.equal(await page.evaluate(() => window.languageSwitchSentinel), "same-document");
+  assert.deepEqual(await readDataCells(), dataCells, "Taiwan locale must not convert database values");
+  assert.equal(await settings.getByText("系統預設", { exact: true }).count(), 1);
+  assert.equal(await settings.getByText("欄位備註", { exact: true }).count(), 1);
+  const checkLanguageLayout = async () => {
+    const groupBox = await language.boundingBox();
+    const buttons = language.getByRole("button");
+    assert.equal(await buttons.count(), 3);
+    for (const button of await buttons.all()) {
+      const box = await button.boundingBox();
+      assert.ok(box.x >= groupBox.x - 1 && box.x + box.width <= groupBox.x + groupBox.width + 1, "language buttons must stay inside settings");
+      assert.ok(await button.evaluate((element) => element.scrollWidth <= element.clientWidth), "complete language names must fit");
+    }
+  };
+  await checkLanguageLayout();
+  await page.screenshot({ path: `${output}/traditional-taiwan.png` });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await checkLanguageLayout();
+  await page.screenshot({ path: `${output}/traditional-taiwan-compact.png` });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await language.getByRole("button", { name: "English", exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.lang === "en");
+  assert.equal(await page.evaluate(() => window.languageSwitchSentinel), "same-document");
+  assert.equal(await page.evaluate(() => localStorage.getItem("dbscout_language")), "en");
+  assert.deepEqual(await readDataCells(), dataCells);
+  await page.screenshot({ path: `${output}/english.png` });
+  await page.reload();
+  await page.locator(".mysql-workbench").waitFor();
+  assert.equal(await page.locator("html").getAttribute("lang"), "en");
+  await context.close();
+
+  const existing = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+  await existing.addInitScript(() => localStorage.setItem("dbscout_theme", "dark"));
+  const restored = await existing.newPage();
+  restored.on("pageerror", (error) => errors.push(error.message));
+  restored.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await restored.goto(base);
+  await restored.locator('[role="option"]').first().waitFor();
+  assert.equal(await restored.locator("html").getAttribute("lang"), "zh-CN");
+  assert.equal(await restored.evaluate(() => localStorage.getItem("dbscout_language")), "zh-CN");
+  await restored.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
+  await restored.locator(".wb-sidebar-settings-trigger").click();
+  await restored.locator(".wb-sidebar-settings-sheet").getByRole("button", { name: "English", exact: true }).click();
+  await restored.reload();
+  await restored.locator(".mysql-workbench").waitFor();
+  assert.equal(await restored.locator("html").getAttribute("lang"), "en", "explicit choice overrides legacy preferences");
+  if (!await restored.locator(".wb-sidebar-settings-trigger").isVisible()) {
+    await restored.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
+  }
+  await restored.locator(".wb-sidebar-settings-trigger").click();
+  const twButton = restored.locator("[data-language-selector]").getByRole("button", { name: "繁體中文（台灣）", exact: true });
+  await twButton.focus();
+  await restored.keyboard.press("Enter");
+  await restored.waitForFunction(() => document.documentElement.lang === "zh-TW");
+  await restored.reload();
+  await restored.locator(".mysql-workbench").waitFor();
+  assert.equal(await restored.locator("html").getAttribute("lang"), "zh-TW", "Taiwan locale survives restart with existing preferences");
+  await existing.close();
+  assert.deepEqual(errors, []);
+  console.log("PASS: fresh English, legacy Chinese, three-language switching, Taiwan terminology/layout/keyboard/persistence, unchanged grid data; no page errors.");
+} finally { await browser.close(); }

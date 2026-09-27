@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "./i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { Pin } from "lucide-vue-next";
 
@@ -4325,14 +4326,14 @@ onBeforeUnmount(() => {
           'is-retracted': sidebarCollapsed,
         }"
         id="wb-topbar-sidebar-actions"
-        aria-label="数据库操作"
+        :aria-label="t('m_ed9a41e59406')"
         data-tauri-drag-region
       >
         <button
           type="button"
           class="wb-header-btn wb-topbar-collapse-btn"
-          :aria-label="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
-          :title="sidebarCollapsed ? '展开数据库栏' : '收起数据库栏'"
+          :aria-label="sidebarCollapsed ? t('m_9cb43e8f453f') : t('m_5219e5b37457')"
+          :title="sidebarCollapsed ? t('m_9cb43e8f453f') : t('m_5219e5b37457')"
           @click.stop="toggleSidebar()"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -4346,7 +4347,7 @@ onBeforeUnmount(() => {
       <div
         class="wb-titlebar-tabs"
         id="wb-topbar-tabs"
-        aria-label="表标签"
+        :aria-label="t('m_79aaded7fe4f')"
         data-tauri-drag-region
       >
         <button
@@ -4361,7 +4362,7 @@ onBeforeUnmount(() => {
             <circle cx="6.2" cy="6.2" r="3.4" />
             <path d="M8.8 8.8l2.4 2.4M9.8 5.2h4.1v8.7H5.2v-3.1M9.8 8.1h4.1M9.8 11h4.1" />
           </svg>
-          <span class="wb-quick-open-entry-label">快速打开</span>
+          <span class="wb-quick-open-entry-label">{{ t('m_13e21519f8b9') }}</span>
           <kbd v-if="quickOpenShortcutLabel">{{ quickOpenShortcutLabel }}</kbd>
         </button>
       </div>
@@ -4371,14 +4372,14 @@ onBeforeUnmount(() => {
         class="wb-titlebar-inspector-controls"
         :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorTitlebarStyle"
-        aria-label="备注区域操作"
+        :aria-label="t('m_58766ed3abce')"
         data-tauri-drag-region
       >
         <button
           type="button"
           class="wb-header-btn wb-topbar-collapse-btn"
-          :aria-label="inspectorCollapsed ? '展开备注栏' : '收起备注栏'"
-          :title="inspectorCollapsed ? '展开备注栏' : '收起备注栏'"
+          :aria-label="inspectorCollapsed ? t('m_9cee1ce2caac') : t('m_c46872e25609')"
+          :title="inspectorCollapsed ? t('m_9cee1ce2caac') : t('m_c46872e25609')"
           @click.stop="toggleInspector()"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -4412,8 +4413,8 @@ onBeforeUnmount(() => {
         type="button"
         class="wb-ai-entry-button"
         :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': agent.isBusy.value || agent.isStarting.value }"
-        :title="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
-        :aria-label="inspectorMode === 'ai' ? '切回备注栏' : '打开数据库 Agent'"
+        :title="inspectorMode === 'ai' ? t('m_bf8784deb67a') : t('m_39fd6df90e08')"
+        :aria-label="inspectorMode === 'ai' ? t('m_bf8784deb67a') : t('m_39fd6df90e08')"
         :aria-pressed="inspectorMode === 'ai'"
         @click.stop="toggleAiAssistant"
       >
@@ -4437,13 +4438,13 @@ onBeforeUnmount(() => {
       <div
         v-if="!usesNativeMacWindowControls"
         class="wb-titlebar-controls"
-        aria-label="窗口控制"
+        :aria-label="t('m_e7cfeddae1f5')"
       >
         <button
           type="button"
           class="wb-titlebar-button"
-          aria-label="最小化窗口"
-          title="最小化"
+          :aria-label="t('m_6ae80538c2b2')"
+          :title="t('m_ac29e57a46f4')"
           @click.stop="minimizeWindow"
         >
           <span class="wb-window-icon is-minimize" aria-hidden="true"></span>
@@ -4451,8 +4452,8 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-titlebar-button"
-          aria-label="最大化或还原窗口"
-          title="最大化或还原"
+          :aria-label="t('m_cc0c2fbe3e92')"
+          :title="t('m_82a6d9c3668c')"
           @click.stop="toggleMaximizeWindow"
         >
           <span class="wb-window-icon is-maximize" aria-hidden="true"></span>
@@ -4460,8 +4461,8 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-titlebar-button is-close"
-          aria-label="关闭窗口"
-          title="关闭"
+          :aria-label="t('m_1ae6b0a0f826')"
+          :title="t('m_3fd47edce45b')"
           @click.stop="closeWindow"
         >
           <span class="wb-window-icon is-close" aria-hidden="true"></span>
@@ -4475,10 +4476,10 @@ onBeforeUnmount(() => {
       :class="{ 'is-dragging': paneIsDragging }"
     >
       <div v-if="showNarrowHint" class="wb-narrow-hint" role="status">
-        <span class="wb-narrow-hint-text">窗口较窄，建议收起侧边栏以获得更大的数据区域</span>
+        <span class="wb-narrow-hint-text">{{ t('m_c59ab8b4a9b4') }}</span>
         <span class="wb-narrow-hint-actions">
-          <button type="button" class="wb-narrow-hint-btn" @click="toggleSidebar()">收起侧边栏</button>
-          <button type="button" class="wb-narrow-hint-btn" @click="focusCurrentTableOnly()">只看当前表</button>
+          <button type="button" class="wb-narrow-hint-btn" @click="toggleSidebar()">{{ t('m_ce1d67c2703c') }}</button>
+          <button type="button" class="wb-narrow-hint-btn" @click="focusCurrentTableOnly()">{{ t('m_74cdac97a8e4') }}</button>
         </span>
       </div>
       <div
@@ -4740,10 +4741,10 @@ onBeforeUnmount(() => {
       :style="{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }"
       @click.stop
     >
-      <button type="button" @click="refreshTabsFromMenu">刷新</button>
-      <button type="button" :disabled="!tabContextNeighborAvailability.left" @click="closeRelativeTabsFromMenu('left')">关闭左侧</button>
-      <button type="button" :disabled="!tabContextNeighborAvailability.right" @click="closeRelativeTabsFromMenu('right')">关闭右侧</button>
-      <button type="button" @click="closeAllTabsFromMenu">全部关闭</button>
+      <button type="button" @click="refreshTabsFromMenu">{{ t('m_aee887434131') }}</button>
+      <button type="button" :disabled="!tabContextNeighborAvailability.left" @click="closeRelativeTabsFromMenu('left')">{{ t('m_bc066eb3c8b6') }}</button>
+      <button type="button" :disabled="!tabContextNeighborAvailability.right" @click="closeRelativeTabsFromMenu('right')">{{ t('m_9594d7707c4b') }}</button>
+      <button type="button" @click="closeAllTabsFromMenu">{{ t('m_34f7336d3983') }}</button>
     </menu>
 
     <DatabaseSyncDialog
@@ -4821,44 +4822,44 @@ onBeforeUnmount(() => {
 
     <!-- Table Rename Dialog -->
     <div v-if="tableRename.open" class="wb-dialog-overlay">
-      <form ref="tableRenameDialogRef" class="wb-dialog" role="dialog" aria-modal="true" aria-label="重命名表" tabindex="-1" @submit.prevent="executeTableRename">
+      <form ref="tableRenameDialogRef" class="wb-dialog" role="dialog" aria-modal="true" :aria-label="t('m_c1c0117d498e')" tabindex="-1" @submit.prevent="executeTableRename">
         <header class="wb-dialog-header">
-          <strong>重命名表</strong>
+          <strong>{{ t('m_c1c0117d498e') }}</strong>
           <button type="button" class="wb-dialog-close" @click="closeTableRename">×</button>
         </header>
         <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
           {{ tableRename.database }} · {{ tableRename.tableName }}
         </p>
         <label class="wb-dialog-field">
-          <span>新名称</span>
-          <input v-model="tableRename.newName" placeholder="输入新表名" />
+          <span>{{ t('m_92ddb51db6c4') }}</span>
+          <input v-model="tableRename.newName" :placeholder="t('m_279d7d4f861b')" />
         </label>
         <p v-if="tableRename.error" class="wb-dialog-error">{{ tableRename.error }}</p>
         <footer class="wb-dialog-actions">
-          <button type="button" @click="closeTableRename">取消</button>
+          <button type="button" @click="closeTableRename">{{ t('m_2cd0f3be8738') }}</button>
           <button type="submit" :disabled="tableRename.busy || !tableRename.newName || tableRename.newName === tableRename.tableName">
-            {{ tableRename.busy ? "重命名中…" : "重命名表" }}
+            {{ tableRename.busy ? t('m_b49f6ac0fe4c') : t('m_c1c0117d498e') }}
           </button>
         </footer>
       </form>
     </div>
 
     <div v-if="aliasDialog.open && aliasDialog.type === 'connection'" class="wb-dialog-overlay">
-      <form ref="connectionAliasDialogRef" class="wb-dialog" role="dialog" aria-modal="true" aria-label="重命名连接" tabindex="-1" @submit.prevent="saveAlias">
+      <form ref="connectionAliasDialogRef" class="wb-dialog" role="dialog" aria-modal="true" :aria-label="t('m_9dc6275e6672')" tabindex="-1" @submit.prevent="saveAlias">
         <header class="wb-dialog-header">
-          <strong>{{ aliasDialog.type === "connection" ? "重命名连接（本地别名）" : "重命名数据库（本地别名）" }}</strong>
+          <strong>{{ aliasDialog.type === "connection" ? t('m_c3a80a6a1e41') : t('m_287199464530') }}</strong>
           <button type="button" class="wb-dialog-close" @click="closeAliasDialog">×</button>
         </header>
         <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
-          {{ aliasDialog.type === "connection" ? "真实连接" : "真实库名" }}：{{ aliasDialog.realName }}（仅修改本地显示，不影响实际{{ aliasDialog.type === "connection" ? "连接" : "数据库" }}）
+          {{ aliasDialog.type === "connection" ? t('m_970932d40f1a') : t('m_5c169ab6b865') }}：{{ aliasDialog.realName }}{{ t('m_0e08a67346ea') }}{{ aliasDialog.type === "connection" ? t('m_a5574109f020') : t('m_263200d7d529') }}）
         </p>
         <label class="wb-dialog-field">
-          <span>别名</span>
-          <input v-model="aliasDialog.alias" placeholder="留空可恢复真实名称" maxlength="60" autofocus />
+          <span>{{ t('m_55c4cb3d7464') }}</span>
+          <input v-model="aliasDialog.alias" :placeholder="t('m_65cb3e68ae95')" maxlength="60" autofocus />
         </label>
         <footer class="wb-dialog-actions">
-          <button type="button" @click="closeAliasDialog">取消</button>
-          <button type="submit">保存</button>
+          <button type="button" @click="closeAliasDialog">{{ t('m_2cd0f3be8738') }}</button>
+          <button type="submit">{{ t('m_a3030bf8f16d') }}</button>
         </footer>
       </form>
     </div>

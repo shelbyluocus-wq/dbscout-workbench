@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed } from "vue";
 import { ExternalLink, FileJson, FileSpreadsheet, FileText, FolderOpen } from "lucide-vue-next";
 
@@ -50,11 +51,11 @@ function formatBytes(value) {
       <span>{{ artifact.path }}</span>
     </span>
     <span class="wb-ai-artifact-actions">
-      <button type="button" title="打开文件" @click="emit('open', artifact)">
+      <button type="button" :title="t('m_4c8a4e3da39e')" @click="emit('open', artifact)">
         <ExternalLink :size="14" />
-        <span>打开</span>
+        <span>{{ t('m_c771248e511f') }}</span>
       </button>
-      <button type="button" class="is-icon-only" title="打开所在文件夹" aria-label="打开所在文件夹" @click="emit('reveal', artifact)">
+      <button type="button" class="is-icon-only" :title="t('m_064fc3c848b0')" :aria-label="t('m_064fc3c848b0')" @click="emit('reveal', artifact)">
         <FolderOpen :size="15" />
       </button>
     </span>

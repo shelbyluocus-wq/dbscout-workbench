@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
@@ -59,7 +60,7 @@ onMounted(() => nextTick(autosize));
 <template>
   <form class="wb-ai-composer" @submit.prevent="submit">
     <div class="wb-ai-composer-context" :title="tableSource">
-      <span>当前上下文</span>
+      <span>{{ t('m_080bc981ec09') }}</span>
       <strong>{{ tableSource }}</strong>
     </div>
     <div class="wb-ai-composer-input-wrap">
@@ -77,8 +78,8 @@ onMounted(() => nextTick(autosize));
         v-if="assistant.isBusy.value"
         type="button"
         class="wb-ai-composer-send is-stop"
-        aria-label="停止生成"
-        title="停止生成"
+        :aria-label="t('m_9ad0aac32ea3')"
+        :title="t('m_9ad0aac32ea3')"
         @click="emit('abort')"
       >
         <span aria-hidden="true" class="wb-ai-stop-icon"></span>
@@ -87,8 +88,8 @@ onMounted(() => nextTick(autosize));
         v-else
         type="submit"
         class="wb-ai-composer-send"
-        aria-label="发送消息"
-        title="发送消息"
+        :aria-label="t('m_008814832cf7')"
+        :title="t('m_008814832cf7')"
         :disabled="!hasDraft || !runtimeReady"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

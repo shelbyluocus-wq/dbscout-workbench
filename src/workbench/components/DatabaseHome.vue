@@ -1,4 +1,5 @@
 <script setup>
+import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   ClipboardPaste,
@@ -99,7 +100,7 @@ const menu = reactive({
 controller.setSelection(Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames : []);
 controller.focusedName.value = props.tab.focusedTableName || props.tab.selectedTableNames?.at?.(-1) || "";
 
-const databaseRealName = computed(() => props.tab.database || "当前数据库");
+const databaseRealName = computed(() => props.tab.database || t('m_5403ed977fb5'));
 const databaseName = computed(() => (
   databaseLabel(props.tab.connectionId, props.tab.database) || databaseRealName.value
 ));
@@ -120,7 +121,7 @@ const databaseHomeDecorationStyle = computed(() => {
   };
 });
 const selectedCount = computed(() => controller.selectedNames.value.length);
-const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 ${menu.selectedNames.length} 张表` : "删除表");
+const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 ${menu.selectedNames.length} 张表` : t('m_d545721cef25'));
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
@@ -140,26 +141,26 @@ const tableListRef = ref(null);
 const contextMenuRef = ref(null);
 const splitMenuOpen = ref(false);
 const compactActionMenuOpen = ref(false);
-const splitItems = Object.freeze([
-  { id: "right", label: "左右分屏", hint: "在右侧打开独立首页", icon: "split-right" },
-  { id: "down", label: "上下分屏", hint: "在下方打开独立首页", icon: "split-down" },
+const splitItems = computed(() => [
+  { id: "right", label: t('m_62ed1b06404f'), hint: t('m_c497337502dc'), icon: "split-right" },
+  { id: "down", label: t('m_3d63360a3d6e'), hint: t('m_18a9b1b583a8'), icon: "split-down" },
 ]);
 const compactActionItems = computed(() => ([
   {
     id: "batch-export",
-    label: "批量导出",
-    hint: "导出当前数据库中的多张表",
+    label: t('m_d2fcdde81f06'),
+    hint: t('m_182001ece5e4'),
     icon: "export",
     disabled: props.busy,
   },
   {
     id: "batch-import",
-    label: "批量导入",
-    hint: "向当前数据库导入多张表",
+    label: t('m_fd7719273970'),
+    hint: t('m_58cd39db1ad8'),
     icon: "import",
     disabled: props.busy || !canImport.value,
   },
-  ...splitItems.map((item, index) => ({
+  ...splitItems.value.map((item, index) => ({
     ...item,
     separatorBefore: index === 0,
   })),
@@ -177,7 +178,7 @@ const typeahead = createHomepageTypeahead({
 const typeaheadResultLabel = computed(() => {
   const query = typeahead.query.value.trim().toLocaleLowerCase();
   const name = typeahead.matchedTableName.value;
-  if (!name) return "未找到匹配表";
+  if (!name) return t('m_e5dcd10208d5');
   return name.toLocaleLowerCase() === query ? "" : name;
 });
 const typeaheadResultHtml = computed(() =>
@@ -660,24 +661,24 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         <component :is="databaseHomeIcon" :size="18" class="wb-dbhome-title-icon" aria-hidden="true" />
         <div>
           <h2 :title="databaseTitle">{{ databaseName }}</h2>
-          <p v-if="homeLoading">正在读取表列表…</p>
-          <p v-else>{{ visibleCount }} / {{ tableCount }} 张表</p>
+          <p v-if="homeLoading">{{ t('m_133b5069fbfb') }}</p>
+          <p v-else>{{ visibleCount }} / {{ tableCount }} {{ t('m_a2b22d3a5ca3') }}</p>
         </div>
       </div>
-      <div v-if="readOnly" class="wb-dbhome-summary" aria-label="首页状态">
-        <span>只读</span>
+      <div v-if="readOnly" class="wb-dbhome-summary" :aria-label="t('m_fa9dcb37fdf5')">
+        <span>{{ t('m_3b5ec3533b0e') }}</span>
       </div>
     </header>
 
-    <div class="wb-dbhome-toolbar" aria-label="表对象工具栏">
+    <div class="wb-dbhome-toolbar" :aria-label="t('m_b0c35c00cb3d')">
       <div class="wb-dbhome-search">
         <span aria-hidden="true"></span>
         <input
           ref="searchInputRef"
           :value="controller.query.value"
           type="search"
-          aria-label="搜索表名或备注"
-          placeholder="搜索表名或备注"
+          :aria-label="t('m_a6c843332a9d')"
+          :placeholder="t('m_a6c843332a9d')"
           @input="setQuery($event.target.value)"
           @keydown="handleSearchKeydown"
         />
@@ -685,7 +686,7 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           v-if="controller.query.value"
           type="button"
           class="wb-dbhome-search-clear"
-          aria-label="清除搜索"
+          :aria-label="t('m_ee32f25f7050')"
           @mousedown.prevent
           @click.stop="clearSearchQuery"
         >
@@ -694,8 +695,8 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           </svg>
         </button>
       </div>
-      <div class="wb-dbhome-actions" aria-label="表操作">
-        <div class="wb-toolbar-action-group wb-dbhome-action-group" aria-label="SQL、批量与分屏操作">
+      <div class="wb-dbhome-actions" :aria-label="t('m_e3244d705db7')">
+        <div class="wb-toolbar-action-group wb-dbhome-action-group" :aria-label="t('m_813a2915d825')">
           <button
             type="button"
             class="wb-toolbar-action-button wb-dbhome-action-button wb-dbhome-sql-entry"
@@ -709,27 +710,27 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           <button
             type="button"
             class="wb-toolbar-action-button wb-dbhome-action-button"
-            aria-label="批量导出"
+            :aria-label="t('m_d2fcdde81f06')"
             :disabled="busy"
             @click="openBatchExport"
           >
             <ToolbarActionIcon name="export" />
-            <span class="wb-toolbar-action-label">批量导出</span>
+            <span class="wb-toolbar-action-label">{{ t('m_d2fcdde81f06') }}</span>
           </button>
           <button
             type="button"
             class="wb-toolbar-action-button wb-dbhome-action-button"
-            aria-label="批量导入"
+            :aria-label="t('m_fd7719273970')"
             :disabled="busy || !canImport"
             @click="openBatchImport"
           >
             <ToolbarActionIcon name="import" />
-            <span class="wb-toolbar-action-label">批量导入</span>
+            <span class="wb-toolbar-action-label">{{ t('m_fd7719273970') }}</span>
           </button>
           <ToolbarSplitButton
-            label="分屏"
+            :label="t('m_666ec3442af3')"
             icon="split-right"
-            menu-label="首页分屏方式"
+            :menu-label="t('m_588827d8d5bb')"
             :open="splitMenuOpen"
             :items="splitItems"
             @primary="splitHome('right')"
@@ -740,9 +741,9 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         </div>
         <ToolbarSplitButton
           class="wb-toolbar-compact-overflow wb-dbhome-overflow"
-          label="更多"
+          :label="t('m_38844b135cf7')"
           icon="more"
-          menu-label="首页操作"
+          :menu-label="t('m_cc5a7393169d')"
           primary-opens-menu
           single-trigger
           :open="compactActionMenuOpen"
@@ -755,14 +756,14 @@ defineExpose({ copySelection, pasteTables, focusSearch });
           v-if="canClosePane"
           type="button"
           class="wb-dbhome-close-pane"
-          title="关闭当前分屏，保留其它分屏"
+          :title="t('m_a11df0f96070')"
           @click="emit('close-pane')"
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
             <path d="M8 3v10M9.8 5.2l2.2 2.2m0-2.2L9.8 7.4" />
           </svg>
-          <span>关闭分屏</span>
+          <span>{{ t('m_1e9b6e9d9fbe') }}</span>
         </button>
       </div>
     </div>
@@ -826,17 +827,17 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         class="wb-context-menu wb-dbhome-context-menu"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         role="menu"
-        aria-label="表首页菜单"
+        :aria-label="t('m_d2061cf8e332')"
         @click.stop
       >
-        <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />打开表</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />表设计</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />重命名</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />发送到…</button>
-        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />复制</button>
-        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />粘贴</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_bf8ef131aa2d') }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
+        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}</button>
+        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}</button>
         <hr class="wb-context-separator" role="separator" />
-        <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />刷新</button>
+        <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || !canRenameDrop || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}</button>
       </menu>
     </Teleport>
