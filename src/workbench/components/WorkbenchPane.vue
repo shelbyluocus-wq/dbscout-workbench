@@ -212,23 +212,31 @@ function cssEscape(value) {
 
 function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   if (activeDataTab.value?.id !== tabId || !gridWrapRef.value) return;
-  const cell = gridWrapRef.value.querySelector(`td[data-row-key="${cssEscape(rowKey)}"][data-column-name="${cssEscape(column)}"]`);
-  if (!cell) return;
   const rootRect = gridWrapRef.value.closest(".mysql-workbench")?.getBoundingClientRect();
   const gridRect = gridWrapRef.value.getBoundingClientRect();
-  const cellRect = cell.getBoundingClientRect();
+  if (!rootRect) return;
+  const cell = gridWrapRef.value.querySelector(`td[data-row-key="${cssEscape(rowKey)}"][data-column-name="${cssEscape(column)}"]`);
+  const cellRect = cell?.getBoundingClientRect();
   const detailRect = gridWrapRef.value.closest(".wb-workbench-pane")
     ?.querySelector(".wb-cell-detail")
     ?.getBoundingClientRect();
   const visibleBottom = detailRect?.top < gridRect.bottom && detailRect?.bottom > gridRect.top
     ? Math.min(gridRect.bottom, detailRect.top)
     : gridRect.bottom;
-  if (!rootRect || cellRect.bottom < gridRect.top || cellRect.top > visibleBottom) return;
+  const cellVisible = cellRect && cellRect.bottom >= gridRect.top && cellRect.top <= visibleBottom;
+  if (!cellVisible && kind !== "copy") return;
+  const anchorRect = cellVisible
+    ? cellRect
+    : gridWrapRef.value.querySelector(`th[data-column-name="${cssEscape(column)}"]`)?.getBoundingClientRect();
+  if (!anchorRect) return;
+  const anchorTop = cellVisible
+    ? anchorRect.top
+    : gridWrapRef.value.querySelector(".wb-field-comments-row th")?.getBoundingClientRect().bottom ?? anchorRect.bottom;
   emit("save-reminder", {
     kind,
     message,
-    x: Math.min(cellRect.right - rootRect.left - 12, rootRect.width - 92),
-    y: Math.max(36, cellRect.top - rootRect.top - 8),
+    x: Math.min(anchorRect.right - rootRect.left - 12, rootRect.width - 92),
+    y: Math.max(36, anchorTop - rootRect.top - 8),
   });
 }
 
