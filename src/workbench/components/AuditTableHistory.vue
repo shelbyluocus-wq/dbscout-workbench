@@ -2,9 +2,14 @@
 import { language, t } from "../i18n/index.js";
 import { computed, ref, watch, nextTick } from "vue";
 import { ArrowLeft, ChevronDown, History, RotateCcw, Search, Table2, TriangleAlert } from "lucide-vue-next";
-import { auditChangeItems } from "../utils/auditDisplay.js";
+import { auditChangeItems, auditChangeSql } from "../utils/auditDisplay.js";
 import { auditTableKey } from "../composables/useAuditHistory.js";
 const props = defineProps({ history: { type: Object, required: true }, connections: { type: Array, default: () => [] } });
+const readOnly = computed(() => Boolean(props.history.readOnly));
+const actorLabel = (entry) => {
+  const name = entry.displayName || entry.username;
+  return entry.displayName && entry.username ? `${entry.displayName} (@${entry.username})` : name || t("backup.unknownUser");
+};
 const s = computed(() => props.history.state);
 const SOURCES = new Set(["import", "grid", "rollback", "ddl", "agent", "sql_console"]);
 const stamp = (value) => new Date(value).toLocaleString(language.intlLocale.value, { hour12: false });
@@ -36,6 +41,7 @@ const details = (id) => s.value.details[id]?.items || [];
         </div>
         <button type="submit" :title="t('m_44ce7ae909bb')" :aria-label="t('m_44ce7ae909bb')" :disabled="s.loadingTables || s.restoring"><Search :size="14" aria-hidden="true" /></button>
       </form>
+      <p v-if="readOnly" class="wb-audit-hint wb-audit-list-hint">{{ t("backup.history.sharedSearchHint") }}</p>
       <p v-if="s.error && !s.selected" class="wb-audit-error" role="alert">{{ s.error }}</p>
       <div class="wb-audit-table-scroll">
         <p v-if="s.loadingTables && !s.tables.length" class="wb-audit-hint wb-audit-list-hint" role="status">{{ t('m_133b5069fbfb') }}</p>
@@ -56,10 +62,10 @@ const details = (id) => s.value.details[id]?.items || [];
         <header class="wb-audit-heading">
           <button type="button" class="wb-audit-back" :disabled="s.restoring" @click="history.resetSelection()"><ArrowLeft :size="14" aria-hidden="true" />{{ t('m_d5e75e167780') }}</button>
           <strong>{{ s.selected.tableName }}</strong><span>{{ connectionLabel(s.selected) }} · {{ s.selected.database }}</span>
-          <p class="wb-audit-hint">{{ t('m_7643dd10ab6c') }}</p>
+          <p class="wb-audit-hint">{{ readOnly ? t('backup.history.sharedReadOnly') : t('m_7643dd10ab6c') }}</p>
         </header>
-        <p v-if="s.previewing" class="wb-audit-hint" role="status">{{ t('m_5e110fbd036a') }}</p>
-        <section v-if="s.preview" ref="previewElement" class="wb-audit-preview" :aria-label="t('m_10328a6f1af8')" tabindex="-1">
+        <p v-if="!readOnly && s.previewing" class="wb-audit-hint" role="status">{{ t('m_5e110fbd036a') }}</p>
+        <section v-if="!readOnly && s.preview" ref="previewElement" class="wb-audit-preview" :aria-label="t('m_10328a6f1af8')" tabindex="-1">
           <h3><TriangleAlert :size="16" aria-hidden="true" />{{ t('backup.history.previewTitle', { table: s.selected.tableName }) }}</h3>
           <dl class="wb-audit-preview-facts">
             <dt>{{ t('backup.history.previewPoint') }}</dt>
@@ -85,12 +91,13 @@ const details = (id) => s.value.details[id]?.items || [];
             <header><strong>{{ title(operation) }}</strong><time :datetime="operation.ts">{{ stamp(operation.ts) }}</time></header>
             <div class="wb-audit-counts">
               <span v-for="[kind, op, value] in nonZeroCounts(operation)" :key="kind" class="wb-audit-count" :data-kind="kind">{{ opLabel(op) }} <b>{{ value }}</b></span>
-              <span v-if="operation.blocked" class="wb-audit-blocked"><TriangleAlert :size="12" aria-hidden="true" />{{ t('backup.history.blocked') }}</span>
+              <span v-if="readOnly" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(operation)">{{ actorLabel(operation) }}</span>
+              <span v-if="!readOnly && operation.blocked" class="wb-audit-blocked"><TriangleAlert :size="12" aria-hidden="true" />{{ t('backup.history.blocked') }}</span>
             </div>
             <p v-if="operation.legacy" class="wb-audit-hint">{{ t('m_2964bd3c0438') }}</p>
             <div class="wb-audit-actions">
               <button type="button" class="wb-audit-details-toggle" :aria-expanded="s.expanded === operation.id" :disabled="s.restoring" @click="history.loadDetails(operation)"><ChevronDown :size="14" aria-hidden="true" />{{ s.expanded === operation.id ? t('m_0ae7312510f4') : t('backup.history.viewDetails', { count: operation.entryCount }) }}</button>
-              <button type="button" class="wb-audit-restore" :disabled="operation.blocked || s.restoring || s.previewing" @click="history.prepareRestore(operation)"><RotateCcw :size="14" aria-hidden="true" />{{ operation.legacy ? t('backup.history.restoreBeforeLegacy') : t('backup.history.restoreBefore') }}</button>
+              <button v-if="!readOnly" type="button" class="wb-audit-restore" :disabled="operation.blocked || s.restoring || s.previewing" @click="history.prepareRestore(operation)"><RotateCcw :size="14" aria-hidden="true" />{{ operation.legacy ? t('backup.history.restoreBeforeLegacy') : t('backup.history.restoreBefore') }}</button>
             </div>
             <section v-if="s.expanded === operation.id" class="wb-audit-details" :aria-label="t('m_0f64b165836e')">
               <p v-if="s.loadingDetails && !details(operation.id).length" class="wb-audit-hint" role="status">{{ t('m_00d75928dfcd') }}</p>
@@ -98,6 +105,11 @@ const details = (id) => s.value.details[id]?.items || [];
                 <header><span class="wb-backup-op" :data-op="entry.operation">{{ opLabel(entry.operation) }}</span><time :datetime="entry.ts">{{ stamp(entry.ts) }}</time><span>{{ entry.status === 'aborted' ? t('m_a37778f17c5f') : entry.status === 'pending' ? t('m_33df16b4afab') : entry.status === 'rolled_back' ? t('m_9d1ac300aa31') : t('m_f28461bb49c8') }}</span></header>
                 <p v-if="entry.rowIdentity" class="wb-audit-identity">{{ t('m_a9e8c256cb93') }}{{ Object.entries(entry.rowIdentity).map(([key, value]) => `${key}=${value ?? 'NULL'}`).join(', ') }}</p>
                 <ul v-if="auditChangeItems(entry).length"><li v-for="(item, index) in auditChangeItems(entry)" :key="index">{{ item }}</li></ul><p v-else class="wb-audit-hint">{{ t('m_c226c1702dc7') }}</p>
+                <p v-if="readOnly && entry.isRollback" class="wb-audit-hint">{{ t('m_dd194f08e2f4') }}</p>
+                <p v-if="readOnly && entry.notes" class="wb-backup-change-note"><b>{{ t('m_3e633a204a63') }}</b>{{ entry.notes }}</p>
+                <details v-if="readOnly && auditChangeSql(entry)" class="wb-backup-change-sql">
+                  <summary>{{ t('m_036ad51c02f9') }}</summary><pre><code>{{ auditChangeSql(entry) }}</code></pre>
+                </details>
               </article>
               <button v-if="s.details[operation.id]?.hasMore" type="button" class="wb-audit-more" :disabled="s.loadingDetails || s.restoring" @click="history.loadDetails(operation, true)">{{ s.loadingDetails ? t('m_4927a53bcc88') : t('m_eb880dd3c3e1') }}</button>
             </section>
@@ -108,7 +120,7 @@ const details = (id) => s.value.details[id]?.items || [];
       <div v-else class="wb-audit-welcome">
         <History :size="36" class="wb-backup-empty-icon" aria-hidden="true" />
         <strong>{{ t('m_86860bdd48e6') }}</strong>
-        <p>{{ t('m_9072ba3cf6bf') }}</p>
+        <p>{{ readOnly ? t('backup.history.sharedReadOnly') : t('m_9072ba3cf6bf') }}</p>
       </div>
     </div>
   </section>

@@ -1,4 +1,5 @@
 import { reactive, shallowRef } from "vue";
+import { useSharedAuditHistory } from "./useSharedAuditHistory.js";
 import { useAuditHistory } from "./useAuditHistory.js";
 import { normalizeTableName } from "../utils/normalize.js";
 import {
@@ -92,6 +93,7 @@ export function useBackupCenter(options = {}) {
   });
 
   const history = useAuditHistory({ invokeWorkbench, onBusy: (value) => { busy.restoring = value; } });
+  const sharedHistory = useSharedAuditHistory({ invokeWorkbench, logs: sharedAuditLogs, localLogs: auditLogs });
   const lastError = shallowRef("");
   let filterLoadToken = 0;
   let listingRequestCount = 0;
@@ -211,21 +213,9 @@ export function useBackupCenter(options = {}) {
   async function loadSharedAuditLogs() {
     beginListing();
     try {
-      const request = {
-        limit: filters.limit,
-        offset: filters.offset,
-      };
-      if (filters.connectionId) request.connectionId = filters.connectionId;
-      if (filters.database) request.database = filters.database;
-      if (filters.tableName) request.tableName = filters.tableName;
-      sharedAuditLogs.value = await invokeWorkbench("list_shared_audit_logs", { request });
-      lastError.value = "";
-      return true;
-    } catch (error) {
-      lastError.value = errorMessage(error);
-      // Fall back to an empty list; the UI surfaces the error.
-      sharedAuditLogs.value = [];
-      return false;
+      const ok = await sharedHistory.loadTables(filters);
+      lastError.value = sharedHistory.state.error;
+      return ok;
     } finally {
       endListing();
     }
@@ -233,6 +223,8 @@ export function useBackupCenter(options = {}) {
 
   /** Switch between "local" (this machine) and "shared" (all users) views. */
   async function setAuditMode(mode) {
+    history.dispose();
+    sharedHistory.dispose();
     auditMode.mode = mode === "shared" ? "shared" : "local";
     filters.offset = 0;
     return loadAuditLogs();
@@ -574,6 +566,7 @@ export function useBackupCenter(options = {}) {
   function close() {
     dialog.open = false;
     history.dispose();
+    sharedHistory.dispose();
     filterLoadToken += 1;
     filterDatabases.value = [];
     filterTables.value = [];
@@ -612,6 +605,7 @@ export function useBackupCenter(options = {}) {
 
   function dispose() {
     history.dispose();
+    sharedHistory.dispose();
     if (stopListeners) {
       stopListeners();
       stopListeners = null;
@@ -623,6 +617,7 @@ export function useBackupCenter(options = {}) {
     filters,
     auditMode,
     history,
+    sharedHistory,
     auditLogs,
     sharedAuditLogs,
     snapshots,

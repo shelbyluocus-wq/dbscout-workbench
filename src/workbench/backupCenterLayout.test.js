@@ -84,18 +84,22 @@ test("audit tab has a local/shared mode switcher", () => {
   assert.match(styles, /\.wb-backup-audit-actor\b/);
 });
 
-test("audit rows show a concise change summary and expandable details", () => {
+test("local and shared audit reuse the table timeline with read-only shared details", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
-  const styles = read("./workbench.css");
+  const history = read("./components/AuditTableHistory.vue");
+  const shared = read("./composables/useSharedAuditHistory.js");
 
-  assert.match(dialog, /具体改动：/);
-  assert.match(dialog, /详细信息/);
-  assert.match(dialog, /row\.changeItems/);
-  assert.match(dialog, /查看原始 SQL/);
-  assert.match(dialog, /localAuditByClientId/);
-  assert.match(styles, /\.wb-backup-change-summary\b/);
-  assert.match(styles, /\.wb-backup-change-details\b/);
-  assert.match(styles, /\.wb-backup-details-btn\b/);
+  assert.match(dialog, /:history="isSharedMode \? backup\.sharedHistory : backup\.history"/);
+  assert.doesNotMatch(dialog, /v-for="row in sharedAuditRows"/);
+  assert.match(history, /class="wb-audit-table"/);
+  assert.match(history, /class="wb-audit-operation"/);
+  assert.match(history, /:aria-expanded="s\.expanded === operation\.id"/);
+  assert.match(history, /auditChangeItems\(entry\)/);
+  assert.match(history, /auditChangeSql\(entry\)/);
+  assert.match(history, /actorLabel\(operation\)/);
+  assert.match(history, /v-if="!readOnly" type="button" class="wb-audit-restore"/);
+  assert.match(history, /v-if="!readOnly && s\.preview"/);
+  assert.match(shared, /readOnly: true/);
 });
 
 test("audit toolbar keeps mode filters and actions on one stable row", () => {

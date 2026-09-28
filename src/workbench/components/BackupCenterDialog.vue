@@ -8,13 +8,6 @@ import BackupSettingsPanel from "./BackupSettingsPanel.vue";
 import BackupSnapshotsPanel from "./BackupSnapshotsPanel.vue";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
-import {
-  auditChangeItems,
-  auditChangeSql,
-  auditChangeSummary,
-  auditHasDetails,
-} from "../utils/auditDisplay.js";
-import { formatBackupTimestamp } from "../utils/backupDisplay.js";
 
 const props = defineProps({
   backup: { type: Object, required: true },
@@ -25,47 +18,9 @@ const props = defineProps({
 const emit = defineEmits(["close"]);
 
 const dialog = computed(() => props.backup.dialog);
-const auditLogs = computed(() => props.backup.auditLogs.value || []);
-const sharedAuditLogs = computed(() => props.backup.sharedAuditLogs.value || []);
 const auditMode = computed(() => props.backup.auditMode?.mode || "local");
 const isSharedMode = computed(() => auditMode.value === "shared");
 const snapshotCount = computed(() => (props.backup.snapshots.value || []).length);
-const localAuditByClientId = computed(() =>
-  new Map(
-    auditLogs.value
-      .filter((entry) => entry.clientId)
-      .map((entry) => [entry.clientId, entry]),
-  ),
-);
-const expandedAuditKeys = ref(new Set());
-// Shared rows are enriched with the local copy (same clientId) when this
-// device recorded them, because only local rows carry SQL and notes.
-const sharedAuditRows = computed(() =>
-  sharedAuditLogs.value.map((entry) => {
-    const localEntry = entry.clientId ? localAuditByClientId.value.get(entry.clientId) : null;
-    const displayEntry = localEntry
-      ? {
-          ...localEntry,
-          ...entry,
-          id: localEntry.id,
-          rowIdentity: entry.rowIdentity ?? localEntry.rowIdentity,
-          forwardSql: entry.forwardSql ?? localEntry.forwardSql,
-          inverseSql: entry.inverseSql ?? localEntry.inverseSql,
-          rollbackStrategy: entry.rollbackStrategy ?? localEntry.rollbackStrategy,
-          notes: entry.notes ?? localEntry.notes,
-        }
-      : entry;
-    const key = entry.clientId || entry.id;
-    return {
-      key,
-      entry: displayEntry,
-      summary: auditChangeSummary(displayEntry),
-      changeItems: auditChangeItems(displayEntry),
-      sql: auditChangeSql(displayEntry),
-      hasDetails: auditHasDetails(displayEntry),
-    };
-  }),
-);
 const account = computed(() => props.account || null);
 const isLoggedIn = computed(() => Boolean(account.value?.isLoggedIn?.value));
 const displayName = computed(() => account.value?.displayName?.value || "");
@@ -93,46 +48,6 @@ const tabs = computed(() => [
   { id: "snapshot", label: t("backup.tab.snapshots"), icon: Archive, count: snapshotCount.value },
   { id: "config", label: t("m_df3d58c7d84b"), icon: Settings },
 ]);
-
-function operationLabel(operation) {
-  const key = `backup.op.${operation}`;
-  const label = t(key);
-  return label === key ? operation : label;
-}
-function statusLabel(status) {
-  const key = `backup.status.${status}`;
-  const label = t(key);
-  return label === key ? status : label;
-}
-function sourceLabel(source) {
-  const key = `backup.source.${source}`;
-  const label = t(key);
-  return label === key ? source : label;
-}
-function identityText(entry) {
-  const identity = entry.rowIdentity;
-  if (!identity || typeof identity !== "object") return "";
-  return Object.entries(identity)
-    .map(([key, value]) => `${key}=${value}`)
-    .join(" & ");
-}
-function isAuditExpanded(key) {
-  return expandedAuditKeys.value.has(key);
-}
-function toggleAuditDetails(key) {
-  const next = new Set(expandedAuditKeys.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  expandedAuditKeys.value = next;
-}
-
-// The actor label shown on each shared audit row: "displayName (@username)".
-function actorLabel(entry) {
-  const name = entry.displayName || entry.username;
-  const handle = entry.username ? `@${entry.username}` : "";
-  if (name && handle) return `${name} (${handle})`;
-  return name || handle || t("backup.unknownUser");
-}
 
 async function onSyncNow() {
   const result = await account.value?.syncNow();
@@ -296,64 +211,11 @@ async function onDatabaseFilterChange() {
           </div>
         </div>
 
-        <AuditTableHistory v-if="!isSharedMode" :history="backup.history" :connections="connections" />
-        <div v-else class="wb-backup-list wb-backup-audit">
-          <div v-if="!sharedAuditRows.length" class="wb-backup-empty">
-            <History :size="32" class="wb-backup-empty-icon" aria-hidden="true" />
-            <strong>{{ t('m_cb9612a9181a') }}</strong>
-            <span>{{ t('m_0b856c6ee3f3') }}</span>
-          </div>
-          <article
-            v-for="row in sharedAuditRows"
-            :key="row.key"
-            class="wb-backup-audit-row"
-            :class="{ rolled: row.entry.isRollback, aborted: row.entry.status === 'aborted', expanded: isAuditExpanded(row.key) }"
-          >
-            <div class="wb-backup-audit-main">
-              <span class="wb-backup-op" :data-op="row.entry.operation">{{ operationLabel(row.entry.operation) }}</span>
-              <span class="wb-backup-loc">{{ row.entry.database }} · {{ row.entry.tableName }}</span>
-              <span class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(row.entry)">{{ actorLabel(row.entry) }}</span>
-              <span class="wb-backup-ts">{{ formatBackupTimestamp(row.entry.ts) }}</span>
-            </div>
-            <div class="wb-backup-audit-meta">
-              <span
-                class="wb-backup-diff wb-backup-change-summary"
-                :class="{ empty: !row.summary }"
-                :title="row.summary || t('m_ebfb90ae7a95')"
-              ><b>{{ t('m_a26529f8c3a1') }}</b>{{ row.summary || t('m_12964a9ef161') }}</span>
-              <span v-if="identityText(row.entry)" class="wb-backup-identity">{{ t('m_a9e8c256cb93') }}{{ identityText(row.entry) }}</span>
-              <span v-if="row.entry.isRollback" class="wb-backup-rollback-tag">{{ t('m_dd194f08e2f4') }}</span>
-              <span class="wb-backup-chip" data-kind="source">{{ sourceLabel(row.entry.source) }}</span>
-              <span class="wb-backup-chip" data-kind="status" :data-status="row.entry.status">{{ statusLabel(row.entry.status) }}</span>
-            </div>
-            <div v-if="row.hasDetails" class="wb-backup-row-actions">
-              <button
-                type="button"
-                class="wb-backup-action-btn wb-backup-details-btn"
-                :aria-expanded="isAuditExpanded(row.key)"
-                @click="toggleAuditDetails(row.key)"
-              >{{ isAuditExpanded(row.key) ? t('m_0ae7312510f4') : t('m_1932da4d4dba') }}</button>
-            </div>
-            <section
-              v-if="row.hasDetails && isAuditExpanded(row.key)"
-              class="wb-backup-change-details"
-              :aria-label="t('m_62a0d24eab2e')"
-            >
-              <div class="wb-backup-change-details-head">
-                <strong>{{ t('m_c7cec0185b47') }}</strong>
-                <span v-if="row.changeItems.length">{{ row.changeItems.length }} {{ t('m_49ccde43a154') }}</span>
-              </div>
-              <ul v-if="row.changeItems.length">
-                <li v-for="(item, index) in row.changeItems" :key="`${row.key}-change-${index}`">{{ item }}</li>
-              </ul>
-              <p v-if="row.entry.notes" class="wb-backup-change-note"><b>{{ t('m_3e633a204a63') }}</b>{{ row.entry.notes }}</p>
-              <details v-if="row.sql" class="wb-backup-change-sql">
-                <summary>{{ t('m_036ad51c02f9') }}</summary>
-                <pre><code>{{ row.sql }}</code></pre>
-              </details>
-            </section>
-          </article>
-        </div>
+        <AuditTableHistory
+          :key="auditMode"
+          :history="isSharedMode ? backup.sharedHistory : backup.history"
+          :connections="connections"
+        />
       </div>
 
       <BackupSnapshotsPanel
