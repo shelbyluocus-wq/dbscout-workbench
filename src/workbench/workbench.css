@@ -8587,8 +8587,10 @@ label:has(input[type="checkbox"]:disabled) {
   bottom: 42px;
   left: 0;
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 0;
+  max-height: calc(100vh - 120px);
+  padding: 2px 12px;
+  overflow-y: auto;
   border: 1px solid var(--wb-floating-border);
   border-radius: 8px;
   background: var(--wb-dialog-surface);
@@ -8633,6 +8635,32 @@ label:has(input[type="checkbox"]:disabled) {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  min-height: 28px;
+}
+
+.wb-sidebar-settings-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.wb-sidebar-settings-group + .wb-sidebar-settings-group {
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-sidebar-settings-reset {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-sidebar-settings-reset:hover,
+.wb-sidebar-settings-reset:focus-visible {
+  color: var(--wb-accent-strong);
 }
 
 .wb-sidebar-settings-action {
@@ -8656,18 +8684,20 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar-theme-options {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
 .wb-sidebar-theme-option {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px 4px 6px;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 4px 6px;
   border: 1px solid var(--wb-line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
   font-size: 12px;
@@ -8704,12 +8734,13 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sidebar-highlight-picker {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .wb-sidebar-highlight-picker input[type="color"] {
   width: 28px;
   height: 22px;
+  flex: none;
   padding: 0;
   border: 1px solid var(--wb-line);
   border-radius: 6px;
@@ -8731,11 +8762,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--wb-line);
-  border-radius: 8px;
-  background: var(--wb-toolbar-surface);
+  gap: 9px;
 }
 
 .wb-sidebar-glow-options .wb-sidebar-highlight-picker {
@@ -8743,8 +8770,11 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar-glow-preset {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  flex: none;
   padding: 0;
   border: 1px solid var(--wb-line);
   border-radius: 50%;
@@ -8933,7 +8963,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sidebar-settings-label {
   color: var(--wb-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 550;
   line-height: 1;
 }
 
@@ -8941,6 +8971,7 @@ label:has(input[type="checkbox"]:disabled) {
   width: 17px;
   height: 17px;
   flex: 0 0 17px;
+  color: var(--wb-secondary-text);
 }
 
 .wb-sidebar-font-icon {
@@ -8996,15 +9027,17 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-language-segment {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   border-radius: 8px;
 }
 
 .wb-language-segment button {
-  flex: 1 0 auto;
-  padding: 0 6px;
+  min-width: 0;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 12.5px;
   white-space: nowrap;
 }
 

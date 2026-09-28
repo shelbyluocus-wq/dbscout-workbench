@@ -829,6 +829,7 @@ defineExpose({ focusSearch });
         :aria-hidden="!settingsOpen"
         :inert="!settingsOpen"
       >
+        <div class="wb-sidebar-settings-group">
         <LanguageSettings />
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
@@ -864,23 +865,35 @@ defineExpose({ focusSearch });
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
+            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span> {{ t('m_52a039f438fd') }} </span>
+          <button
+            type="button"
+            class="wb-sidebar-settings-action wb-sidebar-font-action"
+            :title="fontPreference === 'system' ? t('settings.systemFont') : fontLabel"
+            @click.stop="openFontSettings"
+          >{{ fontPreference === 'system' ? t('settings.systemFont') : fontLabel }}</button>
+        </div>
+        </div>
+        <div class="wb-sidebar-settings-group">
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 5.5h14M5 9.5h9M5 13.5h11M5 17.5h7" />
             </svg> {{ t('m_39230fff0eb1') }} </span>
           <span class="wb-sidebar-highlight-picker">
+            <button
+              v-if="fieldCommentColor"
+              type="button"
+              class="wb-sidebar-settings-reset"
+              :title="t('m_ba2e93e73037')"
+              @click.stop="clearFieldCommentColor"
+            >{{ t('m_844b8cc8dff7') }}</button>
             <input
               type="color"
               :value="fieldCommentColor || (isDark ? '#c2c8d0' : '#3f4650')"
               :aria-label="t('m_268035c4ed59')"
               @input="setFieldCommentColor($event.target.value)"
             />
-            <button
-              v-if="fieldCommentColor"
-              type="button"
-              class="wb-sidebar-settings-action"
-              :title="t('m_ba2e93e73037')"
-              @click.stop="clearFieldCommentColor"
-            >{{ t('m_844b8cc8dff7') }}</button>
           </span>
         </div>
         <div class="wb-sidebar-settings-row">
@@ -892,19 +905,19 @@ defineExpose({ focusSearch });
               <rect x="13" y="13" width="7" height="7" rx="1.5" />
             </svg> {{ t('m_5395b35f3101') }} </span>
           <span class="wb-sidebar-highlight-picker">
+            <button
+              v-if="cellHighlightColor"
+              type="button"
+              class="wb-sidebar-settings-reset"
+              :title="t('m_ba2e93e73037')"
+              @click.stop="clearCellHighlightColor"
+            >{{ t('m_844b8cc8dff7') }}</button>
             <input
               type="color"
               :value="cellHighlightColor || '#3b82f6'"
               :aria-label="t('m_3081c51ef3c7')"
               @input="setCellHighlightColor($event.target.value)"
             />
-            <button
-              v-if="cellHighlightColor"
-              type="button"
-              class="wb-sidebar-settings-action"
-              :title="t('m_ba2e93e73037')"
-              @click.stop="clearCellHighlightColor"
-            >{{ t('m_844b8cc8dff7') }}</button>
           </span>
         </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">
@@ -926,6 +939,13 @@ defineExpose({ focusSearch });
               @click.stop="setGlowColor(preset.value)"
             ></button>
             <span class="wb-sidebar-highlight-picker">
+              <button
+                v-if="glowColor"
+                type="button"
+                class="wb-sidebar-settings-reset"
+                :title="t('m_ba2e93e73037')"
+                @click.stop="clearGlowColor"
+              >{{ t('m_844b8cc8dff7') }}</button>
               <input
                 type="color"
                 :value="glowColorHex"
@@ -933,26 +953,11 @@ defineExpose({ focusSearch });
                 :title="t('m_781b07fdcb56')"
                 @input="setGlowColor($event.target.value)"
               />
-              <button
-                v-if="glowColor"
-                type="button"
-                class="wb-sidebar-settings-action"
-                :title="t('m_ba2e93e73037')"
-                @click.stop="clearGlowColor"
-              >{{ t('m_844b8cc8dff7') }}</button>
             </span>
           </div>
         </div>
-        <div class="wb-sidebar-settings-row">
-          <span class="wb-sidebar-settings-label">
-            <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span> {{ t('m_52a039f438fd') }} </span>
-          <button
-            type="button"
-            class="wb-sidebar-settings-action wb-sidebar-font-action"
-            :title="fontPreference === 'system' ? t('settings.systemFont') : fontLabel"
-            @click.stop="openFontSettings"
-          >{{ fontPreference === 'system' ? t('settings.systemFont') : fontLabel }}</button>
         </div>
+        <div class="wb-sidebar-settings-group">
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -968,6 +973,7 @@ defineExpose({ focusSearch });
               <path d="M8.5 10.5h.01M15.5 10.5h.01M8.5 14.5h7" />
             </svg> {{ t('m_0fe0c819b123') }} </span>
           <button type="button" class="wb-sidebar-settings-action" @click.stop="openDesignDebug">{{ t('m_3429a4778824') }}</button>
+        </div>
         </div>
       </section>
       </Transition>
