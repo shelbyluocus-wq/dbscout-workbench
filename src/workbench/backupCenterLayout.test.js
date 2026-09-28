@@ -135,6 +135,19 @@ test("snapshot range panels use readable database labels and dense rows", () => 
   assert.match(databaseLabel, /text-overflow:\s*ellipsis/);
 });
 
+test("audit table list scrolls inside the backup dialog instead of growing it", () => {
+  const styles = read("./workbench.css");
+
+  assert.match(styles, /\.wb-backup-dialog\s*\{[^}]*max-height:\s*min\(86vh,\s*780px\)/s);
+  assert.match(styles, /\.wb-backup-dialog\s*\{[^}]*min-height:\s*0/s);
+  assert.match(styles, /\.wb-backup-dialog\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.wb-audit-history\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(styles, /\.wb-audit-history\s*\{[^}]*min-height:\s*0/s);
+  assert.match(styles, /\.wb-audit-tables\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.wb-audit-search\s*\{[^}]*flex:\s*none/s);
+  assert.match(styles, /\.wb-audit-table-scroll\s*\{[^}]*flex:\s*1\s+1\s+auto/s);
+});
+
 test("header shows the current user identity", () => {
   const dialog = read("./components/BackupCenterDialog.vue");
   assert.match(dialog, /class="wb-backup-user"/);

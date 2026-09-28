@@ -42,9 +42,9 @@ const details = (id) => s.value.details[id]?.items || [];
         <p v-else-if="!s.tables.length" class="wb-audit-hint wb-audit-list-hint">{{ t('m_7e40d7555c9d') }}</p>
         <button v-for="table in s.tables" :key="auditTableKey(table)" type="button" class="wb-audit-table" :class="{ active: isSelected(table) }" :aria-pressed="isSelected(table)" :disabled="s.restoring" @click="history.selectTable(table)">
           <Table2 :size="14" class="wb-audit-table-icon" aria-hidden="true" />
-          <strong>{{ table.tableName }}</strong>
-          <span>{{ connectionLabel(table) }} · {{ table.database }}</span>
-          <time :datetime="table.latestTs">{{ stamp(table.latestTs) }}</time>
+          <strong :title="table.tableName">{{ table.tableName }}</strong>
+          <span :title="`${connectionLabel(table)} · ${table.database}`">{{ connectionLabel(table) }} · {{ table.database }}</span>
+          <time :datetime="table.latestTs" :title="stamp(table.latestTs)">{{ stamp(table.latestTs) }}</time>
         </button>
         <button v-if="s.tablesMore" type="button" class="wb-audit-more" :disabled="s.loadingTables || s.restoring" @click="history.loadTables(undefined, true)">{{ s.loadingTables ? t('m_4927a53bcc88') : t('m_ab36d2486c97') }}</button>
       </div>

@@ -3248,6 +3248,8 @@ label:has(input[type="checkbox"]:disabled) {
   flex-direction: column;
   width: min(1040px, calc(100vw - 40px));
   height: min(86vh, 780px);
+  max-height: min(86vh, 780px);
+  min-height: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -22004,19 +22006,22 @@ label:has(input[type="checkbox"]:disabled) {
   pointer-events: none;
 }
 
-/* Table-first audit history: table list on the left, operation timeline on the right. */
-.wb-audit-history { display: grid; grid-template-columns: 260px minmax(0, 1fr); flex: 1; min-height: 260px; overflow: hidden; border-radius: 10px; background: var(--wb-detail-surface); box-shadow: inset 0 0 0 1px var(--wb-inset-line); }
-.wb-audit-tables { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--wb-border); background: color-mix(in srgb, var(--wb-text) 2.5%, transparent); }
-.wb-audit-search { display: flex; gap: 6px; padding: 10px; border-bottom: 1px solid var(--wb-border); }
+/* Table-first audit history: table list on the left, operation timeline on the right.
+   The row must be allowed to shrink; otherwise the table list grows the dialog. */
+.wb-audit-history { display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; border-radius: 10px; background: var(--wb-detail-surface); box-shadow: inset 0 0 0 1px var(--wb-inset-line); }
+.wb-audit-tables { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--wb-border); background: color-mix(in srgb, var(--wb-text) 2.5%, transparent); }
+.wb-audit-search { display: flex; flex: none; gap: 6px; padding: 10px; border-bottom: 1px solid var(--wb-border); }
 .wb-audit-search-field { position: relative; flex: 1; min-width: 0; }
 .wb-audit-search-field > svg { position: absolute; z-index: 1; top: 50%; left: 9px; color: var(--wb-muted); transform: translateY(-50%); pointer-events: none; }
 .wb-audit-search input { width: 100%; min-width: 0; height: 30px; padding: 0 8px 0 29px; font-size: 12px; }
 .wb-audit-search button { flex: none; width: 30px; height: 30px; padding: 0; display: inline-grid; place-items: center; }
 .wb-audit-table-scroll, .wb-audit-timeline { min-height: 0; overflow: auto; scrollbar-gutter: stable; }
-.wb-audit-table-scroll { display: grid; align-content: start; gap: 2px; padding: 6px; }
-.wb-audit-table { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; row-gap: 2px; width: 100%; min-height: 0; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-text); text-align: left; overflow-wrap: anywhere; }
+/* Keep each entry at its content height when the list overflows. */
+.wb-audit-table-scroll { display: grid; grid-auto-rows: max-content; flex: 1 1 auto; align-content: start; gap: 2px; padding: 6px; }
+.wb-audit-table { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; row-gap: 2px; width: 100%; min-width: 0; min-height: min-content; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-text); text-align: left; }
 .wb-audit-table-icon { grid-row: 1 / span 3; margin-top: 2px; color: var(--wb-muted); }
-.wb-audit-table strong { font-size: 12.5px; font-weight: 600; }
+.wb-audit-table strong, .wb-audit-table span, .wb-audit-table time { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-audit-table strong { font-size: 12.5px; font-weight: 600; line-height: 1.45; }
 .wb-audit-table span, .wb-audit-table time { color: var(--wb-muted); font-size: 11.5px; line-height: 1.45; }
 .wb-audit-table time { font-variant-numeric: tabular-nums; }
 .wb-audit-table:hover:not(:disabled) { background: var(--wb-control-hover); }
