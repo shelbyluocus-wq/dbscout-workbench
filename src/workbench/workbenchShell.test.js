@@ -1804,7 +1804,21 @@ test("find navigation flushes the pending whole-table search before Enter or but
   assert.match(dialog, /async function\s+refreshListNow\(\)[\s\S]*?clearTimeout\(listTimer\)[\s\S]*?await\s+startTableList\(seq\)/);
   assert.match(dialog, /async function\s+goToNext\(\)[\s\S]*?await\s+refreshListNow\(\)[\s\S]*?jumpToMatch/);
   assert.match(dialog, /async function\s+goToPrevious\(\)[\s\S]*?await\s+refreshListNow\(\)[\s\S]*?jumpToMatch/);
-  assert.match(dialog, /@keydown\.enter\.prevent="goToNext"/);
+  assert.match(dialog, /@keydown\.enter\.exact\.prevent="goToNext"/);
+  assert.match(dialog, /@keydown\.shift\.enter\.prevent="goToPrevious"/);
+});
+
+test("find and replace docks beside the grid, keeps the match uncovered, and has one primary action", () => {
+  const dialog = read("./components/FindReplaceDialog.vue");
+
+  assert.match(dialog, /function\s+gridCornerPositions\(height\)/);
+  assert.match(dialog, /\.wb-workbench-pane\.is-focused \.wb-grid-shell/);
+  assert.match(dialog, /const docked = gridCornerPositions\(/);
+  assert.match(dialog, /await props\.paneState\.locateListMatch\?\.\(match\);\s*await keepActiveMatchVisible\(\);/);
+  assert.match(dialog, /aria-activedescendant/);
+  assert.match(dialog, /class="wb-find-input-row"[\s\S]*?class="wb-find-nav-button"[\s\S]*?class="wb-find-nav-button"/);
+  assert.equal((dialog.match(/class="wb-dialog-primary/g) || []).length, 1);
+  assert.doesNotMatch(dialog, /<button type="button" :disabled="isBusy" @click="emit\('close'\)">/);
 });
 
 test("table search cell selection resolves columns from the searched tab", () => {
@@ -2003,7 +2017,8 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-workbench-pane\s*>\s*\.wb-pane-tabbar\s*\{/);
   assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
   assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*pointer-events:\s*none/s);
-  assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 52px/s);
+  assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 8px/s);
+  assert.match(styles, /\.wb-sidebar-settings-dock\s*\{[^}]*position:\s*relative[^}]*flex:\s*0 0 auto/s);
 });
 
 test("split panes render independent tabbars at the top of each pane", () => {

@@ -1902,7 +1902,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-find-replace-dialog {
-  width: 560px;
+  width: 460px;
   display: flex;
   flex-direction: column;
   padding-top: 4px;
@@ -1980,6 +1980,36 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-find-replace-body .wb-replace-field input {
   height: 32px;
   font-size: 14px;
+}
+
+/* 上一个/下一个紧贴查找输入框，Enter / Shift+Enter 同效 */
+.wb-find-replace-body .wb-replace-field > .wb-find-input-row {
+  display: flex;
+  justify-self: stretch;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wb-find-input-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wb-find-nav-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-find-nav-button:hover:not(:disabled),
+.wb-find-nav-button:focus-visible {
+  color: var(--wb-text);
 }
 
 .wb-find-replace-dialog .wb-replace-footer {
@@ -2161,8 +2191,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-find-all-caret {
-  font-size: 13px;
-  line-height: 1;
+  flex: 0 0 auto;
   opacity: 0.85;
 }
 
@@ -8495,7 +8524,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0 6px 52px;
+  padding: 0 6px 8px;
   background-color: inherit;
   scrollbar-color: transparent var(--wb-scrollbar-track);
 }
@@ -8522,14 +8551,14 @@ label:has(input[type="checkbox"]:disabled) {
   scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
 }
 
+/* 设置入口是侧栏的固定底栏：占据真实空间，窗口再矮也不会压在连接树上。 */
 .wb-sidebar-settings-dock {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  left: 10px;
+  position: relative;
+  flex: 0 0 auto;
   z-index: 24;
   display: grid;
   justify-items: start;
+  padding: 6px 10px 10px;
   pointer-events: none;
 }
 
@@ -8583,9 +8612,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sidebar-settings-sheet {
   position: absolute;
-  right: 0;
-  bottom: 42px;
-  left: 0;
+  right: 10px;
+  bottom: calc(100% - 2px);
+  left: 10px;
   display: grid;
   gap: 0;
   max-height: calc(100vh - 120px);
@@ -12292,7 +12321,31 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 12px;
 }
 
-@container (max-width: 680px) {
+/* 表工具栏按优先级让位：先把低频的冻结、分屏收进「更多」，
+   替换/导出/导入尽量保留文字；再窄才只留图标，最后整组收进溢出菜单。 */
+.wb-table-toolbar-actions > .wb-table-toolbar-more {
+  display: none;
+}
+
+.wb-table-toolbar-more .wb-toolbar-menu-button {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+@container (max-width: 780px) {
+  .wb-table-toolbar-actions > .wb-table-toolbar-secondary {
+    display: none;
+  }
+
+  .wb-table-toolbar-actions > .wb-table-toolbar-more {
+    display: inline-flex;
+    border-left: 1px solid var(--wb-border);
+  }
+}
+
+@container (max-width: 560px) {
   .wb-table-toolbar-actions {
     position: static;
   }

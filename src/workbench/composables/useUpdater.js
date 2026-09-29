@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef } from "vue";
 
 import { APP_VERSION } from "../appVersion.js";
+import { t, translateIn } from "../i18n/index.js";
 import { createTauriUpdaterAdapter } from "../utils/updaterAdapter.js";
 
 export function formatBytes(value) {
@@ -10,16 +11,15 @@ export function formatBytes(value) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function updateTitle(status, update = null) {
-  if (status === "idle") return "检查更新";
-  if (status === "checking") return "正在更新 SVN 目录";
-  if (status === "available" && update?.version) return `发现新版本 ${update.version}`;
-  if (status === "agentAvailable" && update?.agentRuntimeUpdate?.version) return `AI 组件 v${update.agentRuntimeUpdate.version} 可更新`;
-  if (status === "downloading") return "正在启动安装包";
-  if (status === "installed") return "更新安装包已启动";
-  if (status === "error") return "更新检查失败";
-  if (status === "unavailable") return "桌面 SVN 更新器不可用";
-  return "已是最新版本";
+const zhCnTranslate = (key, parameters) => translateIn("zh-CN", key, parameters);
+
+export function updateTitle(status, update = null, translate = zhCnTranslate) {
+  if (status === "available" && update?.version) return translate("updater.title.available", { version: update.version });
+  if (status === "agentAvailable" && update?.agentRuntimeUpdate?.version) {
+    return translate("updater.title.agentAvailable", { version: update.agentRuntimeUpdate.version });
+  }
+  const known = ["idle", "checking", "downloading", "installed", "error", "unavailable"];
+  return translate(`updater.title.${known.includes(status) ? status : "current"}`);
 }
 
 function messageFromError(error) {
@@ -49,7 +49,7 @@ export function useUpdater(initialAdapter = null) {
   });
 
   const isBusy = computed(() => status.value === "checking" || status.value === "downloading");
-  const title = computed(() => updateTitle(status.value, availableUpdate.value || lastCheckResult.value));
+  const title = computed(() => updateTitle(status.value, availableUpdate.value || lastCheckResult.value, t));
   const canPickDirectory = computed(() => Boolean(adapter.value?.supportsDirectoryPicker));
 
   async function ensureAdapter() {

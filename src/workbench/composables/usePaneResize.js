@@ -1,4 +1,10 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import {
+  isInspectorSpaceTight,
+  readInspectorPrefs,
+  resolveInspectorCollapsed,
+  writeInspectorPrefs,
+} from "../inspectorVisibility.js";
 
 const SIDEBAR_DEFAULT = 292;
 const SIDEBAR_MIN = 260;
@@ -55,14 +61,32 @@ function writeStoredCollapsed(key, value) {
   }
 }
 
-export function usePaneResize({ initialCollapsed = true } = {}) {
+export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) } = {}) {
   const workspaceRef = ref(null);
   const isDragging = ref(false);
 
   const sidebarWidth = ref(readStoredWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_MIN, SIDEBAR_DEFAULT));
   const inspectorWidth = ref(readStoredWidth(INSPECTOR_WIDTH_KEY, INSPECTOR_MIN_WIDTH, INSPECTOR_DEFAULT));
   const sidebarCollapsed = ref(readStoredCollapsed(SIDEBAR_COLLAPSED_KEY, initialCollapsed));
-  const inspectorCollapsed = ref(false);
+  // 右侧栏开合由「当前页面类型 + 用户偏好 + 空间是否紧张」共同决定，见 inspectorVisibility.js。
+  const inspectorSurface = ref("data");
+  const inspectorPrefs = ref(readInspectorPrefs());
+  const inspectorTightOverrides = ref({});
+  // 宽度按默认值封顶参与判断：拖宽侧栏或右侧栏时不会反过来把正在拖的面板自动收起。
+  const inspectorSpaceTight = computed(() => isInspectorSpaceTight({
+    viewportWidth: viewportWidth.value,
+    sidebarSpace: sidebarCollapsed.value ? SIDEBAR_TITLEBAR_COLLAPSED_WIDTH : Math.min(sidebarWidth.value, SIDEBAR_DEFAULT),
+    inspectorWidth: Math.min(Math.max(inspectorWidth.value, INSPECTOR_MIN_WIDTH), INSPECTOR_DEFAULT),
+  }));
+  watch(inspectorSpaceTight, (tight) => {
+    if (!tight) inspectorTightOverrides.value = {};
+  });
+  const inspectorCollapsed = computed(() => resolveInspectorCollapsed({
+    surface: inspectorSurface.value,
+    prefs: inspectorPrefs.value,
+    tight: inspectorSpaceTight.value,
+    tightOverrides: inspectorTightOverrides.value,
+  }));
   const sidebarPaneAnimating = ref(false);
   const sidebarPanePhase = ref(null);
 
@@ -174,8 +198,7 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
       expandSidebar();
       currentWidth = savedSidebarWidth;
     } else if (!isSidebar && inspectorCollapsed.value) {
-      inspectorCollapsed.value = false;
-      inspectorWidth.value = savedInspectorWidth;
+      setInspectorCollapsed(false);
       currentWidth = savedInspectorWidth;
     } else {
       currentWidth = Math.round(paneEl.getBoundingClientRect().width);
@@ -232,14 +255,25 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
     collapseSidebar();
   }
 
-  function toggleInspector() {
-    if (inspectorCollapsed.value) {
-      inspectorWidth.value = savedInspectorWidth;
-      inspectorCollapsed.value = false;
-    } else {
-      savedInspectorWidth = inspectorWidth.value;
-      inspectorCollapsed.value = true;
+  // 用户手动开合：按当前页面类型记住偏好；空间紧张时同时记一次临时覆盖，避免被自动收起立即抵消。
+  function setInspectorCollapsed(collapsed) {
+    if (collapsed === inspectorCollapsed.value) return;
+    if (collapsed) savedInspectorWidth = inspectorWidth.value;
+    else inspectorWidth.value = savedInspectorWidth;
+    const surface = inspectorSurface.value;
+    inspectorPrefs.value = { ...inspectorPrefs.value, [surface]: collapsed };
+    writeInspectorPrefs(inspectorPrefs.value);
+    if (inspectorSpaceTight.value) {
+      inspectorTightOverrides.value = { ...inspectorTightOverrides.value, [surface]: collapsed };
     }
+  }
+
+  function toggleInspector() {
+    setInspectorCollapsed(!inspectorCollapsed.value);
+  }
+
+  function expandInspector() {
+    setInspectorCollapsed(false);
   }
 
   return {
@@ -249,6 +283,7 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
     inspectorWidth,
     sidebarCollapsed,
     inspectorCollapsed,
+    inspectorSurface,
     sidebarPaneAnimating,
     sidebarPanePhase,
     sidebarLayoutVars,
@@ -258,5 +293,6 @@ export function usePaneResize({ initialCollapsed = true } = {}) {
     onSidebarLayoutTransitionEnd,
     toggleSidebar,
     toggleInspector,
+    expandInspector,
   };
 }

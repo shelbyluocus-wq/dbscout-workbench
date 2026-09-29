@@ -189,6 +189,10 @@ from UI):
 - `paneLayoutState.js` — Persisted pane sizes / collapse state
 - `cellDetailVisibility.js` — Cell-detail panel collapse state + auto-expand rule
   (persisted; default collapsed, auto-expands on long/multiline cell text)
+- `inspectorVisibility.js` — Right inspector (notes/AI) open state per page kind
+  (table data/home open, SQL/design collapsed by default; manual toggles persist
+  per kind) and narrow-window yield (auto-collapses first when the main area
+  would drop below 780px; a manual reopen is honoured until space returns)
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle

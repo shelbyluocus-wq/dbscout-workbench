@@ -53,7 +53,7 @@ function columnLengthValue(column) {
 
 function columnLength(column) {
   const length = columnLengthValue(column);
-  return length ? `长度 ${length}` : "";
+  return length ? t("inspector.length", { length }) : "";
 }
 
 function columnRemark(column) {
@@ -283,7 +283,7 @@ watch(
         role="button"
         tabindex="0"
         :data-schema-column="columnName(column)"
-        :title="hasCurrentCell ? `定位到当前行的 ${columnName(column)} 字段` : `定位到首行的 ${columnName(column)} 字段`"
+        :title="t(hasCurrentCell ? 'inspector.locateCurrentRow' : 'inspector.locateFirstRow', { column: columnName(column) })"
         :class="{
           'is-selected': isSelectedColumn(column),
           'schema-search-match': isSchemaSearchColumn(column),

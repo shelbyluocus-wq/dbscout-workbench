@@ -94,6 +94,8 @@ test("table and homepage toolbars progressively collapse in narrow split panes",
   const styles = read("./workbench.css");
 
   assert.match(grid, /class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"/);
+  assert.equal((grid.match(/class="wb-table-toolbar-secondary"/g) || []).length, 2, "freeze and split yield first");
+  assert.match(grid, /class="wb-table-toolbar-more"[\s\S]*?:items="secondaryActionItems"/);
   assert.match(grid, /:items="compactActionItems"/);
   assert.match(grid, /id: "export-current"/);
   assert.match(grid, /\.\.\.importActions\.value\.compactItems/);

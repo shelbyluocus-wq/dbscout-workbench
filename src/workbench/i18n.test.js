@@ -103,3 +103,26 @@ test("Taiwan translations use regional terminology without changing interpolated
   assert.equal(controller.t("m_88ce9bfd24f4", { detail: "简体用户数据😀" }), "简体用户数据😀 · 正在開啟");
   assert.equal(controller.t("m_ff9c1fbf5115", { count: 120 }), "已載入全部 120 列");
 });
+
+test("shell tooltips, grid labels, stats and updater titles follow the selected language", async () => {
+  const { updateTitle } = await import("./composables/useUpdater.js");
+  const english = createLanguageController({ storage: storage({ [LANGUAGE_STORAGE_KEY]: "en" }) });
+  assert.equal(updateTitle("idle", null, english.t), "Check for updates");
+  assert.equal(updateTitle("available", { version: "0.2.0" }, english.t), "New version 0.2.0 available");
+  assert.equal(updateTitle("idle"), "检查更新");
+  assert.equal(english.t("shell.withShortcut", { action: english.t("shell.pinWindow"), shortcut: "F8" }), "Pin window (F8)");
+  assert.equal(english.t("grid.sortColumn", { column: "id" }), "Sort id");
+  assert.equal(english.t("selectionStats.sum"), "Sum");
+
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const leaks = [
+    ["./MySqlWorkbench.vue", /快速打开（|"钉住窗口"|"解除钉住"/],
+    ["./components/CellDetailPanel.vue", /展开单元格内容|\{\{ item\.label \}\}|的备注（只读）/],
+    ["./components/InspectorPanel.vue", /`长度 |定位到当前行的|定位到首行的/],
+    ["./components/ColumnSortMenu.vue", /} 排序/],
+    ["./components/AgentPanel.vue", /How can I help|"数据库上下文已接入"|"当前数据库"/],
+    ["./components/DataGrid.vue", /} 数据网格`|列宽；|} 像素`|，点击清除`/],
+    ["./components/WorkbenchSidebar.vue", /} 的表`|`流光颜色：/],
+  ];
+  for (const [path, pattern] of leaks) assert.doesNotMatch(read(path), pattern, path);
+});

@@ -7,6 +7,16 @@ export const LANGUAGE_STORAGE_KEY = "dbscout_language";
 export const SUPPORTED_LANGUAGES = Object.freeze(["en", "zh-CN", "zh-TW"]);
 const catalogs = Object.freeze({ en, "zh-CN": zhCN, "zh-TW": zhTW });
 
+function formatMessage(message, parameters) {
+  return message.replace(/\{([A-Za-z0-9_]+)\}/g, (match, name) =>
+    Object.hasOwn(parameters, name) ? String(parameters[name]) : match);
+}
+
+// 指定语言取文案（不读当前界面语言），供纯函数给出稳定的默认文案。
+export function translateIn(locale, key, parameters = {}) {
+  return formatMessage(catalogs[locale]?.[key] ?? en[key] ?? key, parameters);
+}
+
 function localStorageOrNull() {
   try { return globalThis.localStorage ?? null; } catch { return null; }
 }
@@ -37,9 +47,7 @@ export function createLanguageController({ storage = localStorageOrNull() } = {}
     return true;
   }
   function translate(key, parameters = {}) {
-    const message = catalogs[locale.value]?.[key] ?? en[key] ?? key;
-    return message.replace(/\{([A-Za-z0-9_]+)\}/g, (match, name) =>
-      Object.hasOwn(parameters, name) ? String(parameters[name]) : match);
+    return translateIn(locale.value, key, parameters);
   }
   // Persist migration before other startup preferences can make a new install
   // look like an existing installation on its next launch.

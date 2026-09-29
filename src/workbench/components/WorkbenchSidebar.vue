@@ -728,7 +728,7 @@ defineExpose({ focusSearch });
                     :ref="setTableScrollElement"
                     class="wb-branch-inner wb-table-scroll"
                     role="group"
-                    :aria-label="`${databaseLabel(connection.id, database)} 的表`"
+                    :aria-label="t('sidebar.tablesOf', { database: databaseLabel(connection.id, database) })"
                   >
                   <SidebarSearchPanel
                     ref="searchPanelRef"
@@ -935,7 +935,7 @@ defineExpose({ focusSearch });
               :class="{ active: glowColor === preset.value }"
               :style="{ background: glowPresetSwatch(preset) }"
               :title="preset.label"
-              :aria-label="`流光颜色：${preset.label}`"
+              :aria-label="t('sidebar.glowColor', { name: preset.label })"
               @click.stop="setGlowColor(preset.value)"
             ></button>
             <span class="wb-sidebar-highlight-picker">

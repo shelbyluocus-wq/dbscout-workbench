@@ -138,14 +138,13 @@ watch(
 );
 
 const tableSource = computed(() => {
-  if (!props.activeTab?.tableName) return "当前数据库";
+  if (!props.activeTab?.tableName) return t("m_5403ed977fb5");
   return `${props.activeTab.database ? `${props.activeTab.database}.` : ""}${props.activeTab.tableName}`;
 });
 
-const headline = computed(() => {
-  if (props.assistant.messages.value.length === 0) return "How can I help with this database?";
-  return "数据库上下文已接入";
-});
+const headline = computed(() => (
+  props.assistant.messages.value.length === 0 ? t("agent.headlineEmpty") : t("agent.headlineConnected")
+));
 
 const startupProgress = computed(() => props.assistant.startupProgress.value);
 

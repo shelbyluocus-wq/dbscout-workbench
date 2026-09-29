@@ -164,6 +164,7 @@ import {
   INSPECTOR_MIN_WIDTH,
   usePaneResize,
 } from "./composables/usePaneResize.js";
+import { inspectorSurfaceFor } from "./inspectorVisibility.js";
 import { useQuickOpenClearance } from "./composables/useQuickOpenClearance.js";
 import { useTheme } from "./composables/useTheme.js";
 import { createColorThemeController } from "./colorThemeController.js";
@@ -230,22 +231,16 @@ const { hintsVisible: tabShortcutHintsVisible, hide: hideTabShortcutHints } = us
 const quickOpenShortcutLabel = computed(() =>
   formatShortcutForPlatform(shortcutHelper.get("searchDatabase")),
 );
-const quickOpenEntryTitle = computed(() =>
-  quickOpenShortcutLabel.value
-    ? `快速打开（${quickOpenShortcutLabel.value}）`
-    : "快速打开",
-);
-const quickOpenEntryAriaLabel = computed(() =>
-  quickOpenShortcutLabel.value
-    ? `快速打开表和搜索值（${quickOpenShortcutLabel.value}）`
-    : "快速打开表和搜索值",
-);
+function withShortcutLabel(action, shortcut) {
+  return shortcut ? t("shell.withShortcut", { action, shortcut }) : action;
+}
+const quickOpenEntryTitle = computed(() => withShortcutLabel(t("shell.quickOpen"), quickOpenShortcutLabel.value));
+const quickOpenEntryAriaLabel = computed(() => withShortcutLabel(t("shell.quickOpenAria"), quickOpenShortcutLabel.value));
 const windowPin = useWindowPin();
-const windowPinButtonLabel = computed(() => {
-  const action = windowPin.pinned.value ? "解除钉住" : "钉住窗口";
-  const shortcut = shortcutHelper.get("pinWindow");
-  return shortcut ? `${action}（${shortcut}）` : action;
-});
+const windowPinButtonLabel = computed(() => withShortcutLabel(
+  windowPin.pinned.value ? t("shell.unpinWindow") : t("shell.pinWindow"),
+  shortcutHelper.get("pinWindow"),
+));
 
 // On startup, push the persisted global "open window" binding to the Rust
 // backend so a user-rebound shortcut overrides the hardcoded Alt+Shift+F this
@@ -977,6 +972,12 @@ const { handleUndoKeydown, handleRedoKeydown } = useUndo(editState, invokeWorkbe
 // 全局确认对话框：替代原生 window.confirm，提供统一的视觉风格。
 const { confirmDialog: globalConfirmDialog, confirm: confirmDialogConfirm, close: closeGlobalConfirm } = useConfirm();
 
+// 窗口宽度检测：窄窗口下提示收起侧边栏，并让右侧栏在空间紧张时先让位。
+const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1280);
+function onWindowResize() {
+  windowWidth.value = window.innerWidth;
+}
+
 const {
   workspaceRef: paneWorkspaceRef,
   isDragging: paneIsDragging,
@@ -984,6 +985,7 @@ const {
   inspectorWidth,
   sidebarCollapsed,
   inspectorCollapsed,
+  inspectorSurface,
   sidebarPaneAnimating,
   sidebarPanePhase,
   sidebarLayoutVars,
@@ -992,7 +994,8 @@ const {
   onSidebarLayoutTransitionEnd,
   toggleSidebar,
   toggleInspector,
-} = usePaneResize();
+  expandInspector,
+} = usePaneResize({ viewportWidth: windowWidth });
 
 const { quickOpenEntryRef, quickOpenClearanceVars } = useQuickOpenClearance();
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
@@ -1067,17 +1070,19 @@ watch(
   },
 );
 const inspectorMode = ref("notes");
+watch(
+  () => inspectorSurfaceFor({ mode: inspectorMode.value, tabKind: activeTab.value?.kind }),
+  (surface) => {
+    inspectorSurface.value = surface;
+  },
+  { immediate: true },
+);
 // 错误态判定：先用显式的结构化标志（statusError），回退到关键词启发式，
 // 兼容那些直接给 statusText 赋值而未设置标志的历史调用点。
 const isStatusError = computed(
   () => Boolean(statusError.value) || /失败|错误|不能|冲突|重复|超时|拒绝/.test(statusText.value || ""),
 );
 
-// 窗口宽度检测：窄窗口下提示收起侧边栏，避免网格被挤到不可用。
-const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1280);
-function onWindowResize() {
-  windowWidth.value = window.innerWidth;
-}
 // 窄窗口且侧边栏仍展开时显示提示条。
 const showNarrowHint = computed(
   () => !sidebarCollapsed.value && windowWidth.value > 0 && windowWidth.value < 1000,
@@ -1798,8 +1803,9 @@ function openUpdateDialog() {
 
 function toggleAiAssistant() {
   inspectorMode.value = inspectorMode.value === "ai" ? "notes" : "ai";
-  if (inspectorCollapsed.value) toggleInspector();
+  inspectorSurface.value = inspectorSurfaceFor({ mode: inspectorMode.value, tabKind: activeTab.value?.kind });
   if (inspectorMode.value === "ai") {
+    if (inspectorCollapsed.value) expandInspector();
     void agent.ensureRuntime();
   }
 }

@@ -317,6 +317,14 @@ const freezeItems = computed(() => ([
   { id: "freeze-first-column", label: t('m_e6f957238ec6'), icon: "freeze-column" },
   { id: "unfreeze", label: t('m_0592dd0b34a5'), icon: "unfreeze", disabled: !hasFreeze.value },
 ]));
+// 中等宽度时冻结、分屏先让位进「更多」，替换/导出/导入保留文字。
+const secondaryActionItems = computed(() => ([
+  ...freezeItems.value,
+  ...splitItems.value.map((item, index) => ({
+    ...item,
+    separatorBefore: index === 0,
+  })),
+]));
 const compactActionItems = computed(() => ([
   ...freezeItems.value,
   {
@@ -1217,7 +1225,7 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
       </div>
-      <span v-if="tab.sort" class="wb-sort-chip" :title="`按 ${tab.sort.columnName} ${tab.sort.descending ? t('m_4b77c3546823') : t('m_ca715c0d8d83')}，点击清除`">
+      <span v-if="tab.sort" class="wb-sort-chip" :title="t('grid.sortChip', { column: tab.sort.columnName, direction: tab.sort.descending ? t('m_4b77c3546823') : t('m_ca715c0d8d83') })">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
         <button type="button" class="wb-sort-chip-clear" :aria-label="t('m_cdf8bcd4bfe2')" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
@@ -1260,6 +1268,7 @@ function handleTableContextMenu(event) {
           <span class="wb-toolbar-action-label">{{ t('m_131b13aa2659') }}</span>
         </button>
         <ToolbarSplitButton
+          class="wb-table-toolbar-secondary"
           :label="t('m_0eafcb149bcd')"
           icon="freeze"
           :menu-label="t('m_4684f4302165')"
@@ -1298,6 +1307,7 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
+          class="wb-table-toolbar-secondary"
           :label="t('m_666ec3442af3')"
           icon="split-right"
           :menu-label="t('m_6f718069947d')"
@@ -1305,6 +1315,20 @@ function handleTableContextMenu(event) {
           :items="splitItems"
           @primary="emit('split-pane', 'right')"
           @toggle="toggleToolbarMenu('split')"
+          @close="closeToolbarMenu"
+          @select="handleToolbarAction"
+        />
+        <ToolbarSplitButton
+          class="wb-table-toolbar-more"
+          :label="t('m_38844b135cf7')"
+          icon="more"
+          :menu-label="t('m_e3244d705db7')"
+          primary-opens-menu
+          single-trigger
+          :active="hasFreeze"
+          :open="openToolbarMenu === 'secondary'"
+          :items="secondaryActionItems"
+          @toggle="toggleToolbarMenu('secondary')"
           @close="closeToolbarMenu"
           @select="handleToolbarAction"
         />
@@ -1335,7 +1359,7 @@ function handleTableContextMenu(event) {
         :aria-activedescendant="activeCellDomId || undefined"
         :aria-busy="tab.loading || tab.loadingMore || busy"
         aria-multiselectable="true"
-        :aria-label="`${tab.tableName || t('m_187288e87023')} 数据网格`"
+        :aria-label="t('grid.dataGridLabel', { table: tab.tableName || t('m_187288e87023') })"
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
@@ -1401,11 +1425,11 @@ function handleTableContextMenu(event) {
                 role="separator"
                 aria-orientation="vertical"
                 tabindex="0"
-                :aria-label="`调整 ${columnMeta.name} 列宽；方向键微调，Shift 加速，双击恢复自动宽度`"
+                :aria-label="t('grid.resizeColumnAria', { column: columnMeta.name })"
                 :aria-valuemin="COL_RESIZE_MIN_WIDTH"
                 :aria-valuenow="Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)"
-                :aria-valuetext="`${Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)} 像素`"
-                :title="`调整 ${columnMeta.name} 列宽 · 双击恢复自动宽度`"
+                :aria-valuetext="t('grid.pixels', { value: Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH) })"
+                :title="t('grid.resizeColumnTitle', { column: columnMeta.name })"
                 @mousedown.prevent.stop="onHandleMouseDown($event, tab, columnMeta.name)"
                 @keydown="onHandleKeyDown($event, tab, columnMeta.name)"
                 @dblclick.stop.prevent="restoreAutoColumnWidth(tab, columnMeta.name)"

@@ -147,7 +147,7 @@ async function onDialogDrop(event) {
         </button>
         <button
           type="submit"
-          :class="{ 'wb-dialog-primary': dialog.testPassed }"
+          class="wb-dialog-primary"
           :disabled="busy || testBusy || !formComplete"
         >
           {{ busy ? t('m_ee9ebe523d42') : t('m_5a048351a77f') }}

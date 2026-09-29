@@ -78,7 +78,7 @@ try {
   // user_0003 已被替换为「列表替换」，选区内 user 只剩 2 个命中
   if (!selSummary.includes('选区内命中 2 个单元格')) fail(`expected 2 selection matches, got: ${selSummary}`);
   // 选区导航保留选区
-  await dialog.locator('button', { hasText: '下一个' }).click();
+  await dialog.locator('button.wb-find-nav-button[aria-label="下一个"]').click();
   await page.waitForTimeout(400);
   const scopeAfterNav = await dialog.locator('.wb-find-replace-scope-text').innerText();
   if (!scopeAfterNav.includes('选区内')) fail(`selection should survive navigation, got: ${scopeAfterNav}`);

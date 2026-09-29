@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { X } from "lucide-vue-next";
+import { ChevronDown, ChevronUp, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { gridSelectionCount } from "../utils/gridCellSelection.js";
@@ -293,6 +293,7 @@ async function jumpToMatch(index) {
   if (!match) return;
   activeIndex.value = index;
   await props.paneState.locateListMatch?.(match);
+  await keepActiveMatchVisible();
 }
 
 async function goToNext() {
@@ -444,7 +445,7 @@ const dialogRef = ref(null);
 useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef, modal: false });
 const dialogLeft = ref(0);
 const dialogTop = ref(0);
-const dialogWidth = ref(560);
+const dialogWidth = ref(460);
 const dialogHeight = ref(null); // null = 高度随内容自适应；拖拽缩放后固定
 const positionReady = ref(false);
 const VIEWPORT_INSET = 8;
@@ -462,11 +463,76 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
+// 停靠在当前表格的右上角，而不是盖在表格正中；命中单元格被挡住时自动换到其它角。
+const GRID_CORNER_INSET = 12;
+
+function focusedGridShellRect() {
+  const shell = document.querySelector(".wb-workbench-pane.is-focused .wb-grid-shell")
+    || document.querySelector(".wb-grid-shell");
+  const rect = shell?.getBoundingClientRect?.();
+  return rect && rect.width > 0 && rect.height > 0 ? rect : null;
+}
+
+function activeMatchCellRect() {
+  const wrap = document.querySelector(".wb-workbench-pane.is-focused .wb-grid-wrap")
+    || document.querySelector(".wb-grid-wrap");
+  const cellId = wrap?.getAttribute?.("aria-activedescendant");
+  return (cellId && document.getElementById(cellId)?.getBoundingClientRect()) || null;
+}
+
+function rectsOverlap(a, b, gap = 0) {
+  return a.left < b.right + gap && a.right + gap > b.left && a.top < b.bottom + gap && a.bottom + gap > b.top;
+}
+
+function gridCornerPositions(height) {
+  const shell = focusedGridShellRect();
+  if (!shell) return [];
+  const width = dialogWidth.value;
+  const right = shell.right - width - GRID_CORNER_INSET;
+  const bottom = shell.bottom - height - GRID_CORNER_INSET;
+  const left = shell.left + GRID_CORNER_INSET;
+  const top = shell.top + GRID_CORNER_INSET;
+  return [
+    { left: right, top },
+    { left: right, top: bottom },
+    { left, top },
+    { left, top: bottom },
+  ].map((position) => ({
+    left: clamp(position.left, VIEWPORT_INSET, window.innerWidth - width - VIEWPORT_INSET),
+    top: clamp(position.top, VIEWPORT_INSET, window.innerHeight - height - VIEWPORT_INSET),
+  }));
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => resolve()) : setTimeout(resolve, 0)));
+}
+
+async function keepActiveMatchVisible() {
+  await nextTick();
+  await nextAnimationFrame();
+  await nextAnimationFrame();
+  const cell = activeMatchCellRect();
+  const dialog = dialogRef.value?.getBoundingClientRect?.();
+  if (!cell || !dialog || !rectsOverlap(cell, dialog)) return;
+  const free = gridCornerPositions(dialog.height).find((position) => !rectsOverlap(cell, {
+    left: position.left,
+    top: position.top,
+    right: position.left + dialog.width,
+    bottom: position.top + dialog.height,
+  }));
+  if (!free) return;
+  // 换位后的落点也要真正露出命中单元格，且与其保持一点距离
+  if (rectsOverlap(cell, { left: free.left, top: free.top, right: free.left + dialog.width, bottom: free.top + dialog.height }, 6)) return;
+  dialogLeft.value = free.left;
+  dialogTop.value = free.top;
+}
+
 function initializeDialogPosition() {
   const viewportWidth = window.innerWidth;
   dialogWidth.value = Math.min(dialogWidth.value, Math.max(MIN_DIALOG_WIDTH, viewportWidth - VIEWPORT_INSET * 2));
-  dialogLeft.value = Math.max(VIEWPORT_INSET, Math.round((viewportWidth - dialogWidth.value) / 2));
-  dialogTop.value = Math.max(VIEWPORT_INSET, Math.round(window.innerHeight * 0.15));
+  const docked = gridCornerPositions(dialogRef.value?.offsetHeight || 0)[0];
+  dialogLeft.value = docked?.left ?? Math.max(VIEWPORT_INSET, Math.round((viewportWidth - dialogWidth.value) / 2));
+  dialogTop.value = docked?.top ?? Math.max(VIEWPORT_INSET, Math.round(window.innerHeight * 0.15));
   positionReady.value = true;
 }
 
@@ -654,15 +720,38 @@ onBeforeUnmount(() => {
       <div class="wb-dialog-body wb-find-replace-body">
         <label class="wb-dialog-field wb-replace-field">
           <span>{{ t('m_bf603c449cd8') }}</span>
-          <input
-            ref="findInputRef"
-            v-model="query"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            :disabled="isBusy"
-            @keydown.enter.prevent="goToNext"
-          />
+          <span class="wb-find-input-row">
+            <input
+              ref="findInputRef"
+              v-model="query"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="isBusy"
+              @keydown.enter.exact.prevent="goToNext"
+              @keydown.shift.enter.prevent="goToPrevious"
+            />
+            <button
+              type="button"
+              class="wb-find-nav-button"
+              :aria-label="t('m_bd4b9718f1f0')"
+              :title="`${t('m_bd4b9718f1f0')}（Shift+Enter）`"
+              :disabled="!canNavigate"
+              @click.prevent="goToPrevious"
+            >
+              <ChevronUp :size="16" :stroke-width="2" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="wb-find-nav-button"
+              :aria-label="t('m_a898d7c3d78c')"
+              :title="`${t('m_a898d7c3d78c')}（Enter）`"
+              :disabled="!canNavigate"
+              @click.prevent="goToNext"
+            >
+              <ChevronDown :size="16" :stroke-width="2" aria-hidden="true" />
+            </button>
+          </span>
         </label>
         <label v-if="activeTab === 'replace'" class="wb-dialog-field wb-replace-field">
           <span>{{ t('m_7d37f059645b') }}</span>
@@ -737,22 +826,17 @@ onBeforeUnmount(() => {
             :class="{ 'is-expanded': listExpanded }"
             :disabled="isBusy || !findText"
             @click="toggleFindAll"
-          > {{ t('m_dde41ecd61f7') }} <span class="wb-find-all-caret" aria-hidden="true">{{ listExpanded ? "▴" : "▾" }}</span>
+          > {{ t('m_dde41ecd61f7') }} <component :is="listExpanded ? ChevronUp : ChevronDown" class="wb-find-all-caret" :size="14" aria-hidden="true" />
           </button>
-          <button type="button" :disabled="!canNavigate" @click="goToPrevious">{{ t('m_bd4b9718f1f0') }}</button>
-          <button type="button" :disabled="!canNavigate" @click="goToNext">{{ t('m_a898d7c3d78c') }}</button>
         </div>
-        <div class="wb-replace-footer-right">
-          <template v-if="activeTab === 'replace'">
-            <button type="button" :disabled="!canReplace" @click="replaceCurrent">{{ t('m_131b13aa2659') }}</button>
-            <button
-              type="button"
-              class="wb-dialog-primary wb-replace-all-button"
-              :disabled="!canReplace"
-              @click="replaceAll"
-            > {{ t('m_2357445f30da') }} </button>
-          </template>
-          <button type="button" :disabled="isBusy" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
+        <div v-if="activeTab === 'replace'" class="wb-replace-footer-right">
+          <button type="button" :disabled="!canReplace" @click="replaceCurrent">{{ t('m_131b13aa2659') }}</button>
+          <button
+            type="button"
+            class="wb-dialog-primary wb-replace-all-button"
+            :disabled="!canReplace"
+            @click="replaceAll"
+          > {{ t('m_2357445f30da') }} </button>
         </div>
       </footer>
       <span

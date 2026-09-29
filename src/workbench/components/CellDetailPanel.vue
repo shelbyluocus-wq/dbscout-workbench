@@ -68,7 +68,7 @@ const contentStyle = computed(() => (
     ? { height: "0px", opacity: "0" }
     : { height: `${HANDLE_HEIGHT + detailHeight.value}px`, opacity: "1" }
 ));
-const toggleLabel = computed(() => (isPanelCollapsed.value ? "展开单元格内容" : "收起单元格内容"));
+const toggleLabel = computed(() => (isPanelCollapsed.value ? t("cellDetail.expand") : t("cellDetail.collapse")));
 const selectionStatItems = computed(() => (
   Array.isArray(props.selectionStats?.items) ? props.selectionStats.items : []
 ));
@@ -382,7 +382,7 @@ onBeforeUnmount(finishResize);
           :key="item.key"
           class="wb-cell-detail-stat"
         >
-          <span class="wb-cell-detail-stat-label">{{ item.label }}</span>
+          <span class="wb-cell-detail-stat-label">{{ t(`selectionStats.${item.key}`) }}</span>
           <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
         </span>
       </div>
@@ -456,7 +456,7 @@ onBeforeUnmount(finishResize);
             :readonly="readOnly"
             :placeholder="detailPlaceholder"
             :tabindex="isPanelCollapsed ? -1 : 0"
-            :aria-label="isFieldComment ? `字段 ${selectedCell?.column || ''} 的备注（只读）` : t('m_946f88c2a713')"
+            :aria-label="isFieldComment ? t('cellDetail.fieldCommentReadonly', { column: selectedCell?.column || '' }) : t('m_946f88c2a713')"
             @input="updateDetailDraft"
             @scroll="syncDetailScroll"
             @blur="onDetailBlur"

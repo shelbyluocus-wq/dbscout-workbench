@@ -713,7 +713,8 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(navIconRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /width\s*:\s*24px/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-label"/);
-  assert.match(css, /@container \(max-width: 680px\)[\s\S]*?\.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/s);
+  assert.match(css, /@container \(max-width: 780px\)[\s\S]*?\.wb-table-toolbar-actions > \.wb-table-toolbar-secondary\s*\{[^}]*display:\s*none[\s\S]*?\.wb-table-toolbar-actions > \.wb-table-toolbar-more\s*\{[^}]*display:\s*inline-flex/s);
+  assert.match(css, /@container \(max-width: 560px\)[\s\S]*?\.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/s);
   assert.match(css, /@container \(max-width: 520px\)[\s\S]*?\.wb-table-search-field\s*\{[^}]*min-width:\s*136px/s);
   assert.match(navIconRule, /height\s*:\s*24px/);
 });
