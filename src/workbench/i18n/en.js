@@ -209,7 +209,6 @@ export default Object.freeze({
   "m_ab36d2486c97": "More tables",
   "m_d5e75e167780": "Back to tables",
   "backup.history.sharedReadOnly": "Shared records are organized by table and are read-only. Restore is unavailable here.",
-  "backup.history.sharedSearchHint": "Search loaded tables; load more to find tables in older records.",
   "m_7643dd10ab6c": "Only retained local changes can be restored. Unrecorded external changes and deleted history are outside the recovery scope.",
   "m_5e110fbd036a": "Checking history against current data and preparing a restore preview…",
   "m_10328a6f1af8": "Restore preview",

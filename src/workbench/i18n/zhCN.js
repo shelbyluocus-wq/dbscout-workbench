@@ -209,7 +209,6 @@ export default Object.freeze({
   "m_ab36d2486c97": "更多表",
   "m_d5e75e167780": "返回表列表",
   "backup.history.sharedReadOnly": "共享记录按表查看，仅供查阅，不能在此恢复。",
-  "backup.history.sharedSearchHint": "搜索已加载的表；可加载更多较早记录中的表。",
   "m_7643dd10ab6c": "仅恢复本机留存的修改。未记录的外部修改和已清理的历史不在恢复范围内。",
   "m_5e110fbd036a": "正在核对历史与当前数据，生成恢复预览…",
   "m_10328a6f1af8": "恢复预览",

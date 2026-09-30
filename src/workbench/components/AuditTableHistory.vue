@@ -41,7 +41,6 @@ const details = (id) => s.value.details[id]?.items || [];
         </div>
         <button type="submit" :title="t('m_44ce7ae909bb')" :aria-label="t('m_44ce7ae909bb')" :disabled="s.loadingTables || s.restoring"><Search :size="14" aria-hidden="true" /></button>
       </form>
-      <p v-if="readOnly" class="wb-audit-hint wb-audit-list-hint">{{ t("backup.history.sharedSearchHint") }}</p>
       <p v-if="s.error && !s.selected" class="wb-audit-error" role="alert">{{ s.error }}</p>
       <div class="wb-audit-table-scroll">
         <p v-if="s.loadingTables && !s.tables.length" class="wb-audit-hint wb-audit-list-hint" role="status">{{ t('m_133b5069fbfb') }}</p>
