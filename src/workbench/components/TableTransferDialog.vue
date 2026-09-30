@@ -171,7 +171,7 @@ const runDisabledReason = computed(() => {
                 :aria-label="t('m_56675578a75d')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickScript">
-                <FileText :size="13" aria-hidden="true" /> {{ t('m_b902d80b8b41') }} </button>
+                <FileText :size="18" aria-hidden="true" /> {{ t('m_b902d80b8b41') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
@@ -194,7 +194,7 @@ const runDisabledReason = computed(() => {
                 :aria-label="t('m_6fff77983833')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickProjectDir">
-                <FolderOpen :size="13" aria-hidden="true" /> {{ t('m_93e76151bbeb') }} </button>
+                <FolderOpen :size="18" aria-hidden="true" /> {{ t('m_93e76151bbeb') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
