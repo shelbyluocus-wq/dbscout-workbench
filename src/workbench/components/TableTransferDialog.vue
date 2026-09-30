@@ -180,7 +180,7 @@ const runDisabledReason = computed(() => {
                 :disabled="isRunning || !activeTemplate.scriptPath"
                 @click="browseScript"
               >
-                <FolderSearch :size="13" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
+                <FolderSearch :size="18" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
@@ -203,7 +203,7 @@ const runDisabledReason = computed(() => {
                 :disabled="isRunning || !activeTemplate.projectRoot"
                 @click="browseProject"
               >
-                <FolderSearch :size="13" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
+                <FolderSearch :size="18" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
@@ -408,7 +408,7 @@ const runDisabledReason = computed(() => {
 }
 
 .wb-table-transfer-browse {
-  width: 64px;
+  width: 76px;
   padding: 0 8px;
 }
 
