@@ -11399,7 +11399,8 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: pointer;
 }
 
-.wb-home-favorites-add:hover,
+.wb-home-favorites-add:hover:not(:disabled),
+.wb-home-favorites-add:active:not(:disabled),
 .wb-home-favorites-add:focus-visible {
   background: var(--wb-accent-control-hover);
 }
@@ -11473,6 +11474,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 30px;
   width: 30px;
   height: 30px;
+  padding: 0;
   place-items: center;
   border: 0;
   border-radius: 6px;
