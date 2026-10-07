@@ -10,11 +10,12 @@ import { language } from "./i18n/index.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (file) => readFileSync(join(__dirname, file), "utf8");
 
-test("activity rail lists the action entries, then pins settings at the bottom", () => {
-  const { items, bottomItems } = useActivityRail();
+test("activity rail pins add connection on top, lists the tool group, then pins settings at the bottom", () => {
+  const { leadItems, items, bottomItems } = useActivityRail();
+  assert.deepEqual(leadItems.value.map((item) => item.id), ["addConnection"]);
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["addConnection", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"],
+    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"],
   );
   assert.deepEqual(
     bottomItems.value.map((item) => item.id),
@@ -22,15 +23,14 @@ test("activity rail lists the action entries, then pins settings at the bottom",
   );
 });
 
-test("activity rail entries expose icon components, translated labels, and separators", () => {
-  const { items } = useActivityRail();
-  for (const item of items.value) {
+test("activity rail entries expose icon components, translated labels, and popup surfaces", () => {
+  const { leadItems, items, bottomItems } = useActivityRail();
+  for (const item of [...leadItems.value, ...items.value, ...bottomItems.value]) {
     assert.ok(["object", "function"].includes(typeof item.icon), `${item.id} should map to a lucide icon component`);
     assert.ok(item.label.length > 0, `${item.id} should have a translated label`);
     assert.ok(item.popup, `${item.id} should declare its popup surface for aria-haspopup`);
   }
-  assert.equal(items.value[0].separatorBefore, false);
-  assert.equal(items.value.find((item) => item.id === "quickOpen").separatorBefore, true);
+  assert.equal(ACTIVITY_RAIL_ENTRIES.find((entry) => entry.id === "addConnection").zone, "lead");
 });
 
 test("activity rail entries carry a one-line tooltip hint", () => {
@@ -99,7 +99,7 @@ test("activity rail reflects live shortcut bindings in tooltips", () => {
       },
     };
     const rail = useActivityRail({ shortcuts: shortcutHelper });
-    const byId = Object.fromEntries(rail.items.value.map((item) => [item.id, item]));
+    const byId = Object.fromEntries([...rail.leadItems.value, ...rail.items.value].map((item) => [item.id, item]));
     assert.equal(byId.tableTransfer.shortcutLabel, "Ctrl+Shift+T");
     assert.equal(byId.quickOpen.shortcutLabel, "Ctrl+P");
     assert.equal(byId.addConnection.shortcutLabel, "");
@@ -150,34 +150,42 @@ test("activity rail reorder moves entries and persists the order", () => {
     setItem: (key, value) => store.set(key, String(value)),
   };
   const rail = useActivityRail({ storage });
-  rail.reorder("tableTransfer", "addConnection", { position: "before" });
+  rail.reorder("tableTransfer", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "addConnection", "quickOpen", "databaseFavorites", "backupCenter"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter"],
   );
   assert.equal(
     storage.getItem("dbscout_activity_rail_order"),
-    JSON.stringify(["tableTransfer", "addConnection", "quickOpen", "databaseFavorites", "backupCenter"]),
+    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter"]),
+  );
+
+  // Fixed zones never join the sortable order.
+  rail.reorder("quickOpen", "addConnection", { position: "before" });
+  rail.reorder("settings", "quickOpen", { position: "before" });
+  assert.deepEqual(
+    rail.items.value.map((item) => item.id),
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter"],
   );
 
   // A fresh composable on the same storage restores the custom order.
   const restored = useActivityRail({ storage });
   assert.deepEqual(
     restored.items.value.map((item) => item.id),
-    ["tableTransfer", "addConnection", "quickOpen", "databaseFavorites", "backupCenter"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter"],
   );
 });
 
 test("activity rail order drops unknown ids and re-inserts missing entries at their default slot", () => {
   const storage = {
-    getItem: () => JSON.stringify(["backupCenter", "goneEntry", "addConnection"]),
+    getItem: () => JSON.stringify(["tableTransfer", "goneEntry", "addConnection", "quickOpen"]),
     setItem: () => {},
   };
   const { items } = useActivityRail({ storage });
   // Stored ids keep their relative order; missing defaults re-insert at their slot.
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["backupCenter", "quickOpen", "databaseFavorites", "addConnection", "tableTransfer"],
+    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen"],
   );
 });
 
@@ -188,7 +196,7 @@ test("activity rail ignores corrupt or absent stored order", () => {
     });
     assert.deepEqual(
       rail.items.value.map((item) => item.id),
-      ["addConnection", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"],
+      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"],
       `stored=${stored}`,
     );
   }
@@ -205,12 +213,17 @@ test("activity rail keeps the rail component inside the workbench before the sid
   assert.doesNotMatch(sidebar, /open-backup-center|open-table-transfer/);
 
   assert.match(rail, /class="wb-activity-rail"/);
-  assert.match(rail, /v-for="\(item, index\) in previewItems"/);
-  assert.match(rail, /class="wb-activity-rail-btn"/);
-  assert.match(rail, /draggable="true"/);
-  assert.match(rail, /@reorder="reorderActivityRailEntry"|emit\("reorder"/);
-  assert.match(rail, /data-wb-rail-id/);
+  assert.match(rail, /v-for="\(item, index\) in items"/);
+  assert.match(rail, /@pointerdown="sort\.onPointerDown\(item, \$event\)"/);
+  assert.doesNotMatch(rail, /draggable=/);
+  // The parent's reorder takes positional (sourceId, targetId, { position }) arguments.
+  assert.match(rail, /emit\("reorder", sourceId, targetId, \{ position \}\)/);
+  assert.match(orchestrator, /@reorder="reorderActivityRailEntry"/);
+  assert.match(orchestrator, /:lead-items="activityRailLeadItems"/);
   assert.match(rail, /wb-activity-rail-bottom/);
+  const button = read("./components/WorkbenchActivityRailButton.vue");
+  assert.match(button, /class="wb-activity-rail-btn"/);
+  assert.match(button, /:data-wb-rail-id="item\.id"/);
 
   assert.match(i18n, /"shell\.activityRail":\s*"功能入口"/);
   assert.equal(ACTIVITY_RAIL_ENTRIES.length, 6);

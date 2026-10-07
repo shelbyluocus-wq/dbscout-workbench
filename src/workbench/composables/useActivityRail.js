@@ -1,26 +1,26 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, FileSearch, FileSpreadsheet, Plus, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, FileSpreadsheet, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
 
 const ORDER_STORAGE_KEY = "dbscout_activity_rail_order";
 
-// Entries of the always-visible left rail, top to bottom. `separatorBefore`
-// draws the rail divider above an entry; `zone: "bottom"` pins an entry to the
-// rail's bottom edge (always last, not reorderable). Every other `id` dispatches
-// to the handler of the same name passed to `useActivityRail({ actions })` and
-// can be reordered by dragging; the order persists in localStorage.
+// Entries of the always-visible left rail, top to bottom. `zone: "lead"` pins an
+// entry above the rail divider and `zone: "bottom"` pins it to the rail's bottom
+// edge; neither is reorderable. Entries without a zone form the tool group,
+// which can be reordered by dragging (order persists in localStorage). Every
+// `id` dispatches to the handler of the same name passed to
+// `useActivityRail({ actions })`.
 export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
-  Object.freeze({ id: "addConnection", icon: Plus, labelKey: "m_441ba9e5a9b7", popup: "dialog" }),
+  Object.freeze({ id: "addConnection", icon: Plus, labelKey: "m_441ba9e5a9b7", popup: "dialog", zone: "lead" }),
   Object.freeze({
     id: "quickOpen",
-    icon: FileSearch,
+    icon: Search,
     labelKey: "m_13e21519f8b9",
     hintKey: "shell.quickOpenAria",
     shortcutAction: "searchDatabase",
     popup: "dialog",
-    separatorBefore: true,
   }),
   Object.freeze({
     id: "databaseFavorites",
@@ -55,7 +55,8 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
   }),
 ]);
 
-const TOP_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone !== "bottom");
+const LEAD_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "lead");
+const TOP_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => !entry.zone);
 const BOTTOM_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "bottom");
 
 function readStoredOrder(storage) {
@@ -131,12 +132,12 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
       popup: entry.popup || "",
       controls: entry.controls || "",
       expanded: expandedValue === undefined ? undefined : Boolean(typeof expandedValue === "function" ? expandedValue() : expandedValue),
-      separatorBefore: entry.separatorBefore === true,
       shortcutLabel,
       ariaShortcut: toAriaKeyShortcut(shortcutLabel),
     };
   }
 
+  const leadItems = computed(() => LEAD_ENTRIES.map(toItem));
   const items = computed(() => orderedIds.value.map((id) => toItem(entryById.get(id))));
   const bottomItems = computed(() => BOTTOM_ENTRIES.map(toItem));
 
@@ -152,5 +153,5 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
     if (typeof action === "function") action(...args);
   }
 
-  return { items, bottomItems, select, reorder };
+  return { leadItems, items, bottomItems, select, reorder };
 }

@@ -2884,7 +2884,7 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
 
 test("Quick Open lives on the activity rail and keeps its keyboard shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
-  const rail = read("./components/WorkbenchActivityRail.vue");
+  const rail = read("./components/WorkbenchActivityRailButton.vue");
   const railModel = read("./composables/useActivityRail.js");
 
   // The titlebar entry is gone; the rail action opens the same palette.

@@ -935,6 +935,7 @@ function openSidebarSettings() {
 }
 
 const {
+  leadItems: activityRailLeadItems,
   items: activityRailItems,
   bottomItems: activityRailBottomItems,
   select: selectActivityRailEntry,
@@ -4492,6 +4493,7 @@ onBeforeUnmount(() => {
       :class="{ 'is-dragging': paneIsDragging }"
     >
       <WorkbenchActivityRail
+        :lead-items="activityRailLeadItems"
         :items="activityRailItems"
         :bottom-items="activityRailBottomItems"
         :label="t('shell.activityRail')"

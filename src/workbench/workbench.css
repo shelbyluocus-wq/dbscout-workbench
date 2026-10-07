@@ -7079,6 +7079,17 @@ label:has(input[type="checkbox"]:disabled) {
   padding-block: 4px;
   background: var(--wb-chrome-surface);
   pointer-events: auto;
+  user-select: none;
+  --wb-rail-sort-duration: 180ms;
+  --wb-rail-sort-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wb-activity-rail-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 .wb-activity-rail-separator {
@@ -7107,10 +7118,6 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-border);
 }
 
-.wb-activity-rail-btn.is-rail-dragging {
-  opacity: 0.35;
-}
-
 .wb-activity-rail-btn {
   position: relative;
   display: grid;
@@ -7128,6 +7135,58 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-secondary-text);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+/* Tool-group entries are press-and-drag sortable: siblings glide aside to open
+   a gap while the pressed entry lifts and follows the pointer. */
+.wb-activity-rail-btn.is-sortable {
+  touch-action: none;
+  transform: translateY(var(--wb-rail-sort-shift, 0px));
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow var(--wb-rail-sort-duration) var(--wb-rail-sort-ease),
+    scale var(--wb-rail-sort-duration) var(--wb-rail-sort-ease),
+    transform var(--wb-rail-sort-duration) var(--wb-rail-sort-ease);
+}
+
+/* Scoped under .is-sorting so these outrank the hover rule below while the
+   pointer sits on the lifted entry. */
+.wb-activity-rail.is-sorting .wb-activity-rail-btn.is-rail-dragging,
+.wb-activity-rail.is-sorting .wb-activity-rail-btn.is-rail-settling {
+  z-index: 2;
+  border-color: var(--wb-accent);
+  /* Opaque base: siblings slide underneath the lifted entry. */
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
+  color: var(--wb-text);
+}
+
+.wb-activity-rail.is-sorting .wb-activity-rail-btn.is-rail-dragging {
+  box-shadow: 0 0 0 1px var(--wb-floating-border), var(--wb-floating-shadow);
+  cursor: grabbing;
+  scale: 1.12;
+  /* The position tracks the pointer 1:1; only the lift eases in. */
+  transition:
+    box-shadow var(--wb-rail-sort-duration) var(--wb-rail-sort-ease),
+    scale var(--wb-rail-sort-duration) var(--wb-rail-sort-ease);
+}
+
+.wb-activity-rail.is-sorting .wb-activity-rail-btn .wb-activity-rail-tip {
+  opacity: 0;
+  transition: none;
+}
+
+.wb-activity-rail.is-sorting .wb-activity-rail-btn:not(.is-rail-dragging, .is-rail-settling) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+/* The new order is committed in the same frame the shifts return to zero;
+   transitions stay off for that frame so nothing slides twice. */
+.wb-activity-rail.is-sort-resetting .wb-activity-rail-btn {
+  transition: none;
 }
 
 .wb-activity-rail-btn:hover:not(:disabled),
@@ -18202,6 +18261,13 @@ label:has(input[type="checkbox"]:disabled) {
   /* Keep the delayed fade, drop the slide-in. */
   .wb-activity-rail-tip {
     transform: translate(0, -50%);
+  }
+
+  /* Rail reordering keeps the live gap but drops the glide and lift. */
+  .wb-activity-rail-btn.is-sortable,
+  .wb-activity-rail.is-sorting .wb-activity-rail-btn.is-rail-dragging {
+    scale: none;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
   }
 
   .wb-update-button.is-checking .wb-update-dot,

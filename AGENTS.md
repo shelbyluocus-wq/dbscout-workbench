@@ -437,8 +437,10 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
 - **Activity rail** — Fixed 40px icon column left of the sidebar that stays
   visible when the sidebar collapses: add connection, then (after a separator)
   quick open, favorite databases, backup center, and table transfer; a settings
-  gear is pinned at the bottom edge. Entries are drag-reorderable and the order
-  persists in `dbscout_activity_rail_order`. New feature entries go in
+  gear is pinned at the bottom edge. Add connection and settings are fixed;
+  the tool group between them is press-and-drag reorderable (pointer-based via
+  `useActivityRailSort.js`, Alt+Arrow from the keyboard) and the order persists
+  in `dbscout_activity_rail_order`. New feature entries go in
   `useActivityRail.js`; the width is shared by `--wb-activity-rail-width` and
   `ACTIVITY_RAIL_WIDTH`. The settings sheet itself stays in
   `WorkbenchSidebar.vue` and teleports to `<body>` anchored at the rail's
