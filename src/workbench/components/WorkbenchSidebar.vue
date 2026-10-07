@@ -59,7 +59,6 @@ const emit = defineEmits([
   "select-connection",
   "select-database",
   "open-table",
-  "open-connection",
   "search-values",
   "cancel-search-values",
   "open-schema-result",
@@ -73,8 +72,6 @@ const emit = defineEmits([
   "toggle-theme",
   "set-color-theme",
   "change-font",
-  "open-backup-center",
-  "open-table-transfer",
 ]);
 
 const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
@@ -111,8 +108,7 @@ const tableScrollRef = ref(null);
 const tableListRef = ref(null);
 const databaseRowRefs = new Map();
 const settingsOpen = ref(false);
-const settingsDockRef = ref(null);
-const settingsTriggerRef = ref(null);
+const settingsSheetRef = ref(null);
 const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
 const fontSettingsOpen = ref(false);
@@ -167,9 +163,13 @@ function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
 }
 
+function settingsRailTrigger() {
+  return document.querySelector('.wb-activity-rail-btn[data-wb-rail-id="settings"]');
+}
+
 function closeSettings({ restoreFocus = false } = {}) {
   settingsOpen.value = false;
-  if (restoreFocus) nextTick(() => settingsTriggerRef.value?.focus?.());
+  if (restoreFocus) nextTick(() => settingsRailTrigger()?.focus?.());
 }
 
 function openFontSettings() {
@@ -183,16 +183,17 @@ function openDesignDebug() {
 
 function closeDesignDebug() {
   designDebugOpen.value = false;
-  nextTick(() => settingsTriggerRef.value?.focus?.());
+  nextTick(() => settingsRailTrigger()?.focus?.());
 }
 
 function closeFontSettings() {
   fontSettingsOpen.value = false;
-  nextTick(() => settingsTriggerRef.value?.focus?.());
+  nextTick(() => settingsRailTrigger()?.focus?.());
 }
 
 function onDocumentPointerDown(event) {
-  if (settingsDockRef.value?.contains?.(event.target)) return;
+  if (settingsSheetRef.value?.contains?.(event.target)) return;
+  if (settingsRailTrigger()?.contains?.(event.target)) return;
   closeSettings();
 }
 
@@ -585,7 +586,7 @@ function focusSearch() {
   });
 }
 
-defineExpose({ focusSearch });
+defineExpose({ focusSearch, toggleSettings, settingsOpen });
 </script>
 
 <template>
@@ -606,45 +607,6 @@ defineExpose({ focusSearch });
             <template v-else>
               <polyline points="2,9 7,4 12,9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </template>
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="wb-header-btn wb-connection-add"
-          :aria-label="t('m_441ba9e5a9b7')"
-          :title="t('m_441ba9e5a9b7')"
-          @click="emit('open-connection')"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            <line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="wb-header-btn"
-          :aria-label="t('m_965320c43727')"
-          :title="t('m_19bf68f5c8f5')"
-          @click="emit('open-backup-center')"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M3 3 h6 l2 2 v6 h-8 z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-            <path d="M5 7 h4 M5 9 h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="wb-header-btn"
-          :aria-label="t('m_a36603b169a6')"
-          :title="t('m_1297961df9a3')"
-          @click="emit('open-table-transfer')"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <rect x="1.2" y="2.4" width="7.4" height="9.2" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/>
-            <line x1="1.2" y1="5.4" x2="8.6" y2="5.4" stroke="currentColor" stroke-width="1.2"/>
-            <line x1="4.9" y1="2.4" x2="4.9" y2="11.6" stroke="currentColor" stroke-width="1.2"/>
-            <line x1="9.6" y1="7" x2="12.8" y2="7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            <polyline points="11,5.2 12.8,7 11,8.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
       </div>
@@ -794,37 +756,14 @@ defineExpose({ focusSearch });
       </TransitionGroup>
     </nav>
 
-    <div ref="settingsDockRef" class="wb-sidebar-settings-dock" :class="{ 'is-open': settingsOpen }">
-      <button
-        ref="settingsTriggerRef"
-        type="button"
-        class="wb-sidebar-settings-trigger"
-        :aria-expanded="settingsOpen"
-        aria-controls="wb-sidebar-settings-sheet"
-        :title="t('m_df3d58c7d84b')"
-        :aria-label="t('m_df3d58c7d84b')"
-        @click.stop="toggleSettings"
-      >
-        <svg
-          class="wb-sidebar-settings-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-      </button>
-
+    <Teleport to="body">
       <Transition name="wb-sidebar-settings-sheet">
       <section
         v-if="settingsOpen"
+        ref="settingsSheetRef"
         id="wb-sidebar-settings-sheet"
-        class="wb-sidebar-settings-sheet"
+        class="wb-sidebar-settings-sheet wb-floating-themed"
+        :data-theme="currentTheme"
         :aria-label="t('m_df3d58c7d84b')"
         :aria-hidden="!settingsOpen"
         :inert="!settingsOpen"
@@ -977,7 +916,7 @@ defineExpose({ focusSearch });
         </div>
       </section>
       </Transition>
-    </div>
+    </Teleport>
 
     <ShortcutSettingsDialog
       :open="shortcutsOpen"

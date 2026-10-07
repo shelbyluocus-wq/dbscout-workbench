@@ -59,7 +59,7 @@ import {
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
-import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
+import { isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
@@ -111,6 +111,7 @@ import {
   removePinnedDatabasesForConnection,
 } from "./utils/pinnedDatabases.js";
 
+import WorkbenchActivityRail from "./components/WorkbenchActivityRail.vue";
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
@@ -133,6 +134,7 @@ import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
 
 import { useConnection } from "./composables/useConnection.js";
 import { connectionHasCapability } from "./utils/connectionKinds.js";
@@ -151,6 +153,7 @@ import { useContextMenu } from "./composables/useContextMenu.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableTransfer } from "./composables/useTableTransfer.js";
+import { useActivityRail } from "./composables/useActivityRail.js";
 import { useAccount } from "./composables/useAccount.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
@@ -165,7 +168,6 @@ import {
   usePaneResize,
 } from "./composables/usePaneResize.js";
 import { inspectorSurfaceFor } from "./inspectorVisibility.js";
-import { useQuickOpenClearance } from "./composables/useQuickOpenClearance.js";
 import { useTheme } from "./composables/useTheme.js";
 import { createColorThemeController } from "./colorThemeController.js";
 import { useFontPreference } from "./composables/useFontPreference.js";
@@ -228,14 +230,9 @@ watch(quickOpenVisible, (open) => {
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
 const shortcutHelper = useShortcuts(invokeWorkbench);
 const { hintsVisible: tabShortcutHintsVisible, hide: hideTabShortcutHints } = useTabShortcutHints();
-const quickOpenShortcutLabel = computed(() =>
-  formatShortcutForPlatform(shortcutHelper.get("searchDatabase")),
-);
 function withShortcutLabel(action, shortcut) {
   return shortcut ? t("shell.withShortcut", { action, shortcut }) : action;
 }
-const quickOpenEntryTitle = computed(() => withShortcutLabel(t("shell.quickOpen"), quickOpenShortcutLabel.value));
-const quickOpenEntryAriaLabel = computed(() => withShortcutLabel(t("shell.quickOpenAria"), quickOpenShortcutLabel.value));
 const windowPin = useWindowPin();
 const windowPinButtonLabel = computed(() => withShortcutLabel(
   windowPin.pinned.value ? t("shell.unpinWindow") : t("shell.pinWindow"),
@@ -927,6 +924,36 @@ async function openBackupCenter() {
   void account.loadAccount();
 }
 
+const homeFavoritesRef = ref(null);
+
+function openDatabaseFavorites(event) {
+  homeFavoritesRef.value?.toggle?.(event?.currentTarget);
+}
+
+function openSidebarSettings() {
+  sidebarRef.value?.toggleSettings?.();
+}
+
+const {
+  items: activityRailItems,
+  bottomItems: activityRailBottomItems,
+  select: selectActivityRailEntry,
+  reorder: reorderActivityRailEntry,
+} = useActivityRail({
+  shortcuts: shortcutHelper,
+  expanded: {
+    settings: () => Boolean(sidebarRef.value?.settingsOpen),
+  },
+  actions: {
+    addConnection: openConnDialog,
+    quickOpen: openQuickOpenFromAnywhere,
+    databaseFavorites: openDatabaseFavorites,
+    backupCenter: openBackupCenter,
+    tableTransfer: openTableTransfer,
+    settings: openSidebarSettings,
+  },
+});
+
 const tableCopy = useTableCopy({
   connections,
   invokeWorkbench,
@@ -997,7 +1024,6 @@ const {
   expandInspector,
 } = usePaneResize({ viewportWidth: windowWidth });
 
-const { quickOpenEntryRef, quickOpenClearanceVars } = useQuickOpenClearance();
 const { effectiveTheme, isDark, toggleTheme } = useTheme();
 const {
   currentTheme: currentColorTheme,
@@ -4304,7 +4330,7 @@ onBeforeUnmount(() => {
       'is-native-macos': usesNativeMacWindowControls,
     }"
     :data-theme="effectiveTheme"
-    :style="[sidebarLayoutVars, quickOpenClearanceVars]"
+    :style="sidebarLayoutVars"
     @transitionend="onSidebarLayoutTransitionEnd"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
@@ -4355,23 +4381,7 @@ onBeforeUnmount(() => {
         id="wb-topbar-tabs"
         :aria-label="t('m_79aaded7fe4f')"
         data-tauri-drag-region
-      >
-        <button
-          type="button"
-          class="wb-quick-open-entry"
-          ref="quickOpenEntryRef"
-          :title="quickOpenEntryTitle"
-          :aria-label="quickOpenEntryAriaLabel"
-          @click.stop="openQuickOpenFromAnywhere"
-        >
-          <svg class="wb-quick-open-entry-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="6.2" cy="6.2" r="3.4" />
-            <path d="M8.8 8.8l2.4 2.4M9.8 5.2h4.1v8.7H5.2v-3.1M9.8 8.1h4.1M9.8 11h4.1" />
-          </svg>
-          <span class="wb-quick-open-entry-label">{{ t('m_13e21519f8b9') }}</span>
-          <kbd v-if="quickOpenShortcutLabel">{{ quickOpenShortcutLabel }}</kbd>
-        </button>
-      </div>
+      ></div>
 
 
       <div
@@ -4481,6 +4491,14 @@ onBeforeUnmount(() => {
       ref="paneWorkspaceRef"
       :class="{ 'is-dragging': paneIsDragging }"
     >
+      <WorkbenchActivityRail
+        :items="activityRailItems"
+        :bottom-items="activityRailBottomItems"
+        :label="t('shell.activityRail')"
+        @select="selectActivityRailEntry"
+        @reorder="reorderActivityRailEntry"
+      />
+      <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="workspace.focusedPaneId" />
       <div v-if="showNarrowHint" class="wb-narrow-hint" role="status">
         <span class="wb-narrow-hint-text">{{ t('m_c59ab8b4a9b4') }}</span>
         <span class="wb-narrow-hint-actions">
@@ -4533,9 +4551,6 @@ onBeforeUnmount(() => {
         @rename-table="openTableRenameFromSource"
         @rename-database="openDatabaseAliasDialog"
         @rename-connection="openConnectionAliasDialog"
-        @open-connection="openConnDialog"
-        @open-backup-center="openBackupCenter"
-        @open-table-transfer="openTableTransfer"
         @contextmenu="openSidebarContextMenu"
         @toggle-theme="toggleTheme"
         @change-font="applyFontSettings"

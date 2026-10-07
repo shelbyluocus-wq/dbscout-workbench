@@ -216,24 +216,26 @@ test("favorite database shortcuts cannot reuse Ctrl+digit or Ctrl+Backquote tab 
   );
 });
 
-test("homepage tab exposes a hover database favorites surface with picker and shortcut entry", () => {
+test("database favorites surface opens from an activity rail button instead of home-tab hover", () => {
   const tabs = read("./components/WorkbenchTabs.vue");
   const favorites = read("./components/HomeDatabaseFavorites.vue");
+  const rail = read("./components/WorkbenchActivityRail.vue");
+  const railGroups = read("./composables/useActivityRail.js");
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
   const orchestrator = read("./MySqlWorkbench.vue");
   const styles = read("./workbench.css");
 
-  assert.match(tabs, /import HomeDatabaseFavorites/);
-  assert.match(tabs, /@pointerenter="scheduleHomeFavoritesShow\(tab, \$event\)"/);
-  assert.match(tabs, /@focusin="scheduleHomeFavoritesShow\(tab, \$event\)"/);
-  assert.match(tabs, /@click="activateTabFromPointer\(tab\)"/);
-  assert.match(tabs, /function activateTabFromPointer\(tab\)[\s\S]*?tabKind\(tab\) === "home"[\s\S]*?homeFavoritesRef\.value\?\.hide\?\.\(\)/);
-  assert.match(tabs, /@keydown\.down\.prevent\.stop="showHomeFavorites\(tab, \$event, \{ focusPanel: true \}\)"/);
-  assert.match(tabs, /@keydown\.esc\.prevent\.stop="hideHomeFavorites\(tab\)"/);
-  assert.match(favorites, /const AUTO_SHOW_DELAY_MS = 1000/);
-  assert.match(favorites, /function scheduleShow\(anchor\)[\s\S]*?setTimeout\?\.\(\(\) =>[\s\S]*?AUTO_SHOW_DELAY_MS\)/);
-  assert.match(favorites, /function scheduleHide\(\)[\s\S]*?cancelScheduledShow\(\)/);
+  assert.doesNotMatch(tabs, /HomeDatabaseFavorites/);
+  assert.doesNotMatch(tabs, /homeFavoritesRef|scheduleHomeFavorites|showHomeFavorites|hideHomeFavorites/);
+  assert.match(railGroups, /id:\s*"databaseFavorites"[\s\S]*?popup:\s*"menu"/);
+  assert.match(rail, /emit\((['"])select\1, item\.id, \$event\)/);
+  assert.match(orchestrator, /import HomeDatabaseFavorites from "\.\/components\/HomeDatabaseFavorites\.vue"/);
+  assert.match(orchestrator, /<HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="workspace\.focusedPaneId" \/>/);
+  assert.match(orchestrator, /function openDatabaseFavorites\(event\)[\s\S]*?homeFavoritesRef\.value\?\.toggle\?\.\(event\?\.currentTarget\)/);
+  assert.match(favorites, /function toggle\(anchor\)[\s\S]*?panelVisible\.value\) hide\(\)[\s\S]*?else show\(anchor\)/);
+  assert.match(favorites, /defineExpose\(\{ show, hide, toggle, scheduleHide \}\)/);
+  assert.doesNotMatch(favorites, /AUTO_SHOW_DELAY_MS|scheduleShow/);
   assert.match(favorites, /class="wb-home-favorites-panel wb-floating-themed"/);
   assert.match(favorites, /class="wb-home-favorites-add"/);
   assert.match(favorites, /选择一个已连接的数据库/);

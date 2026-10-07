@@ -14,7 +14,10 @@ const MAIN_MIN = 400;
 const DIVIDER_WIDTH = 4;
 const PADDING = 16;
 const PANE_COLLAPSE_ANIMATION_MS = 280;
-export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = 32;
+// Mirrors --wb-activity-rail-width: the rail always sits left of the sidebar,
+// and the titlebar strip above them spans both.
+export const ACTIVITY_RAIL_WIDTH = 40;
+export const SIDEBAR_TITLEBAR_COLLAPSED_WIDTH = ACTIVITY_RAIL_WIDTH;
 export const SIDEBAR_TAB_CLEARANCE_PX = SIDEBAR_TITLEBAR_COLLAPSED_WIDTH;
 
 // 持久化面板宽度与收起状态，重启后恢复用户上次调整的尺寸/状态。
@@ -75,7 +78,7 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
   // 宽度按默认值封顶参与判断：拖宽侧栏或右侧栏时不会反过来把正在拖的面板自动收起。
   const inspectorSpaceTight = computed(() => isInspectorSpaceTight({
     viewportWidth: viewportWidth.value,
-    sidebarSpace: sidebarCollapsed.value ? SIDEBAR_TITLEBAR_COLLAPSED_WIDTH : Math.min(sidebarWidth.value, SIDEBAR_DEFAULT),
+    sidebarSpace: ACTIVITY_RAIL_WIDTH + (sidebarCollapsed.value ? 0 : Math.min(sidebarWidth.value, SIDEBAR_DEFAULT)),
     inspectorWidth: Math.min(Math.max(inspectorWidth.value, INSPECTOR_MIN_WIDTH), INSPECTOR_DEFAULT),
   }));
   watch(inspectorSpaceTight, (tight) => {
@@ -153,7 +156,7 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
       : `${sidebarWidth.value}px`,
     "--wb-sidebar-titlebar-width": sidebarCollapsed.value
       ? `${SIDEBAR_TITLEBAR_COLLAPSED_WIDTH}px`
-      : `${sidebarWidth.value}px`,
+      : `${ACTIVITY_RAIL_WIDTH + sidebarWidth.value}px`,
     "--wb-sidebar-content-width": `${sidebarWidth.value}px`,
   }));
 
@@ -171,7 +174,7 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
   function maxFor(pane) {
     const ws = workspaceRef.value;
     if (!ws) return pane === "sidebar" ? 500 : 500;
-    const total = ws.clientWidth - PADDING - DIVIDER_WIDTH * 2;
+    const total = ws.clientWidth - ACTIVITY_RAIL_WIDTH - PADDING - DIVIDER_WIDTH * 2;
     const other = pane === "sidebar" ? (inspectorCollapsed.value ? 0 : inspectorWidth.value) : (sidebarCollapsed.value ? 0 : sidebarWidth.value);
     return Math.max(0, total - MAIN_MIN - other);
   }

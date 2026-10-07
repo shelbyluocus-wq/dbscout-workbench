@@ -72,10 +72,11 @@
   --wb-floating-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.14);
   --wb-pane-collapse-duration: 0.28s;
   --wb-pane-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --wb-activity-rail-width: 40px;
   --wb-sidebar-slot-width: 292px;
-  --wb-sidebar-titlebar-width: 292px;
+  --wb-sidebar-titlebar-width: calc(var(--wb-activity-rail-width) + 292px);
   --wb-sidebar-content-width: 292px;
-  --wb-sidebar-tab-clearance: 32px;
+  --wb-sidebar-tab-clearance: var(--wb-activity-rail-width);
   --wb-titlebar-height: 40px;
   --wb-workspace-corner-radius: 12px;
   --wb-main-sheet-shadow: 0 1px 2px rgba(45, 55, 72, 0.04), 0 12px 32px rgba(45, 55, 72, 0.07);
@@ -189,10 +190,6 @@
   /* Quick Open 浮层遮罩与阴影（浅色） */
   --wb-quick-open-overlay: rgba(0, 0, 0, 0.38);
   --wb-quick-open-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
-  --wb-quick-open-entry-bg: rgba(255, 255, 255, 0.96);
-  --wb-quick-open-entry-border: rgba(45, 55, 72, 0.3);
-  --wb-quick-open-entry-text: #252b35;
-  --wb-quick-open-entry-key: #4f5661;
 }
 
 html[data-wb-theme="light"] {
@@ -383,10 +380,6 @@ html[data-wb-theme="dark"] {
   /* Quick Open 浮层遮罩与阴影（深色，更暗以突出浮层） */
   --wb-quick-open-overlay: rgba(0, 0, 0, 0.6);
   --wb-quick-open-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-  --wb-quick-open-entry-bg: rgba(42, 43, 47, 0.98);
-  --wb-quick-open-entry-border: rgba(203, 213, 225, 0.34);
-  --wb-quick-open-entry-text: #f1f3f5;
-  --wb-quick-open-entry-key: #c6ccd5;
 }
 
 * {
@@ -581,15 +574,13 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-sidebar-slot-width)));
-  --wb-quick-open-entry-clearance: 150px;
+  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-activity-rail-width) - var(--wb-sidebar-slot-width)));
   --wb-titlebar-update-right: 142px;
   --wb-titlebar-agent-right: 176px;
   --wb-titlebar-pin-right: 210px;
   --wb-titlebar-inspector-toggle-right: 244px;
-  --wb-titlebar-inspector-tab-padding: 278px;
   --wb-titlebar-collapsed-controls-clearance: 284px;
-  --wb-titlebar-tab-right-clearance: var(--wb-quick-open-entry-clearance);
+  --wb-titlebar-tab-right-clearance: 0px;
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
@@ -607,12 +598,11 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-titlebar-agent-right: 42px;
   --wb-titlebar-pin-right: 76px;
   --wb-titlebar-inspector-toggle-right: 110px;
-  --wb-titlebar-inspector-tab-padding: 148px;
   --wb-titlebar-collapsed-controls-clearance: 150px;
 }
 
 .mysql-workbench.is-inspector-collapsed {
-  --wb-titlebar-tab-right-clearance: calc(var(--wb-titlebar-collapsed-controls-clearance) + var(--wb-quick-open-entry-clearance));
+  --wb-titlebar-tab-right-clearance: var(--wb-titlebar-collapsed-controls-clearance);
 }
 
 .wb-titlebar {
@@ -655,7 +645,7 @@ label:has(input[type="checkbox"]:disabled) {
 @property --wb-sidebar-titlebar-width {
   syntax: "<length>";
   inherits: true;
-  initial-value: 32px;
+  initial-value: 40px;
 }
 
 @property --wb-sidebar-content-width {
@@ -672,7 +662,9 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 3px;
   width: var(--wb-sidebar-titlebar-width);
-  padding-inline: 2px 8px;
+  /* Centers the 30px collapse toggle over the activity rail, so the toggle and
+     the rail entries share one column whether the sidebar is open or not. */
+  padding-inline: calc((var(--wb-activity-rail-width) - 30px) / 2) 8px;
   overflow: hidden;
   transition:
     width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
@@ -686,9 +678,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-titlebar-sidebar:not(.is-collapsed) .wb-sidebar-actions {
   overflow: hidden;
-  /* Sized to the button count: 4 buttons × 22px + 3 gaps × 2px = 94px.
-     A smaller cap silently clips the trailing buttons (overflow: hidden). */
-  max-width: 96px;
+  /* Sized to the single 22px collapse-all button; a smaller cap silently
+     clips it (overflow: hidden). */
+  max-width: 24px;
   opacity: 1;
   pointer-events: auto;
   transition:
@@ -696,11 +688,17 @@ label:has(input[type="checkbox"]:disabled) {
     opacity calc(var(--wb-pane-collapse-duration) * 0.85) var(--wb-pane-collapse-ease);
 }
 
+/* Sets collapse-all directly above the tree's disclosure chevrons. On macOS
+   the traffic lights push the toggle past that column, so the plain gap stays. */
+.mysql-workbench:not(.is-native-macos) .wb-titlebar-sidebar:not(.is-collapsed) .wb-sidebar-actions {
+  margin-left: 8px;
+}
+
 .wb-titlebar-sidebar.is-collapsed {
   position: absolute;
   top: 0;
   left: 0;
-  width: 32px;
+  width: var(--wb-activity-rail-width);
   justify-content: center;
   gap: 0;
   padding: 0;
@@ -709,6 +707,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .mysql-workbench.is-native-macos .wb-titlebar-sidebar.is-collapsed {
   left: var(--wb-macos-traffic-light-clearance);
+  /* Ends exactly at the macOS tab clearance (traffic lights + 32px). */
+  width: 32px;
 }
 
 .wb-titlebar-sidebar.is-retracted .wb-sidebar-actions {
@@ -747,64 +747,6 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-chrome-surface);
   box-shadow: none;
   -webkit-app-region: drag;
-}
-
-/* When the inspector is collapsed, its toggle docks left of the pin, Agent,
-   update, and window controls. The shared clearance keeps the tab strip and
-   Quick Open entry out of the entire fixed-control cluster. */
-.mysql-workbench.is-inspector-collapsed .wb-titlebar-tabs {
-  padding-right: var(--wb-titlebar-inspector-tab-padding);
-}
-
-.wb-quick-open-entry {
-  position: sticky;
-  right: 0;
-  /* 与标题栏其他控件同档（40）：必须高于顶沿 pane 页签条的 z-index 32
-     （.wb-main 上探到标题栏下方，否则按钮被其不透明背景盖住而不可见、不可点） */
-  z-index: 40;
-  order: 999;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  align-self: center;
-  gap: 6px;
-  height: 28px;
-  margin: 0 8px 0 auto;
-  padding: 0 8px;
-  border: 1px solid var(--wb-quick-open-entry-border);
-  border-radius: 6px;
-  background: var(--wb-quick-open-entry-bg);
-  color: var(--wb-quick-open-entry-text);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--wb-text) 12%, transparent);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.wb-quick-open-entry:hover,
-.wb-quick-open-entry:focus-visible {
-  border-color: var(--wb-tab-active-border);
-  background: var(--wb-control-hover);
-  color: var(--wb-text);
-}
-
-.wb-quick-open-entry kbd {
-  color: var(--wb-quick-open-entry-key);
-  font-family: inherit;
-  font-size: 10.5px;
-  font-weight: 550;
-}
-
-@media (max-width: 980px) {
-  .mysql-workbench { --wb-quick-open-entry-clearance: 100px; }
-  .wb-quick-open-entry kbd { display: none; }
-}
-
-@media (max-width: 760px) {
-  .mysql-workbench { --wb-quick-open-entry-clearance: 46px; }
-  .wb-quick-open-entry { width: 30px; justify-content: center; padding: 0; }
-  .wb-quick-open-entry-label { display: none; }
 }
 
 .wb-titlebar-inspector-controls {
@@ -1119,10 +1061,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-titlebar .wb-header-btn svg {
   width: 16px;
   height: 16px;
-}
-
-.wb-connection-add {
-  line-height: 1;
 }
 
 .wb-topbar-collapse-btn {
@@ -7126,6 +7064,154 @@ label:has(input[type="checkbox"]:disabled) {
   background: color-mix(in srgb, var(--wb-warning-border) 20%, transparent);
 }
 
+/* ── Activity rail: always-visible feature entries left of the sidebar ── */
+.wb-activity-rail {
+  /* Above the sidebar and pane tab bars (z-index 32) so entry tooltips can
+     float over them; below the titlebar controls (z-index 40). */
+  position: relative;
+  z-index: 36;
+  display: flex;
+  flex: 0 0 var(--wb-activity-rail-width);
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: var(--wb-activity-rail-width);
+  padding-block: 4px;
+  background: var(--wb-chrome-surface);
+  pointer-events: auto;
+}
+
+.wb-activity-rail-separator {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 1px;
+  margin-block: 3px;
+  background: var(--wb-border);
+}
+
+.wb-activity-rail-bottom {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.wb-activity-rail-bottom::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  margin-bottom: 3px;
+  background: var(--wb-border);
+}
+
+.wb-activity-rail-btn.is-rail-dragging {
+  opacity: 0.35;
+}
+
+.wb-activity-rail-btn {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.wb-activity-rail-btn:hover:not(:disabled),
+.wb-activity-rail-btn:focus-visible {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-activity-rail-btn:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-activity-rail-tip {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 8px);
+  z-index: 1;
+  display: grid;
+  gap: 2px;
+  width: max-content;
+  max-width: 240px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 6px;
+  /* Opaque base under the menu surface: the tip covers sidebar text, and the
+     surface's slight translucency would leave ghost glyphs behind its copy. */
+  background: linear-gradient(var(--wb-menu-surface), var(--wb-menu-surface)), var(--wb-chrome-surface);
+  box-shadow:
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow);
+  color: var(--wb-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-3px, -50%);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+/* Hover waits a beat so sweeping the pointer down the rail does not flash
+   every tooltip; keyboard focus reveals it at once. */
+.wb-activity-rail-btn:hover .wb-activity-rail-tip,
+.wb-activity-rail-btn:focus-visible .wb-activity-rail-tip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.wb-activity-rail-btn:hover .wb-activity-rail-tip {
+  transition-delay: 0.3s;
+}
+
+.wb-activity-rail-btn:focus-visible .wb-activity-rail-tip {
+  transition-delay: 0s;
+}
+
+.wb-activity-rail-tip-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.wb-activity-rail-tip-title strong {
+  font-weight: 600;
+}
+
+.wb-activity-rail-tip kbd {
+  margin-left: auto;
+  color: var(--wb-quiet-text);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 550;
+}
+
+.wb-activity-rail-tip-hint {
+  color: var(--wb-secondary-text);
+  font-weight: 400;
+  white-space: normal;
+}
+
 .wb-sidebar-slot {
   flex: 0 0 auto;
   width: var(--wb-sidebar-slot-width);
@@ -7167,14 +7253,11 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar.is-pane-animating:not(.is-expanding) .wb-source-tree,
-.wb-sidebar.is-pane-animating:not(.is-expanding) .wb-sidebar-settings-dock,
-.wb-sidebar.is-collapsed .wb-source-tree,
-.wb-sidebar.is-collapsed .wb-sidebar-settings-dock {
+.wb-sidebar.is-collapsed .wb-source-tree {
   display: none;
 }
 
-.wb-sidebar.is-pane-animating.is-expanding .wb-source-tree,
-.wb-sidebar.is-pane-animating.is-expanding .wb-sidebar-settings-dock {
+.wb-sidebar.is-pane-animating.is-expanding .wb-source-tree {
   animation: wb-sidebar-content-reveal calc(var(--wb-pane-collapse-duration) * 0.85) var(--wb-pane-collapse-ease) both;
 }
 
@@ -8551,55 +8634,8 @@ label:has(input[type="checkbox"]:disabled) {
   scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
 }
 
-/* 设置入口是侧栏的固定底栏：占据真实空间，窗口再矮也不会压在连接树上。 */
-.wb-sidebar-settings-dock {
-  position: relative;
-  flex: 0 0 auto;
-  z-index: 24;
-  display: grid;
-  justify-items: start;
-  padding: 6px 10px 10px;
-  pointer-events: none;
-}
-
-.wb-sidebar-settings-trigger {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  cursor: pointer;
-  pointer-events: auto;
-  transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    transform 0.18s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.wb-sidebar-settings-trigger:hover,
-.wb-sidebar-settings-trigger:focus-visible,
-.wb-sidebar-settings-dock.is-open .wb-sidebar-settings-trigger {
-  border-color: var(--wb-accent);
-  background: var(--wb-accent-soft);
-}
-
-.wb-sidebar-settings-trigger:focus-visible {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: 2px;
-}
-
-.wb-sidebar-settings-icon {
-  display: block;
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
-  pointer-events: none;
-}
-
+/* 设置入口固定在左侧功能列底部（齿轮按钮在 WorkbenchActivityRail），面板
+   teleport 到 body 后贴左下角弹出，与侧栏收起状态解耦。 */
 .wb-sidebar-settings-sheet svg {
   width: 15px;
   height: 15px;
@@ -8611,12 +8647,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar-settings-sheet {
-  position: absolute;
-  right: 10px;
-  bottom: calc(100% - 2px);
-  left: 10px;
+  position: fixed;
+  z-index: 80;
+  bottom: 12px;
+  left: calc(var(--wb-activity-rail-width) + 8px);
   display: grid;
   gap: 0;
+  width: 300px;
   max-height: calc(100vh - 120px);
   padding: 2px 12px;
   overflow-y: auto;
@@ -8624,19 +8661,10 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-dialog-surface);
   box-shadow: var(--wb-floating-shadow);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(10px);
-  transform-origin: bottom center;
+  transform-origin: bottom left;
   transition:
     opacity 0.16s ease,
     transform 0.18s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.wb-sidebar-settings-dock.is-open .wb-sidebar-settings-sheet {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
 }
 
 .wb-sidebar-settings-sheet-enter-from,
@@ -18131,7 +18159,6 @@ label:has(input[type="checkbox"]:disabled) {
   textarea,
   .wb-sidebar,
   .wb-sidebar.is-pane-animating.is-expanding .wb-source-tree,
-  .wb-sidebar.is-pane-animating.is-expanding .wb-sidebar-settings-dock,
   .wb-inspector,
   .wb-titlebar-sidebar,
   .wb-titlebar-inspector-controls,
@@ -18150,7 +18177,6 @@ label:has(input[type="checkbox"]:disabled) {
   .wb-update-button,
   .wb-update-notice,
   .wb-update-progress-fill,
-  .wb-sidebar-settings-trigger,
   .wb-sidebar-settings-sheet,
   .wb-tree-row,
   .wb-tree-reorder-move,
@@ -18168,10 +18194,14 @@ label:has(input[type="checkbox"]:disabled) {
     animation: none !important;
   }
 
-  .wb-sidebar-settings-trigger:hover,
   .wb-filter-mode-menu-item.wb-filter-mode-menu-item:hover,
   .wb-empty-action:hover {
     transform: none !important;
+  }
+
+  /* Keep the delayed fade, drop the slide-in. */
+  .wb-activity-rail-tip {
+    transform: translate(0, -50%);
   }
 
   .wb-update-button.is-checking .wb-update-dot,

@@ -10,7 +10,6 @@ import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
-import HomeDatabaseFavorites from "./HomeDatabaseFavorites.vue";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -28,7 +27,6 @@ const { getDatabaseDecoration } = useDatabaseDecorations();
 const draggingTabId = ref("");
 const dragTargetTabId = ref("");
 const dragTargetPosition = ref("before");
-const homeFavoritesRef = ref(null);
 
 const previewTabs = computed(() => {
   if (!draggingTabId.value || !dragTargetTabId.value) return pinHomeTabFirst(props.tabs);
@@ -206,31 +204,6 @@ function activateTab(tab) {
   if (!tab?.opening) emit("activate-tab", tab.id);
 }
 
-function activateTabFromPointer(tab) {
-  activateTab(tab);
-  if (tabKind(tab) === "home") homeFavoritesRef.value?.hide?.();
-}
-
-function showHomeFavorites(tab, event, options = {}) {
-  if (tabKind(tab) !== "home") return;
-  homeFavoritesRef.value?.show?.(event?.currentTarget, options);
-}
-
-function scheduleHomeFavoritesShow(tab, event) {
-  if (tabKind(tab) !== "home") return;
-  homeFavoritesRef.value?.scheduleShow?.(event?.currentTarget);
-}
-
-function scheduleHomeFavoritesHide(tab) {
-  if (tabKind(tab) !== "home") return;
-  homeFavoritesRef.value?.scheduleHide?.();
-}
-
-function hideHomeFavorites(tab) {
-  if (tabKind(tab) !== "home") return;
-  homeFavoritesRef.value?.hide?.();
-}
-
 function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
@@ -302,17 +275,11 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
         @dragover.prevent.stop="markTabDragTarget(tab.id, $event)"
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
-        @click="activateTabFromPointer(tab)"
-        @pointerenter="scheduleHomeFavoritesShow(tab, $event)"
-        @pointerleave="scheduleHomeFavoritesHide(tab)"
-        @focusin="scheduleHomeFavoritesShow(tab, $event)"
-        @focusout="scheduleHomeFavoritesHide(tab)"
+        @click="activateTab(tab)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
         @keydown.enter.prevent="activateTab(tab)"
         @keydown.space.prevent="activateTab(tab)"
-        @keydown.down.prevent.stop="showHomeFavorites(tab, $event, { focusPanel: true })"
-        @keydown.esc.prevent.stop="hideHomeFavorites(tab)"
       >
         <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
           <template v-if="hasTabSubtitle(tab)">
@@ -378,5 +345,4 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
       </div>
     </div>
   </section>
-  <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="paneId" />
 </template>

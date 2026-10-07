@@ -68,7 +68,7 @@ capabilities:
   pane's left/top/right edges and floats "<connection name> · <database label>"
   (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
-- **One-click table transfer** — a topbar button next to the backup
+- **One-click table transfer** — an activity-rail entry below the backup
   center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
   the conversion script
   (`.exe/.bat/.cmd/.lnk`; `.lnk` resolved via PowerShell COM, script stdin is
@@ -222,9 +222,10 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
-- Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useContextMenu.js`,
+- Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useActivityRail.js`
+  (activity-rail entries, order, and live shortcut labels), `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
-  `useTabWindowDrag.js`, `useUpdater.js`, `useQuickOpenClearance.js
+  `useTabWindowDrag.js`, `useUpdater.js`
 - Color theme: `colorThemes.js` (preset registry) + `colorThemeController.js`
   (injects token overrides as a runtime <style> using the base selectors, so
   teleported surfaces inherit for free); persisted in localStorage`
@@ -249,7 +250,8 @@ from UI):
   `changeSemantics.js` (format-only vs real diff detection for the comparison
   auto-jump)
 
-**Components** (`components/`) render panes and dialogs: `WorkbenchSidebar.vue`,
+**Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
+`WorkbenchSidebar.vue`,
 `WorkbenchTabs.vue`, `DataGrid.vue`, `InspectorPanel.vue`, `CellDetailPanel.vue`,
 `ContextMenu.vue`, `ConnectionDialog.vue`, import/export dialogs (`ImportWizardDialog.vue` and
 `BatchImportDialog.vue`, both with the side-by-side
@@ -432,6 +434,15 @@ Three-pane flex shell: left sidebar (default 292px) | center main pane
 and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
 + `usePaneResize.js`.
 
+- **Activity rail** — Fixed 40px icon column left of the sidebar that stays
+  visible when the sidebar collapses: add connection, then (after a separator)
+  quick open, favorite databases, backup center, and table transfer; a settings
+  gear is pinned at the bottom edge. Entries are drag-reorderable and the order
+  persists in `dbscout_activity_rail_order`. New feature entries go in
+  `useActivityRail.js`; the width is shared by `--wb-activity-rail-width` and
+  `ACTIVITY_RAIL_WIDTH`. The settings sheet itself stays in
+  `WorkbenchSidebar.vue` and teleports to `<body>` anchored at the rail's
+  bottom-left.
 - **Left pane** — Connection cards, database selector, search, virtualized table
   list with context menu
 - **Center pane** — Tab bar, toolbar (filter/sort/export/import/design), virtual-

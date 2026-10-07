@@ -126,9 +126,10 @@ test("workbench follows Navicat-like table interactions with composables", () =>
   assert.match(all, /class="wb-insert-row"/);
   assert.match(all, /wb-connection-node/);
   assert.match(all, /wb-source-tree/);
-  assert.match(all, /wb-connection-add/);
+  assert.match(orchestrator, /<WorkbenchActivityRail\b/);
+  assert.doesNotMatch(all, /wb-connection-add/);
   assert.match(styles, /\.wb-context-menu/);
-  assert.match(styles, /\.wb-connection-add\s*\{[^}]*line-height:\s*1;/s);
+  assert.doesNotMatch(styles, /\.wb-connection-add/);
   assert.match(styles, /\.wb-insert-row/);
   assert.match(styles, /\.wb-connection-node/);
   assert.match(styles, /\.wb-detail-editor/);
@@ -1873,12 +1874,11 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(orchestrator, /:is-dark="isDark"/);
   assert.match(orchestrator, /@toggle-theme="toggleTheme"/);
   assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
-  assert.match(sidebar, /class="wb-sidebar-settings-trigger"/);
-  assert.match(sidebar, /class="wb-sidebar-settings-icon"/);
-  assert.match(sidebar, /<svg[\s\S]{0,300}class="wb-sidebar-settings-icon"/);
-  assert.match(sidebar, /class="wb-sidebar-settings-icon"[\s\S]{0,300}stroke="currentColor"/);
+  // The settings trigger is the gear pinned at the bottom of the activity rail;
+  // the sidebar only owns the teleported settings sheet.
+  assert.doesNotMatch(sidebar, /wb-sidebar-settings-trigger|wb-sidebar-settings-icon/);
   assert.doesNotMatch(sidebar, /settings(-white)?\.png/);
-  assert.match(sidebar, /class="wb-sidebar-settings-sheet"/);
+  assert.match(sidebar, /class="wb-sidebar-settings-sheet wb-floating-themed"/);
   assert.match(sidebar, /const currentTheme = computed\(\(\) => \(props\.isDark \? "dark" : "light"\)\)/);
   assert.match(sidebar, /useCellHighlight\(\{[\s\S]*getTheme:\s*\(\) => currentTheme\.value,[\s\S]*themeRef:\s*currentTheme,[\s\S]*\}\)/);
   assert.doesNotMatch(sidebar, /<header[\s\S]*设置/);
@@ -1956,9 +1956,8 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /INSPECTOR_MIN_WIDTH/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
   assert.match(orchestrator, /inspectorCollapsed\.value\s*\?\s*`\$\{INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\}px`\s*:\s*`\$\{Math\.max\(inspectorWidth\.value, INSPECTOR_MIN_WIDTH\)\}px`/s);
-  assert.match(orchestrator, /:style="\[sidebarLayoutVars, quickOpenClearanceVars\]"/);
-  assert.match(orchestrator, /useQuickOpenClearance/);
-  assert.match(orchestrator, /ref="quickOpenEntryRef"/);
+  assert.match(orchestrator, /:style="sidebarLayoutVars"/);
+  assert.doesNotMatch(orchestrator, /useQuickOpenClearance|quickOpenClearanceVars|quickOpenEntryRef/);
   assert.match(orchestrator, /:style="inspectorTitlebarStyle"/);
   assert.match(orchestrator, /'is-inspector-collapsed': inspectorCollapsed/);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
@@ -1967,13 +1966,14 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
 
   assert.match(sidebar, /<Teleport[^>]*to="#wb-topbar-sidebar-actions"/);
   assert.match(sidebar, /toggleCollapseAll/);
-  assert.match(sidebar, /emit\('open-connection'\)/);
+  // Feature entries live in the always-visible activity rail, not the sidebar header.
+  assert.doesNotMatch(sidebar, /open-connection|open-backup-center|open-table-transfer/);
   assert.doesNotMatch(sidebar, /class="wb-sidebar-title"/);
   assert.doesNotMatch(sidebar, /class="wb-sidebar-count"/);
   assert.doesNotMatch(sidebar, />数据库<\/strong>/);
 
   assert.doesNotMatch(orchestrator, /import\s+WorkbenchTopbarTabs\s+from\s+["']\.\/components\/WorkbenchTopbarTabs\.vue["']/);
-  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?class="wb-quick-open-entry"[\s\S]*?<\/div>/);
+  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?<\/div>/);
   assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
   assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
   assert.match(pane, /class="wb-pane-tabbar"/);
@@ -2003,11 +2003,11 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
   assert.match(styles, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
   assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
-  assert.match(styles, /--wb-sidebar-tab-clearance:\s*32px/);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/s);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-quick-open-entry-clearance:\s*150px/s);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/s);
-  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*calc\(var\(--wb-titlebar-collapsed-controls-clearance\) \+ var\(--wb-quick-open-entry-clearance\)\)/s);
+  assert.match(styles, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\)\)\)/s);
+  assert.doesNotMatch(styles, /wb-quick-open-entry/);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*0px/s);
+  assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-titlebar-collapsed-controls-clearance\)/s);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-retracted \.wb-sidebar-actions\s*\{[^}]*max-width:\s*0/s);
   assert.match(styles, /\.wb-titlebar-tabs\s*\{/);
   assert.match(styles, /\.wb-titlebar-inspector-controls\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
@@ -2018,7 +2018,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.doesNotMatch(styles, /\.wb-topbar-pane-tabs\s*\{/);
   assert.match(styles, /\.wb-sidebar\.is-collapsed,[\s\S]*?\.wb-inspector\.is-collapsed\s*\{[^}]*pointer-events:\s*none/s);
   assert.match(styles, /\.wb-source-tree\s*\{[^}]*padding:\s*0 6px 8px/s);
-  assert.match(styles, /\.wb-sidebar-settings-dock\s*\{[^}]*position:\s*relative[^}]*flex:\s*0 0 auto/s);
+  assert.match(styles, /\.wb-sidebar-settings-sheet\s*\{[^}]*position:\s*fixed/s);
 });
 
 test("split panes render independent tabbars at the top of each pane", () => {
@@ -2028,7 +2028,7 @@ test("split panes render independent tabbars at the top of each pane", () => {
   const styles = read("./workbench.css");
 
   assert.doesNotMatch(orchestrator, /<WorkbenchTopbarTabs/);
-  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?class="wb-quick-open-entry"[\s\S]*?<\/div>/);
+  assert.match(orchestrator, /<div[\s\S]*?class="wb-titlebar-tabs"[\s\S]*?id="wb-topbar-tabs"[\s\S]*?<\/div>/);
   assert.match(pane, /import\s+WorkbenchTabs\s+from\s+["']\.\/WorkbenchTabs\.vue["']/);
   assert.doesNotMatch(pane, /<Teleport\s+defer\s+to="#wb-topbar-tabs"/);
   assert.doesNotMatch(pane, /v-show="isFocused"/);
@@ -2103,17 +2103,13 @@ test("theme palettes style the full workbench and its sidebar settings control",
   ]) {
     assert.match(styles, new RegExp(`${token}:`), `missing theme token: ${token}`);
   }
-  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{/);
-  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{[^}]*background:\s*transparent/s);
-  assert.match(styles, /\.wb-sidebar-settings-trigger\s*\{[^}]*box-shadow:\s*none/s);
-  assert.match(styles, /\.wb-sidebar-settings-icon\s*\{[^}]*width:\s*18px/s);
-  assert.match(styles, /\.wb-sidebar-settings-trigger:focus-visible\s*\{/);
+  assert.doesNotMatch(styles, /\.wb-sidebar-settings-trigger|\.wb-sidebar-settings-icon|\.wb-sidebar-settings-dock/);
   assert.match(styles, /\.wb-sidebar-settings-sheet\s*\{/);
   assert.match(styles, /\.wb-sidebar-theme-segment\s*\{/);
   assert.match(styles, /\.wb-sidebar-settings-label\s*\{[^}]*font-size:\s*13px/s);
   assert.match(styles, /\.wb-sidebar-settings-label svg\s*\{[^}]*width:\s*17px/s);
   assert.match(styles, /\.wb-sidebar-theme-segment button\s*\{[^}]*font-size:\s*13px/s);
-  assert.match(styles, /\.wb-sidebar-settings-dock\s*\{[^}]*justify-items:\s*start/s);
+  assert.doesNotMatch(styles, /\.wb-sidebar-settings-dock\s*\{/);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
@@ -2886,14 +2882,19 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });
 
-test("Quick Open entry presents its shortcut with the platform-appropriate modifier", () => {
+test("Quick Open lives on the activity rail and keeps its keyboard shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
+  const rail = read("./components/WorkbenchActivityRail.vue");
+  const railModel = read("./composables/useActivityRail.js");
 
-  assert.match(orchestrator, /formatShortcutForPlatform\(shortcutHelper\.get\("searchDatabase"\)\)/);
-  assert.match(orchestrator, /:title="quickOpenEntryTitle"/);
-  assert.match(orchestrator, /:aria-label="quickOpenEntryAriaLabel"/);
-  assert.match(orchestrator, /<kbd v-if="quickOpenShortcutLabel">\{\{ quickOpenShortcutLabel \}\}<\/kbd>/);
-  assert.doesNotMatch(orchestrator, /<kbd>Ctrl\+P<\/kbd>/);
+  // The titlebar entry is gone; the rail action opens the same palette.
+  assert.doesNotMatch(orchestrator, /wb-quick-open-entry|quickOpenEntryTitle|quickOpenShortcutLabel/);
+  assert.match(orchestrator, /quickOpen:\s*openQuickOpenFromAnywhere/);
+  assert.match(railModel, /id:\s*"quickOpen"[\s\S]*?shortcutAction:\s*"searchDatabase"/);
+  // The rail tooltip renders the platform-formatted binding, not a hardcoded keycap.
+  assert.match(railModel, /formatShortcutForPlatform/);
+  assert.match(rail, /<kbd v-if="item\.shortcutLabel">\{\{ item\.shortcutLabel \}\}<\/kbd>/);
+  assert.doesNotMatch(rail, /<kbd>Ctrl\+P<\/kbd>/);
 });
 
 test("Quick Open value field searches on Enter and keeps Ctrl+Enter compatibility", () => {

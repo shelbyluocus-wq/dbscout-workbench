@@ -899,7 +899,6 @@ test("pane table tabs stay above each pane toolbar", () => {
   const rootRule = ruleBody(".mysql-workbench");
   const collapsedInspectorWorkbenchRule = ruleBody(".mysql-workbench.is-inspector-collapsed");
   const titlebarRule = ruleBody(".wb-titlebar");
-  const quickOpenEntryRule = ruleBody(".wb-quick-open-entry");
   const workspaceRule = ruleBody(".wb-workspace");
   const mainRule = ruleBody(".wb-main");
   const sidebarRule = ruleBody(".wb-sidebar");
@@ -918,14 +917,13 @@ test("pane table tabs stay above each pane toolbar", () => {
 
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
-  assert.match(rootRule, /--wb-quick-open-entry-clearance:\s*150px/);
-  assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-quick-open-entry-clearance\)/);
+  assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*0px/);
   assert.match(rootRule, /--wb-titlebar-collapsed-controls-clearance:\s*284px/);
-  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*calc\(var\(--wb-titlebar-collapsed-controls-clearance\) \+ var\(--wb-quick-open-entry-clearance\)\)/);
+  assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-titlebar-collapsed-controls-clearance\)/);
+  assert.doesNotMatch(rootRule, /wb-quick-open-entry/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
   assert.match(titlebarRule, /grid-row\s*:\s*1/);
   assert.doesNotMatch(titlebarRule, /z-index/);
-  assert.match(quickOpenEntryRule, /z-index\s*:\s*40/);
   for (const rule of [titlebarSidebarRule, titlebarInspectorRule, updateRule, pinRule, windowControlsRule]) {
     assert.match(rule, /z-index\s*:\s*40/);
   }
@@ -972,7 +970,9 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   const leftEdgePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane .wb-object-tabs");
   const workbenchRule = ruleBody(".mysql-workbench");
   assert.match(titlebarSidebarRule, /width:\s*var\(--wb-sidebar-titlebar-width\)/);
+  assert.match(titlebarSidebarRule, /padding-inline:\s*calc\(\(var\(--wb-activity-rail-width\) - 30px\) \/ 2\) 8px/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
+  assert.match(collapsedRule, /width\s*:\s*var\(--wb-activity-rail-width\)/);
   assert.match(collapsedRule, /justify-content\s*:\s*center/);
   assert.match(collapsedRule, /padding\s*:\s*0/);
   assert.match(collapsedRule, /transition\s*:\s*none/);
@@ -991,9 +991,9 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(leftEdgePaneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
-  assert.match(css, /--wb-sidebar-tab-clearance:\s*32px/);
+  assert.match(css, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
-  assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-sidebar-slot-width\)\)\)/);
+  assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\)\)\)/);
 });
 
 test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap", () => {
@@ -1186,8 +1186,18 @@ test("context menus use a near-opaque tokenized menu surface in both themes", ()
   assert.match(ruleBody(".wb-context-menu"), /background:\s*var\(--wb-menu-surface\)/);
 });
 
-test("settings drawer uses an opaque dialog surface", () => {
-  assert.match(ruleBody(".wb-sidebar-settings-sheet"), /background:\s*var\(--wb-dialog-surface\)/);
+test("settings sheet floats at the bottom of the activity rail", () => {
+  const sheet = ruleBody(".wb-sidebar-settings-sheet");
+  assert.match(sheet, /position:\s*fixed/);
+  assert.match(sheet, /left:\s*calc\(var\(--wb-activity-rail-width\) \+ 8px\)/);
+  assert.match(sheet, /bottom:\s*12px/);
+  assert.match(sheet, /z-index:\s*80/);
+  assert.match(sheet, /background:\s*var\(--wb-dialog-surface\)/);
+  assert.match(ruleBody(".wb-activity-rail-bottom"), /margin-top:\s*auto/);
+  // The sheet teleports to <body>, so it carries the floating theme scope.
+  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+  assert.match(sidebarVue, /<Teleport to="body">[\s\S]*?wb-sidebar-settings-sheet wb-floating-themed/);
+  assert.match(sidebarVue, /data-theme="currentTheme"|:data-theme="currentTheme"/);
 });
 
 test("collapsed settings drawer is removed from keyboard and screen-reader navigation", () => {
@@ -1199,7 +1209,7 @@ test("collapsed settings drawer is removed from keyboard and screen-reader navig
   assert.match(sheet, /:aria-hidden="!settingsOpen"/);
   assert.match(sheet, /:inert="!settingsOpen"/);
   assert.match(sidebarVue, /closeSettings\(\{ restoreFocus: true \}\)/);
-  assert.match(sidebarVue, /restoreFocus\) nextTick\(\(\) => settingsTriggerRef\.value\?\.focus/);
+  assert.match(sidebarVue, /restoreFocus\) nextTick\(\(\) => settingsRailTrigger\(\)\?\.focus/);
 });
 
 test("save errors remain visible for four seconds while success feedback stays brief", () => {
@@ -1210,13 +1220,12 @@ test("save errors remain visible for four seconds while success feedback stays b
   assert.equal((orchestratorVue.match(/saveReminderDuration\(kind\)/g) || []).length, 3);
 });
 
-test("sidebar settings gear is an inline SVG instead of theme-switched bitmaps", () => {
-  const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
+test("settings gear is a lucide activity-rail icon instead of theme-switched bitmaps", () => {
+  const railModel = readLocalizedContractSource(join(__dirname, "composables", "useActivityRail.js"), "utf8");
 
-  assert.doesNotMatch(sidebarVue, /settings(-white)?\.png/);
-  assert.doesNotMatch(sidebarVue, /<img[\s\S]{0,200}wb-sidebar-settings-icon/);
-  assert.match(sidebarVue, /<svg[\s\S]{0,300}class="wb-sidebar-settings-icon"/);
-  assert.match(sidebarVue, /class="wb-sidebar-settings-icon"[\s\S]{0,300}stroke="currentColor"/);
+  assert.doesNotMatch(railModel, /settings(-white)?\.png|<img/);
+  assert.match(railModel, /import \{[^}]*\bSettings\b[^}]*\} from "lucide-vue-next"/);
+  assert.match(railModel, /id:\s*"settings"[\s\S]*?icon:\s*Settings[\s\S]*?zone:\s*"bottom"/);
 });
 
 test("cell detail collapse bar uses theme tokens and pane-collapse motion", () => {
@@ -1439,9 +1448,9 @@ test("fill handle uses accent tokens and sits outside clipped cells", () => {
   assert.match(ruleBody(".wb-fill-options-item.active"), /background:\s*var\(--wb-accent-soft\)/);
 });
 
-test("quick open entry stacks above the top-edge pane tabbar that overlaps the titlebar", () => {
+test("top-edge pane tabbar still overlaps the titlebar below the chrome controls", () => {
   // .wb-main 上探到标题栏下方，顶沿 pane 页签条 z-index 32 会盖住标题栏区域；
-  // 快速打开按钮与标题栏其他控件同档 40，否则被不透明背景遮罩而不可见、不可点。
-  assert.match(ruleBody(".wb-quick-open-entry"), /z-index:\s*40/);
+  // 标题栏控件同档 40，否则被不透明背景遮罩而不可见、不可点。
   assert.match(ruleBody(".wb-pane-tabbar.is-top-edge-pane"), /z-index:\s*32/);
+  assert.doesNotMatch(css, /wb-quick-open-entry/);
 });

@@ -1,4 +1,4 @@
-// 冒烟：一键转表对话框（mock 模式）。验证工具栏入口按钮、模板页签、
+// 冒烟：一键转表对话框（mock 模式）。验证左侧功能栏入口按钮、模板页签、
 // 模拟转表流程的状态与日志渲染。
 import { chromium } from 'playwright';
 
@@ -20,27 +20,25 @@ await page.addInitScript(() => {
 await page.goto('http://127.0.0.1:1431', { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(800);
 
-// 侧栏可能默认折叠，折叠时顶栏动作区不可见；先展开（同其它 smoke 脚本的 ensureSidebar）。
-const entry = page.locator('button[aria-label="一键转表"]');
-if (!(await entry.count())) fail('顶栏没有找到一键转表按钮');
-if (!(await entry.isVisible().catch(() => false))) {
-  await page.locator('.wb-topbar-collapse-btn').first().click();
-  await page.waitForTimeout(800);
-}
-if (!(await entry.isVisible().catch(() => false))) fail('一键转表按钮在展开侧栏后仍不可见');
-// 回归：.wb-sidebar-actions 的 max-width 曾只容 3 个按钮（70px），第 4 个被
-// overflow:hidden 裁掉但 DOM 可见性检测不出来；这里断言按钮没超出容器右缘。
-const clipBoxes = await page.evaluate(() => {
-  const btn = document.querySelector('button[aria-label="一键转表"]');
-  const wrap = btn?.closest('.wb-sidebar-actions');
-  if (!btn || !wrap) return null;
-  const b = btn.getBoundingClientRect();
-  const w = wrap.getBoundingClientRect();
-  return { btnRight: b.right, wrapRight: w.right };
-});
-if (!clipBoxes) fail('找不到按钮或其 .wb-sidebar-actions 容器');
-if (clipBoxes.btnRight > clipBoxes.wrapRight + 0.5) {
-  fail(`按钮被容器裁剪: btnRight=${clipBoxes.btnRight} wrapRight=${clipBoxes.wrapRight}`);
+// The entry lives in the always-visible activity rail, so it must stay usable
+// whichever state the database sidebar starts in and after toggling it.
+const entry = page.locator('.wb-activity-rail button[aria-label="一键转表"]');
+if (!(await entry.count())) fail('activity rail has no table transfer entry');
+for (const state of ['initial sidebar state', 'toggled sidebar state']) {
+  if (state !== 'initial sidebar state') {
+    await page.locator('#wb-topbar-sidebar-actions .wb-topbar-collapse-btn').click();
+    await page.waitForTimeout(800);
+  }
+  if (!(await entry.isVisible().catch(() => false))) fail(`table transfer entry hidden in the ${state}`);
+  const outsideRail = await page.evaluate(() => {
+    const btn = document.querySelector('.wb-activity-rail button[aria-label="一键转表"]');
+    const rail = btn?.closest('.wb-activity-rail');
+    if (!btn || !rail) return null;
+    const b = btn.getBoundingClientRect();
+    const r = rail.getBoundingClientRect();
+    return b.left < r.left - 0.5 || b.right > r.right + 0.5 || b.bottom > r.bottom + 0.5;
+  });
+  if (outsideRail !== false) fail(`table transfer entry escapes the activity rail in the ${state}`);
 }
 await entry.click();
 
