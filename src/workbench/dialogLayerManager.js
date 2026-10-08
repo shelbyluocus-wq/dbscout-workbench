@@ -1,3 +1,5 @@
+import { interactionShowsFocusRing } from "./focusModality.js";
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -153,6 +155,9 @@ export function createDialogLayerManager(getDocument = () => globalThis.document
     if (existing >= 0) layers.splice(existing, 1);
     const documentTarget = getDocument();
     layer.returnFocus = documentTarget?.activeElement || null;
+    // Snapshot the opener's modality now. The Enter that closes the dialog
+    // must not paint a keyboard focus ring on a control the user clicked.
+    layer.returnFocusVisible = interactionShowsFocusRing();
     layers.push(layer);
     ensureListener();
   }
@@ -163,8 +168,14 @@ export function createDialogLayerManager(getDocument = () => globalThis.document
     const wasTop = index === layers.length - 1;
     layers.splice(index, 1);
     detachRootListener(layer);
-    const result = { wasTop, nextTop: top(), returnFocus: layer.returnFocus || null };
+    const result = {
+      wasTop,
+      nextTop: top(),
+      returnFocus: layer.returnFocus || null,
+      returnFocusVisible: layer.returnFocusVisible !== false,
+    };
     layer.returnFocus = null;
+    layer.returnFocusVisible = undefined;
     releaseListenerWhenIdle();
     return result;
   }
@@ -180,11 +191,11 @@ export function createDialogLayerManager(getDocument = () => globalThis.document
     return true;
   }
 
-  function restoreFocus({ wasTop, nextTop, returnFocus }) {
+  function restoreFocus({ wasTop, nextTop, returnFocus, returnFocusVisible }) {
     if (!wasTop || top() !== nextTop) return false;
     if (returnFocus?.isConnected === false) return false;
     if (typeof returnFocus?.focus !== "function") return false;
-    returnFocus.focus({ preventScroll: true });
+    returnFocus.focus({ preventScroll: true, focusVisible: returnFocusVisible !== false });
     return true;
   }
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createDialogLayerManager } from "./dialogLayerManager.js";
+import { noteKeyboardInteraction, notePointerInteraction } from "./focusModality.js";
 
 function createHarness() {
   const listeners = new Map();
@@ -23,7 +24,8 @@ function createHarness() {
       isConnected: true,
       focusables: [],
       preferred: null,
-      focus() {
+      focus(options) {
+        node.lastFocusOptions = options;
         documentTarget.activeElement = node;
       },
       addEventListener(type, listener) {
@@ -158,6 +160,38 @@ test("Tab stays inside the topmost dialog", () => {
   harness.documentTarget.activeElement = root;
   assert.equal(manager.handleKeydown(keyEvent("Tab", { shiftKey: true })), true);
   assert.equal(harness.documentTarget.activeElement, last);
+});
+
+test("a pointer-opened dialog restores focus without the keyboard focus ring", () => {
+  const harness = createHarness();
+  const manager = createDialogLayerManager(() => harness.documentTarget);
+  const opener = harness.element("opener");
+  const root = harness.element("dialog");
+  harness.documentTarget.activeElement = opener;
+  notePointerInteraction();
+  try {
+    manager.activate(layer(root, () => {}));
+    noteKeyboardInteraction({ key: "Enter" });
+    const focusState = manager.deactivate(manager.top());
+    assert.equal(manager.restoreFocus(focusState), true);
+    assert.equal(harness.documentTarget.activeElement, opener);
+    assert.equal(opener.lastFocusOptions.focusVisible, false);
+  } finally {
+    noteKeyboardInteraction({ key: "Tab" });
+  }
+});
+
+test("a keyboard-opened dialog still restores the focus ring", () => {
+  const harness = createHarness();
+  const manager = createDialogLayerManager(() => harness.documentTarget);
+  const opener = harness.element("opener");
+  harness.documentTarget.activeElement = opener;
+  notePointerInteraction();
+  noteKeyboardInteraction({ key: "Enter" });
+  manager.activate(layer(harness.element("dialog"), () => {}));
+  const focusState = manager.deactivate(manager.top());
+  assert.equal(manager.restoreFocus(focusState), true);
+  assert.equal(opener.lastFocusOptions.focusVisible, true);
 });
 
 test("closing a nested dialog restores focus to its opener", () => {

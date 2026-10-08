@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, toRef } from "vue";
 import { useActivityRailSort } from "../composables/useActivityRailSort.js";
+import { retainPointerActivationChrome } from "../pointerActivationChrome.js";
 import WorkbenchActivityRailButton from "./WorkbenchActivityRailButton.vue";
 
 const props = defineProps({
@@ -22,8 +23,32 @@ const sort = useActivityRailSort({
 onBeforeUnmount(sort.dispose);
 
 const sortPhase = computed(() => sort.phase.value);
+const pointerActivatedIds = ref(new Set());
+
+function pointerActivated(item) {
+  return pointerActivatedIds.value.has(item.id);
+}
+
+function retainPointerChrome(item, event) {
+  const retained = retainPointerActivationChrome(event, () => {
+    if (!pointerActivatedIds.value.has(item.id)) return;
+    const next = new Set(pointerActivatedIds.value);
+    next.delete(item.id);
+    pointerActivatedIds.value = next;
+  });
+  if (!retained) return;
+  const next = new Set(pointerActivatedIds.value);
+  next.add(item.id);
+  pointerActivatedIds.value = next;
+}
+
+function selectItem(item, event) {
+  retainPointerChrome(item, event);
+  emit("select", item.id, event);
+}
 
 function selectSortable(item, event) {
+  retainPointerChrome(item, event);
   if (sort.consumeClick()) return;
   emit("select", item.id, event);
 }
@@ -32,6 +57,7 @@ function sortableClass(item) {
   return {
     "is-rail-dragging": sort.isLifted(item),
     "is-rail-settling": sort.isSettling(item),
+    "is-pointer-activated": pointerActivated(item),
   };
 }
 
@@ -54,7 +80,8 @@ function sortableStyle(item, index) {
       v-for="item in leadItems"
       :key="item.id"
       :item="item"
-      @click="emit('select', item.id, $event)"
+      :class="{ 'is-pointer-activated': pointerActivated(item) }"
+      @click="selectItem(item, $event)"
     />
 
     <span v-if="leadItems.length && items.length" class="wb-activity-rail-separator" aria-hidden="true"></span>
@@ -80,7 +107,8 @@ function sortableStyle(item, index) {
         v-for="item in bottomItems"
         :key="item.id"
         :item="item"
-        @click="emit('select', item.id, $event)"
+        :class="{ 'is-pointer-activated': pointerActivated(item) }"
+        @click="selectItem(item, $event)"
       />
     </div>
   </nav>

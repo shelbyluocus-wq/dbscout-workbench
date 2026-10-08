@@ -215,6 +215,8 @@ test("activity rail keeps the rail component inside the workbench before the sid
   assert.match(rail, /class="wb-activity-rail"/);
   assert.match(rail, /v-for="\(item, index\) in items"/);
   assert.match(rail, /@pointerdown="sort\.onPointerDown\(item, \$event\)"/);
+  assert.match(rail, /retainPointerActivationChrome/);
+  assert.match(rail, /is-pointer-activated/);
   assert.doesNotMatch(rail, /draggable=/);
   // The parent's reorder takes positional (sourceId, targetId, { position }) arguments.
   assert.match(rail, /emit\("reorder", sourceId, targetId, \{ position \}\)/);

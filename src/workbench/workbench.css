@@ -7247,6 +7247,23 @@ label:has(input[type="checkbox"]:disabled) {
   transition-delay: 0s;
 }
 
+/* After a pointer click, keep the idle look until the pointer leaves. Enter
+   would otherwise restore keyboard focus and pop the accent fill plus tooltip. */
+.wb-activity-rail:not(.is-sorting) .wb-activity-rail-btn.is-pointer-activated:hover:not(:disabled),
+.wb-activity-rail:not(.is-sorting) .wb-activity-rail-btn.is-pointer-activated:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  outline: none;
+}
+
+.wb-activity-rail:not(.is-sorting) .wb-activity-rail-btn.is-pointer-activated:hover .wb-activity-rail-tip,
+.wb-activity-rail:not(.is-sorting) .wb-activity-rail-btn.is-pointer-activated:focus-visible .wb-activity-rail-tip {
+  opacity: 0;
+  transform: translate(-3px, -50%);
+  transition-delay: 0s;
+}
+
 .wb-activity-rail-tip-title {
   display: flex;
   align-items: baseline;

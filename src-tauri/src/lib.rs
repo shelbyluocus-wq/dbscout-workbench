@@ -43,6 +43,7 @@ mod table_transfer;
 mod table_xlsx;
 pub mod types;
 mod validation;
+mod window_frame;
 mod window_reveal;
 pub mod work_scheduler;
 
@@ -108,6 +109,9 @@ pub fn run() {
         .setup(move |app| {
             // The configured main window starts hidden to avoid a flash during
             // MCP-only startup. Ordinary launches reveal it immediately.
+            // Windows 10's undecorated shadow is a black frame on three sides;
+            // drop it before the first reveal.
+            window_frame::soften_main_window_frame(app.handle());
             if !launch_headless {
                 window_reveal::reveal_main_window(app.handle());
             }
