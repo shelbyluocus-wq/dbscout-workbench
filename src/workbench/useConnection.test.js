@@ -904,8 +904,9 @@ test("silent modified-time refresh preserves loaded schema and ignores other tab
     columns,
     schemaLoaded: true,
   }];
-  const invoke = async (command) => {
+  const invoke = async (command, payload = {}) => {
     assert.equal(command, "list_tables");
+    assert.equal(payload.priority, "background");
     return [{
       table_name: "accounts",
       table_comment: "External comment",
@@ -1235,4 +1236,74 @@ test("removeConnection removes runtime and saved connection metadata", async () 
   assert.equal(conn.selectedConnectionId.value, "demo");
   assert.deepEqual(JSON.parse(store.dbscout_connections), []);
   assert.deepEqual(JSON.parse(store.dbscout_connection_order), ["demo"]);
+});
+
+function twoSavedServersHarness({ slowSecond }) {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      { host: "10.0.0.1", port: "3306", username: "root", password: "a" },
+      { host: "10.0.0.2", port: "3306", username: "root", password: "b" },
+    ]),
+    dbscout_workspace: JSON.stringify({ version: 2, connectionId: "mysql-1", database: "analytics", tabs: [] }),
+  });
+  const calls = [];
+  const runtime = [];
+  const workspace = createWorkspaceState();
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_connections") return runtime.map((item) => ({ ...item }));
+    if (command === "restore_connection") {
+      if (payload.url.includes("10.0.0.2")) await slowSecond.promise;
+      // Runtime ids follow restore completion order, like the backend.
+      runtime.push({ id: `mysql-${runtime.length + 1}`, label: "MySQL", host: "configured", port: 3306, username: "mysql", connected: true });
+      return ["analytics", "billing"];
+    }
+    if (command === "list_databases") return ["analytics", "billing"];
+    if (command === "select_database") return { tables: [] };
+    if (command === "add_connection") {
+      runtime.push({ id: `mysql-${runtime.length + 1}`, label: "MySQL", host: "configured", port: 3306, username: "mysql", connected: true });
+      return ["fresh"];
+    }
+    return {};
+  };
+  return { calls, runtime, workspace, invoke };
+}
+
+test("startup proceeds once the last-used connection is ready while later ones restore in order", async () => {
+  const slowSecond = deferred();
+  const { calls, runtime, workspace, invoke } = twoSavedServersHarness({ slowSecond });
+  const conn = useConnection(workspace, invoke);
+
+  await conn.loadConnections();
+
+  assert.equal(conn.selectedConnectionId.value, "mysql-1");
+  assert.equal(conn.selectedDatabase.value, "analytics");
+  assert.deepEqual(runtime.map((item) => item.id), ["mysql-1"], "the slow second server has not blocked startup");
+  const restores = calls.filter((call) => call.command === "restore_connection").map((call) => call.payload.url);
+  assert.equal(restores.length, 2);
+  assert.ok(restores[0].includes("10.0.0.1") && restores[1].includes("10.0.0.2"), "restores keep saved order");
+  assert.equal(calls.filter((call) => call.command === "list_databases").length, 0, "restore's database list is reused");
+
+  slowSecond.resolve();
+  await conn.whenConnectionsRestored();
+  assert.deepEqual(runtime.map((item) => item.id), ["mysql-1", "mysql-2"]);
+  assert.ok(conn.connections.value.some((item) => item.id === "mysql-2" && item.connected));
+});
+
+test("adding a connection waits for background restoration so runtime ids keep their order", async () => {
+  const slowSecond = deferred();
+  const { calls, runtime, workspace, invoke } = twoSavedServersHarness({ slowSecond });
+  const conn = useConnection(workspace, invoke);
+  await conn.loadConnections();
+
+  Object.assign(conn.connDialog, { kind: "mysql", host: "10.0.0.3", port: "3306", username: "root", password: "c" });
+  const adding = conn.submitConnDialog();
+  await flushAsync();
+  assert.equal(calls.some((call) => call.command === "add_connection"), false);
+
+  slowSecond.resolve();
+  await adding;
+  assert.deepEqual(runtime.map((item) => item.id), ["mysql-1", "mysql-2", "mysql-3"]);
+  const order = calls.map((call) => call.command);
+  assert.ok(order.lastIndexOf("restore_connection") < order.indexOf("add_connection"));
 });

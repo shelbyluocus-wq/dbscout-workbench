@@ -263,6 +263,11 @@ from UI):
   `homeDesignTargets.js` (home-page multi-select → table-design targets),
   `changeSemantics.js` (format-only vs real diff detection for the comparison
   auto-jump)
+  `tabSourceSync.js` (background sidebar connection/database sync after a tab
+  is shown), `coalescedTask.js` (debounced persistence with max wait),
+  `savedTabRestore.js` (source-matched saved tabs + view state applied before
+  the first load); `selectionStats.js` also provides the incremental,
+  time-sliced selection scan used by the cell detail bar
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
