@@ -92,6 +92,28 @@ test("database home search still lists an exact table-name match first", () => {
   assert.deepEqual(names(home.filteredTables.value), ["user", "user_profile", "account_user"]);
 });
 
+test("database home search matches several keywords and ranks word starts within the active sort", () => {
+  const home = createController({
+    tables: [
+      { table_name: "superuser_prop", table_comment: "" },
+      { table_name: "prop_user", table_comment: "" },
+      { table_name: "user_prop", table_comment: "" },
+      { table_name: "user_skill", table_comment: "道具" },
+      { table_name: "user_hero", table_comment: "" },
+    ],
+  });
+
+  home.setQuery("user prop");
+  assert.deepEqual(names(home.filteredTables.value), ["prop_user", "user_prop", "superuser_prop"]);
+
+  home.setQuery("user 道具");
+  assert.deepEqual(names(home.filteredTables.value), ["user_skill"]);
+
+  home.setSortMode(HOME_SORT_MODES.nameDesc);
+  home.setQuery("user");
+  assert.deepEqual(names(home.filteredTables.value), ["user_skill", "user_prop", "user_hero", "prop_user", "superuser_prop"]);
+});
+
 test("database home reacts when the table list is replaced after refresh", () => {
   const tableRef = ref([{ table_name: "orders", table_comment: "" }]);
   const home = createController({ tables: tableRef });

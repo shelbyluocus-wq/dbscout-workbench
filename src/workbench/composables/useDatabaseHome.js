@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { rankTableSearchResults } from "../utils/tableSearch.js";
+import { filterTablesByKeywords } from "../utils/tableKeywordSearch.js";
 
 export const HOME_SORT_MODES = Object.freeze({
   nameAsc: "nameAsc",
@@ -70,12 +70,16 @@ function normalizeTable(table, index) {
   };
 }
 
+// One shared collator: same ordering as localeCompare with these options,
+// without rebuilding locale data on every comparison.
+const textCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 function compareName(left, right) {
-  return left.tableName.localeCompare(right.tableName, undefined, { sensitivity: "base", numeric: true });
+  return textCollator.compare(left.tableName, right.tableName);
 }
 
 function compareComment(left, right) {
-  return tableCommentOf(left).localeCompare(tableCommentOf(right), undefined, { sensitivity: "base", numeric: true });
+  return textCollator.compare(left.tableComment, right.tableComment);
 }
 
 function compareFieldCount(left, right) {
@@ -224,17 +228,12 @@ export function createDatabaseHomeController({
         return withFavorites((left, right) => compareName(left, right) || left.originalIndex - right.originalIndex);
     }
   });
-  const filteredTables = computed(() => {
-    const compare = compareTables.value;
-    const text = query.value.trim();
-    if (!text) return [...normalizedTables.value].sort(compare);
-    // Search filters the current view: only the match tier (exact name, name
-    // prefix, name substring, comment) outranks the active sort, so typing a
-    // prefix shared by the visible tables keeps their order unchanged.
-    return rankTableSearchResults(normalizedTables.value, text, { mode: "contains" })
-      .sort((left, right) => left.match.rank - right.match.rank || compare(left.table, right.table))
-      .map(({ table }) => table);
-  });
+  // Sort only when the tables or the sort mode change; typing a search then
+  // filters this ordered list in one pass. Only the match tier (exact name,
+  // name prefix, name word start, name substring, then comment matches)
+  // outranks the active sort, so tables sharing a typed prefix keep their order.
+  const sortedTables = computed(() => [...normalizedTables.value].sort(compareTables.value));
+  const filteredTables = computed(() => filterTablesByKeywords(sortedTables.value, query.value));
 
   const selectedSet = computed(() => new Set(selectedNames.value));
   const canWrite = computed(() => !readOnly);
