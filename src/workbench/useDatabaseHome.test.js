@@ -54,6 +54,44 @@ test("database home search only includes contiguous table-name matches", () => {
   assert.deepEqual(names(home.filteredTables.value), ["heroprop", "prefix_heroprop_archive"]);
 });
 
+test("database home search keeps the active sort order for tables sharing the typed prefix", () => {
+  const home = createController({
+    tables: [
+      { table_name: "act_10", table_comment: "" },
+      { table_name: "act_2", table_comment: "" },
+      { table_name: "Act_b", table_comment: "" },
+      { table_name: "act_a", table_comment: "" },
+      { table_name: "zz_act", table_comment: "" },
+    ],
+    favoriteTableNames: ["act_a"],
+  });
+
+  const defaultOrder = names(home.filteredTables.value);
+  assert.deepEqual(defaultOrder, ["act_a", "act_2", "act_10", "Act_b", "zz_act"]);
+
+  home.setQuery("act");
+  assert.deepEqual(names(home.filteredTables.value), defaultOrder);
+
+  home.setSortMode(HOME_SORT_MODES.nameDesc);
+  const descOrder = names(home.filteredTables.value);
+  assert.deepEqual(descOrder, ["act_a", "Act_b", "act_10", "act_2", "zz_act"]);
+  home.setQuery("");
+  assert.deepEqual(names(home.filteredTables.value), ["act_a", "zz_act", "Act_b", "act_10", "act_2"]);
+});
+
+test("database home search still lists an exact table-name match first", () => {
+  const home = createController({
+    tables: [
+      { table_name: "account_user", table_comment: "" },
+      { table_name: "user_profile", table_comment: "" },
+      { table_name: "user", table_comment: "" },
+    ],
+  });
+
+  home.setQuery("user");
+  assert.deepEqual(names(home.filteredTables.value), ["user", "user_profile", "account_user"]);
+});
+
 test("database home reacts when the table list is replaced after refresh", () => {
   const tableRef = ref([{ table_name: "orders", table_comment: "" }]);
   const home = createController({ tables: tableRef });
