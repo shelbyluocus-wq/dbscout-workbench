@@ -2962,6 +2962,18 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
   assert.match(orchestrator, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
 
+  // Ctrl+D must stay available after Ctrl+W closes table design. That close
+  // drops keyboard focus onto the document, outside the workbench bubble listener.
+  assert.match(orchestrator, /function\s+handleOpenDesignShortcut\s*\(event\)/);
+  assert.match(
+    orchestrator,
+    /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCloseTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleOpenDesignShortcut\(event\)\)\s*return;/,
+  );
+  assert.match(orchestrator, /focusedPaneState\.handleOpenDesignKeydown\(event\) === true/);
+  assert.match(read("./components/WorkbenchPane.vue"), /function\s+reclaimDataGridFocus\(tabId\)/);
+  assert.match(read("./components/WorkbenchPane.vue"), /isStrandedKeyboardFocus\(globalThis\.document\?\.activeElement\)/);
+  assert.match(read("./components/WorkbenchPane.vue"), /gridWrapRef\.value\?\.focus\(\{ preventScroll: true \}\)/);
+
   // Ctrl+Tab / Ctrl+Shift+Tab cycle only published tabs in the focused pane.
   assert.match(orchestrator, /matchesBinding\("nextTab",\s*event\)/);
   assert.match(orchestrator, /matchesBinding\("previousTab",\s*event\)/);

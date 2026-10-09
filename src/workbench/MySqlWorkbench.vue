@@ -392,6 +392,7 @@ const focusedPaneState = reactive({
   pasteCopiedRowsAbove: null,
   deleteRow: null,
   handleWorkbenchKeydown: null,
+  handleOpenDesignKeydown: null,
   clearSelection: null,
   resetGridScroll: null,
   selectCellAt: null,
@@ -3732,6 +3733,14 @@ function isEditableShortcutTarget(target) {
   return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
 }
 
+function handleOpenDesignShortcut(event) {
+  if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
+  if (typeof focusedPaneState.handleOpenDesignKeydown === "function") {
+    return focusedPaneState.handleOpenDesignKeydown(event) === true;
+  }
+  return handleOpenDesignKeydown(event);
+}
+
 function handleOpenDesignKeydown(event) {
   if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
@@ -3967,6 +3976,7 @@ function handleGlobalShortcutKeydown(event) {
   if (handleOpenSqlQueryKeydown(event)) return;
   if (handleOpenTableTransferKeydown(event)) return;
   if (handleCloseTabKeydown(event)) return;
+  if (handleOpenDesignShortcut(event)) return;
   if (handleCycleTabKeydown(event)) return;
   if (handleTabShortcutKeydown(event)) return;
   if (handleGlobalHomeClipboardKeydown(event)) return;

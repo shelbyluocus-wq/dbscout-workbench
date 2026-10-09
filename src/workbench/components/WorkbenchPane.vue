@@ -34,6 +34,7 @@ import { useConfirm } from "../composables/useConfirm.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
 import { isTauriRuntime } from "../utils/tauriBridge.js";
 import { connectionHasCapability, normalizeConnectionKind } from "../utils/connectionKinds.js";
+import { isStrandedKeyboardFocus } from "../keyboardFocus.js";
 
 import WorkbenchTabs from "./WorkbenchTabs.vue";
 import DataGrid from "./DataGrid.vue";
@@ -1580,6 +1581,7 @@ function emitPaneState() {
     prepareInsertDraftsForRefresh,
     clearInsertDraftsAfterRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
+    handleOpenDesignKeydown,
     copyHomeSelection,
     pasteHomeTables,
     copyGridSelection,
@@ -1631,6 +1633,25 @@ function emitPaneState() {
     commitEditingWithoutRefocus: () => finishEditing({ skipRefocus: true }),
   });
 }
+
+// The data grid unmounts while table design is open. If it held keyboard
+// focus, the browser parks focus on the document and in-grid shortcuts such
+// as Ctrl+D no longer fire until the user clicks a cell.
+function reclaimDataGridFocus(tabId) {
+  nextTick(() => {
+    if (!props.isFocused || activeDataTab.value?.id !== tabId) return;
+    if (!isStrandedKeyboardFocus(globalThis.document?.activeElement)) return;
+    gridWrapRef.value?.focus({ preventScroll: true });
+  });
+}
+
+watch(
+  () => activeDataTab.value?.id || "",
+  (tabId, previousTabId) => {
+    if (!tabId || tabId === previousTabId) return;
+    reclaimDataGridFocus(tabId);
+  },
+);
 
 watch(
   () => [activeDataTab.value, tableTabViewRevision(activeDataTab.value)],
