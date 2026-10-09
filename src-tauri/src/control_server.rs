@@ -26,7 +26,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio::time::timeout;
 
 use crate::agent::AgentContext;
-use crate::types::AppState;
+use crate::types::{AppState, RuntimeConnection};
 use crate::window_reveal;
 
 /// Window event consumed by the frontend (mirrors the sidecar
@@ -136,6 +136,9 @@ enum ControlRequest {
         args: Value,
     },
     GetContext {
+        id: String,
+    },
+    GetConnections {
         id: String,
     },
     ExportTable {
@@ -255,6 +258,7 @@ fn request_id(request: &ControlRequest) -> &str {
         ControlRequest::DbTool { id, .. }
         | ControlRequest::UiAction { id, .. }
         | ControlRequest::GetContext { id }
+        | ControlRequest::GetConnections { id }
         | ControlRequest::ExportTable { id, .. }
         | ControlRequest::ImportTable { id, .. } => id.as_str(),
         ControlRequest::Hello { .. } => "",
@@ -453,6 +457,7 @@ async fn handle_connection(app: AppHandle, stream: tokio::net::TcpStream, token:
         "version": app.package_info().version.to_string(),
         "protocolVersion": CONTROL_PROTOCOL_VERSION,
         "enabled": app.state::<ControlServerState>().enabled.load(Ordering::Acquire),
+        "capabilities": ["get_connections"],
     });
     if write_line(&mut write_half, &hello).await.is_err() {
         return;
@@ -525,6 +530,13 @@ async fn dispatch(app: &AppHandle, request: ControlRequest) -> Value {
             Ok(data) => response_ok(&id, data),
             Err(error) => response_err(&id, &error),
         },
+        ControlRequest::GetConnections { id } => {
+            let state = app.state::<AppState>();
+            let runtime = state.runtime.lock().await;
+            let mut connections: Vec<_> = runtime.connections.values().collect();
+            connections.sort_by(|a, b| a.id.cmp(&b.id));
+            response_ok(&id, Value::Array(connections.into_iter().map(connection_summary).collect()))
+        }
         ControlRequest::ExportTable { id, args } => match export_table_xlsx(app, args).await {
             Ok(data) => response_ok(&id, data),
             Err(error) => response_err(&id, &error),
@@ -615,6 +627,17 @@ async fn run_ui_action(app: &AppHandle, action: &str, args: Value) -> Result<Val
             Err(format!("界面动作超时: {action}"))
         }
     }
+}
+
+/// Explicit allowlist: never serialize connection URLs or credentials.
+fn connection_summary(connection: &RuntimeConnection) -> Value {
+    serde_json::json!({
+        "id": connection.id,
+        "label": connection.label,
+        "kind": connection.kind,
+        "host": connection.host,
+        "port": connection.port,
+    })
 }
 
 async fn current_context(app: &AppHandle) -> Result<Value, String> {
@@ -1082,6 +1105,32 @@ mod tests {
             }
             other => panic!("unexpected request: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_connection_discovery_and_waits_for_restored_connections() {
+        let request = parse_control_request(r#"{"op":"get_connections","id":"connections-1"}"#).unwrap();
+        assert_eq!(request_id(&request), "connections-1");
+        assert!(request_needs_frontend_ready(&request));
+    }
+
+    #[test]
+    fn connection_discovery_never_exposes_credentials_or_urls() {
+        let connection = RuntimeConnection {
+            id: "mysql-7".into(),
+            kind: crate::types::DatabaseKind::MySql,
+            label: "测试连接".into(),
+            host: "db.example".into(),
+            port: 3307,
+            username: "private-user".into(),
+            mysql_url: Some("mysql://private-user:private-password@db.example:3307/test".into()),
+            clickhouse_url: None,
+            mongodb_url: None,
+            database: Some("test".into()),
+        };
+        assert_eq!(connection_summary(&connection), serde_json::json!({
+            "id":"mysql-7", "label":"测试连接", "kind":"mysql", "host":"db.example", "port":3307
+        }));
     }
 
     #[test]
