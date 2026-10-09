@@ -117,6 +117,15 @@ test("homepage Enter opens tables selected from the homepage tab", () => {
   assert.match(home, /if \(typeahead\.handleKeydown\(event\)\)[\s\S]*?if \(handleHomeEnterKeydown\(event\)\)/);
 });
 
+test("homepage Enter on a ctrl or shift selected row opens every selected table", () => {
+  const tableList = read("./components/DatabaseTableList.vue");
+
+  assert.match(tableList, /import\s+\{\s*homeEnterOpenNames\s*\}\s+from\s+"\.\.\/utils\/homeEnterOpen\.js"/);
+  assert.match(tableList, /function\s+openEnteredTables\(focusedName = ""\)\s*\{[\s\S]*?homeEnterOpenNames\(focusedName,\s*props\.selectedNames\)/);
+  assert.match(tableList, /function\s+handleRowOpen\(table\)\s*\{[\s\S]*?if\s*\(!selectedSet\.value\.has\(name\)\)\s*selectForAction\(table\);[\s\S]*?openEnteredTables\(name\)/);
+  assert.match(tableList, /if\s*\(key === "Enter"\)\s*\{[\s\S]*?openEnteredTables\(\)/);
+});
+
 test("homepage search highlights matching table names and comments in visible rows", () => {
   const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");

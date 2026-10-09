@@ -70,6 +70,15 @@ test("the detail panel copies stored JSON instead of the pretty display", () => 
   );
 });
 
+test("Escape in the detail editor returns keyboard focus to the grid", () => {
+  const detail = read("components/CellDetailPanel.vue");
+  const pane = read("components/WorkbenchPane.vue");
+
+  assert.match(detail, /if \(event\.key === "Escape"\) \{[\s\S]*?detailInputRef\.value\?\.blur\(\);[\s\S]*?emit\("exit-detail"\)/);
+  assert.match(pane, /@exit-detail="focusGridAfterDetailExit"/);
+  assert.match(pane, /function focusGridAfterDetailExit\(\) \{[\s\S]*?gridWrapRef\.value\?\.focus\(\{ preventScroll: true \}\)/);
+});
+
 test("the focused detail editor preserves syntax highlighting and the native text cursor", () => {
   const styles = read("workbench.css");
 

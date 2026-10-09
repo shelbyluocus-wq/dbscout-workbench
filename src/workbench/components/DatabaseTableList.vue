@@ -11,6 +11,7 @@ import {
   moveHomeColumn,
   saveHomeColumnLayout,
 } from "../homeColumnLayout.js";
+import { homeEnterOpenNames } from "../utils/homeEnterOpen.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { matchTableSearch } from "../utils/tableSearch.js";
 import { databaseTableIconComponent } from "./databaseDecorationIcons.js";
@@ -220,9 +221,15 @@ function handleRowRename(table) {
   emit("start-rename", name);
 }
 
+function openEnteredTables(focusedName = "") {
+  homeEnterOpenNames(focusedName, props.selectedNames).forEach((name) => emit("open-table", name));
+}
+
 function handleRowOpen(table) {
-  const name = selectForAction(table);
-  if (name) emit("open-table", name);
+  const name = tableName(table);
+  if (!name) return;
+  if (!selectedSet.value.has(name)) selectForAction(table);
+  openEnteredTables(name);
 }
 
 function handleRowDelete(table) {
@@ -434,7 +441,7 @@ function handleKeydown(event) {
   }
   if (key === "Enter") {
     event.preventDefault();
-    props.selectedNames.forEach((name) => emit("open-table", name));
+    openEnteredTables();
     return;
   }
   if (key === "Delete") {

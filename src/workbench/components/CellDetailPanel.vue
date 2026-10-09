@@ -14,7 +14,7 @@ const props = defineProps({
   selectionStats: { type: Object, default: null },
 });
 
-const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu"]);
+const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu", "exit-detail"]);
 
 const DETAIL_DEFAULT_HEIGHT = 200;
 const DETAIL_MIN_HEIGHT = 96;
@@ -197,9 +197,12 @@ function onDetailKeydown(event) {
     saveDetail();
     return;
   }
+  // Leave the editor and hand the keyboard back to the grid, so the next
+  // arrow key moves the selected cell instead of doing nothing.
   if (event.key === "Escape") {
     event.preventDefault();
     detailInputRef.value?.blur();
+    emit("exit-detail");
   }
 }
 

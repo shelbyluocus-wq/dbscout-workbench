@@ -849,6 +849,11 @@ async function handleSaveTextPanel() {
   return result;
 }
 
+function focusGridAfterDetailExit() {
+  focusPane();
+  nextTick(() => gridWrapRef.value?.focus({ preventScroll: true }));
+}
+
 async function handleCommitDetailDraft(payload) {
   const tab = activeDataTab.value;
   const rowKey = payload?.rowKey || selectedCell.value?.rowKey;
@@ -1779,6 +1784,7 @@ onMounted(() => emitPaneState());
       @update:text-draft="updateTextDraft"
       @save-text-panel="handleSaveTextPanel"
       @commit-detail-draft="handleCommitDetailDraft"
+      @exit-detail="focusGridAfterDetailExit"
       @detail-contextmenu="openDetailContextMenu"
     />
 
