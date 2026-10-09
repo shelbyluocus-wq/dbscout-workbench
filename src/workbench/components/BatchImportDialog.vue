@@ -4,8 +4,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import {
+  centerDialogFrame,
   clampDialogFrame,
-  loadBatchImportDialogFrame,
+  dialogViewportMatches,
+  moveDialogFrame,
+  readBatchImportDialogPlacement,
   resizeDialogFrame,
   saveBatchImportDialogFrame,
 } from "../utils/batchImportDialogFrame.js";
@@ -23,7 +26,10 @@ const viewMode = ref("scope");
 const comparisonFullscreen = ref(false);
 const dialogRef = ref(null);
 const frame = ref(null);
+let userPositioned = false;
+let placedViewport = null;
 const resizing = ref(false);
+const moving = ref(false);
 const resizeHandles = [
   { edge: "n", label: "调整窗口上边缘", orientation: "horizontal", edges: { top: true } },
   { edge: "s", label: "调整窗口下边缘", orientation: "horizontal", edges: { bottom: true } },
@@ -122,7 +128,14 @@ watch(
 );
 
 const dialogStyle = computed(() => {
-  if (!frame.value) return null;
+  if (!frame.value) {
+    return {
+      position: "absolute",
+      left: "50%",
+      top: "50%",
+      transform: "translate(-50%, -50%)",
+    };
+  }
   return {
     position: "absolute",
     left: `${frame.value.left}px`,
@@ -131,6 +144,7 @@ const dialogStyle = computed(() => {
     height: `${frame.value.height}px`,
     maxWidth: "none",
     maxHeight: "none",
+    transform: "none",
   };
 });
 
@@ -141,14 +155,45 @@ function viewportSize() {
   };
 }
 
-function rememberFrame(next) {
+{
+  const openingViewport = viewportSize();
+  const openingPlacement = readBatchImportDialogPlacement(globalThis.localStorage, openingViewport);
+  frame.value = openingPlacement.frame;
+  userPositioned = openingPlacement.positioned;
+  placedViewport = openingPlacement.frame ? openingViewport : null;
+}
+
+function persistFrame(next = frame.value) {
+  if (!next) return;
+  const viewport = viewportSize();
   frame.value = next;
-  saveBatchImportDialogFrame(next, globalThis.localStorage);
+  placedViewport = viewport;
+  saveBatchImportDialogFrame({ ...next, positioned: userPositioned }, globalThis.localStorage, viewport);
 }
 
 function keepFrameInViewport() {
-  if (!frame.value || resizing.value) return;
-  rememberFrame(clampDialogFrame(frame.value, viewportSize()));
+  if (!frame.value || resizing.value || moving.value) return;
+  const viewport = viewportSize();
+  if (!dialogViewportMatches(placedViewport, viewport)) {
+    frame.value = centerDialogFrame(frame.value, viewport);
+    placedViewport = viewport;
+    userPositioned = false;
+    return;
+  }
+  frame.value = clampDialogFrame(frame.value, viewport);
+}
+
+function readDialogFrame() {
+  const dialog = dialogRef.value;
+  if (!dialog?.getBoundingClientRect) return frame.value;
+  const rect = dialog.getBoundingClientRect();
+  const host = dialog.parentElement?.getBoundingClientRect?.() || { left: 0, top: 0 };
+  return {
+    left: rect.left - host.left,
+    top: rect.top - host.top,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 function resizeCursor(edges) {
@@ -159,15 +204,16 @@ function resizeCursor(edges) {
 }
 
 let stopResize = null;
+let stopMove = null;
 
 function startResize(event, edges) {
   if (event.button != null && event.button !== 0) return;
-  const rect = dialogRef.value?.getBoundingClientRect();
-  if (!rect) return;
+  const origin = readDialogFrame();
+  if (!origin?.width || !origin?.height) return;
   event.preventDefault();
   event.stopPropagation();
+  stopMove?.();
   stopResize?.();
-  const origin = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
   const startPoint = { x: event.clientX, y: event.clientY };
   const pointerId = event.pointerId;
   const handle = event.currentTarget;
@@ -200,7 +246,7 @@ function startResize(event, edges) {
       globalThis.document.body.style.cursor = "";
       globalThis.document.body.style.userSelect = "";
     }
-    if (frame.value) saveBatchImportDialogFrame(frame.value, globalThis.localStorage);
+    persistFrame();
     if (stopResize === stop) stopResize = null;
   };
   stopResize = stop;
@@ -210,13 +256,64 @@ function startResize(event, edges) {
   handle?.addEventListener?.("lostpointercapture", stop);
 }
 
+function startMove(event) {
+  if (event.button != null && event.button !== 0) return;
+  if (event.target?.closest?.("button, a, input, select, textarea, label")) return;
+  const origin = readDialogFrame();
+  if (!origin?.width || !origin?.height) return;
+  event.preventDefault();
+  stopResize?.();
+  stopMove?.();
+  const startPoint = { x: event.clientX, y: event.clientY };
+  const pointerId = event.pointerId;
+  const handle = event.currentTarget;
+  userPositioned = true;
+  moving.value = true;
+  try {
+    handle?.setPointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture is unavailable for this event; window listeners still track the drag.
+  }
+  if (globalThis.document?.body) {
+    globalThis.document.body.style.cursor = "grabbing";
+    globalThis.document.body.style.userSelect = "none";
+  }
+  const move = (moveEvent) => {
+    const samples = moveEvent.getCoalescedEvents?.();
+    const latest = samples?.length ? samples[samples.length - 1] : moveEvent;
+    frame.value = moveDialogFrame(origin, {
+      x: latest.clientX - startPoint.x,
+      y: latest.clientY - startPoint.y,
+    }, viewportSize());
+  };
+  const stop = () => {
+    globalThis.removeEventListener?.("pointermove", move);
+    globalThis.removeEventListener?.("pointerup", stop);
+    globalThis.removeEventListener?.("pointercancel", stop);
+    handle?.removeEventListener?.("lostpointercapture", stop);
+    if (handle?.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
+    moving.value = false;
+    if (globalThis.document?.body) {
+      globalThis.document.body.style.cursor = "";
+      globalThis.document.body.style.userSelect = "";
+    }
+    persistFrame();
+    if (stopMove === stop) stopMove = null;
+  };
+  stopMove = stop;
+  globalThis.addEventListener?.("pointermove", move);
+  globalThis.addEventListener?.("pointerup", stop);
+  globalThis.addEventListener?.("pointercancel", stop);
+  handle?.addEventListener?.("lostpointercapture", stop);
+}
+
 onMounted(() => {
-  frame.value = loadBatchImportDialogFrame(globalThis.localStorage, viewportSize());
   globalThis.addEventListener?.("resize", keepFrameInViewport);
 });
 
 onBeforeUnmount(() => {
   stopResize?.();
+  stopMove?.();
   globalThis.removeEventListener?.("resize", keepFrameInViewport);
 });
 </script>
@@ -230,6 +327,7 @@ onBeforeUnmount(() => {
         'is-comparison-mode': viewMode === 'comparison',
         'is-user-sized': frame != null,
         'is-resizing': resizing,
+        'is-moving': moving,
       }"
       :style="dialogStyle"
       role="dialog"
@@ -237,7 +335,7 @@ onBeforeUnmount(() => {
       aria-labelledby="wb-batch-import-title"
       tabindex="-1"
     >
-      <header class="wb-dialog-header">
+      <header class="wb-dialog-header" @pointerdown="startMove">
         <div>
           <strong id="wb-batch-import-title">{{ t('m_fd7719273970') }}</strong>
           <small>{{ batch.database }}</small>

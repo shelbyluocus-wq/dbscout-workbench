@@ -110,6 +110,32 @@ test("opening an inspector context menu stores its inspector surface", () => {
   );
 
   assert.equal(menu.contextMenu.surface, "inspector");
+  assert.equal(menu.contextMenu.commentTarget, null);
+});
+
+test("an inspector comment target is kept for that menu and cleared for the next one", () => {
+  const menu = useContextMenu(
+    { statusText: { value: "" } },
+    {
+      loadTables: async () => {},
+      ensureTableSchema: async () => {},
+      fetchPage: async () => {},
+    },
+    { value: null },
+  );
+
+  menu.openContextMenu(
+    { clientX: 2, clientY: 3 },
+    { tableName: "hero", connectionId: "mysql-1", database: "dev_game" },
+    {
+      surface: "inspector",
+      commentTarget: { kind: "column", columnName: "name", comment: "名称" },
+    },
+  );
+  assert.deepEqual(menu.contextMenu.commentTarget, { kind: "column", columnName: "name", comment: "名称" });
+
+  menu.openContextMenu({ clientX: 4, clientY: 5 });
+  assert.equal(menu.contextMenu.commentTarget, null);
 });
 
 test("opening a general context menu clears prior database target state", () => {

@@ -53,13 +53,14 @@ const props = defineProps({
   // 当前是否存在任意冻结（决定「取消冻结」是否显示）。
   hasFreeze: { type: Boolean, default: false },
   canResetColumnOrder: { type: Boolean, default: false },
+  canEditComment: { type: Boolean, default: false },
   // 动态标签。
   freezeRowLabel: { type: String, default: "冻结到此行" },
   freezeColumnLabel: { type: String, default: "冻结到此列" },
   freezeCellLabel: { type: String, default: "冻结到此单元格" },
 });
 
-const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order']);
+const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
@@ -95,6 +96,10 @@ const contextMenuStyle = computed(() => ({
 
 <template>
   <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" :aria-label="t('m_1a94fed1be72')" @mousedown.stop @click.stop>
+    <template v-if="canEditComment">
+      <button type="button" role="menuitem" @click="emit('edit-comment')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_2d22af42a79f') }}</button>
+      <hr class="wb-context-separator" role="separator" />
+    </template>
     <template v-if="showClipboardActions">
       <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}</button>
       <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}</button>

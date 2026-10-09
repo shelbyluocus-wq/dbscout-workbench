@@ -1700,6 +1700,61 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
+.wb-comment-edit-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(640px, calc(100vh - 32px));
+  box-sizing: border-box;
+}
+
+.wb-comment-edit-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-comment-edit-heading small {
+  overflow: hidden;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-comment-edit-dialog textarea {
+  width: 100%;
+  min-height: 168px;
+  max-height: min(360px, 46vh);
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.wb-comment-edit-dialog textarea:focus {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-comment-edit-dialog textarea:disabled {
+  opacity: 0.7;
+}
+
+.wb-comment-edit-error {
+  margin: 8px 0 0;
+  color: var(--wb-danger-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* ── 查找替换对话框（Ctrl+H）── */
 .wb-replace-field > span {
   justify-self: end;
@@ -5210,7 +5265,21 @@ label:has(input[type="checkbox"]:disabled) {
   position: relative;
 }
 
-.wb-batch-import-dialog.is-resizing {
+.wb-batch-import-dialog .wb-dialog-header {
+  cursor: grab;
+  user-select: none;
+}
+
+.wb-batch-import-dialog.is-moving .wb-dialog-header {
+  cursor: grabbing;
+}
+
+.wb-batch-import-dialog .wb-dialog-header :is(button, a, input, select, textarea) {
+  cursor: pointer;
+}
+
+.wb-batch-import-dialog.is-resizing,
+.wb-batch-import-dialog.is-moving {
   user-select: none;
 }
 

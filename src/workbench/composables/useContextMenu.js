@@ -48,6 +48,7 @@ export function useContextMenu(
     canCopy: false,
     canPaste: false,
     clipboardActions: null,
+    commentTarget: null,
   });
 
   const contextMenuStyle = computed(() => ({
@@ -85,7 +86,7 @@ export function useContextMenu(
   function openContextMenu(
     event,
     target = null,
-    { columnIndex = -1, surface = "general", menuHeight = DEFAULT_MENU_HEIGHT, clipboardActions = null } = {},
+    { columnIndex = -1, surface = "general", menuHeight = DEFAULT_MENU_HEIGHT, clipboardActions = null, commentTarget = null } = {},
   ) {
     const tableName = normalizeTableName(target);
     const kind = target?.kind === "database"
@@ -121,6 +122,7 @@ export function useContextMenu(
     contextMenu.canCopy = Boolean(clipboardActions?.canCopy);
     contextMenu.canPaste = Boolean(clipboardActions?.canPaste);
     contextMenu.clipboardActions = clipboardActions || null;
+    contextMenu.commentTarget = normalizeCommentTarget(commentTarget);
     resetHitResultContext();
   }
 
@@ -147,8 +149,21 @@ export function useContextMenu(
     contextMenu.rowActions = rowActions || null;
     contextMenu.selectedRowCount = Number(rowActions?.selectedRowCount) || 0;
     contextMenu.canInsertCopiedRows = Boolean(rowActions?.canInsertCopiedRows);
+    contextMenu.commentTarget = null;
     resetClipboardContext();
     resetHitResultContext();
+  }
+
+  function normalizeCommentTarget(target) {
+    const kind = target?.kind === "table" || target?.kind === "column" ? target.kind : "";
+    if (!kind) return null;
+    const columnName = String(target.columnName || "");
+    if (kind === "column" && !columnName) return null;
+    return {
+      kind,
+      columnName,
+      comment: String(target.comment || ""),
+    };
   }
 
   function closeContextMenu() {

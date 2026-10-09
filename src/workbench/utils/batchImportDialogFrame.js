@@ -2,6 +2,7 @@ export const BATCH_IMPORT_DIALOG_MIN_WIDTH = 640;
 export const BATCH_IMPORT_DIALOG_MIN_HEIGHT = 420;
 export const BATCH_IMPORT_DIALOG_INSET = 16;
 export const BATCH_IMPORT_DIALOG_FRAME_KEY = "dbscout_batch_import_dialog_frame_v1";
+const VIEWPORT_TOLERANCE = 120;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
@@ -24,6 +25,36 @@ function frameOptions(options = {}) {
 
 function safeMinimum(minSize, viewLength, inset) {
   return Math.min(minSize, Math.max(0, viewLength - inset * 2));
+}
+
+export function dialogViewportMatches(saved, viewport) {
+  const previous = viewSize(saved);
+  const view = viewSize(viewport);
+  if (previous.width <= 0 || previous.height <= 0 || view.width <= 0 || view.height <= 0) return false;
+  return Math.abs(previous.width - view.width) <= VIEWPORT_TOLERANCE
+    && Math.abs(previous.height - view.height) <= VIEWPORT_TOLERANCE;
+}
+
+export function centerDialogFrame(frame, viewport, options) {
+  const fitted = clampDialogFrame({ ...frame, left: 0, top: 0 }, viewport, options);
+  const view = viewSize(viewport);
+  const { inset } = frameOptions(options);
+  const maxLeft = Math.max(inset, view.width - inset - fitted.width);
+  const maxTop = Math.max(inset, view.height - inset - fitted.height);
+  return {
+    ...fitted,
+    left: Math.round(clamp((view.width - fitted.width) / 2, inset, maxLeft)),
+    top: Math.round(clamp((view.height - fitted.height) / 2, inset, maxTop)),
+  };
+}
+
+export function moveDialogFrame(start, delta, viewport, options) {
+  return clampDialogFrame({
+    left: Number(start?.left) + Number(delta?.x || 0),
+    top: Number(start?.top) + Number(delta?.y || 0),
+    width: start?.width,
+    height: start?.height,
+  }, viewport, options);
 }
 
 export function clampDialogFrame(frame, viewport, options) {
@@ -109,23 +140,49 @@ function finiteFrame(value) {
   return { left, top, width, height };
 }
 
-export function loadBatchImportDialogFrame(storage, viewport, options) {
+function savedViewport(parsed) {
+  return {
+    width: Number(parsed?.viewportWidth) || 0,
+    height: Number(parsed?.viewportHeight) || 0,
+  };
+}
+
+export function readBatchImportDialogPlacement(storage, viewport, options) {
   try {
     const parsed = JSON.parse(storage?.getItem?.(BATCH_IMPORT_DIALOG_FRAME_KEY) || "null");
-    if (parsed?.version !== 1) return null;
-    const frame = finiteFrame(parsed);
-    if (!frame) return null;
-    return clampDialogFrame(frame, viewport, options);
+    if (parsed?.version !== 1) return { frame: null, positioned: false };
+    const geometry = finiteFrame(parsed);
+    if (!geometry) return { frame: null, positioned: false };
+    // A resize used to store whatever corner the window occupied. Treat that as
+    // a size memory only, and restore the place solely after the title bar was dragged.
+    const positioned = parsed.positioned === true && dialogViewportMatches(savedViewport(parsed), viewport);
+    return {
+      frame: positioned
+        ? clampDialogFrame(geometry, viewport, options)
+        : centerDialogFrame(geometry, viewport, options),
+      positioned,
+    };
   } catch {
-    return null;
+    return { frame: null, positioned: false };
   }
 }
 
-export function saveBatchImportDialogFrame(frame, storage) {
+export function loadBatchImportDialogFrame(storage, viewport, options) {
+  return readBatchImportDialogPlacement(storage, viewport, options).frame;
+}
+
+export function saveBatchImportDialogFrame(frame, storage, viewport) {
   const safe = finiteFrame(frame);
   if (!safe) return;
+  const view = viewSize(viewport);
   try {
-    storage?.setItem?.(BATCH_IMPORT_DIALOG_FRAME_KEY, JSON.stringify({ version: 1, ...safe }));
+    storage?.setItem?.(BATCH_IMPORT_DIALOG_FRAME_KEY, JSON.stringify({
+      version: 1,
+      ...safe,
+      positioned: frame?.positioned === true,
+      viewportWidth: view.width,
+      viewportHeight: view.height,
+    }));
   } catch {
     // A failed preference write must not interrupt resizing.
   }

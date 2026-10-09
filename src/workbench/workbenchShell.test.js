@@ -890,6 +890,20 @@ test("batch import dialog can be dragged to resize the window", () => {
   assert.match(styles, /\.wb-batch-import-dialog\.is-user-sized\.is-comparison-mode \.wb-batch-comparison\s*\{[^}]*min-height:\s*0/s);
 });
 
+test("batch import dialog can be dragged by its title to a new place", () => {
+  const dialog = read("./components/BatchImportDialog.vue");
+  const styles = read("./workbench.css");
+  const frame = read("./utils/batchImportDialogFrame.js");
+
+  assert.match(dialog, /@pointerdown="startMove"/);
+  assert.match(dialog, /moveDialogFrame/);
+  assert.match(dialog, /centerDialogFrame/);
+  assert.match(frame, /export function moveDialogFrame/);
+  assert.match(frame, /export function centerDialogFrame/);
+  assert.match(styles, /\.wb-batch-import-dialog \.wb-dialog-header\s*\{[^}]*cursor:\s*grab/s);
+  assert.match(styles, /\.wb-batch-import-dialog\.is-moving \.wb-dialog-header\s*\{[^}]*cursor:\s*grabbing/s);
+});
+
 test("table comparison panes can be dragged to resize left, right, and the detail band", () => {
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");

@@ -124,6 +124,7 @@ import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import QuickOpenPalette from "./components/QuickOpenPalette.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import CommentEditDialog from "./components/CommentEditDialog.vue";
 import DatabaseSyncDialog from "./components/DatabaseSyncDialog.vue";
 import TableCopyDialog from "./components/TableCopyDialog.vue";
 import FindReplaceDialog from "./components/FindReplaceDialog.vue";
@@ -153,6 +154,8 @@ import { applyResolvedFreeze } from "./utils/freezeSelection.js";
 import { useGridEditor } from "./composables/useGridEditor.js";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useContextMenu } from "./composables/useContextMenu.js";
+import { resolveInspectorCommentTarget } from "./utils/inspectorCommentTarget.js";
+import { applySchemaComment } from "./utils/applySchemaComment.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableTransfer } from "./composables/useTableTransfer.js";
@@ -3336,12 +3339,13 @@ function designAppliedSource(event = {}) {
   };
 }
 
-async function handleTableDesignApplied(event = {}) {
+async function handleTableDesignApplied(event = {}, options = {}) {
   const source = designAppliedSource(event);
   const { connectionId, database, tableName } = source;
+  const savedStatus = options.statusLabel || (tableName ? `表设计已保存：${tableName}` : "表设计已保存");
   if (!tableName) {
-    statusText.value = "表设计已保存";
-    return;
+    statusText.value = savedStatus;
+    return false;
   }
   const appliedSchema = event.schema || event.result?.schema || event.result || null;
   const affectedTabs = findTableDataTabs(workspace, source);
@@ -3363,11 +3367,13 @@ async function handleTableDesignApplied(event = {}) {
     }
     if (refreshErrors.length > 0) {
       statusText.value = `表设计已保存，刷新失败，请重新打开或刷新表：${String(refreshErrors[0])}`;
-      return;
+      return false;
     }
-    statusText.value = `表设计已保存：${tableName}`;
+    statusText.value = savedStatus;
+    return true;
   } catch (error) {
     statusText.value = `表设计已保存，刷新失败，请重新打开或刷新表：${String(error)}`;
+    return false;
   }
 }
 
@@ -3493,8 +3499,18 @@ function openInspectorContextMenu(event, selectedText = "") {
   closeTabContextMenu();
   const text = String(selectedText ?? "");
   const hasSelectedText = Boolean(text.trim());
+  const tab = focusedInspectorTab.value;
+  const commentTarget = tab?.tableName
+    ? resolveInspectorCommentTarget(event, {
+        columns: focusedActiveColumns.value,
+        selectedColumn: focusedSelectedCell.value?.tabId === tab?.id ? focusedSelectedCell.value?.column : "",
+        tableComment: tab.tableComment || "",
+      })
+    : null;
   openContextMenu(event, focusedInspectorTab.value, {
     surface: "inspector",
+    menuHeight: 280,
+    commentTarget,
     clipboardActions: hasSelectedText
       ? {
           canCopy: true,
@@ -3503,6 +3519,105 @@ function openInspectorContextMenu(event, selectedText = "") {
         }
       : null,
   });
+}
+
+const commentEdit = reactive({
+  open: false,
+  saving: false,
+  error: "",
+  kind: "column",
+  columnName: "",
+  connectionId: "",
+  database: "",
+  tableName: "",
+  value: "",
+});
+
+const canEditInspectorComment = computed(() => {
+  if (contextMenu.surface !== "inspector" || !contextMenu.commentTarget || !contextMenu.tableName) return false;
+  const source = {
+    connectionId: contextMenu.connectionId,
+    database: contextMenu.database,
+    tableName: contextMenu.tableName,
+    readOnly: focusedInspectorTab.value?.readOnly || focusedInspectorTab.value?.read_only,
+  };
+  return !isReadOnlySource(source) && sourceHasCapability("tableDesign", source);
+});
+
+function openCommentEditFromMenu() {
+  const target = contextMenu.commentTarget;
+  const source = {
+    connectionId: contextMenu.connectionId,
+    database: contextMenu.database,
+    tableName: contextMenu.tableName,
+    readOnly: focusedInspectorTab.value?.readOnly || focusedInspectorTab.value?.read_only,
+  };
+  closeContextMenu();
+  if (!target || !source.tableName) return;
+  if (isReadOnlySource(source)) {
+    blockReadOnlyAction("修改备注");
+    return;
+  }
+  if (!sourceHasCapability("tableDesign", source)) {
+    blockUnsupportedEngine("修改备注");
+    return;
+  }
+  commentEdit.open = true;
+  commentEdit.saving = false;
+  commentEdit.error = "";
+  commentEdit.kind = target.kind;
+  commentEdit.columnName = target.columnName || "";
+  commentEdit.connectionId = source.connectionId;
+  commentEdit.database = source.database;
+  commentEdit.tableName = source.tableName;
+  commentEdit.value = target.comment || "";
+}
+
+function closeCommentEdit() {
+  if (commentEdit.saving) return;
+  commentEdit.open = false;
+  commentEdit.error = "";
+}
+
+async function saveCommentEdit(nextValue) {
+  if (!commentEdit.open || commentEdit.saving) return;
+  const source = {
+    connectionId: commentEdit.connectionId,
+    database: commentEdit.database,
+    tableName: commentEdit.tableName,
+  };
+  const target = { kind: commentEdit.kind, columnName: commentEdit.columnName };
+  commentEdit.saving = true;
+  commentEdit.error = "";
+  try {
+    const outcome = await applySchemaComment(invokeWorkbench, source, target, nextValue);
+    if (outcome.status === "unchanged") {
+      commentEdit.open = false;
+      statusText.value = t("m_65f40f66a348");
+      return;
+    }
+    if (outcome.status === "missing-column") {
+      commentEdit.error = t("m_c89b88df082b", { name: outcome.columnName || commentEdit.columnName });
+      return;
+    }
+    if (outcome.status === "invalid" || outcome.status === "conflict") {
+      commentEdit.error = outcome.message || t("m_d5079872e308");
+      return;
+    }
+    const statusLabel = commentEdit.kind === "table"
+      ? t("m_d5c2d177c93e", { name: commentEdit.tableName })
+      : t("m_ec5bb7c806fe", { name: commentEdit.columnName });
+    await handleTableDesignApplied({
+      source,
+      schema: outcome.schema,
+      result: outcome.result,
+    }, { statusLabel });
+    commentEdit.open = false;
+  } catch (error) {
+    commentEdit.error = String(error?.message || error);
+  } finally {
+    commentEdit.saving = false;
+  }
 }
 
 function deleteGridRow(tab, row) {
@@ -4840,6 +4955,7 @@ onBeforeUnmount(() => {
       :can-freeze-cell="canFreezeCell"
       :has-freeze="hasFreeze"
       :can-reset-column-order="canResetColumnOrder"
+      :can-edit-comment="canEditInspectorComment"
       :freeze-row-label="freezeRowLabel"
       :freeze-column-label="freezeColumnLabel"
       :freeze-cell-label="freezeCellLabel"
@@ -4866,6 +4982,18 @@ onBeforeUnmount(() => {
       @freeze-first-column="onFreezeFirstColumn"
       @unfreeze="onUnfreeze"
       @reset-column-order="onResetColumnOrder"
+      @edit-comment="openCommentEditFromMenu"
+    />
+
+    <CommentEditDialog
+      :open="commentEdit.open"
+      :kind="commentEdit.kind"
+      :name="commentEdit.kind === 'table' ? commentEdit.tableName : commentEdit.columnName"
+      :value="commentEdit.value"
+      :saving="commentEdit.saving"
+      :error="commentEdit.error"
+      @close="closeCommentEdit"
+      @save="saveCommentEdit"
     />
 
     <menu

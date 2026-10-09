@@ -673,12 +673,27 @@ function previewSignatureFor(source, schemaSignature, draft) {
   return `mock-preview:${JSON.stringify(source)}:${schemaSignature}:${JSON.stringify(draft || {})}`;
 }
 
+function primaryKeyOrdinal(column = {}) {
+  const value = column.primary_key_ordinal ?? column.primaryKeyOrdinal ?? null;
+  if (value == null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function samePrimaryKeyOrdinal(left = {}, right = {}) {
+  const leftOrdinal = primaryKeyOrdinal(left);
+  const rightOrdinal = primaryKeyOrdinal(right);
+  // Demo schema often omits the ordinal. Filling it in is not a column change.
+  if (leftOrdinal == null || rightOrdinal == null) return true;
+  return leftOrdinal === rightOrdinal;
+}
+
 function sameColumn(left = {}, right = {}) {
   return left.column_name === right.column_name &&
     left.column_type === right.column_type &&
     Boolean(left.is_nullable) === Boolean(right.is_nullable) &&
     Boolean(left.is_primary_key) === Boolean(right.is_primary_key) &&
-    (left.primary_key_ordinal ?? null) === (right.primary_key_ordinal ?? null) &&
+    samePrimaryKeyOrdinal(left, right) &&
     (left.column_default ?? null) === (right.column_default ?? null) &&
     String(left.column_comment || "") === String(right.column_comment || "");
 }

@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   BATCH_IMPORT_DIALOG_FRAME_KEY,
+  centerDialogFrame,
   clampDialogFrame,
   loadBatchImportDialogFrame,
+  moveDialogFrame,
   resizeDialogFrame,
   saveBatchImportDialogFrame,
 } from "./batchImportDialogFrame.js";
@@ -71,8 +73,11 @@ test("dialog size is remembered and ignored when the saved value is unusable", (
       saved[0] = value;
     },
   };
-  saveBatchImportDialogFrame({ left: 24, top: 32, width: 960, height: 700 }, storage);
-  assert.equal(JSON.parse(saved[0]).version, 1);
+  saveBatchImportDialogFrame({ left: 24, top: 32, width: 960, height: 700, positioned: true }, storage, viewport);
+  const stored = JSON.parse(saved[0]);
+  assert.equal(stored.version, 1);
+  assert.equal(stored.positioned, true);
+  assert.equal(stored.viewportWidth, viewport.width);
   assert.equal(storage.getItem(BATCH_IMPORT_DIALOG_FRAME_KEY), saved[0]);
   assert.deepEqual(loadBatchImportDialogFrame(storage, viewport), { left: 24, top: 32, width: 960, height: 700 });
 
@@ -80,4 +85,49 @@ test("dialog size is remembered and ignored when the saved value is unusable", (
   assert.equal(loadBatchImportDialogFrame(storage, viewport), null);
   saved[0] = JSON.stringify({ version: 1, left: "wide" });
   assert.equal(loadBatchImportDialogFrame(storage, viewport), null);
+});
+
+test("a saved place is centered when the window was never dragged or the screen changed", () => {
+  const saved = [];
+  const storage = {
+    getItem: () => saved[0] || null,
+    setItem: (_key, value) => {
+      saved[0] = value;
+    },
+  };
+  const fullscreen = { width: 1920, height: 1080 };
+  saveBatchImportDialogFrame({ left: 16, top: 20, width: 700, height: 480 }, storage, { width: 800, height: 600 });
+  const centered = loadBatchImportDialogFrame(storage, fullscreen);
+  assert.deepEqual(centered, centerDialogFrame({ width: 700, height: 480 }, fullscreen));
+  assert.equal(centered.left, Math.round((fullscreen.width - 700) / 2));
+  assert.equal(centered.top, Math.round((fullscreen.height - 480) / 2));
+
+  saveBatchImportDialogFrame(
+    { left: 40, top: 50, width: 700, height: 480, positioned: true },
+    storage,
+    fullscreen,
+  );
+  assert.deepEqual(loadBatchImportDialogFrame(storage, fullscreen), { left: 40, top: 50, width: 700, height: 480 });
+  assert.deepEqual(loadBatchImportDialogFrame(storage, { width: 1960, height: 1120 }), {
+    left: 40,
+    top: 50,
+    width: 700,
+    height: 480,
+  });
+  const restored = loadBatchImportDialogFrame(storage, { width: 1280, height: 800 });
+  assert.equal(restored.left, Math.round((1280 - 700) / 2));
+  assert.equal(restored.top, Math.round((800 - 480) / 2));
+});
+
+test("dragging the window moves it and keeps it on screen", () => {
+  const moved = moveDialogFrame(start, { x: 30, y: -20 }, viewport);
+  assert.equal(moved.left, start.left + 30);
+  assert.equal(moved.top, start.top - 20);
+  assert.equal(moved.width, start.width);
+  assert.equal(moved.height, start.height);
+
+  const stuck = moveDialogFrame(start, { x: -5000, y: 5000 }, viewport);
+  assert.equal(stuck.left, 16);
+  assert.equal(stuck.top + stuck.height, viewport.height - 16);
+  assert.equal(stuck.width, start.width);
 });
