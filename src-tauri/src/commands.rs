@@ -1921,12 +1921,26 @@ pub async fn select_database(
     })
 }
 
+/// Table-list reads default to foreground priority. Periodic silent refreshes
+/// pass `priority: "background"` so they share the bounded background budget
+/// instead of a foreground permit.
+fn table_list_work(priority: Option<&str>) -> (WorkClass, std::time::Duration) {
+    match priority.map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("background") => {
+            (WorkClass::Background, BACKGROUND_SCHEMA_TIMEOUT)
+        }
+        _ => (WorkClass::Foreground, FOREGROUND_DB_TIMEOUT),
+    }
+}
+
 #[tauri::command]
 pub async fn list_tables(
     connection_id: Option<String>,
     database: Option<String>,
+    priority: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
+    let (work_class, work_timeout) = table_list_work(priority.as_deref());
     let (
         connection_id,
         kind,
@@ -1970,8 +1984,8 @@ pub async fn list_tables(
         run_pool_work(
             &state.work_scheduler,
             &PoolKey::new(&connection_id, &database),
-            WorkClass::Foreground,
-            FOREGROUND_DB_TIMEOUT,
+            work_class,
+            work_timeout,
             list_tables_from_db(&pool, &database),
         )
         .await
@@ -6995,6 +7009,22 @@ pub async fn quick_search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_list_priority_defaults_to_foreground() {
+        assert_eq!(
+            table_list_work(None),
+            (WorkClass::Foreground, FOREGROUND_DB_TIMEOUT)
+        );
+        assert_eq!(
+            table_list_work(Some("visible")),
+            (WorkClass::Foreground, FOREGROUND_DB_TIMEOUT)
+        );
+        assert_eq!(
+            table_list_work(Some(" Background ")),
+            (WorkClass::Background, BACKGROUND_SCHEMA_TIMEOUT)
+        );
+    }
 
     fn cm(name: &str, pk: bool) -> ColumnMeta {
         ColumnMeta::with_basic(name, "varchar(32)", "", pk, !pk)

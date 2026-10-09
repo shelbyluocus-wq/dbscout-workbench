@@ -2371,8 +2371,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return null;
   }
   if (command === "add_connection" || command === "restore_connection") {
-    upsertMockConnection(payload.url, payload.kind);
-    return ["game_db"];
+    const connection = upsertMockConnection(payload.url, payload.kind);
+    // Mirror the real backend: the returned list equals list_databases.
+    return [...(mockConnectionDatabases[connection.id] || ["game_db"])];
   }
   if (command === "agent_pick_project_directory") {
     return {

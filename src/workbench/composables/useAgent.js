@@ -1,4 +1,4 @@
-import { computed, ref, watch } from "vue";
+import { computed, ref, toRaw, watch } from "vue";
 import { isTauriRuntime, listenWorkbenchEvent } from "../utils/tauriBridge.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { columnName } from "../utils/normalize.js";
@@ -411,8 +411,19 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   // Local control endpoint (external MCP server) UI actions. Registered
   // eagerly on workbench mount — unlike the agent-event listener it must work
   // even when the built-in assistant has never been started.
-  async function ensureControlListener() {
-    if (controlUnlisten) return;
+  // Single-flight: startup may request readiness from more than one path.
+  let controlListenerRequest = null;
+  function ensureControlListener() {
+    if (controlUnlisten) return Promise.resolve();
+    if (!controlListenerRequest) {
+      controlListenerRequest = registerControlListener().finally(() => {
+        controlListenerRequest = null;
+      });
+    }
+    return controlListenerRequest;
+  }
+
+  async function registerControlListener() {
     controlUnlisten = await listenWorkbenchEvent("control-workbench-action", (event) => {
       const action = normalizeWorkbenchAction(event?.payload || {});
       if (action) {
@@ -796,9 +807,55 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     return context;
   }
 
+  // Streaming deltas arrive many times per second. Appending each one would
+  // re-parse the whole Markdown transcript and re-anchor the scroll for every
+  // few characters, so text is coalesced and committed at most every
+  // STREAM_FLUSH_INTERVAL_MS. Any non-delta event flushes first to keep order.
+  const STREAM_FLUSH_INTERVAL_MS = 50;
+  let streamBuffer = null;
+  let streamFlushTimer = null;
+
+  function liveMessageFor(message) {
+    const raw = toRaw(message);
+    const list = messages.value;
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      if (toRaw(list[index]) === raw) return list[index];
+    }
+    return null;
+  }
+
+  function flushStreamBuffer() {
+    if (streamFlushTimer) {
+      clearTimeout(streamFlushTimer);
+      streamFlushTimer = null;
+    }
+    const pending = streamBuffer;
+    streamBuffer = null;
+    if (!pending) return;
+    // A replaced transcript (new session, regenerate, replay) drops stale text.
+    const target = liveMessageFor(pending.message);
+    if (!target) return;
+    if (pending.text) target.content = String(target.content || "") + pending.text;
+    if (pending.thinking) target.thinking = String(target.thinking || "") + pending.thinking;
+  }
+
+  function bufferStreamDelta(message, field, text) {
+    if (!text) return;
+    if (streamBuffer && toRaw(streamBuffer.message) !== toRaw(message)) flushStreamBuffer();
+    if (!streamBuffer) streamBuffer = { message, text: "", thinking: "" };
+    streamBuffer[field] += text;
+    if (!streamFlushTimer) {
+      streamFlushTimer = setTimeout(() => {
+        streamFlushTimer = null;
+        flushStreamBuffer();
+      }, STREAM_FLUSH_INTERVAL_MS);
+    }
+  }
+
   function handleEvent(payload) {
     if (!payload || typeof payload !== "object") return;
     const ev = payload.ev;
+    if (ev !== "text_delta" && ev !== "thinking_delta") flushStreamBuffer();
 
     switch (ev) {
       case "startup_progress": {
@@ -865,8 +922,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
         }
         activeStartupMode = "idle";
         status.value = "streaming";
-        const message = ensureAssistantMessage();
-        message.content += String(payload.text || "");
+        bufferStreamDelta(ensureAssistantMessage(), "text", String(payload.text || ""));
         break;
       }
       case "thinking_delta": {
@@ -875,8 +931,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
         }
         activeStartupMode = "idle";
         status.value = "thinking";
-        const message = ensureAssistantMessage();
-        message.thinking += String(payload.text || "");
+        bufferStreamDelta(ensureAssistantMessage(), "thinking", String(payload.text || ""));
         break;
       }
       case "tool_use": {

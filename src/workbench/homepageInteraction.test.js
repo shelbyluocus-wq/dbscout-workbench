@@ -58,8 +58,9 @@ test("homepage direct typing is scoped to the focused pane and scrolls to its ma
   assert.match(home, /v-html="typeaheadResultHtml"/);
   assert.match(home, /:typeahead-query="typeahead\.query\.value"/);
   assert.match(tableList, /typeaheadQuery:\s*\{\s*type:\s*String/);
-  assert.match(tableList, /matchedFieldRanges\(table,\s*typeaheadQuery\s*\?\s*\[typeaheadQuery\]\s*:\s*\[\],\s*"tableName"\)/);
-  assert.doesNotMatch(tableList, /matchedFieldRanges\(table,\s*typeaheadQuery[^\n]*"tableComment"/);
+  assert.match(tableList, /typeaheadNameRanges\(table,\s*typeaheadQuery\)/);
+  assert.match(tableList, /matchTableSearch\(table,\s*query,\s*\{\s*includedKinds:\s*\["tableName"\]\s*\}\)/);
+  assert.doesNotMatch(tableList, /tableComment:[^\n]*typeahead/);
   assert.match(tableList, /function\s+scrollTableIntoView\(name,/);
   assert.match(styles, /\.wb-dbhome-typeahead-result mark\s*\{[^}]*background:\s*var\(--wb-mark-surface\)/s);
 });
@@ -134,9 +135,10 @@ test("homepage search highlights matching table names and comments in visible ro
   assert.match(home, /:search-query="controller\.query\.value"/);
   assert.match(tableList, /visibleSearchMatches\s*=\s*computed/);
   assert.match(tableList, /visibleRows\.value\.map/);
-  assert.match(tableList, /matchTableSearch\(table,\s*query,\s*\{\s*mode,\s*includedKinds:\s*\[kind\]\s*\}\)/);
-  assert.match(tableList, /matchedFieldRanges\(table,\s*searchQuery\s*\?\s*\[searchQuery\]\s*:\s*\[\],\s*"tableName",\s*"contains"\)/);
-  assert.match(tableList, /tableComment:\s*matchedFieldRanges\(table,\s*searchQuery\s*\?\s*\[searchQuery\]\s*:\s*\[\],\s*"tableComment",\s*"contains"\)/);
+  assert.match(tableList, /parseSearchKeywords\(props\.searchQuery\)/);
+  assert.match(tableList, /matchTableKeywords\(table,\s*keywords\)/);
+  assert.match(tableList, /\.\.\.keywordMatch\.nameRanges/);
+  assert.match(tableList, /tableComment:\s*keywordMatch\.commentRanges/);
   assert.match(tableList, /v-html="highlightedTableField\(table, 'tableName'\)"/);
   assert.match(tableList, /v-html="highlightedTableField\(table, 'tableComment'\)"/);
   assert.match(styles, /\.wb-dbhome-object-name-button mark,[\s\S]*?background:\s*var\(--wb-mark-surface\)/);

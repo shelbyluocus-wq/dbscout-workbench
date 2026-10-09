@@ -1027,9 +1027,10 @@ label:has(input[type="checkbox"]:disabled) {
   transform: rotate(-45deg);
 }
 
+/* The inspector and table toolbar paint opaque canvas tokens, so a backdrop
+   blur there is invisible but still forces a GPU re-blur on every repaint
+   (pane resizing, scrolling). Only the translucent context menu keeps it. */
 @supports ((backdrop-filter: blur(16px)) or (-webkit-backdrop-filter: blur(16px))) {
-  .wb-inspector,
-  .wb-table-toolbar,
   .wb-context-menu {
     -webkit-backdrop-filter: blur(18px) saturate(1.24);
     backdrop-filter: blur(18px) saturate(1.24);
@@ -7350,6 +7351,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex-direction: column;
   position: relative;
   pointer-events: auto;
+  isolation: isolate;
   transition:
     width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
     opacity var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
@@ -11863,6 +11865,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-workspace-mist-raised);
   box-shadow: inset 0 -1px 0 var(--wb-workspace-mist-border);
   scrollbar-width: thin;
+  isolation: isolate;
 }
 
 .wb-schema-search-nav {

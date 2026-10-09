@@ -110,6 +110,7 @@ export function useTableSession(
     unlistenSessionInvalidation?.();
     unlistenSessionInvalidation = null;
     stopNavigationWatch();
+    stopDeferredVisibilityWatch();
     activationIntentByPane.clear();
     stopSessionOwnershipWatch();
     for (const tabId of currentTotalRequestByTab.keys()) cancelExactTotalRefreshById(tabId);
@@ -123,8 +124,7 @@ export function useTableSession(
     await Promise.all([...remainingSessionIds].map(closeOwnedSession));
   }
 
-  async function reopenTableSession(tab) {
-    if (disposed || !tab?.id || !findTabById(tab.id)) return null;
+  async function releaseTabSession(tab) {
     cancelExactTotalRefresh(tab);
     await cancelSearchResultPage(tab);
     if (tab.searchResultMode) {
@@ -135,13 +135,103 @@ export function useTableSession(
     tab.sessionId = "";
     tab.loadError = null;
     tab.loadMoreError = "";
-    return loadFirstPageIntoTab(tab, null, {
+  }
+
+  const firstPageLoadsByTab = new Map();
+
+  function loadTabFirstPage(tab, { background = false } = {}) {
+    tab.deferredLoad = false;
+    const request = loadFirstPageIntoTab(tab, null, {
       connectionId: tab.connectionId,
       database: tab.database,
       tableName: tab.tableName,
       readOnly: Boolean(tab.readOnly),
+      background,
+    }).finally(() => {
+      if (firstPageLoadsByTab.get(tab.id) === request) firstPageLoadsByTab.delete(tab.id);
     });
+    firstPageLoadsByTab.set(tab.id, request);
+    return request;
   }
+
+  async function reopenTableSession(tab) {
+    if (disposed || !tab?.id || !findTabById(tab.id)) return null;
+    await releaseTabSession(tab);
+    return loadTabFirstPage(tab);
+  }
+
+  // A deferred tab keeps its place, title and view state but has no backend
+  // session yet. It loads when it becomes visible (or is preloaded), so
+  // background tabs never cost a database round trip until they are needed.
+  async function markTabDeferred(tab) {
+    if (disposed || !tab?.id || !findTabById(tab.id)) return;
+    await releaseTabSession(tab);
+    tab.deferredLoad = true;
+  }
+
+  function needsDeferredLoad(tab) {
+    return Boolean(
+      tab
+      && (tab.kind || "data") === "data"
+      && tab.deferredLoad
+      && !tab.sessionId
+      && !tab.loading
+      && !tab.opening,
+    );
+  }
+
+  function loadDeferredTab(tab, { background = false } = {}) {
+    const current = tab?.id ? findTabById(tab.id) : null;
+    if (disposed || !current) return null;
+    if (firstPageLoadsByTab.has(current.id)) return firstPageLoadsByTab.get(current.id);
+    if (!needsDeferredLoad(current)) return null;
+    return loadTabFirstPage(current, { background: background && !isTabVisible(current.id) });
+  }
+
+  function isTabVisible(tabId) {
+    if (!tabId) return false;
+    if (workspace.activeTabId === tabId) return true;
+    return Object.values(workspace.panes || {}).some((pane) => pane?.activeTabId === tabId);
+  }
+
+  function visibleTabIds() {
+    const ids = new Set(Object.values(workspace.panes || {}).map((pane) => pane?.activeTabId).filter(Boolean));
+    if (workspace.activeTabId) ids.add(workspace.activeTabId);
+    return [...ids];
+  }
+
+  function loadVisibleDeferredTabs() {
+    const loads = [];
+    for (const tabId of visibleTabIds()) {
+      const request = loadDeferredTab(findTabById(tabId));
+      if (request) loads.push(request);
+    }
+    return Promise.all(loads);
+  }
+
+  // Quiet one-at-a-time preload of the remaining deferred tabs (e.g. restored
+  // after startup). A tab the user opens meanwhile loads immediately through
+  // the visibility watcher and is skipped here because it is already loading.
+  let preloadRunning = false;
+  async function preloadDeferredTabs() {
+    if (preloadRunning) return;
+    preloadRunning = true;
+    try {
+      for (;;) {
+        if (disposed) return;
+        const next = (workspace.tabs || []).find((tab) => needsDeferredLoad(tab));
+        if (!next) return;
+        await loadDeferredTab(next, { background: true });
+      }
+    } finally {
+      preloadRunning = false;
+    }
+  }
+
+  const stopDeferredVisibilityWatch = watch(
+    () => visibleTabIds().join("\u001f"),
+    () => { void loadVisibleDeferredTabs(); },
+  );
 
   async function handleSessionsInvalidated(payload) {
     if (disposed || !payload) return;
@@ -155,12 +245,17 @@ export function useTableSession(
       return Boolean(connectionId) && String(tab.connectionId || "") === connectionId;
     });
     if (!affected.length) return;
-    // Recover the visible tab first; background tabs follow sequentially.
-    affected.sort(
+    // Only tabs on screen reload now (the focused one first). Background tabs
+    // are deferred until they are shown again, so an idle window no longer
+    // reloads every tab each time the 30-minute session lease expires.
+    const visible = affected.filter((tab) => isTabVisible(tab.id));
+    const hidden = affected.filter((tab) => !isTabVisible(tab.id));
+    visible.sort(
       (a, b) => Number(b.id === workspace.activeTabId) - Number(a.id === workspace.activeTabId),
     );
+    for (const tab of hidden) await markTabDeferred(tab);
     let recovered = 0;
-    for (const tab of affected) {
+    for (const tab of visible) {
       const loaded = await reopenTableSession(tab);
       if (loaded) recovered += 1;
     }
@@ -481,11 +576,15 @@ export function useTableSession(
   async function loadFirstPageIntoTab(
     tab,
     table,
-    { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only) } = {},
+    { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only), background = false } = {},
   ) {
     if (!tab) return null;
-    pendingTableOpenCount.value += 1;
-    statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
+    // Background preloads stay silent: no progress cursor, no status-bar text.
+    const reportProgress = !background;
+    if (reportProgress) {
+      pendingTableOpenCount.value += 1;
+      statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
+    }
     let requestToken;
     let openedSessionId = "";
     try {
@@ -526,9 +625,11 @@ export function useTableSession(
       // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
       // Retains the sameSource stale-guard inside ensureTableSchema.
       ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
-      const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
-      if (setStatus) setStatus(msg);
-      else statusText.value = msg;
+      if (reportProgress) {
+        const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
+        if (setStatus) setStatus(msg);
+        else statusText.value = msg;
+      }
       return tab;
     } catch (error) {
       if (openedSessionId && findTabById(tab.id)?.sessionId !== openedSessionId) {
@@ -537,13 +638,15 @@ export function useTableSession(
       if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) {
         tab.loading = false;
         tab.loadError = String(error?.message || error);
-        const msg = `读取表失败：${String(error?.message || error)}`;
-        if (setStatus) setStatus(msg, { error: true });
-        else statusText.value = msg;
+        if (reportProgress) {
+          const msg = `读取表失败：${String(error?.message || error)}`;
+          if (setStatus) setStatus(msg, { error: true });
+          else statusText.value = msg;
+        }
       }
       return null;
     } finally {
-      pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
+      if (reportProgress) pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
     }
   }
 
@@ -596,6 +699,10 @@ export function useTableSession(
         return loadedTab;
       }
       activateForIntent(existingTab, targetPaneId, activationIntent);
+      if (isNormalOpen(initialState) && (existingTab.deferredLoad || firstPageLoadsByTab.has(existingTab.id))) {
+        // A restored/deferred tab keeps its saved sort and filter: load it as-is.
+        return (await loadDeferredTab(existingTab)) || existingTab;
+      }
       if (!existingTabNeedsNormalReload(existingTab, initialState)) return existingTab;
       resetNormalTableViewState(existingTab);
       if (existingTab.sessionId) {
@@ -692,7 +799,14 @@ export function useTableSession(
     if (tab?.searchResultMode) {
       return loadSearchResultPage(tab, tab.searchResultQuery || tab.searchQuery || tab.filter || "");
     }
-    if (!tab?.sessionId) return { ok: false, error: new Error("missing table session") };
+    if (!tab?.sessionId) {
+      const deferred = loadDeferredTab(tab);
+      if (deferred) {
+        const loaded = await deferred;
+        return loaded ? { ok: true, tab: loaded } : { ok: false, error: new Error(String(tab.loadError || "table load failed")) };
+      }
+      return { ok: false, error: new Error("missing table session") };
+    }
     const requestToken = beginTabRequest(tab.id);
     cancelExactTotalRefresh(tab);
     tab.loading = true;
@@ -1171,6 +1285,10 @@ export function useTableSession(
   }
 
   return {
+    markTabDeferred,
+    loadDeferredTab,
+    loadVisibleDeferredTabs,
+    preloadDeferredTabs,
     openTable,
     pendingTableOpenCount,
     cancelPendingTableActivation,

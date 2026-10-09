@@ -13,6 +13,7 @@ import {
 } from "../homeColumnLayout.js";
 import { homeEnterOpenNames } from "../utils/homeEnterOpen.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
+import { matchTableKeywords, parseSearchKeywords } from "../utils/tableKeywordSearch.js";
 import { matchTableSearch } from "../utils/tableSearch.js";
 import { databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
@@ -109,17 +110,20 @@ const visibleRows = computed(() =>
   })),
 );
 const visibleSearchMatches = computed(() => {
-  const searchQuery = props.searchQuery.trim();
+  const keywords = parseSearchKeywords(props.searchQuery);
   const typeaheadQuery = props.typeaheadQuery.trim();
-  if (!searchQuery && !typeaheadQuery) return new Map();
+  if (!keywords.length && !typeaheadQuery) return new Map();
 
-  return new Map(visibleRows.value.map(({ table }) => [tableName(table), {
-    tableName: [
-      ...matchedFieldRanges(table, searchQuery ? [searchQuery] : [], "tableName", "contains"),
-      ...matchedFieldRanges(table, typeaheadQuery ? [typeaheadQuery] : [], "tableName"),
-    ],
-    tableComment: matchedFieldRanges(table, searchQuery ? [searchQuery] : [], "tableComment", "contains"),
-  }]));
+  return new Map(visibleRows.value.map(({ table }) => {
+    const keywordMatch = matchTableKeywords(table, keywords);
+    return [tableName(table), {
+      tableName: [
+        ...keywordMatch.nameRanges,
+        ...typeaheadNameRanges(table, typeaheadQuery),
+      ],
+      tableComment: keywordMatch.commentRanges,
+    }];
+  }));
 });
 
 watch(
@@ -138,11 +142,10 @@ function tableComment(table) {
   return table?.tableComment || table?.table_comment || "";
 }
 
-function matchedFieldRanges(table, queries, kind, mode = "fuzzy") {
-  return queries.flatMap((query) => {
-    const match = matchTableSearch(table, query, { mode, includedKinds: [kind] });
-    return match.matched ? match.ranges : [];
-  });
+function typeaheadNameRanges(table, query) {
+  if (!query) return [];
+  const match = matchTableSearch(table, query, { includedKinds: ["tableName"] });
+  return match.matched ? match.ranges : [];
 }
 
 function highlightedTableField(table, kind) {

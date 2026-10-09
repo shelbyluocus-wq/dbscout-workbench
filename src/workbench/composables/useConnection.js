@@ -246,6 +246,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
   const savedRestoreRequests = new Map();
+  // Database lists returned by restore_connection during startup, by runtime id.
+  const restoredDatabaseLists = new Map();
 
   // 统一状态写入入口：同时设置文案与错误标志。鼓励新代码用这个替代直接赋值。
   function setStatus(text, { error = false } = {}) {
@@ -388,15 +390,49 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return connectionHasCapability(connection?.kind, name);
   }
 
+  // Saved connections are restored strictly one after another in saved order:
+  // runtime connection ids are allocated in that order and aliases, backups and
+  // database order are keyed by them. Startup only waits until the last-used
+  // connection is ready; the rest of the same chain continues in background.
+  let connectionsRestored = Promise.resolve();
+
+  function whenConnectionsRestored() {
+    return connectionsRestored;
+  }
+
+  function restoreSavedConnectionsInOrder(saved, { readyWhen = () => false } = {}) {
+    let chain = Promise.resolve();
+    const steps = saved.map((savedConn) => {
+      chain = chain
+        .then(() => ensureSavedConnectionRuntime(savedConn))
+        .catch(() => null);
+      return chain;
+    });
+    connectionsRestored = chain.then(() => {
+      restoredDatabaseLists.clear();
+      connections.value = applyConnectionOrder(connections.value);
+      markPerf("connection.all-restored", { count: connections.value.length });
+    });
+    return (async () => {
+      for (const step of steps) {
+        if (readyWhen()) return;
+        await step;
+      }
+    })();
+  }
+
   async function loadConnections() {
     connections.value = applyConnectionOrder(await measureAsync("connection.list", () => invokeWorkbench("list_connections")));
     const saved = readSavedConnections();
-    for (const savedConn of saved) {
-      await ensureSavedConnectionRuntime(savedConn);
-    }
+    const snapshot = loadWorkspaceSnapshot();
+    const lastUsedConnectionId = String(snapshot?.connectionId || "");
+    await restoreSavedConnectionsInOrder(saved, {
+      readyWhen: () => Boolean(lastUsedConnectionId) && connections.value.some((item) => (
+        item.id === lastUsedConnectionId && item.connected
+      )),
+    });
     connections.value = applyConnectionOrder(connections.value);
     markPerf("connection.loaded", { count: connections.value.length });
-    const snapshot = loadWorkspaceSnapshot();
     let selectedConnection;
 
     if (snapshot?.connectionId) {
@@ -415,13 +451,19 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     selectedConnectionId.value = selectedConnection.id;
     try {
+      // The restore that just connected already read this server's database
+      // list; reuse it instead of a second identical round trip.
+      const restoredList = restoredDatabaseLists.get(selectedConnection.id);
+      restoredDatabaseLists.delete(selectedConnection.id);
       databases.value = applyDatabaseOrder(
         selectedConnection.id,
-        await measureAsync(
-          "database.list",
-          () => invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
-          { connectionId: selectedConnection.id },
-        ),
+        Array.isArray(restoredList)
+          ? restoredList
+          : await measureAsync(
+            "database.list",
+            () => invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
+            { connectionId: selectedConnection.id },
+          ),
       );
       markPerf("database.loaded", { connectionId: selectedConnection.id, count: databases.value.length });
     } catch {
@@ -468,13 +510,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     const previousIds = new Set(connections.value.map((connection) => connection.id));
     try {
-      await invokeWorkbench("restore_connection", { kind, url });
+      const restoredDatabases = await invokeWorkbench("restore_connection", { kind, url });
       const previousConnections = connections.value;
       connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
       const restored =
         connections.value.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
         connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
       if (restored) {
+        if (Array.isArray(restoredDatabases)) restoredDatabaseLists.set(restored.id, restoredDatabases);
         applySavedMetadata(restored, savedConn);
         restored.connected = true;
         connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
@@ -664,7 +707,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   async function refreshTableModifiedTimes({ connectionId = selectedConnectionId.value || null, database = selectedDatabase.value || null } = {}) {
     if (!connectionId || !database) return { updatedCount: 0, stale: false };
     const loadTokenAtStart = tableLoadToken;
-    const tables = await invokeWorkbench("list_tables", { connectionId, database });
+    // Silent periodic refresh: background priority so it never takes a
+    // foreground database permit from the user's own actions.
+    const tables = await invokeWorkbench("list_tables", { connectionId, database, priority: "background" });
     if (
       loadTokenAtStart !== tableLoadToken
       || !sameSource(workspace.connectionId, workspace.database, connectionId, database)
@@ -862,6 +907,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   async function removeConnection(connectionId) {
     if (!connectionId) return false;
+    // Runtime ids are allocated by count: never add/remove mid-restore.
+    await whenConnectionsRestored();
     const connection = connectionById(connectionId);
     if (!connection) return false;
     try {
@@ -910,6 +957,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     busy.value = true;
     connDialog.error = "";
     try {
+      // Runtime ids are allocated by count: never add/remove mid-restore.
+      await whenConnectionsRestored();
       const previousIds = new Set(connections.value.map((connection) => connection.id));
       const dbList = await invokeWorkbench("add_connection", { kind: normalizedKind, url });
       connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
@@ -957,6 +1006,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   return {
     connections,
+    whenConnectionsRestored,
     visibleConnections,
     databases,
     databasesByConnection,

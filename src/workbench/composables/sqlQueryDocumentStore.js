@@ -26,9 +26,10 @@ function normalizedTitle(value, fallback = "未命名查询") {
   return String(value || "").trim().slice(0, 120) || fallback;
 }
 
-function normalizeDocument(value, { now = defaultNow(), createId = defaultCreateId(), allowCreateId = false } = {}) {
+function normalizeDocument(value, { now, createId = defaultCreateId, allowCreateId = false } = {}) {
   const id = String(value?.id || (allowCreateId ? createId() : "")).trim();
   if (!id) return null;
+  if (now === undefined) now = defaultNow();
   const sql = String(value?.sql || "");
   const savedSql = String(value?.savedSql ?? (value?.filePath ? sql : ""));
   const createdAt = String(value?.createdAt || now);
@@ -49,11 +50,19 @@ function normalizeDocument(value, { now = defaultNow(), createId = defaultCreate
   };
 }
 
+let titleCollator = null;
+
+function compareTitles(left, right) {
+  // localeCompare with an explicit locale may build a collator per call.
+  if (!titleCollator) titleCollator = new Intl.Collator("zh-CN");
+  return titleCollator.compare(left, right);
+}
+
 function sortDocuments(documents) {
   return [...documents].sort((left, right) => {
     const updated = String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
     if (updated) return updated;
-    return String(left.title || "").localeCompare(String(right.title || ""), "zh-CN");
+    return compareTitles(String(left.title || ""), String(right.title || ""));
   });
 }
 
@@ -109,8 +118,9 @@ export function loadSqlQueryDocuments(storage = defaultStorage()) {
 }
 
 export function saveSqlQueryDocuments(documents, storage = defaultStorage()) {
+  const now = defaultNow();
   const normalized = dedupeExactDocuments((Array.isArray(documents) ? documents : [])
-    .map((item) => normalizeDocument(item))
+    .map((item) => normalizeDocument(item, { now }))
     .filter(Boolean));
   try {
     storage?.setItem?.(SQL_QUERY_DOCUMENTS_STORAGE_KEY, JSON.stringify({ version: 1, documents: normalized }));

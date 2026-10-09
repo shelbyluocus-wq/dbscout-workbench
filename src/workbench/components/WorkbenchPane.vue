@@ -1,16 +1,15 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { gridSelectionActualBounds, gridSelectionToggleMap, isGridCellSelected } from "../utils/gridCellSelection.js";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch, watchEffect } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { applyTabColumnSearch, commitTabColumnOrder, resetTabColumnOrder } from "../workspaceState.js";
 import { columnName } from "../utils/normalize.js";
 import { columnNamesOf, isCustomColumnOrder, moveColumn } from "../utils/columnOrder.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
-import { getOptimisticCellValue } from "../editState.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
-import { buildSelectionStats } from "../utils/selectionStats.js";
+import { createSelectionStatsScan, indexOptimisticValuesForTable } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { insertRowIdFromKey } from "../utils/gridRowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
@@ -557,6 +556,7 @@ watch(viewportHeight, (height, previousHeight) => {
 });
 
 onBeforeUnmount(() => {
+  stopSelectionStatsScan();
   captureActiveTableViewState();
   void disposeTableSearch();
 });
@@ -1353,46 +1353,106 @@ function selectionStatRowKey(tab, entry) {
   return entry.row ? buildRowKey(tab, entry.row) : "";
 }
 
-function selectionStatCellValue(tab, entry, column) {
-  const rowKey = selectionStatRowKey(tab, entry);
-  if (
-    editingCell.value?.tabId === tab.id
-    && editingCell.value.rowKey === rowKey
-    && editingCell.value.column === column
-  ) {
-    return editDraft.value;
-  }
-  if (
-    selectedCell.value?.tabId === tab.id
-    && selectedCell.value.kind !== "fieldComment"
-    && selectedCell.value.rowKey === rowKey
-    && selectedCell.value.column === column
-  ) {
-    return textDraft.value;
-  }
-  if (entry.type === "insert") return entry.insertRow?.draft?.[column] ?? "";
-  const optimistic = getOptimisticCellValue(
-    props.editState,
-    tab.tableKey || tab.tableName,
-    rowKey,
-    column,
-  );
-  return optimistic != null ? optimistic : entry.row?.[column];
+// Selection statistics (average / count / sum) for the cell detail bar.
+// Small selections resolve synchronously in the post-render flush; large ones
+// are scanned in time-sliced chunks so dragging or extending a big range never
+// blocks on summing every selected cell. A newer selection cancels the scan.
+const SELECTION_STATS_SYNC_CELL_LIMIT = 20_000;
+const SELECTION_STATS_CHUNK_ROWS = 64;
+const SELECTION_STATS_CHUNK_BUDGET_MS = 8;
+const selectionStats = shallowRef(null);
+let selectionStatsTabId = "";
+let selectionStatsJob = 0;
+let selectionStatsTimer = null;
+
+function stopSelectionStatsScan() {
+  selectionStatsJob += 1;
+  if (selectionStatsTimer) clearTimeout(selectionStatsTimer);
+  selectionStatsTimer = null;
 }
 
-const selectionStats = computed(() => {
+function publishSelectionStats(tabId, stats) {
+  selectionStatsTabId = stats ? tabId : "";
+  selectionStats.value = stats;
+}
+
+function selectionStatOverrides(tab) {
+  const overrides = [];
+  const editing = editingCell.value;
+  if (editing?.tabId === tab.id) {
+    overrides.push({ rowKey: editing.rowKey, column: editing.column, value: editDraft.value });
+  }
+  const selected = selectedCell.value;
+  if (selected?.tabId === tab.id && selected.kind !== "fieldComment") {
+    overrides.push({ rowKey: selected.rowKey, column: selected.column, value: textDraft.value });
+  }
+  return overrides;
+}
+
+function createActiveSelectionStatsScan(tab, range, bounds) {
+  const toggles = gridSelectionToggleMap(range);
+  const toggleKeys = toggles.size ? new Set(toggles.keys()) : null;
+  return createSelectionStatsScan({
+    bounds,
+    isSelected: toggleKeys ? (rowIndex, columnIndex) => isGridCellSelected(range, rowIndex, columnIndex, toggleKeys) : null,
+    model: editor.visualRowEntries(tab),
+    columns: activeColumns.value.map(columnName),
+    rowKeyOf: (entry) => selectionStatRowKey(tab, entry),
+    overrides: selectionStatOverrides(tab),
+    // Raw map: one index per scan instead of a tracked lookup per cell. The
+    // effect below subscribes to the map's size/iteration and mutationVersion.
+    optimistic: indexOptimisticValuesForTable(toRaw(props.editState.optimisticValues), tab.tableKey || tab.tableName),
+  });
+}
+
+function runSelectionStatsChunks(job, tabId, scan) {
+  selectionStatsTimer = setTimeout(() => {
+    selectionStatsTimer = null;
+    if (job !== selectionStatsJob) return;
+    const started = performance.now();
+    while (!scan.step(SELECTION_STATS_CHUNK_ROWS)) {
+      if (performance.now() - started >= SELECTION_STATS_CHUNK_BUDGET_MS) {
+        runSelectionStatsChunks(job, tabId, scan);
+        return;
+      }
+    }
+    publishSelectionStats(tabId, scan.result());
+  }, 0);
+}
+
+watchEffect(() => {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
-  if (!tab || !range || range.tabId !== tab.id) return null;
-  if (selectedCell.value?.kind === "fieldComment") return null;
+  // Explicit dependencies: drafts, pending optimistic values, loaded rows and
+  // column order all change what the bar must show.
   void props.editState.mutationVersion;
+  void props.editState.optimisticValues.size;
   void textDraft.value;
   void editDraft.value;
-  const values = editor.selectedGridCells(tab, range).map((cell) => (
-    selectionStatCellValue(tab, cell.entry, cell.column)
-  ));
-  return buildSelectionStats(values);
-});
+  void editingCell.value;
+  void tab?.dataVersion;
+  void activeColumns.value;
+  stopSelectionStatsScan();
+  if (!tab || !range || range.tabId !== tab.id || selectedCell.value?.kind === "fieldComment") {
+    publishSelectionStats("", null);
+    return;
+  }
+  const bounds = gridSelectionActualBounds(range);
+  if (!bounds) {
+    publishSelectionStats("", null);
+    return;
+  }
+  const scan = createActiveSelectionStatsScan(tab, range, bounds);
+  const cellCount = (bounds.bottom - bounds.top + 1) * (bounds.right - bounds.left + 1);
+  if (cellCount <= SELECTION_STATS_SYNC_CELL_LIMIT) {
+    scan.step();
+    publishSelectionStats(tab.id, scan.result());
+    return;
+  }
+  // Keep the previous numbers for this tab while the larger scan runs.
+  if (selectionStatsTabId !== tab.id) publishSelectionStats("", null);
+  runSelectionStatsChunks(selectionStatsJob, tab.id, scan);
+}, { flush: "post" });
 
 // 选区范围的命中明细列表（含新增行草稿格），供弹窗结果列表展示与导航。
 function listSelectionMatches({ query, caseSensitive } = {}) {

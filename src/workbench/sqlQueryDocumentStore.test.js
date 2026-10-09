@@ -6,6 +6,7 @@ import {
   createSqlQueryDocumentStore,
   loadSqlQueryDocuments,
   nextSqlQueryTitle,
+  saveSqlQueryDocuments,
 } from "./composables/sqlQueryDocumentStore.js";
 
 function createStorage() {
@@ -90,4 +91,24 @@ test("loading query documents collapses exact migration duplicates", () => {
   const loaded = loadSqlQueryDocuments(storage);
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].id, "new");
+});
+
+test("saving documents does not mint throwaway ids for documents that already have one", () => {
+  const original = globalThis.crypto;
+  let minted = 0;
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { randomUUID: () => { minted += 1; return `uuid-${minted}`; } },
+  });
+  try {
+    const writes = [];
+    const storage = { setItem: (key, value) => writes.push(value), getItem: () => null };
+    const documents = Array.from({ length: 20 }, (_, index) => ({ id: `doc-${index}`, title: `查询 ${index}`, sql: "select 1" }));
+    const saved = saveSqlQueryDocuments(documents, storage);
+    assert.equal(saved.length, 20);
+    assert.equal(minted, 0);
+    assert.equal(writes.length, 1);
+  } finally {
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: original });
+  }
 });

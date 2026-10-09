@@ -2368,7 +2368,7 @@ test("cell detail panel is a collapsible pane with a persistent title bar", () =
   // collapsed bar expands on click anywhere, the expanded bar only via the
   // chevron. Selected-cell stats replace the static title when a range exists.
   const pane = read("./components/WorkbenchPane.vue");
-  assert.match(pane, /buildSelectionStats/);
+  assert.match(pane, /createSelectionStatsScan/);
   assert.match(pane, /:selection-stats="selectionStats"/);
   assert.match(cellDetail, /class="wb-cell-detail-header"/);
   assert.match(cellDetail, /class="wb-cell-detail-title">单元格内容<\/span>/);
@@ -3729,4 +3729,51 @@ test("table transfer failure banner stays inside the dialog", () => {
     dialog,
     /\.wb-table-transfer-error\s*\{[^}]*max-height:[^}]*overflow:\s*auto/s,
   );
+});
+
+test("startup update check waits until the workspace is usable and idle", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const mounted = orchestrator.match(/onMounted\(async \(\) => \{[\s\S]*?\n\}\);/)?.[0] || "";
+  assert.ok(mounted, "onMounted block should exist");
+  assert.doesNotMatch(mounted.split("persistenceReady = true")[0], /checkForUpdates/);
+  assert.match(mounted, /persistenceReady = true;[\s\S]*scheduleDeferredUpdateCheck\(\)/);
+  assert.match(orchestrator, /function scheduleIdleStartupWork\([^)]*\) \{[\s\S]*?requestIdleCallback/);
+  assert.match(orchestrator, /function scheduleDeferredUpdateCheck\(\) \{[\s\S]*?scheduleIdleStartupWork\(/);
+});
+
+test("SQL text edits are coalesced instead of serializing the workspace per keystroke", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  assert.match(orchestrator, /import \{ createCoalescedTask \} from "\.\/utils\/coalescedTask\.js"/);
+  // The structural persistence signature no longer stringifies SQL text.
+  assert.doesNotMatch(orchestrator, /tab\?\.kind === "sql" \? tab\.sql : undefined/);
+  assert.match(orchestrator, /workspace\.tabs\.map\(\(tab\) => \(tab\?\.kind === "sql" \? tab\.sql : null\)\)[\s\S]*?workspacePersistence\.schedule\(\)/);
+  assert.match(orchestrator, /workspacePersistence\.flush\(\{ force: true \}\)/);
+  // Pending text is written before the window hides, unloads, or unmounts.
+  assert.match(orchestrator, /addEventListener\("visibilitychange", flushWorkspacePersistenceWhenHidden\)/);
+  assert.match(orchestrator, /addEventListener\("pagehide", flushWorkspacePersistence\)/);
+  assert.match(orchestrator, /onBeforeUnmount\(\(\) => \{\s*flushWorkspacePersistence\(\);/);
+  assert.match(orchestrator, /async function openSqlDocument\([^)]*\)[^{]*\{\s*flushWorkspacePersistence\(\);/);
+});
+
+test("activating a tab shows it before syncing the sidebar database in the background", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const body = orchestrator.match(/async function activateTab\([^)]*\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(body, "activateTab should exist");
+  const activated = body.indexOf("activateTableTab(workspace, tabId)");
+  const synced = body.indexOf("void tabSourceSync.syncToTab(tab)");
+  assert.ok(activated > 0 && synced > activated, "the tab activates before the sidebar sync starts");
+  assert.doesNotMatch(body, /await\s+select(Connection|Database)\(/);
+  assert.match(orchestrator, /createTabSourceSync\(\{[\s\S]*selectConnection,[\s\S]*selectDatabase,/);
+});
+
+test("restored table tabs are deferred shells that load visible tabs first", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const restore = orchestrator.match(/async function restoreSavedTabs\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(restore, "restoreSavedTabs should exist");
+  assert.doesNotMatch(restore, /await openTable\(/);
+  assert.match(restore, /savedTableTabMatchesSource\(savedTab/);
+  assert.match(restore, /restoredTab\.deferredLoad = true/);
+  assert.match(restore, /applySavedTableTabState\(restoredTab, savedTab\)/);
+  assert.match(restore, /void loadVisibleDeferredTabs\(\)/);
+  assert.match(orchestrator, /scheduleIdleStartupWork\(\(\) => \{ void preloadDeferredTabs\(\); \}/);
 });

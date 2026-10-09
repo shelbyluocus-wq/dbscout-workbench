@@ -1361,4 +1361,55 @@ describe("useAgent", () => {
     assert.equal(agent.runtimeState.value, "error");
     assert.match(agent.runtimeStatus.value.message, /SVN unavailable/);
   });
+  it("coalesces streaming deltas into one transcript update per flush window", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "hello";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "text_delta", text: "Hel" });
+    emitMockEvent("agent-event", { ev: "text_delta", text: "lo" });
+    emitMockEvent("agent-event", { ev: "thinking_delta", text: "hmm" });
+    const assistant = agent.messages.value[1];
+
+    assert.equal(assistant.role, "assistant");
+    assert.equal(assistant.content, "");
+    assert.equal(agent.status.value, "thinking");
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(assistant.content, "Hello");
+    assert.equal(assistant.thinking, "hmm");
+    agent.disposeRuntimeListener();
+  });
+
+  it("flushes buffered text before tool and result events without duplicating it", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "hello";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "text_delta", text: "Before tool. " });
+    emitMockEvent("agent-event", { ev: "tool_use", id: "tu-9", name: "run_read_query", input: { sql: "SELECT 1" } });
+    const assistant = agent.messages.value[1];
+    assert.equal(assistant.content, "Before tool. ");
+    assert.equal(assistant.toolUses.length, 1);
+
+    emitMockEvent("agent-event", { ev: "text_delta", text: "After." });
+    emitMockEvent("agent-event", { ev: "result", subtype: "success", text: "Before tool. After." });
+    assert.equal(assistant.content, "Before tool. After.");
+    assert.equal(assistant.done, true);
+  });
+
+  it("drops buffered text when the transcript is replaced before the flush", async () => {
+    const agent = useAgent({}, async () => null);
+    agent.draft.value = "hello";
+    agent.send();
+    await flushPromises();
+
+    emitMockEvent("agent-event", { ev: "text_delta", text: "stale" });
+    agent.startNewSession();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    assert.equal(agent.messages.value.length, 0);
+  });
 });

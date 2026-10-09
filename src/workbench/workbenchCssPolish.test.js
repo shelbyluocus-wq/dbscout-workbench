@@ -1454,3 +1454,16 @@ test("top-edge pane tabbar still overlaps the titlebar below the chrome controls
   assert.match(ruleBody(".wb-pane-tabbar.is-top-edge-pane"), /z-index:\s*32/);
   assert.doesNotMatch(css, /wb-quick-open-entry/);
 });
+
+test("opaque inspector and table toolbar skip the invisible backdrop blur", () => {
+  const inspectorRule = ruleBody(".wb-inspector");
+  const toolbarRule = ruleBody(".wb-table-toolbar");
+  // Opaque canvas tokens make a backdrop blur invisible but still costly on repaint.
+  assert.match(inspectorRule, /background:\s*var\(--wb-workspace-mist\)/);
+  assert.match(toolbarRule, /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.doesNotMatch(inspectorRule, /backdrop-filter/);
+  assert.doesNotMatch(toolbarRule, /backdrop-filter/);
+  assert.match(inspectorRule, /isolation:\s*isolate/);
+  assert.match(toolbarRule, /isolation:\s*isolate/);
+  assert.match(ruleBody(".wb-context-menu"), /backdrop-filter:\s*blur\(18px\)/);
+});

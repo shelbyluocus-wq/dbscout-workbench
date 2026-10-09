@@ -2,9 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSelectionStats,
+  createSelectionStatsScan,
+  indexOptimisticValuesForTable,
+  statsFromTotals,
   formatStatNumber,
   parseNumericCellValue,
 } from "./selectionStats.js";
+import { createVisualRowModel } from "./visualRows.js";
+import { gridSelectionActualBounds, gridSelectionToggleMap, isGridCellSelected, createGridSelection } from "./gridCellSelection.js";
 
 test("parseNumericCellValue accepts plain numbers and numeric strings", () => {
   assert.equal(parseNumericCellValue(12), 12);
@@ -60,4 +65,98 @@ test("buildSelectionStats reports average, count, and sum like a spreadsheet sta
     { key: "count", label: "计数", text: "5" },
     { key: "sum", label: "求和", text: "60" },
   ]);
+});
+
+
+const COLUMNS = ["id", "score", "name"];
+const ROWS = Array.from({ length: 40 }, (_, index) => ({ id: String(index + 1), score: String((index % 7) * 1.5), name: `n${index}` }));
+const INSERT_ROWS = [{ id: "ins-1", anchorIndex: 3, draft: { id: "", score: "100", name: "draft" } }];
+
+function model() {
+  return createVisualRowModel({
+    dataRowCount: ROWS.length,
+    dataRowAt: (index) => ROWS[index],
+    insertRows: INSERT_ROWS,
+    makeInsertRow: (row) => ({ ...row.draft }),
+  });
+}
+
+function rowKeyOf(entry) {
+  return entry.type === "insert" ? `__insert__:${entry.insertRow.id}` : `id=${entry.row.id}`;
+}
+
+// Reference: the previous per-cell algorithm (row key and lookup per cell).
+function referenceStats(range, { overrides = [], optimistic = new Map(), tableName = "t" } = {}) {
+  const bounds = gridSelectionActualBounds(range);
+  const toggleKeys = new Set(gridSelectionToggleMap(range).keys());
+  const visual = model();
+  const values = [];
+  for (let rowIndex = bounds.top; rowIndex <= bounds.bottom; rowIndex += 1) {
+    const entry = visual.at(rowIndex);
+    if (!entry) continue;
+    for (let columnIndex = bounds.left; columnIndex <= bounds.right; columnIndex += 1) {
+      if (!isGridCellSelected(range, rowIndex, columnIndex, toggleKeys)) continue;
+      const column = COLUMNS[columnIndex];
+      if (!column) continue;
+      const rowKey = rowKeyOf(entry);
+      const override = overrides.find((item) => item.rowKey === rowKey && item.column === column);
+      if (override) values.push(override.value);
+      else if (entry.type === "insert") values.push(entry.insertRow?.draft?.[column] ?? "");
+      else {
+        const key = [tableName, rowKey, column].join("\u001f");
+        const pending = optimistic.has(key) ? optimistic.get(key) : null;
+        values.push(pending != null ? pending : entry.row?.[column]);
+      }
+    }
+  }
+  return buildSelectionStats(values);
+}
+
+function scanStats(range, { overrides = [], optimistic = new Map(), tableName = "t", chunk = Infinity } = {}) {
+  const toggles = gridSelectionToggleMap(range);
+  const toggleKeys = toggles.size ? new Set(toggles.keys()) : null;
+  let keyBuilds = 0;
+  const scan = createSelectionStatsScan({
+    bounds: gridSelectionActualBounds(range),
+    isSelected: toggleKeys ? (r, c) => isGridCellSelected(range, r, c, toggleKeys) : null,
+    model: model(),
+    columns: COLUMNS,
+    rowKeyOf: (entry) => { keyBuilds += 1; return rowKeyOf(entry); },
+    overrides,
+    optimistic: indexOptimisticValuesForTable(optimistic, tableName),
+  });
+  while (!scan.step(chunk));
+  return { stats: scan.result(), keyBuilds };
+}
+
+test("selection scan matches the per-cell reference for contiguous ranges and insert rows", () => {
+  const range = createGridSelection("tab", { rowIndex: 0, columnIndex: 0 }, { rowIndex: 40, columnIndex: 2 });
+  const { stats, keyBuilds } = scanStats(range);
+  assert.deepEqual(stats, referenceStats(range));
+  assert.equal(keyBuilds, 0, "no row keys are needed without overrides or pending values");
+});
+
+test("selection scan matches the reference with toggled cells, drafts, and pending values", () => {
+  const range = createGridSelection("tab", { rowIndex: 2, columnIndex: 1 }, { rowIndex: 30, columnIndex: 2 }, {
+    toggledCells: [{ rowIndex: 5, columnIndex: 1 }, { rowIndex: 35, columnIndex: 0 }],
+  });
+  const overrides = [
+    { rowKey: "id=8", column: "score", value: "999" },
+    { rowKey: "id=8", column: "score", value: "1" },
+    { rowKey: "__insert__:ins-1", column: "score", value: "7" },
+  ];
+  const optimistic = new Map([
+    [["t", "id=10", "score"].join("\u001f"), "50"],
+    [["t", "id=11", "score"].join("\u001f"), null],
+    [["other", "id=12", "score"].join("\u001f"), "1000"],
+  ]);
+  const expected = referenceStats(range, { overrides, optimistic });
+  const { stats, keyBuilds } = scanStats(range, { overrides, optimistic, chunk: 3 });
+  assert.deepEqual(stats, expected);
+  const bounds = gridSelectionActualBounds(range);
+  assert.ok(keyBuilds <= bounds.bottom - bounds.top + 1, "row keys are built at most once per row");
+});
+
+test("statsFromTotals returns null for an empty selection", () => {
+  assert.equal(statsFromTotals(0, 0, 0), null);
 });

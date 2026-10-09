@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { rankTableSearchResults } from "../utils/tableSearch.js";
+import { filterTablesByKeywords } from "../utils/tableKeywordSearch.js";
 
 export const HOME_SORT_MODES = Object.freeze({
   nameAsc: "nameAsc",
@@ -70,12 +70,16 @@ function normalizeTable(table, index) {
   };
 }
 
+// One shared collator: same ordering as localeCompare with these options,
+// without rebuilding locale data on every comparison.
+const textCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
 function compareName(left, right) {
-  return left.tableName.localeCompare(right.tableName, undefined, { sensitivity: "base", numeric: true });
+  return textCollator.compare(left.tableName, right.tableName);
 }
 
 function compareComment(left, right) {
-  return tableCommentOf(left).localeCompare(tableCommentOf(right), undefined, { sensitivity: "base", numeric: true });
+  return textCollator.compare(left.tableComment, right.tableComment);
 }
 
 function compareFieldCount(left, right) {
@@ -180,55 +184,56 @@ export function createDatabaseHomeController({
         return { column: "name", direction: "asc" };
     }
   });
-  const filteredTables = computed(() => {
-    const text = query.value.trim();
-    if (text) {
-      return rankTableSearchResults(normalizedTables.value, text, { mode: "contains" }).map(({ table }) => table);
-    }
-    const list = [...normalizedTables.value];
+  const compareTables = computed(() => {
     const favoritePriority = (left, right) =>
       Number(favoriteSet.value.has(right.tableName)) - Number(favoriteSet.value.has(left.tableName));
-    const sort = (compare) => list.sort((left, right) => favoritePriority(left, right) || compare(left, right));
+    const withFavorites = (compare) => (left, right) => favoritePriority(left, right) || compare(left, right);
     switch (sortMode.value) {
       case HOME_SORT_MODES.nameDesc:
-        return sort((left, right) => compareName(right, left) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareName(right, left) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.commentFirst:
-        return sort((left, right) => {
+        return withFavorites((left, right) => {
           const leftHasComment = tableCommentOf(left) ? 0 : 1;
           const rightHasComment = tableCommentOf(right) ? 0 : 1;
           return leftHasComment - rightHasComment || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.commentDesc:
-        return sort((left, right) => {
+        return withFavorites((left, right) => {
           const leftHasComment = tableCommentOf(left) ? 0 : 1;
           const rightHasComment = tableCommentOf(right) ? 0 : 1;
           return leftHasComment - rightHasComment || compareComment(right, left) || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.fieldsAsc:
-        return sort((left, right) => compareFieldCount(left, right) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareFieldCount(left, right) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.fieldsDesc:
-        return sort((left, right) => compareNullableNumber(left.columnCount, right.columnCount, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareNullableNumber(left.columnCount, right.columnCount, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.sizeAsc:
-        return sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.sizeDesc:
-        return sort((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareNullableNumber(left.dataSizeBytes, right.dataSizeBytes, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.modifiedAsc:
-        return sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, 1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.modifiedDesc:
-        return sort((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareNullableNumber(left.modifiedTimestamp, right.modifiedTimestamp, -1) || compareName(left, right) || left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.recent:
-        return sort((left, right) => {
+        return withFavorites((left, right) => {
           const leftRank = recentRank.value.get(left.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
           const rightRank = recentRank.value.get(right.tableName.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
           return leftRank - rightRank || compareName(left, right) || left.originalIndex - right.originalIndex;
         });
       case HOME_SORT_MODES.original:
-        return sort((left, right) => left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => left.originalIndex - right.originalIndex);
       case HOME_SORT_MODES.nameAsc:
       default:
-        return sort((left, right) => compareName(left, right) || left.originalIndex - right.originalIndex);
+        return withFavorites((left, right) => compareName(left, right) || left.originalIndex - right.originalIndex);
     }
   });
+  // Sort only when the tables or the sort mode change; typing a search then
+  // filters this ordered list in one pass. Only the match tier (exact name,
+  // name prefix, name word start, name substring, then comment matches)
+  // outranks the active sort, so tables sharing a typed prefix keep their order.
+  const sortedTables = computed(() => [...normalizedTables.value].sort(compareTables.value));
+  const filteredTables = computed(() => filterTablesByKeywords(sortedTables.value, query.value));
 
   const selectedSet = computed(() => new Set(selectedNames.value));
   const canWrite = computed(() => !readOnly);

@@ -1,11 +1,10 @@
 <script setup>
 import { t } from "./i18n/index.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { Pin } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
-  reapplyTabColumnOrder,
   buildSchemaSearchResults,
   closeDatabaseTabs,
   closeConnectionTabs,
@@ -29,6 +28,7 @@ import {
   openSqlLibraryTab,
   openSqlQueryTab,
   openTableDesignTab,
+  openTableTab,
   renameTableTab,
 } from "./workspaceState.js";
 import {
@@ -63,8 +63,11 @@ import { isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
-import { MAX_FROZEN_ROWS, MAX_FROZEN_COLS } from "./constants.js";
-import { resolveFieldCommentHeight, resolveGridRowHeight } from "./utils/gridRowHeight.js";
+import { createCoalescedTask } from "./utils/coalescedTask.js";
+import { createTabSourceSync } from "./utils/tabSourceSync.js";
+import { applySavedTableTabState, savedTableTabMatchesSource } from "./utils/savedTabRestore.js";
+import { MAX_FROZEN_COLS } from "./constants.js";
+import { resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import {
   SHORTCUT_LABELS,
   matchesShortcutCombo,
@@ -352,6 +355,8 @@ const {
   loadNextSearchResultPage,
   cancelSearchResultPage,
   reopenTableSession,
+  loadVisibleDeferredTabs,
+  preloadDeferredTabs,
   toggleSort,
   applySort,
   dispose: disposeTableSessions,
@@ -1322,11 +1327,44 @@ function paneIdForTab(tabId) {
   return Object.values(workspace.panes || {}).find((pane) => pane.tabIds?.includes(tabId))?.id || "";
 }
 
+// Last document state written per SQL tab, so a flush only rewrites the
+// document library for tabs whose content or metadata actually changed.
+const syncedSqlDocumentSignatures = new WeakMap();
+
+function sqlDocumentSignature(tab) {
+  return [
+    tab.sql,
+    tab.savedSql,
+    tab.dirty,
+    tab.title,
+    tab.fileName,
+    tab.filePath,
+    tab.connectionId,
+    tab.database,
+    Boolean(tab.readOnly || tab.read_only),
+    tab.documentId,
+  ];
+}
+
+function sameSqlDocumentSignature(left, right) {
+  return Boolean(left && right && left.length === right.length && left.every((value, index) => value === right[index]));
+}
+
 function syncSqlDocumentsFromTabs() {
-  workspace.tabs.filter((tab) => tab.kind === "sql").forEach((tab) => sqlDocumentStore.upsertFromTab(tab));
+  workspace.tabs.filter((tab) => tab.kind === "sql").forEach((tab) => {
+    const rawTab = toRaw(tab);
+    const signature = sqlDocumentSignature(tab);
+    if (
+      sameSqlDocumentSignature(syncedSqlDocumentSignatures.get(rawTab), signature)
+      && sqlDocumentStore.findDocument(tab.documentId)
+    ) return;
+    sqlDocumentStore.upsertFromTab(tab);
+    syncedSqlDocumentSignatures.set(rawTab, sqlDocumentSignature(tab));
+  });
 }
 
 async function openSqlDocument({ documentId } = {}, paneId = workspace.focusedPaneId) {
+  flushWorkspacePersistence();
   const document = sqlDocumentStore.findDocument(documentId);
   if (!document) return null;
   const existing = workspace.tabs.find((tab) => tab.kind === "sql" && tab.documentId === document.id);
@@ -2478,18 +2516,20 @@ async function activateTab(paneIdOrTabId, maybeTabId) {
     focusedPaneState.captureActiveTableViewState?.();
   }
   if (paneId) cancelPendingTableActivation(paneId);
-  const tab = workspace.tabs.find((t) => t.id === tabId);
-  if (tab) {
-    if (tab.connectionId && tab.connectionId !== selectedConnectionId.value) {
-      await selectConnection(tab.connectionId);
-    }
-    if (tab.database && tab.database !== selectedDatabase.value) {
-      await selectDatabase({ connectionId: tab.connectionId, database: tab.database });
-    }
-  }
+  // The tab already holds its rows: show it first, then bring the sidebar's
+  // connection/database in line in the background instead of making the
+  // switch wait for the table-list reload.
   if (paneId) focusWorkspacePane(workspace, paneId);
   activateTableTab(workspace, tabId);
+  const tab = workspace.tabs.find((t) => t.id === tabId);
+  if (tab) void tabSourceSync.syncToTab(tab);
 }
+
+const tabSourceSync = createTabSourceSync({
+  getSelected: () => ({ connectionId: selectedConnectionId.value, database: selectedDatabase.value }),
+  selectConnection,
+  selectDatabase,
+});
 
 async function closeTab(paneIdOrTabId, maybeTabId) {
   const paneId = maybeTabId ? paneIdOrTabId : workspace.focusedPaneId;
@@ -4083,6 +4123,19 @@ function persistWorkspace() {
   );
 }
 
+// SQL text changes on every keystroke. Serializing every tab and rewriting
+// the SQL document library + workspace snapshot per key made typing lag, so
+// text edits are coalesced; structural changes (tabs, panes, layout, flags)
+// still persist immediately and flush any pending text with them.
+const workspacePersistence = createCoalescedTask(() => {
+  syncSqlDocumentsFromTabs();
+  persistWorkspace();
+}, { delayMs: 400, maxWaitMs: 2000 });
+
+function flushWorkspacePersistence() {
+  workspacePersistence.flush();
+}
+
 watch(
   () => [
     selectedConnectionId.value,
@@ -4101,7 +4154,6 @@ watch(
       tab?.fieldCommentsExpanded,
       tab?.rowHeight,
       tab?.fieldCommentHeight,
-      tab?.kind === "sql" ? tab.sql : undefined,
       tab?.kind === "sql" ? tab.dirty : undefined,
       tab?.kind === "sql" ? tab.filePath : undefined,
       tab?.kind === "sql" ? tab.documentId : undefined,
@@ -4112,11 +4164,22 @@ watch(
     ])),
   ],
   () => {
-    syncSqlDocumentsFromTabs();
-    persistWorkspace();
+    workspacePersistence.flush({ force: true });
   },
   { deep: false },
 );
+
+// Reads each SQL tab's text by reference only (no serialization per keystroke).
+watch(
+  () => workspace.tabs.map((tab) => (tab?.kind === "sql" ? tab.sql : null)),
+  () => {
+    workspacePersistence.schedule();
+  },
+);
+
+function flushWorkspacePersistenceWhenHidden() {
+  if (document.visibilityState === "hidden") flushWorkspacePersistence();
+}
 
 async function restoreSavedTabs() {
   const snapshot = loadWorkspaceSnapshot();
@@ -4192,7 +4255,11 @@ async function restoreSavedTabs() {
       }
       continue;
     }
-    if (!availableTableNames.has(savedTab.tableName)) continue;
+    if (!savedTableTabMatchesSource(savedTab, {
+      connectionId: currentConnectionId,
+      database: currentDatabase,
+      availableTableNames,
+    })) continue;
 
     const tableMeta = workspace.schema.find(
       (table) => normalizeTableName(table) === savedTab.tableName,
@@ -4211,23 +4278,23 @@ async function restoreSavedTabs() {
     if (savedTab.kind === "design") {
       restoredTab = openTableDesignTab(workspace, tableForOpen, { activate: false, paneId });
     } else {
-      restoredTab = await openTable(tableForOpen, { activate: false, paneId });
+      // Restore a shell only: no database round trip here. Visible tabs load
+      // right after the layout is restored, the rest are preloaded quietly or
+      // load when first shown (useTableSession deferred loading).
+      restoredTab = openTableTab(workspace, {
+        connectionId: currentConnectionId,
+        database: currentDatabase,
+        tableName: savedTab.tableName,
+        tableComment: normalizeTableComment(tableForOpen),
+        readOnly,
+      }, { activate: false, paneId });
+      if (restoredTab && !restoredTab.sessionId) {
+        restoredTab.readOnly = readOnly;
+        restoredTab.deferredLoad = true;
+      }
     }
     if (restoredTab) {
-      if (savedTab.filter) restoredTab.filter = savedTab.filter;
-      if (savedTab.filterMode) restoredTab.filterMode = savedTab.filterMode;
-      if (savedTab.sort) restoredTab.sort = savedTab.sort;
-      // Freeze panes: restore per-tab pinned rows/columns (default 0 when absent).
-      restoredTab.frozenRowStart = Math.max(0, Math.floor(Number(savedTab.frozenRowStart) || 0));
-      restoredTab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));
-      restoredTab.frozenColumnCount = Math.max(0, Math.min(MAX_FROZEN_COLS, Number(savedTab.frozenColumnCount) || 0));
-      if (Array.isArray(savedTab.columnOrder) && savedTab.columnOrder.length) {
-        restoredTab.columnOrder = savedTab.columnOrder;
-        reapplyTabColumnOrder(restoredTab);
-      }
-      restoredTab.fieldCommentsExpanded = savedTab.fieldCommentsExpanded !== false;
-      restoredTab.rowHeight = resolveGridRowHeight(savedTab);
-      restoredTab.fieldCommentHeight = resolveFieldCommentHeight(savedTab);
+      applySavedTableTabState(restoredTab, savedTab);
       savedToRestoredTabId.set(savedTab.id, restoredTab.id);
     }
   }
@@ -4262,16 +4329,42 @@ async function restoreSavedTabs() {
     workspace.activeTabId = focusedPane?.activeTabId || workspace.tabs[0]?.id || "";
   }
   syncSqlDocumentsFromTabs();
+  void loadVisibleDeferredTabs();
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
+// The startup update check runs `svn update` (network + disk). Defer it until
+// the workspace is usable and the WebView is idle so it never competes with
+// connection restoration or the first table page.
+const DEFERRED_UPDATE_CHECK_IDLE_TIMEOUT_MS = 10_000;
+const DEFERRED_UPDATE_CHECK_FALLBACK_DELAY_MS = 5_000;
+// Restored background tabs are preloaded one at a time once the WebView is
+// idle, so later tab switches stay instant without delaying the first screen.
+const RESTORED_TAB_PRELOAD_IDLE_TIMEOUT_MS = 3_000;
+function scheduleIdleStartupWork(run, idleTimeoutMs) {
+  if (typeof globalThis.requestIdleCallback === "function") {
+    globalThis.requestIdleCallback(run, { timeout: idleTimeoutMs });
+  } else {
+    globalThis.setTimeout(run, DEFERRED_UPDATE_CHECK_FALLBACK_DELAY_MS);
+  }
+}
+
+let deferredUpdateCheckScheduled = false;
+function scheduleDeferredUpdateCheck() {
+  if (deferredUpdateCheckScheduled) return;
+  deferredUpdateCheckScheduled = true;
+  scheduleIdleStartupWork(() => { void updater.checkForUpdates({ silent: true }); }, DEFERRED_UPDATE_CHECK_IDLE_TIMEOUT_MS);
+}
+
 onMounted(async () => {
   markPerf("workbench.mounted");
   tableModifiedTimeAutoRefresh.start();
   void updater.startBackgroundListener();
-  void updater.checkForUpdates({ silent: true });
   void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);
+  document.addEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
+  window.addEventListener("pagehide", flushWorkspacePersistence);
+  window.addEventListener("beforeunload", flushWorkspacePersistence);
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
   document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
@@ -4282,10 +4375,11 @@ onMounted(async () => {
   void syncGlobalShortcutBinding();
   try {
     await conn.loadConnections();
-    // Saved connection URLs are restored by loadConnections(). Only mark the
-    // external MCP frontend ready afterwards, so a hidden cold start cannot
-    // race its first DB/UI request against connection restoration.
-    await agent.ensureControlListener();
+    // loadConnections() returns once the last-used connection is ready; other
+    // saved connections keep restoring in order in the background. Only mark
+    // the external MCP frontend ready after all of them, so a hidden cold
+    // start cannot race its first DB/UI request against connection restoration.
+    void conn.whenConnectionsRestored().finally(() => agent.ensureControlListener());
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
     await ensureCurrentDatabaseHome();
@@ -4299,9 +4393,15 @@ onMounted(async () => {
   }
   persistenceReady = true;
   persistWorkspace();
+  scheduleDeferredUpdateCheck();
+  scheduleIdleStartupWork(() => { void preloadDeferredTabs(); }, RESTORED_TAB_PRELOAD_IDLE_TIMEOUT_MS);
 });
 
 onBeforeUnmount(() => {
+  flushWorkspacePersistence();
+  document.removeEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
+  window.removeEventListener("pagehide", flushWorkspacePersistence);
+  window.removeEventListener("beforeunload", flushWorkspacePersistence);
   tableModifiedTimeAutoRefresh.stop();
   void agent.disposeControlListener();
   agent.disposeRuntimeListener();

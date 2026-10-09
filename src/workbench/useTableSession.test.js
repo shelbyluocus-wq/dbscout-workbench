@@ -2383,6 +2383,7 @@ test("handleSessionsInvalidated reopens only the listed sessions", async () => {
     deadSessionTab({ id: "tab-b", tableName: "item", sessionId: "s-2" }),
     deadSessionTab({ id: "tab-c", tableName: "pet", sessionId: "s-3", connectionId: "mysql-2" }),
   ];
+  workspace.activeTabId = "tab-b";
   const opened = [];
   const invoke = async (command, payload) => {
     if (command === "open_table_session") {
@@ -2420,6 +2421,7 @@ test("handleSessionsInvalidated matches by connection when no session ids are gi
     deadSessionTab({ id: "tab-a", tableName: "hero", sessionId: "s-1" }),
     deadSessionTab({ id: "tab-c", tableName: "pet", sessionId: "s-3", connectionId: "mysql-2" }),
   ];
+  workspace.activeTabId = "tab-a";
   const opened = [];
   const invoke = async (command, payload) => {
     if (command === "open_table_session") {
@@ -2829,4 +2831,106 @@ test("loadPreviousPage surfaces failures without moving the window", async () =>
   assert.deepEqual(tab.rows, [{ id: 2001 }]);
   assert.equal(tab.loadingPrevious, false);
   assert.match(tab.loadMoreError, /network down/);
+});
+
+function freshPageInvoke(opened, calls = []) {
+  return async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "open_table_session") {
+      opened.push(payload.tableName);
+      return {
+        sessionId: `fresh-${payload.tableName}`,
+        columns: [{ column_name: "id" }],
+        rows: [{ id: 1 }],
+        totalRows: 1,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
+      };
+    }
+    return { closed: true };
+  };
+}
+
+test("expired sessions reload only on-screen tabs and defer background tabs until shown", async () => {
+  const workspace = reactive(createWorkspaceState({ connectionId: "mysql-1", database: "game" }));
+  workspace.tabs = [
+    deadSessionTab({ id: "tab-a", tableName: "hero", sessionId: "s-1" }),
+    deadSessionTab({ id: "tab-b", tableName: "item", sessionId: "s-2" }),
+  ];
+  workspace.panes["pane-1"].tabIds = ["tab-a", "tab-b"];
+  workspace.panes["pane-1"].activeTabId = "tab-a";
+  workspace.activeTabId = "tab-a";
+  const opened = [];
+  const session = useTableSession(workspace, freshPageInvoke(opened), { busy: ref(false), statusText: ref("") });
+
+  await session.handleSessionsInvalidated({ connectionId: "mysql-1", sessionIds: ["s-1", "s-2"], reason: "expired" });
+
+  assert.deepEqual(opened, ["hero"]);
+  assert.equal(workspace.tabs[1].sessionId, "");
+  assert.equal(workspace.tabs[1].deferredLoad, true);
+  assert.equal(workspace.tabs[1].rows.length, 1, "deferred tabs keep their last rows until shown");
+
+  workspace.panes["pane-1"].activeTabId = "tab-b";
+  workspace.activeTabId = "tab-b";
+  await nextTick();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(opened, ["hero", "item"]);
+  assert.equal(workspace.tabs[1].sessionId, "fresh-item");
+  assert.equal(workspace.tabs[1].deferredLoad, false);
+});
+
+test("a deferred tab loads once with its restored sort when opened or paged", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: "hero" }, { activate: false });
+  tab.sort = { columnName: "id", descending: true };
+  tab.deferredLoad = true;
+  const opened = [];
+  const calls = [];
+  const session = useTableSession(workspace, freshPageInvoke(opened, calls), { busy: ref(false), statusText: ref("") });
+
+  const [viaOpen, viaFetch] = await Promise.all([
+    session.openTable({ tableName: "hero", connectionId: "mysql-1", database: "game" }),
+    session.fetchPage(tab, 1),
+  ]);
+
+  assert.deepEqual(opened, ["hero"], "concurrent callers share one first-page load");
+  assert.equal(viaOpen.id, tab.id);
+  assert.equal(viaFetch.ok, true);
+  const openCall = calls.find((call) => call.command === "open_table_session");
+  assert.deepEqual(openCall.payload.options.sort, { columnName: "id", descending: true });
+  assert.deepEqual(workspace.tabs[0].sort, { columnName: "id", descending: true });
+});
+
+test("background preload loads deferred tabs one at a time", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  for (const name of ["hero", "item", "pet"]) {
+    const tab = openTableTab(workspace, { connectionId: "mysql-1", database: "game", tableName: name }, { activate: false });
+    tab.deferredLoad = true;
+  }
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const opened = [];
+  const base = freshPageInvoke(opened);
+  const invoke = async (command, payload) => {
+    if (command !== "open_table_session") return base(command, payload);
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setImmediate(resolve));
+    inFlight -= 1;
+    return base(command, payload);
+  };
+  const statusText = ref("ready");
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText });
+
+  const preload = session.preloadDeferredTabs();
+  assert.equal(session.pendingTableOpenCount.value, 0, "background preload shows no progress cursor");
+  await preload;
+
+  assert.deepEqual(opened, ["hero", "item", "pet"]);
+  assert.equal(maxInFlight, 1);
+  assert.equal(statusText.value, "ready", "background preload leaves the status bar alone");
+  assert.ok(workspace.tabs.every((tab) => tab.sessionId && !tab.deferredLoad));
 });
