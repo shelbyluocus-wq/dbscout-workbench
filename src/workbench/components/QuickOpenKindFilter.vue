@@ -2,6 +2,7 @@
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
+import { searchKindLabel } from "../utils/searchKindLabels.js";
 
 const props = defineProps({
   modelValue: { type: String, default: "all" },
@@ -10,20 +11,15 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue"]);
 
-const options = [
-  { value: "all", label: "全部类型" },
-  { value: "tableName", label: "表名" },
-  { value: "tableComment", label: "表备注" },
-  { value: "columnName", label: "字段" },
-  { value: "columnComment", label: "字段备注" },
-];
+const options = computed(() => ["all", "tableName", "tableComment", "columnName", "columnComment"]
+  .map((value) => ({ value, label: searchKindLabel(value) })));
 
 const triggerRef = ref(null);
 const menuRef = ref(null);
 const open = ref(false);
 const menuPosition = ref({ left: 0, top: 0, width: 124 });
 const menuId = "wb-quick-open-kind-filter-menu";
-const currentOption = computed(() => options.find((option) => option.value === props.modelValue) || options[0]);
+const currentOption = computed(() => options.value.find((option) => option.value === props.modelValue) || options.value[0]);
 const menuStyle = computed(() => ({
   left: `${menuPosition.value.left}px`,
   top: `${menuPosition.value.top}px`,
@@ -36,7 +32,7 @@ function updateMenuPosition() {
   const width = Math.max(124, rect.width);
   const viewportWidth = globalThis.innerWidth || 1024;
   const viewportHeight = globalThis.innerHeight || 768;
-  const estimatedHeight = options.length * 29 + 8;
+  const estimatedHeight = options.value.length * 29 + 8;
   const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8));
   const top = rect.bottom + estimatedHeight + 8 <= viewportHeight
     ? rect.bottom + 4
@@ -112,7 +108,7 @@ onBeforeUnmount(() => {
       aria-haspopup="listbox"
       :aria-controls="menuId"
       :aria-expanded="open ? 'true' : 'false'"
-      :aria-label="`筛选表范围命中类型：${currentOption.label}`"
+      :aria-label="t('search.kindFilterAria', { kind: currentOption.label })"
       :title="t('m_2aee15f9baab')"
       @click="toggleMenu"
       @keydown="onTriggerKeydown"

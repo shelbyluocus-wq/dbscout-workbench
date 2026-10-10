@@ -1,7 +1,24 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, ref, watch } from "vue";
+import {
+  Binary,
+  Braces,
+  Brackets,
+  Calendar,
+  CalendarClock,
+  Clock,
+  Fingerprint,
+  Hash,
+  KeyRound,
+  MapPin,
+  Table2,
+  ToggleLeft,
+  Type,
+  Variable,
+} from "lucide-vue-next";
 import { columnName } from "../utils/normalize.js";
+import { columnTypeKind } from "../utils/columnTypes.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { useAliases } from "../composables/aliasStore.js";
@@ -36,6 +53,33 @@ const tableSource = computed(() => {
   return `${db ? `${db}.` : ""}${props.activeTab.tableName}`;
 });
 const tableComment = computed(() => props.activeTab?.tableComment || "");
+// Home, SQL and empty panes have no table to describe; show guidance instead
+// of an empty header, a dead search box and a blank list.
+const hasTableContext = computed(() => Boolean(props.activeTab?.tableName));
+
+const COLUMN_KIND_ICONS = Object.freeze({
+  key: KeyRound,
+  number: Hash,
+  boolean: ToggleLeft,
+  text: Type,
+  date: Calendar,
+  datetime: CalendarClock,
+  time: Clock,
+  json: Braces,
+  array: Brackets,
+  identifier: Fingerprint,
+  binary: Binary,
+  spatial: MapPin,
+  other: Variable,
+});
+
+function columnKind(column) {
+  return columnTypeKind(columnType(column), { primaryKey: isPrimaryKey(column) });
+}
+
+function columnIcon(column) {
+  return COLUMN_KIND_ICONS[columnKind(column)] || Variable;
+}
 
 function columnComment(column) {
   return column.column_comment || column.columnComment || "";
@@ -184,6 +228,12 @@ watch(
     class="wb-inspector wb-info-pane"
     @contextmenu.prevent.stop="emit('contextmenu', $event, selectedTextWithin(inspectorRef))"
   >
+    <div v-if="!hasTableContext" class="wb-inspector-empty">
+      <Table2 class="wb-inspector-empty-icon" :size="22" :stroke-width="1.6" aria-hidden="true" />
+      <strong>{{ t('m_88ac482e6e23') }}</strong>
+      <span>{{ t('inspector.emptyHint') }}</span>
+    </div>
+    <template v-else>
     <header class="wb-inspector-table-status" :aria-label="t('m_788e6a933525')">
       <div class="wb-inspector-table-meta">
         <strong
@@ -293,7 +343,14 @@ watch(
         @keydown.enter.prevent="selectColumn(column)"
         @keydown.space.prevent="selectColumn(column)"
       >
-        <span class="wb-object-icon" data-kind="column"></span>
+        <component
+          :is="columnIcon(column)"
+          class="wb-schema-type-icon"
+          :class="`is-${columnKind(column)}`"
+          :size="14"
+          :stroke-width="1.9"
+          aria-hidden="true"
+        />
         <span class="wb-schema-field-copy">
           <strong class="wb-schema-field-name" v-html="highlightSchemaSearchText(columnName(column))"></strong>
           <span class="wb-schema-type-line">
@@ -313,5 +370,6 @@ watch(
         class="wb-inspector-search-empty"
       >{{ t('m_18e034572849') }}</p>
     </section>
+    </template>
   </aside>
 </template>

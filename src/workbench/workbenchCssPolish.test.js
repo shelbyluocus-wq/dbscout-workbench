@@ -598,20 +598,28 @@ test("database homepage uses a compact resizable table surface with selection ca
   assert.match(tableSurfaceRule, /cursor\s*:\s*default/);
   assert.match(tableHeaderRule, /position\s*:\s*sticky/);
   assert.match(tableHeaderRule, /width\s*:\s*max-content/);
+  assert.match(tableHeaderRule, /min-width\s*:\s*100%/);
   assert.doesNotMatch(tableHeaderRule, /border\s*:\s*1px/);
   assert.match(tableHeaderRule, /background\s*:\s*color-mix\(in srgb,\s*var\(--wb-grid-canvas\)\s*92%,\s*var\(--wb-surface\)\)/);
   assert.doesNotMatch(tableHeaderRule, /background\s*:\s*var\(--wb-grid-header\)/);
   assert.match(headerCellRule, /resize\s*:\s*none/);
   assert.doesNotMatch(headerCellRule, /border-right\s*:\s*1px/);
-  assert.match(headerCellRule, /padding\s*:\s*0 22px 0 10px/);
+  // Header labels share the cells' inset so each label sits above its values.
+  assert.match(headerCellRule, /padding\s*:\s*0 10px;/);
+  assert.match(headerCellRule, /justify-content\s*:\s*flex-start/);
+  assert.match(ruleBody(".wb-dbhome-header-cell.is-end"), /justify-content\s*:\s*flex-end/);
+  assert.match(ruleBody(".wb-dbhome-object-cell.is-end"), /justify-content\s*:\s*flex-end/);
   assert.match(listRule, /overflow\s*:\s*visible/);
   assert.doesNotMatch(listRule, /border\s*:\s*1px/);
   assert.match(listRule, /background\s*:\s*transparent/);
-  assert.match(virtualRule, /width\s*:\s*max-content/);
+  assert.match(virtualRule, /width\s*:\s*100%/);
   assert.match(rowRule, /height\s*:\s*30px/);
   assert.match(rowRule, /border-radius\s*:\s*0/);
   assert.match(rowRule, /background\s*:\s*transparent/);
-  assert.doesNotMatch(ruleBody(".wb-dbhome-object-row.is-selected"), /background\s*:\s*var\(--wb-row-selected\)/);
+  assert.match(rowRule, /width\s*:\s*100%/);
+  // Hover and selection belong to the whole row, like a desktop file list.
+  assert.match(ruleBody(".wb-dbhome-object-row:hover"), /background\s*:\s*var\(--wb-list-hover\)/);
+  assert.match(css, /\.wb-dbhome-object-row\.is-selected,\s*\n\.wb-dbhome-object-row\.is-box-selected\s*\{[^}]*background:\s*var\(--wb-list-selected\)/);
   assert.match(nameRule, /overflow\s*:\s*hidden/);
   assert.match(nameButtonRule, /width\s*:\s*100%/);
   assert.match(selectedNameButtonRule, /box-shadow\s*:/);

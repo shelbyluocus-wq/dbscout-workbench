@@ -1307,3 +1307,24 @@ test("adding a connection waits for background restoration so runtime ids keep t
   const order = calls.map((call) => call.command);
   assert.ok(order.lastIndexOf("restore_connection") < order.indexOf("add_connection"));
 });
+
+test("status writes are journaled so repeats and same-tick overwrites stay visible", () => {
+  installLocalStorage();
+  const conn = useConnection(createWorkspaceState(), async () => ({}));
+  conn.drainStatusJournal();
+
+  conn.statusText.value = "剪贴板为空，未修改数据";
+  conn.statusText.value = "剪贴板为空，未修改数据";
+  conn.setStatus("读取分页失败：timeout", { error: true });
+  conn.statusText.value = "已打开表：hero";
+
+  assert.deepEqual(conn.drainStatusJournal(), [
+    { text: "剪贴板为空，未修改数据", explicitError: false },
+    { text: "剪贴板为空，未修改数据", explicitError: false },
+    { text: "读取分页失败：timeout", explicitError: true },
+    { text: "已打开表：hero", explicitError: false },
+  ]);
+  assert.deepEqual(conn.drainStatusJournal(), []);
+  assert.equal(conn.statusText.value, "已打开表：hero");
+  assert.equal(conn.statusRevision.value >= 4, true);
+});

@@ -72,6 +72,16 @@
   --wb-floating-shadow-strong: 0 10px 28px rgba(0, 0, 0, 0.14);
   --wb-pane-collapse-duration: 0.28s;
   --wb-pane-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Shared motion scale: state feedback stays within 120-240ms. */
+  --wb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --wb-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --wb-duration-fast: 120ms;
+  --wb-duration-base: 180ms;
+  --wb-duration-slow: 240ms;
+  /* Shared list interaction surfaces (home table, inspector, menus). */
+  --wb-list-hover: color-mix(in srgb, var(--wb-accent) 7%, transparent);
+  --wb-list-selected: color-mix(in srgb, var(--wb-accent) 13%, transparent);
+  --wb-list-selected-hover: color-mix(in srgb, var(--wb-accent) 17%, transparent);
   --wb-activity-rail-width: 40px;
   --wb-sidebar-slot-width: 292px;
   --wb-sidebar-titlebar-width: calc(var(--wb-activity-rail-width) + 292px);
@@ -238,6 +248,9 @@ html[data-wb-theme="dark"] {
   --wb-workspace-mist-raised: #0f0f11;
   --wb-workspace-mist-canvas: #0f0f11;
   --wb-workspace-mist-border: rgba(255, 255, 255, 0.22);
+  --wb-list-hover: color-mix(in srgb, var(--wb-accent) 10%, transparent);
+  --wb-list-selected: color-mix(in srgb, var(--wb-accent) 20%, transparent);
+  --wb-list-selected-hover: color-mix(in srgb, var(--wb-accent) 25%, transparent);
   --wb-split-line: rgba(255, 255, 255, 0.14);
   --wb-glass: rgba(20, 20, 22, 0.92);
   --wb-glass-strong: rgba(18, 18, 20, 0.96);
@@ -883,12 +896,22 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-danger);
 }
 
+/* A quiet ring at rest; the light fills in only when something needs
+   attention (an update, a failure, or a check in progress). */
 .wb-update-dot {
   width: 10px;
   height: 10px;
+  border: 1.5px solid currentColor;
   border-radius: 50%;
+  background: transparent;
+  opacity: 0.6;
+}
+
+.wb-update-button.is-available .wb-update-dot,
+.wb-update-button.is-error .wb-update-dot,
+.wb-update-button.is-checking .wb-update-dot {
   background: currentColor;
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .wb-update-button.is-checking .wb-update-dot {
@@ -13654,6 +13677,8 @@ label:has(input[type="checkbox"]:disabled) {
   z-index: 4;
 }
 
+/* The sort control appears with the header it belongs to; a sorted column
+   keeps a solid direction arrow so the active sort is always visible. */
 .wb-column-sort-trigger {
   display: inline-grid;
   grid-template-columns: auto;
@@ -13667,13 +13692,20 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 0;
   background: transparent;
   color: var(--wb-muted);
-  font-size: 18px;
   line-height: 1;
-  opacity: 0.35;
+  opacity: 0;
   box-shadow: none;
   outline: none;
   cursor: pointer;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition: opacity var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
+}
+
+.wb-column-sort-icon {
+  display: inline-flex;
+}
+
+.wb-column-sort-trigger.is-sorted {
+  color: var(--wb-accent-strong);
 }
 
 .wb-column-sort-trigger:hover,
@@ -13731,28 +13763,42 @@ label:has(input[type="checkbox"]:disabled) {
   z-index: 90;
   display: grid;
   gap: 1px;
-  min-width: 112px;
+  min-width: 132px;
   margin: 0;
   padding: 4px;
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
-  background: var(--wb-dialog-surface);
-  box-shadow: 0 10px 24px var(--wb-shadow);
+  border: 0;
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  box-shadow:
+    0 0 0 1px var(--wb-floating-border),
+    var(--wb-floating-shadow);
 }
 
 .wb-column-sort-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   justify-content: start;
   width: 100%;
-  height: 26px;
-  min-height: 26px;
+  height: 28px;
+  min-height: 28px;
   padding: 0 9px;
   border: 0;
-  border-radius: 3px;
+  border-radius: 5px;
   background: transparent;
   color: var(--wb-text);
   font-size: 12px;
   text-align: left;
   white-space: nowrap;
+}
+
+.wb-column-sort-menu button svg {
+  flex: none;
+  color: var(--wb-quiet-text);
+}
+
+.wb-column-sort-menu button.active svg {
+  color: currentColor;
 }
 
 .wb-column-sort-menu button:hover:not(:disabled),
@@ -13769,7 +13815,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-column-sort-menu-enter-active,
 .wb-column-sort-menu-leave-active {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  transition: opacity var(--wb-duration-fast) ease, transform var(--wb-duration-fast) var(--wb-ease-out);
 }
 
 .wb-column-sort-menu-enter-from,
@@ -14616,20 +14662,23 @@ label:has(input[type="checkbox"]:disabled) {
   z-index: 2;
   display: grid;
   width: max-content;
+  min-width: 100%;
   height: 30px;
   background: color-mix(in srgb, var(--wb-grid-canvas) 92%, var(--wb-surface));
   box-shadow: inset 0 -1px 0 var(--wb-line);
 }
 
+/* Header labels share the cells' 10px inset and alignment, so each label sits
+   directly above its values; numeric columns align to the end. */
 .wb-dbhome-header-cell {
   position: relative;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 4px;
   min-width: 0;
   min-height: 30px;
-  padding: 0 22px 0 10px;
+  padding: 0 10px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -14641,11 +14690,30 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   resize: none;
   cursor: pointer;
+  transition: background-color var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
 }
 
-.wb-dbhome-header-cell:hover,
+.wb-dbhome-header-cell.is-end {
+  justify-content: flex-end;
+}
+
+.wb-dbhome-header-cell.is-end .wb-dbhome-sort-mark {
+  order: -1;
+}
+
+.wb-dbhome-header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-dbhome-header-cell:hover {
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
 .wb-dbhome-header-cell.is-sorted {
-  background: color-mix(in srgb, var(--wb-control-hover) 42%, transparent);
   color: var(--wb-text);
 }
 
@@ -14655,11 +14723,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-dbhome-sort-mark {
-  flex: 0 0 14px;
+  display: inline-flex;
+  flex: none;
   color: var(--wb-accent-strong);
-  font-size: 12px;
-  font-weight: 700;
-  text-align: center;
+}
+
+.wb-dbhome-sort-mark:empty {
+  display: none;
 }
 
 .wb-dbhome-resize-handle {
@@ -14695,7 +14765,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-virtual {
   position: relative;
-  width: max-content;
+  width: 100%;
 }
 
 .wb-dbhome-virtual-window {
@@ -14703,13 +14773,14 @@ label:has(input[type="checkbox"]:disabled) {
   left: 0;
   top: 0;
   display: grid;
-  width: max-content;
+  width: 100%;
 }
 
+/* The whole row answers hover and selection, like a desktop file list. */
 .wb-dbhome-object-row {
   display: grid;
   align-items: center;
-  width: max-content;
+  width: 100%;
   height: 30px;
   min-height: 30px;
   padding: 0;
@@ -14720,10 +14791,22 @@ label:has(input[type="checkbox"]:disabled) {
   font: inherit;
   text-align: left;
   cursor: default;
+  transition: background-color var(--wb-duration-fast) ease;
 }
 
-.wb-dbhome-object-row.is-selected {
+.wb-dbhome-object-row:hover {
+  background: var(--wb-list-hover);
+}
+
+.wb-dbhome-object-row.is-selected,
+.wb-dbhome-object-row.is-box-selected {
+  background: var(--wb-list-selected);
   color: var(--wb-text);
+}
+
+.wb-dbhome-object-row.is-selected:hover,
+.wb-dbhome-object-row.is-box-selected:hover {
+  background: var(--wb-list-selected-hover);
 }
 
 .wb-dbhome-object-name,
@@ -14815,6 +14898,8 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: default;
 }
 
+/* Stars stay out of the way until the row is hovered or selected; a
+   favorite keeps its filled star visible. */
 .wb-dbhome-favorite-button {
   display: inline-grid;
   flex: 0 0 26px;
@@ -14827,6 +14912,16 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-quiet-text);
   cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--wb-duration-fast) ease, background-color var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
+}
+
+.wb-dbhome-object-row:hover .wb-dbhome-favorite-button,
+.wb-dbhome-object-row.is-selected .wb-dbhome-favorite-button,
+.wb-dbhome-object-row.is-box-selected .wb-dbhome-favorite-button,
+.wb-dbhome-favorite-button.is-favorite,
+.wb-dbhome-favorite-button:focus-visible {
+  opacity: 1;
 }
 
 .wb-dbhome-favorite-button svg {
@@ -14846,11 +14941,6 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-favorite-button.is-favorite {
   color: var(--wb-warning-text);
-}
-
-.wb-dbhome-object-row.is-selected .wb-dbhome-favorite-button,
-.wb-dbhome-object-row.is-box-selected .wb-dbhome-favorite-button {
-  background: var(--wb-row-selected);
 }
 
 /* SQL query library ------------------------------------------------------ */
@@ -15042,10 +15132,30 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
 }
 
+/* The list surface reaches the bottom of the page, so short or empty lists
+   never leave a differently tinted strip below them. */
 .wb-sql-library-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
+  background: var(--wb-table-surface);
+}
+
+.wb-sql-library-section:last-child {
+  flex: 1 0 auto;
+}
+
+.wb-sql-library-section:only-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-sql-library-section:only-child > .wb-sql-library-empty {
+  flex: 1 1 auto;
+  padding-bottom: 10vh;
 }
 
 .wb-sql-library-section {
@@ -15376,8 +15486,10 @@ label:has(input[type="checkbox"]:disabled) {
   }
 }
 
-.wb-dbhome-object-name-button:hover {
-  background: color-mix(in srgb, var(--wb-accent) 9%, transparent);
+/* The row already shows hover; keep the generic button hover box off names. */
+.wb-dbhome-object-name-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
 }
 
 .wb-dbhome-object-name-button:focus-visible {
@@ -15386,21 +15498,18 @@ label:has(input[type="checkbox"]:disabled) {
   outline-offset: 1px;
 }
 
+/* Selection belongs to the row; the name keeps only its keyboard focus ring. */
 .wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button {
-  border-color: color-mix(in srgb, var(--wb-accent) 42%, transparent);
-  background: var(--wb-row-selected);
-  box-shadow:
-    inset 2px 0 0 var(--wb-accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 20%, transparent);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   color: var(--wb-dbhome-name-color, var(--wb-text));
 }
 
 .wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button {
-  border-color: color-mix(in srgb, var(--wb-accent) 46%, transparent);
-  background: var(--wb-row-selected);
-  box-shadow:
-    inset 2px 0 0 var(--wb-accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 24%, transparent);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   color: var(--wb-dbhome-name-color, var(--wb-text));
 }
 
@@ -15971,6 +16080,8 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
 }
 
+/* Quiet until its row is hovered or being edited, so a long field list is not
+   a column of identical buttons. */
 .wb-design-comment-expand {
   display: inline-flex;
   align-items: center;
@@ -15978,16 +16089,23 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 40px;
   height: 22px;
   padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--wb-accent) 38%, transparent);
+  border: 1px solid transparent;
   border-radius: 5px;
-  background: var(--wb-accent-soft);
+  background: transparent;
   box-shadow: none;
-  color: var(--wb-accent-strong);
+  color: var(--wb-quiet-text);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
+  transition: background-color var(--wb-duration-fast) ease, border-color var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
+}
+
+:where(.wb-design-grid tr:hover, .wb-design-comment-input:focus-within) .wb-design-comment-expand {
+  border-color: color-mix(in srgb, var(--wb-accent) 38%, transparent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
 }
 
 .wb-design-comment-expand:hover,
@@ -16451,13 +16569,14 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 6px;
 }
 
+/* Two compact lines per field: name + type on the first, comment below. */
 .wb-schema-column {
   display: grid;
   width: 100%;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: start;
-  gap: 6px;
-  padding: 6px 7px;
+  gap: 8px;
+  padding: 5px 8px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -16465,11 +16584,22 @@ label:has(input[type="checkbox"]:disabled) {
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--wb-duration-fast) ease, border-color var(--wb-duration-fast) ease;
 }
 
 .wb-schema-column:hover {
-  border-color: var(--wb-accent);
-  background: var(--wb-accent-soft);
+  background: var(--wb-list-hover);
+}
+
+.wb-schema-type-icon {
+  margin-top: 2px;
+  color: var(--wb-type-text);
+  opacity: 0.85;
+}
+
+.wb-schema-type-icon.is-key {
+  color: var(--wb-warning-text);
+  opacity: 1;
 }
 
 .wb-schema-column:focus-visible {
@@ -16501,26 +16631,33 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-schema-field-copy {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 1px;
   min-width: 0;
-  gap: 3px;
   cursor: text;
   user-select: text;
 }
 
 .wb-schema-field-name {
+  flex: 0 1 auto;
+  max-width: 100%;
   overflow: hidden;
   color: var(--wb-identifier-text);
   font-size: 12px;
   font-weight: 650;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .wb-schema-type-line {
   display: flex;
+  flex: 0 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -16551,12 +16688,45 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-schema-field-comment {
+  flex: 1 0 100%;
   color: var(--wb-field-comment-text);
   font-size: 12.5px;
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.6;
+}
+
+/* Guidance when the focused pane has no table to describe (home, SQL). */
+.wb-inspector-empty {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px 20px 64px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.wb-inspector-empty strong {
+  color: var(--wb-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-inspector-empty-icon {
+  margin-bottom: 4px;
+  color: var(--wb-quiet-text);
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-schema-column {
+    transition: none;
+  }
 }
 
 .wb-inspector-divider {
@@ -20997,24 +21167,39 @@ label:has(input[type="checkbox"]:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+.wb-dbhome-object-cell.is-end {
+  justify-content: flex-end;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-dbhome-header-cell,
-  .wb-dbhome-object-row > * {
+  .wb-dbhome-object-row,
+  .wb-dbhome-object-row > *,
+  .wb-dbhome-favorite-button,
+  .wb-dbhome-column-drag-handle {
     transition: none !important;
   }
 }
 
+/* The reorder grip lives in the cell's inset and appears on hover only. */
 .wb-dbhome-column-drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
   display: inline-flex;
-  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  margin-left: -5px;
+  width: 12px;
   color: var(--wb-quiet-text);
-  font-size: 12px;
   cursor: grab;
-  opacity: 0.62;
+  opacity: 0;
+  transition: opacity var(--wb-duration-fast) ease;
+}
+
+.wb-dbhome-header-cell:hover .wb-dbhome-column-drag-handle,
+.wb-dbhome-header-cell:focus-visible .wb-dbhome-column-drag-handle {
+  opacity: 0.7;
 }
 
 .wb-dbhome-column-drag-handle:active { cursor: grabbing; }
@@ -21106,7 +21291,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   width: 100%;
   height: 100%;
   min-height: 16px;
@@ -22366,4 +22551,208 @@ label:has(input[type="checkbox"]:disabled) {
 }
 @media (prefers-reduced-motion: reduce) {
   .wb-audit-details-toggle > svg { transition: none; }
+}
+
+/* Operation notices ---------------------------------------------------------
+   One quiet, non-blocking home for operation feedback: failures stay readable
+   (and copyable) for a while, completions confirm briefly. The stack never
+   takes layout space and sits below menus and modal dialogs. */
+.wb-notice-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  margin: 0;
+  pointer-events: none;
+}
+
+.wb-notice {
+  --wb-notice-accent: var(--wb-accent-strong);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 8px 10px 12px;
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  box-shadow:
+    0 0 0 1px var(--wb-floating-border),
+    0 0 0 1px color-mix(in srgb, var(--wb-notice-accent) 18%, transparent),
+    var(--wb-floating-shadow);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.wb-notice.is-error { --wb-notice-accent: var(--wb-danger); }
+.wb-notice.is-warning { --wb-notice-accent: var(--wb-warning-text); }
+.wb-notice.is-success { --wb-notice-accent: var(--wb-success-text); }
+
+.wb-notice-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--wb-notice-accent);
+}
+
+.wb-notice-copy {
+  min-width: 0;
+}
+
+.wb-notice-title,
+.wb-notice-detail {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+}
+
+.wb-notice-title {
+  font-weight: 600;
+  -webkit-line-clamp: 4;
+}
+
+.wb-notice-detail {
+  margin-top: 2px;
+  color: var(--wb-secondary-text);
+  -webkit-line-clamp: 3;
+}
+
+.wb-notice-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-notice-accent) 14%, transparent);
+  color: var(--wb-notice-accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
+}
+
+.wb-notice-close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin: -3px 0 -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  transition: background-color var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
+}
+
+.wb-notice-close:hover {
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
+.wb-notice-close:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-notice-enter-active {
+  transition:
+    opacity var(--wb-duration-base) var(--wb-ease-out),
+    transform var(--wb-duration-slow) var(--wb-ease-out);
+}
+
+.wb-notice-leave-active {
+  transition:
+    opacity var(--wb-duration-fast) var(--wb-ease-in),
+    transform var(--wb-duration-fast) var(--wb-ease-in);
+}
+
+.wb-notice-move {
+  transition: transform var(--wb-duration-base) var(--wb-ease-out);
+}
+
+.wb-notice-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+}
+
+.wb-notice-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-notice-enter-active,
+  .wb-notice-leave-active,
+  .wb-notice-move,
+  .wb-notice-close {
+    transition: none;
+  }
+}
+
+/* Surface entrance motion ---------------------------------------------------
+   Dialogs, menus and popovers ease in instead of popping. Closing stays
+   instant so dismissal never waits on an animation. The individual
+   `translate`/`scale` properties compose with any inline `transform` a surface
+   uses for its own positioning (e.g. the draggable batch import dialog). */
+@keyframes wb-surface-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes wb-dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.985;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@keyframes wb-menu-in {
+  from {
+    opacity: 0;
+    translate: 0 -3px;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+.wb-dialog-overlay {
+  animation: wb-surface-fade-in var(--wb-duration-fast) ease-out;
+}
+
+.wb-dialog-overlay > [role="dialog"],
+.wb-dialog-overlay > .wb-dialog {
+  animation: wb-dialog-in var(--wb-duration-base) var(--wb-ease-out);
+}
+
+.wb-context-menu {
+  transform-origin: top left;
+  animation: wb-menu-in var(--wb-duration-fast) var(--wb-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-dialog-overlay,
+  .wb-dialog-overlay > [role="dialog"],
+  .wb-dialog-overlay > .wb-dialog,
+  .wb-context-menu {
+    animation: none;
+  }
 }

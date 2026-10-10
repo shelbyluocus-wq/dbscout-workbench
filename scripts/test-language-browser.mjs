@@ -28,7 +28,7 @@ try {
   const cellText = await firstCell.innerText();
   await page.evaluate(() => { window.languageSwitchSentinel = "same-document"; });
   await page.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
-  await page.locator(".wb-sidebar-settings-trigger").click();
+  await page.locator(".wb-activity-rail-bottom .wb-activity-rail-btn").first().click();
   const settings = page.locator(".wb-sidebar-settings-sheet");
   const language = settings.locator("[data-language-selector]");
   await language.getByRole("button", { name: "简体中文", exact: true }).click();
@@ -83,15 +83,15 @@ try {
   assert.equal(await restored.locator("html").getAttribute("lang"), "zh-CN");
   assert.equal(await restored.evaluate(() => localStorage.getItem("dbscout_language")), "zh-CN");
   await restored.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
-  await restored.locator(".wb-sidebar-settings-trigger").click();
+  await restored.locator(".wb-activity-rail-bottom .wb-activity-rail-btn").first().click();
   await restored.locator(".wb-sidebar-settings-sheet").getByRole("button", { name: "English", exact: true }).click();
   await restored.reload();
   await restored.locator(".mysql-workbench").waitFor();
   assert.equal(await restored.locator("html").getAttribute("lang"), "en", "explicit choice overrides legacy preferences");
-  if (!await restored.locator(".wb-sidebar-settings-trigger").isVisible()) {
+  if (!await restored.locator(".wb-activity-rail-bottom .wb-activity-rail-btn").first().isVisible()) {
     await restored.locator("#wb-topbar-sidebar-actions .wb-topbar-collapse-btn").click();
   }
-  await restored.locator(".wb-sidebar-settings-trigger").click();
+  await restored.locator(".wb-activity-rail-bottom .wb-activity-rail-btn").first().click();
   const twButton = restored.locator("[data-language-selector]").getByRole("button", { name: "繁體中文（台灣）", exact: true });
   await twButton.focus();
   await restored.keyboard.press("Enter");

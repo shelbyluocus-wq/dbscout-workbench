@@ -574,16 +574,16 @@ const commentPreviewHtml = computed(() => renderMarkdown(commentDialog.value));
 
 /* ---------- Column definition for rendering ---------- */
 const colDefs = [
-  { key: "name", label: "字段名" },
-  { key: "primaryKey", label: "主键顺序" },
-  { key: "type", label: "类型" },
-  { key: "length", label: "长度" },
-  { key: "scale", label: "小数位" },
-  { key: "nullable", label: "允许 NULL" },
-  { key: "defaultMode", label: "默认值模式" },
-  { key: "defaultValue", label: "默认值" },
-  { key: "comment", label: "备注" },
-  { key: "actions", label: "操作" },
+  { key: "name", labelKey: "design.column.name" },
+  { key: "primaryKey", labelKey: "design.column.primaryKey" },
+  { key: "type", labelKey: "design.column.type" },
+  { key: "length", labelKey: "design.column.length" },
+  { key: "scale", labelKey: "design.column.scale" },
+  { key: "nullable", labelKey: "design.column.nullable" },
+  { key: "defaultMode", labelKey: "design.column.defaultMode" },
+  { key: "defaultValue", labelKey: "design.column.defaultValue" },
+  { key: "comment", labelKey: "design.column.comment" },
+  { key: "actions", labelKey: "design.column.actions" },
 ];
 </script>
 
@@ -648,7 +648,7 @@ const colDefs = [
                 :key="col.key"
                 :style="{ width: colWidths[col.key] + 'px', minWidth: colWidths[col.key] + 'px', position: 'relative' }"
               >
-                {{ col.label }}
+                {{ t(col.labelKey) }}
                 <span
                   class="wb-design-col-resize"
                   :class="{ 'is-resizing': resizingCol === col.key }"

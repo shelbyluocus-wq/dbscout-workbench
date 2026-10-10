@@ -213,24 +213,24 @@ const dynamicPrompts = computed(() => {
 
   if (!tableName) {
     return [
-      "当前数据库有哪些表？",
-      "描述 player 表的结构",
-      "查询 player 表前 10 条数据",
+      t("agent.promptListTables"),
+      t("agent.promptDescribePlayer"),
+      t("agent.promptSamplePlayer"),
     ];
   }
 
   const columns = table?.columns || [];
   const pk = guessPrimaryKeyColumn(columns);
   const stringCol = guessStringColumn(columns);
-  const firstPrompt = `${tableName} 表有哪些字段？`;
-  const secondPrompt = `查询 ${tableName} 表前 10 条数据`;
+  const firstPrompt = t("agent.promptColumns", { table: tableName });
+  const secondPrompt = t("agent.promptSampleRows", { table: tableName });
   let thirdPrompt;
   if (pk && stringCol) {
-    thirdPrompt = `把 ${tableName} 表中 ${pk} 为 1 的 ${stringCol} 改成 Admin`;
+    thirdPrompt = t("agent.promptUpdateByKey", { table: tableName, key: pk, column: stringCol });
   } else if (stringCol) {
-    thirdPrompt = `把 ${tableName} 表中 ${stringCol} 改成 Admin`;
+    thirdPrompt = t("agent.promptUpdateColumn", { table: tableName, column: stringCol });
   } else {
-    thirdPrompt = `在 ${tableName} 表中搜索关键字`;
+    thirdPrompt = t("agent.promptSearch", { table: tableName });
   }
 
   return [firstPrompt, secondPrompt, thirdPrompt];
@@ -314,7 +314,7 @@ function toggleSettings() {
 
 function startNewSessionWithNotice() {
   props.assistant.startNewSession();
-  sessionNotice.value = "已打开新会话";
+  sessionNotice.value = t('m_002e345b54a6');
   if (sessionNoticeTimer) window.clearTimeout(sessionNoticeTimer);
   sessionNoticeTimer = window.setTimeout(() => {
     sessionNotice.value = "";
@@ -358,17 +358,17 @@ onBeforeUnmount(() => {
 const agentStatusLabel = computed(() => {
   // 有待批准的操作时，优先提示用户 Agent 正在等待你的决定。
   if (props.assistant.pendingApprovals.value.length || props.assistant.pendingPlans.value.length) {
-    return "等待你批准操作";
+    return t("agent.statusAwaitingApproval");
   }
   const elapsed = busyElapsed.value;
   const suffix = elapsed > 0 ? ` · ${elapsed}s` : "";
   switch (props.assistant.status.value) {
     case "thinking":
-      return `处理中… (esc 中断${suffix})`;
+      return t("agent.statusThinking", { suffix });
     case "streaming":
-      return `输出中… (esc 中断${suffix})`;
+      return t("agent.statusStreaming", { suffix });
     case "error":
-      return "出错了";
+      return t("agent.statusError");
     default:
       return "";
   }

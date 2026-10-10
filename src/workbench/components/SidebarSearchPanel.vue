@@ -22,6 +22,7 @@ import {
   removeSidebarSearchHistoryEntry,
 } from "../utils/sidebarSearchHistory.js";
 import SearchHitBadge from "./SearchHitBadge.vue";
+import { searchKindLabel } from "../utils/searchKindLabels.js";
 
 const props = defineProps({
   query: { type: String, default: "" },
@@ -80,13 +81,7 @@ function columnComment(column) {
 }
 
 function matchKindLabel(kind) {
-  return {
-    tableName: "表名",
-    tableComment: "表备注",
-    columnName: "字段",
-    columnComment: "字段备注",
-    value: "值",
-  }[kind] || "结构";
+  return searchKindLabel(kind);
 }
 
 function columnHitLabel(column, result) {
@@ -238,7 +233,8 @@ defineExpose({ focusSearch });
         :value="query"
         autocomplete="off"
         spellcheck="false"
-        :placeholder="t('m_e287730c90c3')"
+        :placeholder="t('m_88f61178b6b5')"
+        :title="t('m_e287730c90c3')"
         aria-controls="wb-sidebar-search-history"
         :aria-expanded="showHistory ? 'true' : 'false'"
         @input="emit('update:query', $event.target.value)"

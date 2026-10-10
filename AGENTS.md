@@ -196,6 +196,10 @@ from UI):
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle
+- `operationNotices.js` — Visible operation-feedback queue rendered by
+  `OperationNoticeStack.vue` (bottom-right, below menus and dialogs): tone-based
+  auto-dismiss, hover/focus pause, same-event coalescing and suppression of
+  messages already shown beside a cell
 - `constants.js` — `DEFAULT_PAGE_SIZE` (100), `REQUEST_PAGE_SIZE` (1000),
   `GRID_ROW_HEIGHT`/`GRID_HEADER_HEIGHT` (28), `VIRTUAL_BUFFER` (10),
   `SIDEBAR_TABLE_ROW_HEIGHT`, and adaptive column-width constants
@@ -253,7 +257,11 @@ from UI):
   is shown), `coalescedTask.js` (debounced persistence with max wait),
   `savedTabRestore.js` (source-matched saved tabs + view state applied before
   the first load); `selectionStats.js` also provides the incremental,
-  time-sliced selection scan used by the cell detail bar
+  time-sliced selection scan used by the cell detail bar;
+  `statusMessages.js` (classifies legacy zh-CN `statusText` messages into
+  notice tones — quiet, info, success, warning, error — and maps their
+  templates to `status.*` catalog keys for display); `searchKindLabels.js`
+  (shared localized labels for schema-search hit kinds)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -486,6 +494,12 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
 - **Optimistic editing** — Cell saves apply immediately in the frontend, then
   commit to the backend. On failure the optimistic value is cleared and a
   per-cell error is recorded.
+- **Operation feedback** — `statusText` stays the single status channel (and
+  the screen-reader live region). Every write is journaled by `useConnection`;
+  the orchestrator drains the journal after each task and surfaces failures,
+  blocked actions and completed operations as notices. Progress chatter and
+  results already visible in place stay quiet. When adding a status message,
+  add a rule in `utils/statusMessages.js` if it should notify or be translated.
 - **Safety layers** — Writes flow through backup (layer 1) + audit (layer 2); a
   successful mutation always has a committed audit row so it can be rolled back.
 - **Node.js test runner** — JS/sidecar tests use `node:test` and

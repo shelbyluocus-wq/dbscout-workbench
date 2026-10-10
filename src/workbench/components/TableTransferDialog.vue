@@ -293,14 +293,18 @@ const runDisabledReason = computed(() => {
   padding-top: 10px;
 }
 
-/* 关闭按钮加大（全局是 28px / 16px 字） */
+/* Two-line header: keep the close button level with the title, not centred
+   against the title plus description. */
 .wb-table-transfer-header {
+  align-items: flex-start;
   margin-bottom: 8px;
 }
 
+/* 关闭按钮加大（全局是 28px / 16px 字） */
 .wb-table-transfer-header .wb-dialog-close {
   width: 36px;
   height: 36px;
+  margin-top: -6px;
   font-size: 22px;
 }
 
@@ -348,23 +352,25 @@ const runDisabledReason = computed(() => {
   cursor: default;
 }
 
+/* Two-column form: the label column is as wide as the longest label in the
+   current language, so labels never wrap and every input lines up. */
 .wb-table-transfer-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
 }
 
 .wb-table-transfer-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: contents;
 }
 
 .wb-table-transfer-label {
-  flex: none;
-  width: 60px;
+  min-width: 56px;
   font-size: 13px;
   color: var(--wb-text);
+  white-space: nowrap;
 }
 
 .wb-table-transfer-path {

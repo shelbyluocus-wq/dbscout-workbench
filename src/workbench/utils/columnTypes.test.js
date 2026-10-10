@@ -22,3 +22,36 @@ test("isNumericColumnType rejects text/date/other families", () => {
   assert.equal(isNumericColumnType(null), false);
   assert.equal(isNumericColumnType(undefined), false);
 });
+
+test("columnTypeKind groups column types into icon families", async () => {
+  const { columnTypeKind } = await import("./columnTypes.js");
+  const cases = {
+    int: "number",
+    "bigint(20) unsigned": "number",
+    "decimal(10,2)": "number",
+    "tinyint(1)": "boolean",
+    tinyint: "number",
+    "varchar(32)": "text",
+    longtext: "text",
+    "enum('a','b')": "text",
+    datetime: "datetime",
+    "timestamp(3)": "datetime",
+    date: "date",
+    year: "date",
+    time: "time",
+    json: "json",
+    blob: "binary",
+    point: "spatial",
+    "Nullable(Int32)": "number",
+    "LowCardinality(String)": "text",
+    "DateTime64(3)": "datetime",
+    objectId: "identifier",
+    array: "array",
+    interval: "other",
+    "": "other",
+  };
+  for (const [type, kind] of Object.entries(cases)) {
+    assert.equal(columnTypeKind(type), kind, type);
+  }
+  assert.equal(columnTypeKind("int", { primaryKey: true }), "key");
+});

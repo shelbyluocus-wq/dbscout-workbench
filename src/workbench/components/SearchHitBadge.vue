@@ -1,23 +1,18 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { searchKindLabel } from "../utils/searchKindLabels.js";
 const props = defineProps({
   kind: { type: String, default: "tableName" },
   subtle: { type: Boolean, default: false },
   label: { type: String, default: "" },
 });
 
-const labels = {
-  tableName: "表名",
-  tableComment: "表备注",
-  columnName: "字段",
-  columnComment: "字段备注",
-  value: "值",
-};
+const KNOWN_KINDS = new Set(["tableName", "tableComment", "columnName", "columnComment", "value"]);
 </script>
 
 <template>
   <span
     class="wb-search-hit-badge"
     :class="[`is-${props.kind}`, { 'is-subtle': props.subtle }]"
-  >{{ props.label || labels[props.kind] || t('m_3b15fa5b2ac0') }}</span>
+  >{{ props.label || (KNOWN_KINDS.has(props.kind) ? searchKindLabel(props.kind) : t('m_3b15fa5b2ac0')) }}</span>
 </template>

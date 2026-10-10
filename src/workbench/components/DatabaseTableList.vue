@@ -1,12 +1,15 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, nextTick, ref, useId, watch } from "vue";
-import { Star } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { ArrowDown, ArrowUp, GripVertical, Star } from "lucide-vue-next";
 import {
   defaultHomeColumnLayout,
+  fittedFillWidth,
   formatDataSize,
   formatModifiedAt,
   homeColumnDefinition,
+  homeGridTemplateColumns,
+  homeTableWidthCss,
   loadHomeColumnLayout,
   moveHomeColumn,
   saveHomeColumnLayout,
@@ -64,6 +67,7 @@ const renameErrorId = `wb-dbhome-rename-error-${useId().replace(/[^a-zA-Z0-9_-]/
 const renameSubmissionHandled = ref(false);
 const scrollTop = ref(0);
 const viewportHeight = ref(520);
+const surfaceWidth = ref(0);
 const columnLayout = ref(loadHomeColumnLayout());
 const columnResize = ref(null);
 const draggedColumnKey = ref("");
@@ -91,10 +95,24 @@ const columnWidths = computed(() => {
     modified: 176,
     comment: clampWidth(maxComment + 28, 180, 520),
   };
-  return Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
+  const widths = Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
+  // Only an automatically sized fill column adapts to the pane; a width the
+  // user dragged stays exactly as set.
+  const fill = columnLayout.value.find((item) => homeColumnDefinition(item.key).fill && !item.width);
+  if (fill) {
+    const otherColumnsWidth = columnLayout.value
+      .reduce((sum, item) => (item.key === fill.key ? sum : sum + widths[item.key]), 0);
+    widths[fill.key] = fittedFillWidth({
+      preferred: widths[fill.key],
+      minWidth: homeColumnDefinition(fill.key).minWidth,
+      available: surfaceWidth.value,
+      otherColumnsWidth,
+    });
+  }
+  return widths;
 });
-const tableWidth = computed(() => columns.value.reduce((sum, column) => sum + column.width, 0));
-const gridTemplateColumns = computed(() => columns.value.map((column) => `${column.width}px`).join(" "));
+const tableWidth = computed(() => homeTableWidthCss(columns.value));
+const gridTemplateColumns = computed(() => homeGridTemplateColumns(columns.value));
 const totalHeight = computed(() => props.tables.length * ROW_HEIGHT);
 const visibleRange = computed(() => {
   const total = props.tables.length;
@@ -249,10 +267,11 @@ function beginColumnResize(column, event) {
   const key = column?.key;
   if (!key) return;
   suppressHeaderClick.value = true;
+  const renderedWidth = event.currentTarget?.parentElement?.getBoundingClientRect?.().width;
   columnResize.value = {
     key,
     startX: event.clientX,
-    startWidth: column.width,
+    startWidth: renderedWidth || column.width,
   };
   window.addEventListener("pointermove", continueColumnResize);
   window.addEventListener("pointerup", finishColumnResize, { once: true });
@@ -545,6 +564,23 @@ watch(
   },
 );
 
+let surfaceObserver = null;
+
+onMounted(() => {
+  const surface = scrollerRef.value;
+  if (!surface || typeof ResizeObserver !== "function") return;
+  surfaceObserver = new ResizeObserver(() => {
+    surfaceWidth.value = surface.clientWidth;
+    viewportHeight.value = surface.clientHeight || viewportHeight.value;
+  });
+  surfaceObserver.observe(surface);
+});
+
+onBeforeUnmount(() => {
+  surfaceObserver?.disconnect();
+  surfaceObserver = null;
+});
+
 defineExpose({ focusList, resetView, scrollTableIntoView });
 </script>
 
@@ -571,7 +607,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
       <span>{{ t('m_ca3e16dc2317') }}</span>
     </div>
     <template v-else>
-      <div class="wb-dbhome-table-header" :style="{ gridTemplateColumns, width: `${tableWidth}px` }" role="row">
+      <div class="wb-dbhome-table-header" :style="{ gridTemplateColumns, width: tableWidth }" role="row">
         <button
           v-for="column in columns"
           :key="column.key"
@@ -579,6 +615,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           class="wb-dbhome-header-cell"
           :class="{
             'is-sorted': sortDirection(column.key),
+            'is-end': column.align === 'end',
             'is-drop-before': dropTarget?.key === column.key && dropTarget?.position === 'before',
             'is-drop-after': dropTarget?.key === column.key && dropTarget?.position === 'after',
           }"
@@ -598,9 +635,12 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
             @click.stop
             @dragstart.stop="beginColumnDrag(column, $event)"
             @dragend="endColumnDrag"
-          >⠿</span>
-          <span>{{ column.label }}</span>
-          <span class="wb-dbhome-sort-mark" aria-hidden="true">{{ sortDirection(column.key) === "asc" ? "↑" : sortDirection(column.key) === "desc" ? "↓" : "" }}</span>
+          ><GripVertical :size="12" :stroke-width="2" aria-hidden="true" /></span>
+          <span class="wb-dbhome-header-label">{{ column.label }}</span>
+          <span class="wb-dbhome-sort-mark" aria-hidden="true">
+            <ArrowUp v-if="sortDirection(column.key) === 'asc'" :size="12" :stroke-width="2.2" />
+            <ArrowDown v-else-if="sortDirection(column.key) === 'desc'" :size="12" :stroke-width="2.2" />
+          </span>
           <span v-if="sortLabel(column.key)" class="wb-visually-hidden">{{ sortLabel(column.key) }}</span>
           <span
             class="wb-dbhome-resize-handle"
@@ -610,8 +650,8 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           ></span>
         </button>
       </div>
-      <div class="wb-dbhome-object-list" :style="{ width: `${tableWidth}px` }">
-        <div class="wb-dbhome-virtual" :style="{ height: `${totalHeight}px`, width: `${tableWidth}px` }">
+      <div class="wb-dbhome-object-list" :style="{ width: tableWidth }">
+        <div class="wb-dbhome-virtual" :style="{ height: `${totalHeight}px` }">
           <div class="wb-dbhome-virtual-window" :style="{ transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)` }">
         <div
           v-for="{ table } in visibleRows"
@@ -634,6 +674,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
               'wb-dbhome-object-name': column.key === 'name',
               'wb-dbhome-object-comment': column.key === 'comment',
               'wb-dbhome-object-cell': column.key !== 'name',
+              'is-end': column.align === 'end',
             }"
             :title="columnCellValue(table, column.key)"
             @click="column.key !== 'name' && select(table, $event)"
@@ -680,7 +721,7 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 class="wb-dbhome-favorite-button"
                 :class="{ 'is-favorite': favoriteSet.has(tableName(table)) }"
                 :title="favoriteSet.has(tableName(table)) ? t('m_dca60869e7d2') : t('m_616b6280465e')"
-                :aria-label="favoriteSet.has(tableName(table)) ? `取消收藏 ${tableName(table)}` : `收藏并置顶 ${tableName(table)}`"
+                :aria-label="t(favoriteSet.has(tableName(table)) ? 'home.unfavoriteTable' : 'home.favoriteTable', { table: tableName(table) })"
                 :aria-pressed="favoriteSet.has(tableName(table)) ? 'true' : 'false'"
                 @pointerdown.stop.prevent
                 @click.stop="toggleFavorite(table)"

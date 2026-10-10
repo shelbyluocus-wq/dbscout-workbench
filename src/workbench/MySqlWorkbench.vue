@@ -139,6 +139,9 @@ import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
+import OperationNoticeStack from "./components/OperationNoticeStack.vue";
+import { createOperationNotices } from "./operationNotices.js";
+import { describeStatusMessage } from "./utils/statusMessages.js";
 
 import { useConnection } from "./composables/useConnection.js";
 import { connectionHasCapability } from "./utils/connectionKinds.js";
@@ -217,6 +220,8 @@ useEscClose(
 const saveReminders = ref([]);
 let nextSaveReminderId = 1;
 const SAVE_REMINDER_DURATION_MS = Object.freeze({ default: 1300, error: 4000, warning: 4000 });
+const WORKBENCH_REMINDER_TONES = Object.freeze({ success: "success", "export-success": "success", warning: "warning", error: "error" });
+const operationNotices = createOperationNotices();
 const sidebarRef = ref(null);
 // Quick Open 浮层（Ctrl+P 快速切表 + 切库）。独立于侧栏内嵌搜索框，侧栏收起/
 // 展开态均可触发，契合"降低信息密度、保留留白"的诉求。
@@ -290,7 +295,9 @@ const {
   busy,
   connTestBusy,
   statusText,
+  statusRevision,
   statusError,
+  drainStatusJournal,
   setStatus,
   loadConnections,
   selectConnection,
@@ -680,18 +687,18 @@ const canFreezeCell = computed(() => {
 const freezeCellLabel = computed(() => {
   const r = contextMenuTargetRowIndex.value;
   const c = contextMenuTargetColumnIndex.value;
-  if (r >= 0 && c >= 0) return `冻结到第 ${r + 1} 行第 ${c + 1} 列`;
-  return "冻结到此单元格";
+  if (r >= 0 && c >= 0) return t("grid.freezeAtCell", { row: r + 1, column: c + 1 });
+  return t("grid.freezeAtThisCell");
 });
 
 const freezeRowLabel = computed(() => {
   const idx = contextMenu.anchorIndex;
-  return Number.isFinite(idx) ? `冻结到第 ${idx + 1} 行` : "冻结到此行";
+  return Number.isFinite(idx) ? t("grid.freezeThroughRow", { row: idx + 1 }) : t("grid.freezeThroughThisRow");
 });
 
 const freezeColumnLabel = computed(() => {
   const idx = contextMenuTargetColumnIndex.value;
-  return idx >= 0 ? `冻结到第 ${idx + 1} 列` : "冻结到此列";
+  return idx >= 0 ? t("grid.freezeThroughColumn", { column: idx + 1 }) : t("grid.freezeThroughThisColumn");
 });
 
 function onFreezeRow() {
@@ -1176,6 +1183,7 @@ function showSaveReminder({ tabId, rowKey, column, kind, message }) {
   const rootRect = gridWrapRef.value.closest(".mysql-workbench")?.getBoundingClientRect();
   const cellRect = cell.getBoundingClientRect();
   if (!rootRect || cellRect.bottom < rootRect.top || cellRect.top > rootRect.bottom) return;
+  operationNotices.suppress(message);
   const id = nextSaveReminderId++;
   saveReminders.value = [
     ...saveReminders.value.slice(-4),
@@ -1197,6 +1205,7 @@ function saveReminderDuration(kind) {
 }
 
 function showSaveReminderAt({ x, y, kind, message }) {
+  operationNotices.suppress(message);
   const id = nextSaveReminderId++;
   saveReminders.value = [
     ...saveReminders.value.slice(-4),
@@ -1207,15 +1216,32 @@ function showSaveReminderAt({ x, y, kind, message }) {
   }, saveReminderDuration(kind));
 }
 
+// Revision of the last status write the notice watcher has processed.
+let drainedStatusRevision = 0;
+
+// Workbench-level feedback has one home: the notice stack. Status text written
+// in the same task becomes the detail line (e.g. an export's path); an older
+// message would be unrelated, so it is left out.
 function showWorkbenchReminder(kind, message) {
-  const rootRect = paneWorkspaceRef.value?.getBoundingClientRect?.();
-  showSaveReminderAt({
-    kind,
-    message,
-    x: rootRect ? Math.max(72, rootRect.width / 2 - 36) : 160,
-    y: 58,
+  const freshStatusText = statusRevision.value !== drainedStatusRevision ? statusText.value : "";
+  operationNotices.push({
+    tone: WORKBENCH_REMINDER_TONES[kind] || "info",
+    text: message,
+    detail: freshStatusText,
   });
 }
+
+// Status messages that deserve attention surface as notices; progress chatter
+// and results already shown in place stay in the screen-reader live region.
+// Drained after the current task, so feedback already shown beside a cell in
+// the same task can suppress its duplicate; every journaled message is seen.
+watch(statusRevision, () => {
+  for (const entry of drainStatusJournal()) {
+    const notice = describeStatusMessage(entry.text, { explicitError: entry.explicitError });
+    if (notice) operationNotices.push({ tone: notice.tone, text: entry.text });
+  }
+  drainedStatusRevision = statusRevision.value;
+});
 
 async function copyTextToClipboard(text) {
   const value = String(text ?? "");
@@ -4904,6 +4930,8 @@ onBeforeUnmount(() => {
         @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
       />
     </section>
+
+    <OperationNoticeStack :notices="operationNotices" />
 
     <section
       class="wb-operation-status-live wb-visually-hidden"

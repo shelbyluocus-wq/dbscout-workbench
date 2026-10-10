@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -1451,7 +1451,7 @@ function handleTableContextMenu(event) {
                 :aria-expanded="fieldCommentsExpanded ? 'true' : 'false'"
                 @click.stop="toggleFieldComments"
               >
-                <span>{{ t('m_7d053f4bf3af') }}</span>
+                <MessageSquareText :size="12" :stroke-width="2" aria-hidden="true" />
                 <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <polyline :points="fieldCommentsExpanded ? '2,5.5 4.5,3 7,5.5' : '2,3.5 4.5,6 7,3.5'" />
                 </svg>

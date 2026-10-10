@@ -16,10 +16,10 @@ const batch = computed(() => props.transfer.batchExport);
 const isBusy = computed(() => batch.value.exporting);
 useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef });
 const selectedCount = computed(() => props.transfer.selectedExportCount.value);
-const modeOptions = [
-  { value: "workbook", label: "合并工作簿" },
-  { value: "separate", label: "每表一个 Excel" },
-];
+const modeOptions = computed(() => [
+  { value: "workbook", label: t("batch.modeWorkbook") },
+  { value: "separate", label: t("batch.modeSeparate") },
+]);
 
 const normalizedQuery = computed(() => query.value.trim().toLowerCase());
 const isSearchActive = computed(() => Boolean(normalizedQuery.value));
@@ -52,17 +52,21 @@ const allSelectionIndeterminate = computed(() => (
   selectionScope.value.length > 0 && selectedInScopeCount.value > 0 && !allSelected.value
 ));
 const selectAllLabel = computed(() => (
-  isSearchActive.value ? `仅选搜索结果（${filteredTables.value.length}）` : "全选"
+  isSearchActive.value ? t("batch.selectSearchResults", { count: filteredTables.value.length }) : t("batch.selectAll")
 ));
 const selectionSummary = computed(() => {
   if (batch.value.homepageSelectionActive && !isSearchActive.value) {
-    return `首页预选 ${selectedCount.value} / 全部 ${batch.value.tables.length}`;
+    return t("batch.summaryHomepage", { selected: selectedCount.value, total: batch.value.tables.length });
   }
-  if (!isSearchActive.value) return `已选 ${selectedCount.value} / ${batch.value.tables.length}`;
-  return `已选 ${selectedCount.value} / 全部 ${batch.value.tables.length} · 匹配 ${filteredTables.value.length}`;
+  if (!isSearchActive.value) return t("batch.summary", { selected: selectedCount.value, total: batch.value.tables.length });
+  return t("batch.summarySearch", {
+    selected: selectedCount.value,
+    total: batch.value.tables.length,
+    matches: filteredTables.value.length,
+  });
 });
 const searchPlaceholder = computed(() => (
-  batch.value.homepageSelectionActive ? "在首页预选表中搜索" : "搜索表"
+  batch.value.homepageSelectionActive ? t("batch.searchHomepage") : t("batch.search")
 ));
 
 function cancelHomepageSelection() {
@@ -215,7 +219,7 @@ watch(
           :disabled="!transfer.canExecuteBatchExport.value"
           @click="emit('execute')"
         >
-          {{ batch.result ? t('m_8f822c358e75') : (batch.mode === "separate" ? `导出 ${selectedCount} 个 Excel` : `导出 ${selectedCount} 张表`) }}
+          {{ batch.result ? t('m_8f822c358e75') : t(batch.mode === "separate" ? "batch.exportFiles" : "batch.exportTables", { count: selectedCount }) }}
         </button>
       </footer>
     </section>

@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
   assistant: { type: Object, required: true },
-  tableSource: { type: String, default: "当前数据库" },
+  tableSource: { type: String, default: () => t("agent.currentDatabase") },
 });
 
 const emit = defineEmits(["send", "abort"]);
@@ -13,7 +13,7 @@ const textareaRef = ref(null);
 const hasDraft = computed(() => props.assistant.draft.value.trim().length > 0);
 const runtimeReady = computed(() => props.assistant.runtimeReady?.value !== false);
 const inputDisabled = computed(() => props.assistant.isBusy.value || !runtimeReady.value);
-const placeholder = computed(() => runtimeReady.value ? "询问数据库…" : "AI 组件准备完成后即可提问");
+const placeholder = computed(() => runtimeReady.value ? t("agent.composerPlaceholder") : t("agent.composerPreparing"));
 
 function autosize() {
   const el = textareaRef.value;

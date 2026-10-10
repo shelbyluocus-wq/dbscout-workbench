@@ -20,17 +20,17 @@ const isPicking = computed(() => Boolean(props.projects?.isPicking?.value));
 
 const statusText = computed(() => {
   const current = currentProject.value;
-  if (!current) return "未接入项目文件夹";
-  if (current.available === false) return "项目不可用";
-  return `项目：${current.name}`;
+  if (!current) return t('m_5412116ef95e');
+  if (current.available === false) return t('m_f35faa2194fb');
+  return `${t('m_63f08b5f03e8')}${current.name}`;
 });
 
 const detailText = computed(() => {
   const current = currentProject.value;
-  if (props.disabled) return "Agent 完成后可切换项目";
+  if (props.disabled) return t('m_0283efc4b6b8');
   if (current?.error) return current.error;
   if (current?.shortPath) return current.shortPath;
-  return "添加项目后，Agent 可只读查看项目文件";
+  return t('m_c43441b81070');
 });
 
 function toggleOpen() {

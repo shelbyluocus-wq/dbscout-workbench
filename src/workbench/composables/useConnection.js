@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from "vue";
+import { computed, customRef, reactive, ref } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
@@ -42,6 +42,8 @@ const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
 const EAGER_SCHEMA_LOAD_TABLE_LIMIT = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
+// Status writes kept until the notice watcher drains them after each task.
+const STATUS_JOURNAL_LIMIT = 20;
 
 function savedConnectionKey(connection) {
   const kind = normalizeConnectionKind(connection?.kind);
@@ -239,10 +241,41 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   const busy = ref(false);
   const connTestBusy = ref(false);
   let connTestSuccessTimer = null;
-  const statusText = ref("");
   // 结构化错误标志：与 statusText 配合使用。调用 setStatus(text, { error: true })
   // 时置为 true，成功/中性消息置为 false。比纯正则判断更可靠，逐步替换历史赋值点。
   const statusError = ref(false);
+  // Revision at which setStatus() last flagged an error. Direct statusText
+  // assignments leave statusError untouched, so the flag only describes the
+  // message written by that same setStatus() call.
+  const statusErrorRevision = ref(-1);
+  // Every assignment is journaled and bumps statusRevision, even when the text
+  // is unchanged, so a repeated failure is announced again and a message
+  // overwritten within the same tick is not lost. Consumers drain the journal.
+  const statusRevision = ref(0);
+  const statusJournal = [];
+  const statusText = customRef((track, trigger) => {
+    let value = "";
+    return {
+      get() {
+        track();
+        return value;
+      },
+      set(next) {
+        value = next ?? "";
+        statusRevision.value += 1;
+        statusJournal.push({
+          text: value,
+          explicitError: statusError.value && statusErrorRevision.value === statusRevision.value,
+        });
+        if (statusJournal.length > STATUS_JOURNAL_LIMIT) statusJournal.splice(0, statusJournal.length - STATUS_JOURNAL_LIMIT);
+        trigger();
+      },
+    };
+  });
+
+  function drainStatusJournal() {
+    return statusJournal.splice(0);
+  }
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
   const savedRestoreRequests = new Map();
@@ -251,8 +284,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   // 统一状态写入入口：同时设置文案与错误标志。鼓励新代码用这个替代直接赋值。
   function setStatus(text, { error = false } = {}) {
-    statusText.value = text ?? "";
+    // Flags first: synchronous observers of statusText then see a consistent pair.
     statusError.value = Boolean(error);
+    statusErrorRevision.value = error ? statusRevision.value + 1 : -1;
+    statusText.value = text ?? "";
   }
 
   function applyConnectionOrder(list) {
@@ -1030,7 +1065,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     busy,
     connTestBusy,
     statusText,
+    statusRevision,
     statusError,
+    drainStatusJournal,
     setStatus,
     loadConnections,
     selectConnection,

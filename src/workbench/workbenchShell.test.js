@@ -1612,7 +1612,11 @@ test("data grid sorts from a hover-revealed column menu instead of header clicks
   assert.match(styles, /\.wb-column-sort-trigger\.is-sorted/);
   assert.match(styles, /\.wb-column-sort-menu/);
   const triggerRule = styles.match(/\.wb-column-sort-trigger\s*\{([^}]*)\}/s)?.[1] || "";
-  assert.match(triggerRule, /font-size:\s*18px/);
+  // Vector icons (not a font glyph) and revealed with its header or when sorted.
+  assert.match(menu, /<ChevronDown/);
+  assert.match(menu, /<ArrowUp v-if="isSorted && !sort\?\.descending"/);
+  assert.doesNotMatch(menu, /▾/);
+  assert.match(triggerRule, /opacity:\s*0;/);
   assert.match(triggerRule, /border:\s*0/);
   assert.match(triggerRule, /border-radius:\s*0/);
   assert.match(triggerRule, /background:\s*transparent/);
@@ -3342,7 +3346,7 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.doesNotMatch(agentUi, /<section class="wb-ai-service-panel"/);
   assert.match(agentUi, /@submit\.prevent="submit"/);
   assert.match(composer, /wb-ai-composer-send/);
-  assert.match(composer, /tableSource:\s*\{\s*type:\s*String,\s*default:\s*["']当前数据库["']\s*\}/);
+  assert.match(composer, /tableSource:\s*\{\s*type:\s*String,\s*default:\s*\(\)\s*=>\s*t\("agent\.currentDatabase"\)\s*\}/);
   assert.match(composer, /wb-ai-composer-context/);
   assert.match(composer, /当前上下文/);
   assert.match(composer, /\{\{\s*tableSource\s*\}\}/);

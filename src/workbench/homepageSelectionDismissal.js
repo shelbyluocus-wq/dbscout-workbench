@@ -21,8 +21,10 @@ export function createHomepageSelectionDismissal({
     }
     const target = event?.target;
     const root = getRoot?.();
+    // The whole row is the selection target (Ctrl/Shift+click anywhere on it),
+    // so only clicks outside the rows and the action toolbar dismiss.
     if (root?.contains?.(target) && (
-      target?.closest?.(".wb-dbhome-object-name") ||
+      target?.closest?.(".wb-dbhome-object-row") ||
       target?.closest?.(".wb-dbhome-actions")
     )) return;
     if (getProtectedRoots().some((protectedRoot) => protectedRoot?.contains?.(target))) return;

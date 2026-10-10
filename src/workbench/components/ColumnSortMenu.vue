@@ -1,6 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, ref } from "vue";
+import { ArrowDown, ArrowUp, ChevronDown, X } from "lucide-vue-next";
 
 const props = defineProps({
   column: { type: String, required: true },
@@ -110,7 +111,11 @@ onBeforeUnmount(closeMenu);
       aria-haspopup="menu"
       @click.stop="toggleMenu"
     >
-      <span class="wb-column-sort-icon" aria-hidden="true">▾</span>
+      <span class="wb-column-sort-icon" aria-hidden="true">
+        <ArrowUp v-if="isSorted && !sort?.descending" :size="13" :stroke-width="2.3" />
+        <ArrowDown v-else-if="isSorted" :size="13" :stroke-width="2.3" />
+        <ChevronDown v-else :size="13" :stroke-width="2" />
+      </span>
       <span v-if="currentLabel" class="wb-column-sort-state">{{ currentLabel }}</span>
     </button>
 
@@ -131,19 +136,19 @@ onBeforeUnmount(closeMenu);
             role="menuitem"
             :class="{ active: isSorted && !sort?.descending }"
             @click="apply('ascending')"
-          >{{ t('m_4eee42bb07d1') }}</button>
+          ><ArrowUp :size="13" :stroke-width="2" aria-hidden="true" />{{ t('m_4eee42bb07d1') }}</button>
           <button
             type="button"
             role="menuitem"
             :class="{ active: isSorted && sort?.descending }"
             @click="apply('descending')"
-          >{{ t('m_d587546d90f2') }}</button>
+          ><ArrowDown :size="13" :stroke-width="2" aria-hidden="true" />{{ t('m_d587546d90f2') }}</button>
           <button
             type="button"
             role="menuitem"
             :disabled="!isSorted"
             @click="apply('none')"
-          >{{ t('m_acae948f157d') }}</button>
+          ><X :size="13" :stroke-width="2" aria-hidden="true" />{{ t('m_acae948f157d') }}</button>
         </menu>
       </Transition>
     </Teleport>

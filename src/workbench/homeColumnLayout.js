@@ -1,10 +1,13 @@
 const STORAGE_KEY = "dbscout.home.columns.v1";
 
+// `align: "end"` right-aligns numeric values (and their header) so magnitudes
+// line up; the `fill` column keeps its width as a minimum and absorbs the
+// remaining space so the table never leaves an empty strip on wide panes.
 export const HOME_COLUMN_DEFINITIONS = Object.freeze([
-  { key: "name", label: "表名", minWidth: 160, maxWidth: 520, defaultWidth: 240 },
-  { key: "size", label: "数据大小", minWidth: 100, maxWidth: 180, defaultWidth: 116 },
-  { key: "modified", label: "修改时间", minWidth: 150, maxWidth: 240, defaultWidth: 176 },
-  { key: "comment", label: "备注", minWidth: 180, maxWidth: 520, defaultWidth: 280 },
+  { key: "name", label: "表名", minWidth: 160, maxWidth: 520, defaultWidth: 240, align: "start" },
+  { key: "size", label: "数据大小", minWidth: 100, maxWidth: 180, defaultWidth: 116, align: "end" },
+  { key: "modified", label: "修改时间", minWidth: 150, maxWidth: 240, defaultWidth: 176, align: "start" },
+  { key: "comment", label: "备注", minWidth: 180, maxWidth: 520, defaultWidth: 280, align: "start", fill: true },
 ]);
 
 const definitionByKey = new Map(HOME_COLUMN_DEFINITIONS.map((column) => [column.key, column]));
@@ -70,6 +73,31 @@ export function moveHomeColumn(columns, sourceKey, targetKey, position = "before
 
 export function homeColumnDefinition(key) {
   return definitionByKey.get(key) || HOME_COLUMN_DEFINITIONS[0];
+}
+
+// grid-template-columns for sized columns ({ key, width }): fixed tracks, except
+// the fill column, which grows from its width into any spare space.
+export function homeGridTemplateColumns(columns = []) {
+  return columns
+    .map((column) => (homeColumnDefinition(column.key).fill
+      ? `minmax(${column.width}px, 1fr)`
+      : `${column.width}px`))
+    .join(" ");
+}
+
+// Automatic width for the fill column: shrink toward its minimum so the table
+// fits the visible surface (long comments then truncate instead of forcing a
+// horizontal scroll), never below the minimum and never above its content width.
+export function fittedFillWidth({ preferred, minWidth, available, otherColumnsWidth }) {
+  if (!(available > 0)) return preferred;
+  const room = Math.floor(available - otherColumnsWidth);
+  return Math.max(minWidth, Math.min(preferred, room));
+}
+
+// Total width the table needs; it stretches to the pane when the pane is wider.
+export function homeTableWidthCss(columns = []) {
+  const total = columns.reduce((sum, column) => sum + (Number(column.width) || 0), 0);
+  return `max(100%, ${total}px)`;
 }
 
 export function formatDataSize(bytes) {

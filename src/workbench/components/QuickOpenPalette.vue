@@ -33,6 +33,7 @@ import {
 } from "../utils/searchMatch.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import SearchHitBadge from "./SearchHitBadge.vue";
+import { searchKindLabel } from "../utils/searchKindLabels.js";
 import QuickOpenKindFilter from "./QuickOpenKindFilter.vue";
 
 const props = defineProps({
@@ -203,11 +204,11 @@ const progressLabel = computed(() => {
   const done = Number(progress.done) || 0;
   const total = Number(progress.total) || 0;
   const matches = Number(progress.matches) || 0;
-  if (!total) return `搜索值… 命中 ${matches}`;
-  return `搜索值 ${done}/${total}，命中 ${matches}`;
+  if (!total) return t("search.valueProgressPending", { matches });
+  return t("search.valueProgress", { done, total, matches });
 });
 const emptyResultLabel = computed(() =>
-  hasFreshValues.value ? "当前数据库没有匹配的值" : "没有匹配的表或字段",
+  hasFreshValues.value ? t("search.noValueMatches") : t("search.noSchemaMatches"),
 );
 
 // 常驻库里属于其它连接的（跨连接展示，标注连接名）
@@ -276,13 +277,7 @@ function columnComment(column) {
   return column?.column_comment || column?.columnComment || "";
 }
 function matchKindLabel(kind) {
-  return {
-    tableName: "表名",
-    tableComment: "表备注",
-    columnName: "字段",
-    columnComment: "字段备注",
-    value: "值",
-  }[kind] || "结构";
+  return searchKindLabel(kind);
 }
 function columnHitLabel(column, result) {
   return matchKindLabel(column?.searchMatchKind || result?.matchKind || "columnName");
