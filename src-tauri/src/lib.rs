@@ -12,6 +12,7 @@ mod clickhouse;
 mod mongodb;
 mod clipboard;
 mod commands;
+mod config_relations;
 mod control_server;
 mod database_sync_jobs;
 mod db;
@@ -194,6 +195,18 @@ pub fn run() {
             commands::table_transfer_discover_paths,
             commands::table_transfer_run,
             commands::table_transfer_cancel,
+            config_relations::commands::config_relations_overview,
+            config_relations::commands::config_relations_table,
+            config_relations::commands::config_relations_row_targets,
+            config_relations::commands::config_relations_row_references,
+            config_relations::commands::config_relations_review_list,
+            config_relations::commands::config_relations_review,
+            config_relations::commands::config_relations_refresh,
+            config_relations::commands::config_relations_discover_clients,
+            config_relations::commands::config_relations_inspect_client,
+            config_relations::commands::config_relations_bind_client,
+            config_relations::commands::config_relations_unbind_client,
+            config_relations::commands::config_relations_pick_client_dir,
             commands::agent_runtime_status,
             commands::agent_runtime_check,
             commands::agent_runtime_install,

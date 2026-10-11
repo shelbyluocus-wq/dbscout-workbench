@@ -1,6 +1,7 @@
 import { compareSearchMatches, matchSearchText } from "./utils/searchMatch.js";
 import { matchTableSearch } from "./utils/tableSearch.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "./utils/tableFilterMode.js";
+import { normalizeRelationFilter, normalizeRelationOrigin, relationFilterKey } from "./utils/relationFilter.js";
 import { GRID_FIELD_COMMENT_HEIGHT, GRID_ROW_HEIGHT } from "./constants.js";
 import {
   appendTabRows,
@@ -105,6 +106,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     hitResultMode: false,
     hitResultSourceTabId: "",
     hitResultSourcePaneId: "",
+    relationFilter: null,
+    relationOrigin: null,
     searchResultMode: false,
     searchResultQuery: "",
     searchResultJobId: "",
@@ -477,6 +480,8 @@ export function openTableTab(
     searchQuery = "",
     filter = "",
     filterMode = DEFAULT_TABLE_FILTER_MODE,
+    relationFilter = null,
+    relationOrigin = null,
   } = {},
   { activate = true, paneId = "" } = {},
 ) {
@@ -490,6 +495,7 @@ export function openTableTab(
   const requestedHitResultMode = Boolean(hitResultMode);
   const requestedSearchQuery = String(searchQuery || filter || "").trim();
   const requestedFilterMode = normalizeTableFilterMode(filterMode);
+  const requestedRelationKey = relationFilterKey(relationFilter);
   const existing = state.tabs.find((tab) => {
     const kind = normalizeTabKind(tab.kind);
     if (kind !== "data") return false;
@@ -500,7 +506,11 @@ export function openTableTab(
     if (!requestedHitResultMode) return true;
     const tabSearchQuery = String(tab.searchQuery || tab.filter || "").trim();
     const tabFilterMode = normalizeTableFilterMode(tab.filterMode);
-    return tabSearchQuery === requestedSearchQuery && tabFilterMode === requestedFilterMode;
+    return (
+      tabSearchQuery === requestedSearchQuery &&
+      tabFilterMode === requestedFilterMode &&
+      relationFilterKey(tab.relationFilter) === requestedRelationKey
+    );
   });
   if (existing) {
     if (activate) addTabToPane(state, pane.id, existing.id, { activate: true });
@@ -514,6 +524,8 @@ export function openTableTab(
     tableComment,
     readOnly,
   });
+  tab.relationFilter = normalizeRelationFilter(relationFilter);
+  tab.relationOrigin = normalizeRelationOrigin(relationOrigin);
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });
   return tab;

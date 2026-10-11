@@ -2,6 +2,7 @@ import { createMockAuditHistory, recordMockTableDiff } from "./mockAuditHistory.
 import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from "./mockSchema.js";
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
+import { createMockConfigRelations, relationRowMatches } from "./mockConfigRelations.js";
 import {
   activePerfFixture,
   createPerfFixtureSchema,
@@ -57,6 +58,11 @@ const mockConnectionDatabases = {
 };
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 const schemaOverrides = new Map();
+const mockConfigRelations = createMockConfigRelations({
+  connectionFor: (connectionId) => mockConnections.find((connection) => connection.id === connectionId),
+  schemaFor: (connectionId, database) => tableSchemaFor(connectionId, database),
+  rowsFor: (connectionId, database, tableName) => getOrInitRows(connectionId, database, tableName),
+});
 
 function resolveContext(payload) {
   const connectionId = payload.connectionId || payload.connection_id || "demo";
@@ -98,6 +104,7 @@ export function resetMockWorkbenchState() {
   schemaOverrides.clear();
   rowCache.clear();
   perfRows.clear();
+  mockConfigRelations.reset();
   resetMockDatabaseSchemas();
 }
 
@@ -284,6 +291,7 @@ async function invokePerfFixture(command, payload) {
         database: active.database,
         connected: true,
         readOnly: false,
+        sampleData: true,
       }],
     };
   }
@@ -932,6 +940,9 @@ function mockRowsFor(tableName, connectionId, database, filter = null, sort = nu
     } else {
       rows = rows.filter((row) => filterValues(row).some((value) => fuzzyValueMatches(value, filter.query)));
     }
+  }
+  if (filter?.relation) {
+    rows = rows.filter((row) => relationRowMatches(row, table.columns, filter.relation));
   }
   if (sort?.columnName || sort?.column_name) {
     const sortColumn = sort.columnName || sort.column_name;
@@ -2169,6 +2180,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       tables: plan.tables,
       warnings: plan.warnings,
     };
+  }
+  if (mockConfigRelations.handles(command)) {
+    return mockConfigRelations.invoke(command, payload);
   }
   if (command === "table_transfer_pick_script" || command === "table_transfer_pick_project_dir") {
     // 浏览器预览没有原生文件对话框，按用户取消处理。

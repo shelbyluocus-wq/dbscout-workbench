@@ -1762,6 +1762,9 @@ pub(crate) fn row_matches_filter(
     let Some(filter) = filter else {
         return true;
     };
+    if !crate::config_relations::filter::row_matches(row, columns, filter.relation.as_ref()) {
+        return false;
+    }
     let raw_query = filter.query.trim();
     if raw_query.is_empty() {
         return true;
@@ -2000,6 +2003,7 @@ mod tests {
                 query: "user_0001".into(),
                 columns: vec!["username".into()],
                 mode: None,
+                relation: None,
             }),
             sort: Some(TablePageSort {
                 column_name: "level".into(),
@@ -2249,6 +2253,7 @@ mod tests {
                 query: "hrp".into(),
                 columns: vec![],
                 mode: None,
+                relation: None,
             }),
             sort: None,
         };
@@ -2289,6 +2294,7 @@ mod tests {
                 query: "hrp".into(),
                 columns: vec![],
                 mode: Some("continuous".into()),
+                relation: None,
             }),
             sort: None,
         };

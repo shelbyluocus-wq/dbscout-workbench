@@ -116,9 +116,29 @@ pub fn build_filter_sql(
     let Some(filter) = request.filter.as_ref() else {
         return (String::new(), Vec::new());
     };
+    let clauses = [
+        query_filter_clause(columns, filter),
+        crate::config_relations::filter::sql_clause(columns, filter.relation.as_ref()),
+    ];
+    let mut predicates = Vec::new();
+    let mut binds = Vec::new();
+    for (sql, values) in clauses.into_iter().flatten() {
+        predicates.push(sql);
+        binds.extend(values);
+    }
+    if predicates.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    (format!(" WHERE {}", predicates.join(" AND ")), binds)
+}
+
+fn query_filter_clause(
+    columns: &[ColumnMeta],
+    filter: &TablePageFilter,
+) -> Option<(String, Vec<String>)> {
     let query = filter.query.trim();
     if query.is_empty() {
-        return (String::new(), Vec::new());
+        return None;
     }
     let requested = filter
         .columns
@@ -132,7 +152,7 @@ pub fn build_filter_sql(
         })
         .collect::<Vec<_>>();
     if filter_columns.is_empty() {
-        return (String::new(), Vec::new());
+        return None;
     }
     let exact = filter
         .mode
@@ -141,17 +161,17 @@ pub fn build_filter_sql(
         .unwrap_or(false);
     if exact {
         let sql = format!(
-            " WHERE ({})",
+            "({})",
             filter_columns
                 .iter()
                 .map(|column| format!("CAST(`{}` AS CHAR) = ?", escape_ident(&column.column_name)))
                 .collect::<Vec<_>>()
                 .join(" OR ")
         );
-        return (
+        return Some((
             sql,
             filter_columns.iter().map(|_| query.to_string()).collect(),
-        );
+        ));
     }
 
     let continuous = filter
@@ -164,10 +184,10 @@ pub fn build_filter_sql(
         fuzzy_search_patterns(query)
     };
     if patterns.is_empty() {
-        return (String::new(), Vec::new());
+        return None;
     }
     let sql = format!(
-        " WHERE ({})",
+        "({})",
         filter_columns
             .iter()
             .map(|column| {
@@ -191,7 +211,7 @@ pub fn build_filter_sql(
         .iter()
         .flat_map(|_| patterns.iter().cloned())
         .collect::<Vec<_>>();
-    (sql, binds)
+    Some((sql, binds))
 }
 
 #[allow(dead_code)]
@@ -1601,6 +1621,7 @@ mod tests {
                 query: "Alice".into(),
                 columns: vec!["name".into()],
                 mode: Some("exact".into()),
+                relation: None,
             }),
             sort: None,
         };
@@ -1762,6 +1783,7 @@ mod tests {
                 query: "abc".into(),
                 columns: vec!["remark`text".into()],
                 mode: None,
+                relation: None,
             }),
             sort: None,
         };
@@ -1793,6 +1815,7 @@ mod tests {
                 query: "  Hrp  ".into(),
                 columns: vec![],
                 mode: None,
+                relation: None,
             }),
             sort: None,
         };
@@ -1824,6 +1847,7 @@ mod tests {
                 query: "Needle".into(),
                 columns: vec![],
                 mode: Some("exact".into()),
+                relation: None,
             }),
             sort: None,
         };
@@ -1852,6 +1876,7 @@ mod tests {
                 query: "Hrp".into(),
                 columns: vec![],
                 mode: Some("continuous".into()),
+                relation: None,
             }),
             sort: None,
         };

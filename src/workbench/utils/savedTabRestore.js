@@ -1,6 +1,7 @@
 import { MAX_FROZEN_COLS, MAX_FROZEN_ROWS } from "../constants.js";
 import { reapplyTabColumnOrder } from "../workspaceState.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
+import { normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
 
 /**
  * Whether a saved table/design tab belongs to the source being restored.
@@ -29,6 +30,11 @@ export function applySavedTableTabState(tab, savedTab) {
   if (savedTab.filter) tab.filter = savedTab.filter;
   if (savedTab.filterMode) tab.filterMode = savedTab.filterMode;
   if (savedTab.sort) tab.sort = savedTab.sort;
+  // A saved relation tab restores its filtered view (and with it the backend
+  // filter path and the relation chip).
+  tab.relationFilter = normalizeRelationFilter(savedTab.relationFilter);
+  tab.relationOrigin = normalizeRelationOrigin(savedTab.relationOrigin);
+  if (tab.relationFilter) tab.hitResultMode = true;
   // Freeze panes: restore per-tab pinned rows/columns (default 0 when absent).
   tab.frozenRowStart = Math.max(0, Math.floor(Number(savedTab.frozenRowStart) || 0));
   tab.frozenRowCount = Math.max(0, Math.min(MAX_FROZEN_ROWS, Number(savedTab.frozenRowCount) || 0));

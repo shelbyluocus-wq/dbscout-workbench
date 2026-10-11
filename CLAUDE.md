@@ -101,6 +101,20 @@ capabilities:
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
   Path rows have a Browse button that reveals the script/project in Explorer.
+- **Config relations** — for game-config databases the workbench works out
+  which config tables reference each other from three evidence sources:
+  database column comments, a static scan of the bound game client's source
+  code, and recognisable list formats in the data. A table tab's inspector
+  gains a relation page listing the rows the selected row points to and the
+  rows that point back, each with click-to-jump; the tab bar tags tables that
+  take part in relations, and a review dialog (with an activity-rail badge
+  counting what needs attention) lets the user confirm or reject candidates.
+  Each MySQL server binds to its game client folder (auto-discovered across
+  drives); client code changes that affect a relation mark it stale or
+  conflicting for re-review while unrelated changes stay quiet. Bindings and
+  review verdicts stay local in `config-relations.json`, shared by every
+  database on the same server. Available for MySQL connections and the
+  built-in demo data; ClickHouse and MongoDB are excluded.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based
@@ -242,6 +256,10 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
+- Config relations: `useConfigRelations.js` — mirrors each scope's relation
+  overview, refreshes on `config-relations-updated`, and serves the
+  table/row lookups; `configRelationContext.js` — provided scope so grid
+  chips can clear a relation filter without prop chains
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useActivityRail.js`
   (activity-rail entries, order, and live shortcut labels), `useContextMenu.js`,
   `useConfirm.js`, `useEscClose.js`, `useShortcuts.js`, `useTheme.js`,
@@ -280,7 +298,10 @@ from UI):
   (shared localized labels for schema-search hit kinds); `listSelection.js`
   (shared table-list selection rules, open plans, the open-many guard and the
   Delete / context-menu key checks); `menuKeyboard.js` (arrow/Home/End/Escape
-  navigation for context menus)
+  navigation for context menus); `relationFilter.js` (relation-tab filter
+  normalization and JSON list-cell key matching mirrored from the backend);
+  `configRelations.js` (relation status/reason copy, coverage gaps, table
+  labels, the tab chip and the per-connection capability gate)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -292,6 +313,9 @@ from UI):
 `BackupCenterDialog.vue` (shell + history tab, with the
 `BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
 `TableTransferDialog.vue` (one-click table transfer),
+`ConfigRelationsPanel.vue` (inspector relation page) /
+`ConfigRelationsDialog.vue` (review dialog) / `ConfigRelationCard.vue`
+(shared relation card),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the
@@ -322,6 +346,8 @@ natural order. Audit durability remains FULL.
 - `mockBackend.js` — Browser-only mock implementing the Tauri command contract
 - `mockSchema.js` / `mockRows.js` — In-memory demo database
 - `mockEventBus.js` — Emulates Tauri window events for mock mode
+- `mockConfigRelations.js` — Demo-mode config-relations index and review
+  storage so the feature works in the browser without the Rust backend
 
 ### Backend (`src-tauri/src/`)
 
@@ -382,6 +408,27 @@ The Rust backend is split by concern:
   `table_transfer_run`, `table_transfer_cancel`; progress via the
   `table-transfer-progress` event.
   `svn_updater::resolve_svn_exe` is shared (Tortoise first, bundled fallback).
+- **`config_relations/`** — Config relations index: which config tables a row
+  references and which tables reference it. `comments.rs` reads database
+  column comments, `code_scan.rs` statically scans the bound game client's
+  source, `formats.rs` recognises list-shaped cell data, and `assembly.rs`
+  merges the evidence into relations with statuses (confirmed / unconfirmed /
+  stale / conflict / rejected) plus per-table coverage gaps. `engine.rs`
+  keeps one index per (connection, database) on the work scheduler — comments
+  first, client code and data formats in the background — and republishes
+  through the `config-relations-updated` event as steps finish; `store.rs`
+  persists client bindings, the post-bind baseline and review verdicts per
+  MySQL server in the local `config-relations.json`; `discovery.rs`
+  auto-discovers client folders across drives; `rows.rs` resolves row-level
+  jump targets and incoming references; `filter.rs` builds the
+  relation-filter WHERE clause shared by page/count/search (MySQL and demo
+  only — other engines refuse relation filters). Commands:
+  `config_relations_overview`, `config_relations_table`,
+  `config_relations_row_targets`, `config_relations_row_references`,
+  `config_relations_review_list`, `config_relations_review`,
+  `config_relations_refresh`, `config_relations_discover_clients`,
+  `config_relations_inspect_client`, `config_relations_bind_client`,
+  `config_relations_unbind_client`, `config_relations_pick_client_dir`.
 - **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
   (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)

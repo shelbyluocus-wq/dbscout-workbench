@@ -322,17 +322,68 @@ fn nzg_script_for_project(project: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Project folder layouts relative to a drive root or one of its child folders.
+const JSWZ_LAYOUTS: &[&[&str]] = &[&["chengxu", "client", "jswz"], &["client", "jswz"], &["jswz"], &[]];
+const NZG_LAYOUTS: &[&[&str]] = &[
+    &["trunk", "client", "nzg"],
+    &["client", "nzg"],
+    &["Versions", "nzg"],
+    &["nzg"],
+    &[],
+];
+
+fn layout_candidates(root: &Path, layouts: &[&[&str]]) -> Vec<PathBuf> {
+    layouts.iter().map(|layout| join_rel(root, layout)).collect()
+}
+
+/// Roots that discovery inspects: every non-C drive and its direct child folders.
+fn discovery_bases(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut bases = Vec::new();
+    for root in roots {
+        if is_c_drive_root(root) {
+            continue;
+        }
+        bases.push(root.clone());
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        bases.extend(
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir()),
+        );
+    }
+    bases
+}
+
+/// Every jswz / nzg project folder in the known layouts, without stopping at
+/// the first match, so callers can rank stale checkouts below current ones.
+pub(crate) fn discover_game_projects() -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for base in discovery_bases(&search_roots()) {
+        let candidates = layout_candidates(&base, JSWZ_LAYOUTS)
+            .into_iter()
+            .filter(|path| is_jswz_project(path))
+            .chain(
+                layout_candidates(&base, NZG_LAYOUTS)
+                    .into_iter()
+                    .filter(|path| is_nzg_project(path)),
+            );
+        for candidate in candidates {
+            if !found.contains(&candidate) {
+                found.push(candidate);
+            }
+        }
+    }
+    found
+}
+
 fn try_fill_jswz(root: &Path, found: &mut DiscoveredLayout) {
     if found.project_root.is_some() && found.script_path.is_some() {
         return;
     }
-    let candidates = [
-        join_rel(root, &["chengxu", "client", "jswz"]),
-        join_rel(root, &["client", "jswz"]),
-        join_rel(root, &["jswz"]),
-        root.to_path_buf(),
-    ];
-    for relative in candidates {
+    for relative in layout_candidates(root, JSWZ_LAYOUTS) {
         if !is_jswz_project(&relative) {
             continue;
         }
@@ -352,14 +403,7 @@ fn try_fill_nzg(root: &Path, found: &mut DiscoveredLayout) {
     if found.project_root.is_some() && found.script_path.is_some() {
         return;
     }
-    let candidates = [
-        join_rel(root, &["trunk", "client", "nzg"]),
-        join_rel(root, &["client", "nzg"]),
-        join_rel(root, &["Versions", "nzg"]),
-        join_rel(root, &["nzg"]),
-        root.to_path_buf(),
-    ];
-    for relative in candidates {
+    for relative in layout_candidates(root, NZG_LAYOUTS) {
         if !is_nzg_project(&relative) {
             continue;
         }
@@ -378,22 +422,9 @@ fn try_fill_nzg(root: &Path, found: &mut DiscoveredLayout) {
 fn discover_in_roots(roots: &[PathBuf]) -> HashMap<String, DiscoveredLayout> {
     let mut jswz = DiscoveredLayout::default();
     let mut nzg = DiscoveredLayout::default();
-    for root in roots {
-        if is_c_drive_root(root) {
-            continue;
-        }
-        try_fill_jswz(root, &mut jswz);
-        try_fill_nzg(root, &mut nzg);
-        let Ok(entries) = std::fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                try_fill_jswz(&path, &mut jswz);
-                try_fill_nzg(&path, &mut nzg);
-            }
-        }
+    for base in discovery_bases(roots) {
+        try_fill_jswz(&base, &mut jswz);
+        try_fill_nzg(&base, &mut nzg);
     }
     let mut map = HashMap::new();
     map.insert(TEMPLATE_JUESHENG_2.to_string(), jswz);

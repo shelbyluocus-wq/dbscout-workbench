@@ -111,7 +111,7 @@ fn map_schedule_error(error: WorkScheduleError) -> String {
     }
 }
 
-async fn run_pool_work<T, E, Fut>(
+pub(crate) async fn run_pool_work<T, E, Fut>(
     scheduler: &crate::work_scheduler::WorkScheduler,
     pool_key: &PoolKey,
     class: WorkClass,
@@ -716,6 +716,7 @@ pub async fn list_connections(
             database: connection.database.clone(),
             connected: connection_connected(&connection, mysql_pool_connected),
             read_only: connection.kind.is_read_only(),
+            sample_data: connection.kind == DatabaseKind::MySql && connection.mysql_url.is_none(),
         });
     }
     Ok(result)

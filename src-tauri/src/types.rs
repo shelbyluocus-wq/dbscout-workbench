@@ -86,6 +86,9 @@ pub struct WorkbenchConnection {
     pub database: Option<String>,
     pub connected: bool,
     pub read_only: bool,
+    /// Served from the built-in sample data rather than a real server, so
+    /// features that read the server directly (config relations) are off.
+    pub sample_data: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -210,6 +213,65 @@ pub struct TablePageFilter {
     pub columns: Vec<String>,
     #[serde(default)]
     pub mode: Option<String>,
+    /// Restricts rows to those linked by a config relation; combined with
+    /// `query` using AND.
+    #[serde(default)]
+    pub relation: Option<RelationFilter>,
+}
+
+impl TablePageFilter {
+    pub fn is_empty(&self) -> bool {
+        self.query.trim().is_empty() && self.relation.as_ref().is_none_or(RelationFilter::is_empty)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum RelationMatchKind {
+    /// The column value equals one of `values`.
+    #[default]
+    Equals,
+    /// The column holds a JSON list of objects whose `item_key` field equals
+    /// one of `values`, e.g. `[{"ID":1001,"Num":2}]`.
+    ListContains,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationFilter {
+    pub column: String,
+    #[serde(default)]
+    pub kind: RelationMatchKind,
+    #[serde(default)]
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub item_key: Option<String>,
+}
+
+impl RelationFilter {
+    pub const DEFAULT_ITEM_KEY: &'static str = "ID";
+
+    pub fn is_empty(&self) -> bool {
+        self.column.trim().is_empty()
+    }
+
+    pub fn item_key(&self) -> &str {
+        self.item_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .unwrap_or(Self::DEFAULT_ITEM_KEY)
+    }
+
+    /// Trimmed, de-duplicated values in their original order.
+    pub fn normalized_values(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.values
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && seen.insert(value.clone()))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -959,6 +1021,7 @@ pub struct AppState {
     pub account: AccountState,
     pub perf: crate::perf::PerformanceRecorder,
     pub table_transfer: crate::table_transfer::TableTransferJobs,
+    pub config_relations: crate::config_relations::engine::ConfigRelationsState,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1522,6 +1585,7 @@ impl AppState {
             },
             perf: crate::perf::PerformanceRecorder::default(),
             table_transfer: crate::table_transfer::TableTransferJobs::default(),
+            config_relations: crate::config_relations::engine::ConfigRelationsState::default(),
         }
     }
 }

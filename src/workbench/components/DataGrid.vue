@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, Link2, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -17,6 +17,8 @@ import { useGridRowResize } from "../composables/useGridRowResize.js";
 import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelection.js";
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
+import { relationChipLabel } from "../utils/configRelations.js";
+import { useConfigRelationContext } from "../composables/configRelationContext.js";
 import {
   createTableImportToolbarActions,
   resolveTableImportToolbarEvent,
@@ -29,6 +31,7 @@ import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 
 const workbenchFontSignature = inject("workbenchFontSignature", ref(""));
+const configRelationContext = useConfigRelationContext();
 const gridWrapRef = ref(null);
 const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
@@ -157,6 +160,11 @@ const splitItems = computed(() => [
 const hasActiveCellSearch = computed(() => Boolean(
   String(props.tab?.searchQuery ?? props.tab?.filter ?? "").trim(),
 ));
+const relationChip = computed(() => relationChipLabel(props.tab, t));
+
+function clearRelationChip() {
+  if (props.tab) configRelationContext?.clearRelationFilter?.(props.tab);
+}
 
 watch(
   () => [props.tab?.id, props.tab?.filter],
@@ -1225,6 +1233,17 @@ function handleTableContextMenu(event) {
           @select="handleToolbarAction"
         />
       </div>
+      <span v-if="relationChip" class="wb-relation-chip" :title="relationChip">
+        <Link2 :size="11" class="wb-relation-chip-icon" aria-hidden="true" />
+        <span class="wb-sort-chip-label">{{ relationChip }}</span>
+        <button
+          type="button"
+          class="wb-sort-chip-clear"
+          :aria-label="t('relations.chip.clear')"
+          :title="t('relations.chip.clear')"
+          @click="clearRelationChip"
+        >×</button>
+      </span>
       <span v-if="tab.sort" class="wb-sort-chip" :title="t('grid.sortChip', { column: tab.sort.columnName, direction: tab.sort.descending ? t('m_4b77c3546823') : t('m_ca715c0d8d83') })">
         <span class="wb-sort-chip-icon" aria-hidden="true">{{ tab.sort.descending ? '↓' : '↑' }}</span>
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>

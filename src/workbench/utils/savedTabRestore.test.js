@@ -38,3 +38,26 @@ test("saved view state is applied before the first load and bounded", () => {
   assert.equal(tab.fieldCommentsExpanded, false);
   assert.ok(Number.isFinite(tab.rowHeight));
 });
+
+test("saved relation tabs restore their filtered view", () => {
+  const tab = { columns: [] };
+  applySavedTableTabState(tab, {
+    relationFilter: { column: "id", kind: "listContains", values: ["1001"] },
+    relationOrigin: {
+      direction: "incoming",
+      sourceTable: "activity",
+      sourceColumn: "reward_pool",
+      targetTable: "item",
+      targetColumn: "id",
+    },
+  });
+  assert.deepEqual(tab.relationFilter, { column: "id", kind: "listContains", values: ["1001"], itemKey: "ID" });
+  assert.equal(tab.relationOrigin.direction, "incoming");
+  assert.equal(tab.hitResultMode, true);
+
+  const plain = { columns: [] };
+  applySavedTableTabState(plain, { filter: "abc" });
+  assert.equal(plain.relationFilter, null);
+  assert.equal(plain.relationOrigin, null);
+  assert.equal(plain.hitResultMode, undefined);
+});

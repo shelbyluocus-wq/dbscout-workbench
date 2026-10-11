@@ -267,7 +267,7 @@ function generateMockRows() {
         type: String(((i - 1) % 4) + 1),
         start_time: fakeDate(i, 0),
         end_time: fakeFutureDate(i),
-        reward_pool: i % 3 === 0 ? `[{"item_id":${((i - 1) % 20) + 1},"count":${Math.ceil(i / 5)}},{"item_id":${((i + 5) % 20) + 1},"count":1}]` : null,
+        reward_pool: i % 3 === 0 ? `[{"ID":${((i - 1) % 20) + 1},"Num":${Math.ceil(i / 5)}},{"ID":${((i + 5) % 20) + 1},"Num":1}]` : null,
         daily_limit: i % 4 === 0 ? String(3 + (i % 5)) : null,
         total_limit: i % 4 === 0 ? String(30 + i) : null,
         required_level: String(Math.min(50, i)),

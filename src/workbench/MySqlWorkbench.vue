@@ -139,6 +139,7 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
+import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
 import OperationNoticeStack from "./components/OperationNoticeStack.vue";
@@ -165,6 +166,10 @@ import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableTransfer } from "./composables/useTableTransfer.js";
 import { useActivityRail } from "./composables/useActivityRail.js";
+import { useConfigRelations } from "./composables/useConfigRelations.js";
+import { CONFIG_RELATION_CONTEXT } from "./composables/configRelationContext.js";
+import { normalizeRelationFilter, normalizeRelationOrigin } from "./utils/relationFilter.js";
+import { connectionOffersConfigRelations } from "./utils/configRelations.js";
 import { useAccount } from "./composables/useAccount.js";
 import { useTableCopy } from "./composables/useTableCopy.js";
 import { useImportWizard } from "./composables/useImportWizard.js";
@@ -371,6 +376,7 @@ const {
   preloadDeferredTabs,
   toggleSort,
   applySort,
+  clearRelationFilter,
   dispose: disposeTableSessions,
 } = useTableSession(
   workspace,
@@ -919,6 +925,77 @@ function openTableTransfer() {
   tableTransfer.open();
 }
 
+// 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，
+// 检查器里的关联页则按各自标签页的来源读取。
+const configRelations = useConfigRelations({});
+void configRelations.attach();
+
+function configRelationsAvailable(connectionId) {
+  if (!connectionId) return false;
+  return connectionOffersConfigRelations(connections.value.find((item) => item.id === connectionId));
+}
+
+const configRelationsDialogOpen = ref(false);
+const configRelationsSupported = computed(() => configRelationsAvailable(selectedConnectionId.value));
+const configRelationsEntry = computed(() =>
+  configRelations.entryFor({ connectionId: selectedConnectionId.value, database: selectedDatabase.value }));
+const configRelationsBadge = computed(() =>
+  configRelationsSupported.value ? Number(configRelationsEntry.value?.overview?.reviewCount) || 0 : 0);
+const configRelationsScopeLabel = computed(() => {
+  const connectionId = selectedConnectionId.value;
+  const connection = connections.value.find((item) => item.id === connectionId);
+  const name = connectionLabel(connectionId, connection?.label || connectionId);
+  return `${name} · ${databaseLabel(connectionId, selectedDatabase.value)}`;
+});
+
+watch(
+  () => [selectedConnectionId.value, selectedDatabase.value, configRelationsSupported.value],
+  ([connectionId, database, supported]) => {
+    if (supported && connectionId && database) {
+      void configRelations.loadOverview({ connectionId, database });
+    }
+  },
+  { immediate: true },
+);
+
+function openConfigRelationsReview() {
+  configRelationsDialogOpen.value = true;
+}
+
+async function openRelationTab({ connectionId, database, tableName, tableComment = "", readOnly = false, relationFilter, relationOrigin }) {
+  const filter = normalizeRelationFilter(relationFilter);
+  if (!filter || !tableName) return;
+  await openTable(
+    { connectionId, database, tableName, tableComment, readOnly },
+    {
+      initialState: {
+        hitResultMode: true,
+        relationFilter: filter,
+        relationOrigin: normalizeRelationOrigin(relationOrigin),
+      },
+    },
+  );
+}
+
+function openConfigRelationTable({ connectionId, database, tableName, tableComment = "" }) {
+  if (!tableName) return;
+  const table = workspace.schema.find((item) => normalizeTableName(item) === tableName);
+  void openTable(
+    table || { connectionId, database, tableName, tableComment },
+    { initialState: null },
+  );
+}
+
+provide(CONFIG_RELATION_CONTEXT, {
+  clearRelationFilter: (tab) => void clearRelationFilter(tab),
+});
+
+// A tab offers the relation page only when its own connection is a real
+// MySQL config source.
+function relationsSupportedForTab(tab) {
+  return configRelationsAvailable(tab?.connectionId);
+}
+
 const account = useAccount({
   onSessionChanged: async () => {
     // Preserve the user's chosen history view; login must not replace the
@@ -963,12 +1040,16 @@ const {
   expanded: {
     settings: () => Boolean(sidebarRef.value?.settingsOpen),
   },
+  badges: {
+    configRelations: () => configRelationsBadge.value,
+  },
   actions: {
     addConnection: openConnDialog,
     quickOpen: openQuickOpenFromAnywhere,
     databaseFavorites: openDatabaseFavorites,
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
+    configRelations: openConfigRelationsReview,
     settings: openSidebarSettings,
   },
 });
@@ -4584,6 +4665,9 @@ async function restoreSavedTabs() {
         tableName: savedTab.tableName,
         tableComment: normalizeTableComment(tableForOpen),
         readOnly,
+        hitResultMode: Boolean(savedTab.relationFilter),
+        relationFilter: savedTab.relationFilter,
+        relationOrigin: savedTab.relationOrigin,
       }, { activate: false, paneId });
       if (restoredTab && !restoredTab.sessionId) {
         restoredTab.readOnly = readOnly;
@@ -5077,6 +5161,10 @@ onBeforeUnmount(() => {
         @schema-search="focusedPaneState.applyColumnSearch?.($event)"
         @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
         @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
+        :relations="configRelations"
+        :relations-supported="relationsSupportedForTab(focusedInspectorTab)"
+        @open-relation="openRelationTab"
+        @open-relations-review="openConfigRelationsReview"
       />
     </section>
 
@@ -5271,6 +5359,16 @@ onBeforeUnmount(() => {
       v-if="tableTransfer.dialog.open"
       :transfer="tableTransfer"
       @close="tableTransfer.close"
+    />
+
+    <ConfigRelationsDialog
+      v-if="configRelationsDialogOpen"
+      :relations="configRelations"
+      :scope="{ connectionId: selectedConnectionId, database: selectedDatabase }"
+      :scope-label="configRelationsScopeLabel"
+      :supported="configRelationsSupported"
+      @close="configRelationsDialogOpen = false"
+      @open-table="openConfigRelationTable"
     />
 
     <!-- Table Rename Dialog -->

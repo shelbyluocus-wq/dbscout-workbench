@@ -15,7 +15,7 @@ use tokio::{
 
 use crate::{
     runtime_resources::PoolKey,
-    types::{TableCountResult, TablePageFilter},
+    types::{RelationFilter, RelationMatchKind, TableCountResult, TablePageFilter},
     work_scheduler::WorkCancellation,
 };
 
@@ -75,6 +75,29 @@ pub(crate) struct CountFilterSignature {
     query: String,
     columns: Vec<String>,
     mode: String,
+    relation: Option<RelationSignature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RelationSignature {
+    column: String,
+    kind: RelationMatchKind,
+    item_key: String,
+    values: Vec<String>,
+}
+
+impl RelationSignature {
+    fn from_filter(relation: Option<&RelationFilter>) -> Option<Self> {
+        let relation = relation.filter(|relation| !relation.is_empty())?;
+        let mut values = relation.normalized_values();
+        values.sort_unstable();
+        Some(Self {
+            column: normalize_component(&relation.column),
+            kind: relation.kind,
+            item_key: normalize_component(relation.item_key()),
+            values,
+        })
+    }
 }
 
 impl CountFilterSignature {
@@ -82,9 +105,13 @@ impl CountFilterSignature {
         let Some(filter) = filter else {
             return Self::default();
         };
+        let relation = RelationSignature::from_filter(filter.relation.as_ref());
         let query = filter.query.trim().to_string();
         if query.is_empty() {
-            return Self::default();
+            return Self {
+                relation,
+                ..Self::default()
+            };
         }
         let mut columns = filter
             .columns
@@ -103,6 +130,7 @@ impl CountFilterSignature {
             query,
             columns,
             mode: mode.into(),
+            relation,
         }
     }
 }
@@ -781,6 +809,7 @@ mod tests {
             query: "hrp".into(),
             columns: vec!["name".into()],
             mode: Some(mode.into()),
+            relation: None,
         };
 
         let continuous = CountFilterSignature::from_filter(Some(&filter("continuous")));
@@ -996,11 +1025,13 @@ mod tests {
             query: "Alice".into(),
             columns: vec!["name".into()],
             mode: Some("exact".into()),
+            relation: None,
         };
         let fuzzy_filter = TablePageFilter {
             query: "ali".into(),
             columns: vec!["name".into()],
             mode: Some("fuzzy".into()),
+            relation: None,
         };
         for (request_id, filter) in [("session-a", &exact_filter), ("session-b", &fuzzy_filter)] {
             manager
@@ -1087,11 +1118,13 @@ mod tests {
             query: "  Hero  ".into(),
             columns: vec![" Name ".into(), "ID".into(), "name".into()],
             mode: Some(" EXACT ".into()),
+            relation: None,
         };
         let right = TablePageFilter {
             query: "Hero".into(),
             columns: vec!["id".into(), "NAME".into()],
             mode: Some("exact".into()),
+            relation: None,
         };
 
         assert_eq!(

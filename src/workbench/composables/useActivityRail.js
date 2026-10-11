@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, FileSpreadsheet, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, FileSpreadsheet, Link2, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -42,6 +42,13 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     labelKey: "m_a36603b169a6",
     hintKey: "shell.tableTransferHint",
     shortcutAction: "openTableTransfer",
+    popup: "dialog",
+  }),
+  Object.freeze({
+    id: "configRelations",
+    icon: Link2,
+    labelKey: "shell.configRelations",
+    hintKey: "shell.configRelationsHint",
     popup: "dialog",
   }),
   Object.freeze({
@@ -113,7 +120,7 @@ function storageOrDefault(storage) {
   try { return globalThis.localStorage ?? null; } catch { return null; }
 }
 
-export function useActivityRail({ actions = {}, shortcuts = null, translate = t, expanded = {}, storage = null } = {}) {
+export function useActivityRail({ actions = {}, shortcuts = null, translate = t, expanded = {}, badges = {}, storage = null } = {}) {
   const localStorage_ = storageOrDefault(storage);
   const customOrder = ref(readStoredOrder(localStorage_));
 
@@ -124,6 +131,10 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
     const shortcut = entry.shortcutAction ? shortcuts?.get(entry.shortcutAction) || "" : "";
     const shortcutLabel = formatShortcutForPlatform(shortcut);
     const expandedValue = expanded[entry.id];
+    const badgeSource = badges[entry.id];
+    const badge = badgeSource === undefined
+      ? 0
+      : Math.max(0, Math.floor(Number(typeof badgeSource === "function" ? badgeSource() : badgeSource) || 0));
     return {
       id: entry.id,
       icon: entry.icon,
@@ -134,6 +145,9 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
       expanded: expandedValue === undefined ? undefined : Boolean(typeof expandedValue === "function" ? expandedValue() : expandedValue),
       shortcutLabel,
       ariaShortcut: toAriaKeyShortcut(shortcutLabel),
+      badge,
+      badgeText: badge > 99 ? "99+" : badge > 0 ? String(badge) : "",
+      badgeLabel: badge > 0 ? translate("shell.railBadge", { count: badge }) : "",
     };
   }
 

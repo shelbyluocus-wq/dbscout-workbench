@@ -483,3 +483,99 @@ test("buildWorkspaceSnapshot persists a custom column order", () => {
   clearWorkspaceSnapshot();
   cleanupLocalStorage();
 });
+
+test("relation tabs keep their filter and origin across a save and load", () => {
+  installLocalStorage();
+  clearWorkspaceSnapshot();
+  const snapshot = buildWorkspaceSnapshot({
+    connectionId: "conn-r",
+    database: "game_config",
+    tabs: [
+      {
+        id: "tab-r1",
+        kind: "data",
+        tableName: "item",
+        connectionId: "conn-r",
+        database: "game_config",
+        filter: "fire",
+        relationFilter: { column: "id", kind: "LISTCONTAINS", values: [" 1001 ", "1002", "1001"] },
+        relationOrigin: {
+          direction: "outgoing",
+          sourceTable: "activity",
+          sourceColumn: "reward_pool",
+          targetTable: "item",
+          targetColumn: "id",
+        },
+      },
+      {
+        id: "tab-r2",
+        kind: "data",
+        tableName: "hero",
+        connectionId: "conn-r",
+        database: "game_config",
+        relationFilter: { column: "", values: ["1"] },
+        relationOrigin: { direction: "incoming", sourceTable: "a", sourceColumn: "b", targetTable: "c", targetColumn: "d" },
+      },
+    ],
+    activeTabId: "tab-r1",
+  });
+  assert.deepEqual(snapshot.tabs[0].relationFilter, {
+    column: "id",
+    kind: "listContains",
+    values: ["1001", "1002"],
+    itemKey: "ID",
+  });
+  assert.equal(Object.hasOwn(snapshot.tabs[1], "relationFilter"), false);
+  assert.equal(Object.hasOwn(snapshot.tabs[1], "relationOrigin"), false);
+  saveWorkspaceSnapshot(snapshot);
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.deepEqual(loaded.tabs[0].relationFilter, snapshot.tabs[0].relationFilter);
+  assert.deepEqual(loaded.tabs[0].relationOrigin, {
+    direction: "outgoing",
+    sourceTable: "activity",
+    sourceColumn: "reward_pool",
+    targetTable: "item",
+    targetColumn: "id",
+  });
+  assert.equal(loaded.tabs[0].filter, "fire");
+  assert.equal(Object.hasOwn(loaded.tabs[1], "relationFilter"), false);
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});
+
+test("loadWorkspaceSnapshot drops malformed relation fields", () => {
+  installLocalStorage();
+  localStorage.setItem("dbscout_workspace", JSON.stringify({
+    version: 4,
+    tabs: [
+      {
+        id: "t1",
+        kind: "data",
+        tableName: "item",
+        relationFilter: { column: "id", values: [] },
+        relationOrigin: { direction: "outgoing", sourceTable: "a", sourceColumn: "b", targetTable: "c", targetColumn: "d" },
+      },
+      { id: "t2", kind: "data", tableName: "hero", relationFilter: "id=1", relationOrigin: 7 },
+      {
+        id: "t3",
+        kind: "data",
+        tableName: "skill",
+        relationFilter: { column: "id", values: [5] },
+        relationOrigin: { sourceTable: "hero" },
+      },
+    ],
+    activeTabId: "t1",
+  }));
+
+  const loaded = loadWorkspaceSnapshot();
+  assert.equal(Object.hasOwn(loaded.tabs[0], "relationFilter"), false);
+  assert.equal(Object.hasOwn(loaded.tabs[0], "relationOrigin"), false);
+  assert.equal(Object.hasOwn(loaded.tabs[1], "relationFilter"), false);
+  assert.deepEqual(loaded.tabs[2].relationFilter, { column: "id", kind: "equals", values: ["5"] });
+  assert.equal(Object.hasOwn(loaded.tabs[2], "relationOrigin"), false);
+
+  clearWorkspaceSnapshot();
+  cleanupLocalStorage();
+});

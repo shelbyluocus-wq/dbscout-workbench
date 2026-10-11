@@ -9,6 +9,7 @@ import { activateTableTab, closePaneTab, openTableTab, replaceTabPage, appendTab
 import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMarks.js";
 import { resetTableTabViewState } from "../utils/tabActivation.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "../utils/tableFilterMode.js";
+import { normalizeRelationFilter, normalizeRelationOrigin, relationFilterKey } from "../utils/relationFilter.js";
 import { listenWorkbenchEvent } from "../utils/tauriBridge.js";
 
 const SEARCH_RESULT_PAGE_SIZE = 100;
@@ -295,6 +296,7 @@ export function useTableSession(
     const hitResultMode = Boolean(initialState?.hitResultMode);
     const query = String(initialState?.searchQuery || initialState?.filter || "").trim();
     const filterMode = normalizeTableFilterMode(initialState?.filterMode);
+    const relationKey = relationFilterKey(initialState?.relationFilter);
     return workspace.tabs.find(
       (tab) =>
         (tab.kind || "data") === "data" &&
@@ -302,7 +304,10 @@ export function useTableSession(
         sameSource(tab.connectionId, tab.database, connectionId, database) &&
         String(tab.tableName || "") === String(tableName || "") &&
         Boolean(tab.hitResultMode) === hitResultMode &&
-        (!hitResultMode || (searchText(tab) === query && normalizeTableFilterMode(tab.filterMode) === filterMode)),
+        (!hitResultMode ||
+          (searchText(tab) === query &&
+            normalizeTableFilterMode(tab.filterMode) === filterMode &&
+            relationFilterKey(tab.relationFilter) === relationKey)),
     );
   }
 
@@ -407,7 +412,7 @@ export function useTableSession(
   }
 
   function usesBackendFilter(tab) {
-    return tab?.hitResultMode === true || tab?.searchResultMode === true;
+    return tab?.hitResultMode === true || tab?.searchResultMode === true || Boolean(normalizeRelationFilter(tab?.relationFilter));
   }
 
   function isNormalOpen(initialState) {
@@ -434,6 +439,8 @@ export function useTableSession(
     tab.hitResultMode = false;
     tab.hitResultSourceTabId = "";
     tab.hitResultSourcePaneId = "";
+    tab.relationFilter = null;
+    tab.relationOrigin = null;
     tab.filterMode = DEFAULT_TABLE_FILTER_MODE;
     tab.sort = null;
     tab.selectedRowKeys?.clear?.();
@@ -450,11 +457,13 @@ export function useTableSession(
 
   function buildBackendFilter(tab) {
     const query = String(tab?.filter || tab?.searchQuery || "").trim();
-    if (!query) return null;
+    const relation = normalizeRelationFilter(tab?.relationFilter);
+    if (!query && !relation) return null;
     return {
       query,
       columns: [],
       mode: normalizeTableFilterMode(tab.filterMode),
+      ...(relation ? { relation } : {}),
     };
   }
 
@@ -728,6 +737,8 @@ export function useTableSession(
       searchQuery: initialState?.searchQuery ?? initialState?.filter ?? "",
       filter: initialState?.filter ?? "",
       filterMode: normalizeTableFilterMode(initialState?.filterMode),
+      relationFilter: initialState?.relationFilter ?? null,
+      relationOrigin: initialState?.relationOrigin ?? null,
     }, { activate: false, paneId: targetPaneId });
     tab.readOnly = readOnly;
     if (initialState) {
@@ -738,6 +749,8 @@ export function useTableSession(
       tab.hitResultMode = Boolean(initialState.hitResultMode);
       tab.hitResultSourceTabId = String(initialState.hitResultSourceTabId || "");
       tab.hitResultSourcePaneId = String(initialState.hitResultSourcePaneId || "");
+      tab.relationFilter = normalizeRelationFilter(initialState.relationFilter);
+      tab.relationOrigin = normalizeRelationOrigin(initialState.relationOrigin);
     }
     return startProvisionalOpen(tab, table, {
       connectionId,
@@ -1273,6 +1286,22 @@ export function useTableSession(
       : fetchPage(tab, 1);
   }
 
+  // The relation chip's clear button: the tab becomes an ordinary table view
+  // again. A text search typed on top of the relation view survives as a
+  // client-side search; everything else about the filtered view is dropped.
+  async function clearRelationFilter(tab) {
+    if (!normalizeRelationFilter(tab?.relationFilter)) return { ok: false };
+    const query = String(tab.searchQuery || tab.filter || "").trim();
+    resetNormalTableViewState(tab);
+    if (query) {
+      tab.filter = query;
+      tab.searchQuery = query;
+    }
+    if (!tab.sessionId) return { ok: true, tab };
+    const result = await fetchPage(tab, 1);
+    return { ok: true, tab: result?.tab || tab };
+  }
+
   function applySort(tab, column, direction) {
     if (direction === "none") {
       tab.sort = null;
@@ -1303,6 +1332,7 @@ export function useTableSession(
     handleSessionsInvalidated,
     toggleSort,
     applySort,
+    clearRelationFilter,
     dispose,
   };
 }

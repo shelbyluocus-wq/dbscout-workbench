@@ -1,6 +1,7 @@
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
 import { normalizeTableFilterMode } from "./tableFilterMode.js";
 import { normalizeColumnOrder } from "./columnOrder.js";
+import { normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
 
 const STORAGE_KEY = "dbscout_workspace";
 const SNAPSHOT_VERSION = 4;
@@ -11,6 +12,15 @@ function normalizeTabKind(kind) {
 
 function normalizeDirection(direction) {
   return direction === "vertical" ? "vertical" : "horizontal";
+}
+
+// Relation fields are present only on relation tabs, so ordinary tabs keep
+// their exact saved shape. An origin without a valid filter is dropped.
+function savedRelation(tab) {
+  const relationFilter = normalizeRelationFilter(tab?.relationFilter);
+  if (!relationFilter) return {};
+  const relationOrigin = normalizeRelationOrigin(tab.relationOrigin);
+  return relationOrigin ? { relationFilter, relationOrigin } : { relationFilter };
 }
 
 function savedPane(id, pane = {}) {
@@ -108,6 +118,7 @@ export function buildWorkspaceSnapshot({
     tableComment: tab.tableComment || "",
     filter: tab.filter || "",
     filterMode: normalizeTableFilterMode(tab.filterMode),
+    ...savedRelation(tab),
     sort: tab.sort || null,
     frozenRowStart: Number(tab.frozenRowStart) || 0,
     frozenRowCount: Number(tab.frozenRowCount) || 0,
@@ -187,6 +198,7 @@ export function loadWorkspaceSnapshot() {
               tableComment: String(tab.tableComment || ""),
               filter: String(tab.filter || ""),
               filterMode: normalizeTableFilterMode(tab.filterMode),
+              ...savedRelation(tab),
               sort: tab.sort || null,
               frozenRowStart: Number(tab.frozenRowStart) || 0,
               frozenRowCount: Number(tab.frozenRowCount) || 0,

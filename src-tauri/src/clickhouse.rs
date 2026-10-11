@@ -641,6 +641,7 @@ pub async fn read_table_count_with_perf(
     recorder: &PerformanceRecorder,
     context: &PerfContext,
 ) -> Result<TableCountResult, String> {
+    crate::config_relations::filter::ensure_engine_supports(request)?;
     let value = execute_json_query_inner(
         url,
         &build_table_count_sql(database, table, request),
@@ -699,6 +700,7 @@ async fn read_page_inner(
     request: &TablePageRequest,
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
+    crate::config_relations::filter::ensure_engine_supports(request)?;
     let (page, page_size) = normalize_page_request(request);
     let offset = normalize_page_offset(request, page, page_size);
     let value = execute_json_query_inner(
@@ -1042,6 +1044,7 @@ mod tests {
                 query: "launch".into(),
                 columns: vec!["event_name".into()],
                 mode: None,
+                relation: None,
             }),
             sort: None,
         };

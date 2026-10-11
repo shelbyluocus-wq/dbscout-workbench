@@ -137,6 +137,40 @@ test("openTableTab reuses an existing table tab and makes it active", () => {
   );
 });
 
+test("openTableTab keeps relation tabs apart by their relation filter", () => {
+  const state = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const origin = { direction: "outgoing", sourceTable: "shop", sourceColumn: "item_id", targetTable: "item", targetColumn: "id" };
+  const plain = openTableTab(state, { tableName: "item" });
+  const first = openTableTab(state, {
+    tableName: "item",
+    hitResultMode: true,
+    relationFilter: { column: "id", kind: "equals", values: ["1001"] },
+    relationOrigin: origin,
+  });
+  // The table session marks relation tabs as hit-result views after opening.
+  first.hitResultMode = true;
+  const reused = openTableTab(state, {
+    tableName: "item",
+    hitResultMode: true,
+    relationFilter: { column: "ID", values: [" 1001 ", "1001"] },
+    relationOrigin: origin,
+  });
+  const other = openTableTab(state, {
+    tableName: "item",
+    hitResultMode: true,
+    relationFilter: { column: "id", values: ["1002"] },
+    relationOrigin: origin,
+  });
+
+  assert.notEqual(first.id, plain.id);
+  assert.equal(reused.id, first.id);
+  assert.notEqual(other.id, first.id);
+  assert.equal(plain.relationFilter, null);
+  assert.equal(plain.relationOrigin, null);
+  assert.deepEqual(first.relationFilter, { column: "id", kind: "equals", values: ["1001"] });
+  assert.deepEqual(first.relationOrigin, origin);
+});
+
 test("new data tabs initialize RowStore generation immediately", () => {
   const state = createWorkspaceState({ database: "game" });
   const tab = openTableTab(state, { tableName: "items" });

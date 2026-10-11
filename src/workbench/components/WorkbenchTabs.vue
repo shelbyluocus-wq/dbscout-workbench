@@ -295,6 +295,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
             <span class="wb-tab-line wb-tab-line-primary">
               <span class="wb-tab-name">{{ tab.tableName || tabTitle(tab) }}</span>
               <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
+              <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
             </span>
             <span class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
               <component
@@ -318,6 +319,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
             <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
             <small v-if="tab.opening" class="wb-tab-opening-label" aria-live="polite">{{ t('m_48de9f48a703') }}</small>
             <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
+            <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
             <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
             <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
           </template>

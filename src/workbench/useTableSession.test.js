@@ -2934,3 +2934,120 @@ test("background preload loads deferred tabs one at a time", async () => {
   assert.equal(statusText.value, "ready", "background preload leaves the status bar alone");
   assert.ok(workspace.tabs.every((tab) => tab.sessionId && !tab.deferredLoad));
 });
+
+const SKILL_ORIGIN = { direction: "outgoing", sourceTable: "hero", sourceColumn: "skill_id", targetTable: "skill", targetColumn: "id" };
+
+test("relation tabs send their filter, reuse an identical jump and keep other jumps apart", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  const calls = [];
+  let sessions = 0;
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "get_table_schema") return { table_name: "skill", columns: [{ column_name: "id" }] };
+    if (command === "open_table_session") {
+      sessions += 1;
+      return {
+        sessionId: `skill-${sessions}`,
+        columns: [{ column_name: "id" }],
+        rows: [{ id: "1" }],
+        totalRows: 1,
+        totalRowsExact: true,
+        hasMore: false,
+        page: 1,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    if (command === "fetch_table_count") return { totalRows: 1, exact: true, estimated: false };
+    if (command === "close_table_session") return { closed: true };
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const jump = (values) => ({
+    initialState: {
+      hitResultMode: true,
+      relationFilter: { column: "id", kind: "equals", values },
+      relationOrigin: SKILL_ORIGIN,
+    },
+  });
+
+  const first = await session.openTable({ table_name: "skill" }, jump(["1", "2"]));
+  await waitForTimers();
+  const openCall = calls.find((call) => call.command === "open_table_session");
+  assert.deepEqual(openCall.payload.options.filter, {
+    query: "",
+    columns: [],
+    mode: "continuous",
+    relation: { column: "id", kind: "equals", values: ["1", "2"] },
+  });
+  assert.equal(first.hitResultMode, true);
+  assert.deepEqual(first.relationOrigin, SKILL_ORIGIN);
+
+  assert.equal((await session.openTable({ table_name: "skill" }, jump(["2", "1"]))).id, first.id);
+  const other = await session.openTable({ table_name: "skill" }, jump(["3"]));
+  assert.notEqual(other.id, first.id);
+  const plain = await session.openTable({ table_name: "skill" });
+  assert.notEqual(plain.id, first.id);
+  assert.equal(plain.relationFilter, null);
+  await session.dispose();
+});
+
+test("clearing the relation filter shows the whole table and keeps a typed search", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "skill",
+    sessionId: "skill-session",
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+    rows: [{ id: "1" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    filter: "fire",
+    searchQuery: "fire",
+    filterMode: "continuous",
+    hitResultMode: true,
+    relationFilter: { column: "id", kind: "equals", values: ["1"] },
+    relationOrigin: { ...SKILL_ORIGIN },
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return {
+      sessionId: "skill-session",
+      columns: [{ column_name: "id" }],
+      rows: [{ id: "1" }, { id: "2" }],
+      totalRows: 2,
+      totalRowsExact: true,
+      hasMore: false,
+      page: 1,
+      pageSize: REQUEST_PAGE_SIZE,
+    };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.fetchPage(tab, 1);
+  assert.deepEqual(calls[0].payload.request.filter, {
+    query: "fire",
+    columns: [],
+    mode: "continuous",
+    relation: { column: "id", kind: "equals", values: ["1"] },
+  });
+
+  const cleared = await session.clearRelationFilter(tab);
+  assert.equal(cleared.ok, true);
+  assert.equal(tab.relationFilter, null);
+  assert.equal(tab.relationOrigin, null);
+  assert.equal(tab.hitResultMode, false);
+  assert.equal(tab.filter, "fire");
+  assert.equal(tab.searchQuery, "fire");
+  const pageCall = calls.filter((call) => call.command === "fetch_table_page").at(-1);
+  assert.equal(pageCall.payload.request.filter, null);
+  assert.deepEqual(await session.clearRelationFilter(tab), { ok: false });
+  await session.dispose();
+});

@@ -592,6 +592,7 @@ async fn read_page_inner(
     request: &TablePageRequest,
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<TableSessionPage, String> {
+    crate::config_relations::filter::ensure_engine_supports(request)?;
     let client = client_for(url).await?;
     let collection = client
         .database(database)
@@ -682,6 +683,7 @@ pub async fn read_table_count_with_perf(
     _recorder: &PerformanceRecorder,
     _context: &PerfContext,
 ) -> Result<TableCountResult, String> {
+    crate::config_relations::filter::ensure_engine_supports(request)?;
     let client = client_for(url).await?;
     let collection = client
         .database(database)

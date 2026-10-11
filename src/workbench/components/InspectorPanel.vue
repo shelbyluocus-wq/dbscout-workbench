@@ -22,6 +22,7 @@ import { columnTypeKind } from "../utils/columnTypes.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { useAliases } from "../composables/aliasStore.js";
+import ConfigRelationsPanel from "./ConfigRelationsPanel.vue";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
@@ -31,6 +32,8 @@ const props = defineProps({
   schemaSearchQuery: { type: String, default: "" },
   schemaSearchMatches: { type: Array, default: () => [] },
   schemaSearchIndex: { type: Number, default: -1 },
+  relations: { type: Object, default: null },
+  relationsSupported: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -39,6 +42,8 @@ const emit = defineEmits([
   "schema-search",
   "schema-search-previous",
   "schema-search-next",
+  "open-relation",
+  "open-relations-review",
 ]);
 
 const { databaseLabel } = useAliases();
@@ -56,6 +61,13 @@ const tableComment = computed(() => props.activeTab?.tableComment || "");
 // Home, SQL and empty panes have no table to describe; show guidance instead
 // of an empty header, a dead search box and a blank list.
 const hasTableContext = computed(() => Boolean(props.activeTab?.tableName));
+
+// 字段 / 关联 toggle: only real data tabs of a supported connection offer the
+// relation page; everything else stays on the field list.
+const showRelationsToggle = computed(() =>
+  Boolean(props.relationsSupported && props.relations && props.activeTab?.tableName && (props.activeTab?.kind || "data") === "data"));
+const inspectorView = ref("fields");
+const effectiveView = computed(() => (showRelationsToggle.value ? inspectorView.value : "fields"));
 
 const COLUMN_KIND_ICONS = Object.freeze({
   key: KeyRound,
@@ -250,6 +262,36 @@ watch(
         <span v-else class="wb-inspector-table-comment is-empty">{{ t('m_dbc8f66df4fd') }}</span>
       </div>
     </header>
+    <div
+      v-if="showRelationsToggle"
+      class="wb-inspector-view-toggle"
+      role="tablist"
+      :aria-label="t('relations.toggle.relations')"
+    >
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="effectiveView === 'fields'"
+        :class="{ 'is-active': effectiveView === 'fields' }"
+        @click="inspectorView = 'fields'"
+      >{{ t('relations.toggle.fields') }}</button>
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="effectiveView === 'relations'"
+        :class="{ 'is-active': effectiveView === 'relations' }"
+        @click="inspectorView = 'relations'"
+      >{{ t('relations.toggle.relations') }}</button>
+    </div>
+    <ConfigRelationsPanel
+      v-if="showRelationsToggle && effectiveView === 'relations'"
+      :tab="activeTab"
+      :selected-cell="selectedCell"
+      :relations="relations"
+      @open-relation="emit('open-relation', $event)"
+      @open-review="emit('open-relations-review')"
+    />
+    <template v-if="effectiveView === 'fields'">
     <div class="wb-inspector-section-head">
       <div class="wb-inspector-section-label">{{ t('m_39230fff0eb1') }}</div>
       <span
@@ -370,6 +412,7 @@ watch(
         class="wb-inspector-search-empty"
       >{{ t('m_18e034572849') }}</p>
     </section>
+    </template>
     </template>
   </aside>
 </template>

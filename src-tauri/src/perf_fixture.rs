@@ -365,7 +365,7 @@ pub fn count_fixture_rows(
     filter: Option<&crate::types::TablePageFilter>,
 ) -> u64 {
     let spec = scenario_spec(selection);
-    if filter.is_none_or(|filter| filter.query.trim().is_empty()) {
+    if filter.is_none_or(crate::types::TablePageFilter::is_empty) {
         return spec.row_count as u64;
     }
     (1..=spec.row_count)

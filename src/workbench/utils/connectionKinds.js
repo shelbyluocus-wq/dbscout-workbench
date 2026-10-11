@@ -14,6 +14,7 @@ const MYSQL_CAPABILITIES = {
   import: true,
   findReplace: true,
   renameDrop: true,
+  configRelations: true,
 };
 
 const CLICKHOUSE_CAPABILITIES = {
@@ -26,6 +27,7 @@ const CLICKHOUSE_CAPABILITIES = {
   import: false,
   findReplace: false,
   renameDrop: false,
+  configRelations: false,
 };
 
 const MONGODB_CAPABILITIES = {
@@ -38,6 +40,7 @@ const MONGODB_CAPABILITIES = {
   import: false,
   findReplace: false,
   renameDrop: false,
+  configRelations: false,
 };
 
 export function normalizeConnectionKind(kind, url = "") {

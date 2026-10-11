@@ -2278,7 +2278,7 @@ test("inspector field remarks select the matching cell on the current visual row
   const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*\]\)/);
+  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*"open-relation",\s*"open-relations-review",\s*\]\)/);
   assert.match(inspector, /<article[\s\S]*class="wb-schema-column"/);
   assert.match(inspector, /role="button"/);
   assert.match(inspector, /tabindex="0"/);
