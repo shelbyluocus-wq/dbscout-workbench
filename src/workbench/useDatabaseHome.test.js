@@ -287,6 +287,28 @@ test("database home selection supports plain, ctrl, and shift clicks", () => {
   assert.deepEqual(home.selectedNames.value, ["hero", "orders", "player"]);
 });
 
+test("database home Ctrl+Shift click adds a range to the existing selection", () => {
+  const home = createController();
+
+  home.selectTable("audit_log", {});
+  home.selectTable("orders", { ctrlKey: true });
+  home.selectTable("player", { ctrlKey: true, shiftKey: true });
+  assert.deepEqual(home.selectedNames.value, ["audit_log", "orders", "player"]);
+  assert.equal(home.anchorName.value, "orders");
+});
+
+test("database home keyboard paging and Home/End move within the filtered order", () => {
+  const home = createController();
+
+  assert.equal(home.moveSelection(Infinity), "player");
+  assert.deepEqual(home.selectedNames.value, ["player"]);
+  assert.equal(home.moveSelection(-Infinity, { shiftKey: true }), "audit_log");
+  assert.deepEqual(home.selectedNames.value, ["audit_log", "hero", "orders", "player"]);
+  assert.equal(home.moveSelection(2), "orders");
+  assert.deepEqual(home.selectedNames.value, ["orders"]);
+  assert.equal(home.moveSelection(-10), "audit_log");
+});
+
 test("database home Ctrl+A selection covers every filtered table beyond the virtual window", () => {
   const manyTables = Array.from({ length: 160 }, (_, index) => ({
     table_name: index % 2 === 0 ? `vip_${index}` : `regular_${index}`,

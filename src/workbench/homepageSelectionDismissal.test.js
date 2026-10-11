@@ -3,17 +3,31 @@ import assert from "node:assert/strict";
 
 import { createHomepageSelectionDismissal } from "./homepageSelectionDismissal.js";
 
-function createTarget({ inside = false, tableRow = false, homeActions = false, insideMenu = false } = {}) {
+function createTarget({ inside = false, tableRow = false, homeActions = false, insideMenu = false, insideDialog = false } = {}) {
   return {
     inside,
     insideMenu,
     closest(selector) {
       if (tableRow && selector === ".wb-dbhome-object-row") return this;
       if (homeActions && selector === ".wb-dbhome-actions") return this;
+      if (insideDialog && selector === '[aria-modal="true"]') return this;
       return null;
     },
   };
 }
+
+test("answering a modal dialog keeps the homepage selection it was asked about", () => {
+  const scheduled = [];
+  const dismissal = createHomepageSelectionDismissal({
+    getRoot: () => ({ contains: () => false }),
+    clearSelection: () => {},
+    scheduleClear: (callback) => scheduled.push(callback),
+    scheduleGuardReset: () => {},
+  });
+
+  dismissal.handleDocumentClick({ target: createTarget({ insideDialog: true }) });
+  assert.equal(scheduled.length, 0);
+});
 
 test("homepage selection is preserved for its table rows and action toolbar, then cleared after other clicks", () => {
   const scheduled = [];

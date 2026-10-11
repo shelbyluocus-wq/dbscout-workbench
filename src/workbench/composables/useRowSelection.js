@@ -7,6 +7,7 @@ import { gridRowKey, insertRowIdFromRow, isInsertDraftRow } from "../utils/gridR
 import { tabRowAt, tabRowCount } from "../rowStore.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "../utils/gridRowHeight.js";
 import { useConfirm } from "./useConfirm.js";
+import { t } from "../i18n/index.js";
 
 const ROW_SELECTION_INDEX_ATTRIBUTE = "data-row-selection-index";
 
@@ -330,12 +331,14 @@ export function useRowSelection(
     }
     const count = dataEntries.length;
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
-    const insertNotice = insertRowIds.length > 0 ? `，并移除 ${insertRowIds.length} 条未保存新增行` : "";
     const confirmed = await confirm({
-      title: "删除选中行",
-      message: `将删除 ${sourceName} 中已选的 ${count} 行${insertNotice}。删除后可在备份中心回滚。`,
-      confirmText: "删除",
-      cancelText: "取消",
+      title: t(count === 1 ? "grid.deleteSelectedRowTitle" : "grid.deleteSelectedRowsTitle"),
+      message: count === 1
+        ? t("grid.deleteSelectedRowMessage", { source: sourceName })
+        : t("grid.deleteSelectedRowsMessage", { source: sourceName, count }),
+      note: insertRowIds.length > 0 ? t("grid.deleteRowsDraftNote", { count: insertRowIds.length }) : "",
+      confirmText: t("m_2f9daa828907"),
+      cancelText: t("m_2cd0f3be8738"),
       danger: true,
     });
     if (!confirmed) return;
@@ -381,12 +384,13 @@ export function useRowSelection(
     }
     const sourceName = tab.database ? `${tab.database}.${tab.tableName}` : tab.tableName;
     const identityLabel = rowIdentityLabel(tab, row);
-    const targetText = identityLabel ? `${sourceName} 中 ${identityLabel} 的行` : `${sourceName} 的当前行`;
     const confirmed = await confirm({
-      title: "删除当前行",
-      message: `删除 ${targetText}？删除后可在备份中心回滚。`,
-      confirmText: "删除",
-      cancelText: "取消",
+      title: t("grid.deleteRowTitle"),
+      message: identityLabel
+        ? t("grid.deleteRowMessage", { source: sourceName, row: identityLabel })
+        : t("grid.deleteCurrentRowMessage", { source: sourceName }),
+      confirmText: t("m_2f9daa828907"),
+      cancelText: t("m_2cd0f3be8738"),
       danger: true,
     });
     if (!confirmed) return;

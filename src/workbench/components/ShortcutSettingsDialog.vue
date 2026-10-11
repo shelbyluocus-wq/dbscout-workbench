@@ -3,12 +3,13 @@ import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref } from "vue";
 import {
   DEFAULT_BINDINGS,
-  SHORTCUT_LABELS,
   GLOBAL_ACTIONS,
   shortcutComboFromEvent,
+  shortcutLabel,
   useShortcuts,
 } from "../composables/useShortcuts.js";
 import { useEscClose } from "../composables/useEscClose.js";
+import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -27,11 +28,25 @@ const dialogRef = ref(null);
 const rows = computed(() =>
   Object.keys(DEFAULT_BINDINGS).map((action) => ({
     action,
-    label: SHORTCUT_LABELS[action] || action,
+    label: shortcutLabel(action),
     combo: bindings[action] || "",
     isGlobal: GLOBAL_ACTIONS.has(action),
   })),
 );
+
+// Fixed keys of the table lists and tabs, listed for discoverability.
+const referenceRows = computed(() => {
+  const click = t("shortcut.keyClick");
+  return [
+    { label: t("shortcut.refOpen"), keys: ["Enter", t("shortcut.keyDoubleClick")] },
+    { label: t("shortcut.refDelete"), keys: ["Delete"] },
+    { label: t("shortcut.refRename"), keys: ["F2"] },
+    { label: t("shortcut.refMultiSelect"), keys: [`${formatShortcutForPlatform("Ctrl")}+${click}`, `Shift+${click}`] },
+    { label: t("shortcut.refSelectAll"), keys: [formatShortcutForPlatform("Ctrl+A")] },
+    { label: t("shortcut.refContextMenu"), keys: ["Shift+F10"] },
+    { label: t("shortcut.refCloseTab"), keys: [t("shortcut.keyMiddleClick")] },
+  ];
+});
 
 function startRebind(action) {
   listeningAction.value = action;
@@ -117,6 +132,7 @@ onBeforeUnmount(cancelRebind);
         </header>
         <p v-if="error" class="wb-shortcut-dialog-error">{{ error }}</p>
         <p class="wb-shortcut-dialog-hint"> {{ t('m_ca1097b87e7a') }} </p>
+        <div class="wb-shortcut-scroll">
         <ul class="wb-shortcut-list">
           <li v-for="row in rows" :key="row.action" class="wb-shortcut-row">
             <span class="wb-shortcut-row-label">
@@ -141,6 +157,17 @@ onBeforeUnmount(cancelRebind);
             </div>
           </li>
         </ul>
+        <section class="wb-shortcut-reference" :aria-label="t('shortcut.referenceTitle')">
+          <h3>{{ t('shortcut.referenceTitle') }}</h3>
+          <p>{{ t('shortcut.referenceHint') }}</p>
+          <dl>
+            <template v-for="row in referenceRows" :key="row.label">
+              <dt>{{ row.label }}</dt>
+              <dd><kbd v-for="key in row.keys" :key="key" class="wb-shortcut-combo">{{ key }}</kbd></dd>
+            </template>
+          </dl>
+        </section>
+        </div>
         <footer class="wb-shortcut-dialog-footer">
           <button type="button" @click="resetAll">{{ t('m_ba2e93e73037') }}</button>
           <button type="button" class="wb-shortcut-dialog-primary" @click="close">{{ t('m_c0b3fbff51cc') }}</button>

@@ -28,6 +28,9 @@ export function createHomepageSelectionDismissal({
       target?.closest?.(".wb-dbhome-actions")
     )) return;
     if (getProtectedRoots().some((protectedRoot) => protectedRoot?.contains?.(target))) return;
+    // Answering a dialog (such as "Delete 3 tables?" -> Cancel) is not a
+    // click elsewhere: the selection it was asked about stays.
+    if (target?.closest?.('[aria-modal="true"]')) return;
     scheduleClear(() => clearSelection?.());
   }
 

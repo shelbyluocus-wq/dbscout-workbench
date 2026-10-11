@@ -2,27 +2,55 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import { translateIn } from "./i18n/index.js";
 
 const source = readFileSync(new URL("./MySqlWorkbench.vue", import.meta.url), "utf8");
 const handler = source.slice(source.indexOf("async function deleteHomeTables("), source.indexOf("async function refreshHome("));
 
-function harness({ result, refreshError = false, busy = false, invoke, tableNames = ["a", "b"] } = {}) {
+function harness({ result, refreshError = false, busy = false, invoke, tableNames = ["a", "b"], locale = "zh-CN", origin } = {}) {
   const closed = [];
+  const confirmations = [];
+  const homeOpens = [];
   const home = { selectedTableNames: ["a", "b"] };
   const state = {
     busy: { value: busy }, statusText: { value: "" }, workspace: {},
     recentHomeTableNames: { value: ["a", "b", "c"] },
     isReadOnlyConnection: () => false, connectionCapability: () => true,
-    confirmDialogConfirm: async () => true,
+    confirmDialogConfirm: async (options) => { confirmations.push(options); return true; },
+    t: (key, params) => translateIn(locale, key, params),
     invokeWorkbench: invoke || (async () => result),
     closeTableObjectTabs: (_, { tableNames }) => { closed.push(...tableNames); return []; },
     clearTabCellErrors() {},
     loadTables: async () => { if (refreshError) throw new Error("offline"); },
-    openCurrentDatabaseHome: () => home,
+    openCurrentDatabaseHome: (options) => { homeOpens.push(options); return home; },
   };
   const run = runInNewContext(`${handler}; deleteHomeTables`, state);
-  return { state, home, closed, run: () => run({ connectionId: "c", database: "db", tableNames }) };
+  return { state, home, closed, confirmations, homeOpens, run: () => run({ connectionId: "c", database: "db", tableNames, origin }) };
 }
+
+test("the deletion confirmation is localized and focuses on the listed tables", async () => {
+  const h = harness({ locale: "en", result: { dropped: [{ tableName: "a" }, { tableName: "b" }], failed: [] } });
+  await h.run();
+  assert.equal(h.confirmations.length, 1);
+  const [options] = h.confirmations;
+  assert.equal(options.title, "Delete 2 tables");
+  assert.equal(options.message, "These tables will be deleted from db:");
+  assert.deepEqual([...options.items], ["a", "b"]);
+  assert.equal(options.confirmText, "Delete selected tables");
+  assert.equal(options.cancelText, "Cancel");
+  assert.equal(options.danger, true);
+  assert.doesNotMatch(JSON.stringify(options), /\p{Script=Han}/u);
+});
+
+test("deleting from the home page returns to it, deleting from the sidebar keeps the current tab", async () => {
+  const fromHome = harness({ result: { dropped: [{ tableName: "a" }, { tableName: "b" }], failed: [] } });
+  await fromHome.run();
+  assert.equal(JSON.stringify(fromHome.homeOpens), '[{"activate":true}]');
+
+  const fromSidebar = harness({ origin: "sidebar", result: { dropped: [{ tableName: "a" }, { tableName: "b" }], failed: [] } });
+  await fromSidebar.run();
+  assert.equal(JSON.stringify(fromSidebar.homeOpens), '[{"activate":false}]');
+});
 
 test("large table deletions report bounded progress and retain prior results after a later request fails", async () => {
   const tableNames = Array.from({ length: 70 }, (_, index) => `table_${index}`);

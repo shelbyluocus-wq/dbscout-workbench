@@ -9,6 +9,7 @@ import {
   Columns2,
   Copy,
   DatabaseZap,
+  FolderOpen,
   ListRestart,
   Minus,
   Pencil,
@@ -21,6 +22,9 @@ import {
   Trash2,
   Unplug,
 } from "lucide-vue-next";
+import { useShortcuts } from "../composables/useShortcuts.js";
+import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { focusMenuItem, handleMenuKeydown } from "../utils/menuKeyboard.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -58,12 +62,43 @@ const props = defineProps({
   freezeRowLabel: { type: String, default: "冻结到此行" },
   freezeColumnLabel: { type: String, default: "冻结到此列" },
   freezeCellLabel: { type: String, default: "冻结到此单元格" },
+  // Sidebar table menus act on the whole selection when the clicked table is
+  // part of it.
+  tableCount: { type: Number, default: 1 },
+  canDeleteTables: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
+const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
+const showSidebarTableActions = computed(() => props.kind === "table" && props.surface === "sidebar");
+const isGridMenu = computed(() => props.surface === "grid" || props.kind === "grid-row");
+const shortcuts = useShortcuts();
+// Hints only where the key does the same thing in that place: F2 renames a
+// table in the sidebar but edits a cell in the grid, and Ctrl+D/F5 act on the
+// open table rather than a sidebar row.
+const shortcutHints = computed(() => ({
+  open: "Enter",
+  copy: formatShortcutForPlatform("Ctrl+C"),
+  paste: formatShortcutForPlatform("Ctrl+V"),
+  deleteRows: "Delete",
+  deleteTables: "Delete",
+  rename: showSidebarTableActions.value ? "F2" : "",
+  design: isGridMenu.value ? formatShortcutForPlatform(shortcuts.get("openDesign")) : "",
+  refresh: isGridMenu.value ? formatShortcutForPlatform(shortcuts.get("refresh")) : "",
+}));
+const menuRef = ref(null);
+
+function handleKeydown(event) {
+  handleMenuKeydown(event, menuRef.value, { close: () => emit("close") });
+}
+
+function focusFirstItem() {
+  return focusMenuItem(menuRef.value, "first");
+}
+
+defineExpose({ focusFirstItem });
 const showTransferActions = computed(() => showTableActions.value || props.kind === "database");
 const insertRowCount = ref(1);
 const normalizedInsertRowCount = computed(() => Math.max(1, Math.min(99, Math.floor(Number(insertRowCount.value) || 1))));
@@ -95,14 +130,26 @@ const contextMenuStyle = computed(() => ({
 </script>
 
 <template>
-  <menu v-if="open" class="wb-context-menu" :style="contextMenuStyle" role="menu" :aria-label="t('m_1a94fed1be72')" @mousedown.stop @click.stop>
+  <menu
+    v-if="open"
+    ref="menuRef"
+    class="wb-context-menu"
+    :style="contextMenuStyle"
+    role="menu"
+    tabindex="-1"
+    :aria-label="t('m_1a94fed1be72')"
+    @mousedown.stop
+    @click.stop
+    @contextmenu.prevent.stop
+    @keydown="handleKeydown"
+  >
     <template v-if="canEditComment">
       <button type="button" role="menuitem" @click="emit('edit-comment')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_2d22af42a79f') }}</button>
       <hr class="wb-context-separator" role="separator" />
     </template>
     <template v-if="showClipboardActions">
-      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}</button>
-      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}</button>
+      <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.copy }}</kbd></button>
+      <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.paste }}</kbd></button>
       <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
       <hr class="wb-context-separator" role="separator" />
     </template>
@@ -131,7 +178,7 @@ const contextMenuStyle = computed(() => ({
       <button type="button" role="menuitem" @click="emit('grid-row-insert-below', normalizedInsertRowCount)"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_5232ad2f35aa') }} {{ normalizedInsertRowCount }} {{ t('m_4cc7b00050cb') }}</button>
       <button v-if="canInsertCopiedRows" type="button" role="menuitem" @click="emit('grid-row-paste-above')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_9b8d86c405fe') }}</button>
       <button v-if="canSetNull" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
-      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}</button>
+      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.deleteRows }}</kbd></button>
       <hr v-if="tableScoped || canFreezeRow || canFreezeColumn || canFreezeCell || hasFreeze" class="wb-context-separator" role="separator" />
     </template>
     <!-- 冻结窗格组：在表格/行右键时出现，按位置冻结（Excel 语义） -->
@@ -146,8 +193,9 @@ const contextMenuStyle = computed(() => ({
       <hr v-if="showTableActions" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}</button>
-    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}</button>
+    <button v-if="showSidebarTableActions" type="button" role="menuitem" @click="emit('open-tables')"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.openTables', { count: tableCount }) : t('m_bf8ef131aa2d') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.open }}</kbd></button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="shortcutHints.design" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.design }}</kbd></button>
+    <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd v-if="shortcutHints.rename" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.rename }}</kbd></button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_623281e9dfdb') }}</button>
     <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? t('m_5d43a2115ed9') : t('m_d7898968a0a2') }}</button>
@@ -155,8 +203,9 @@ const contextMenuStyle = computed(() => ({
     <!-- 通用操作组 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
-    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}</button>
+    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
     <!-- 危险操作放最后 -->
+    <button v-if="showSidebarTableActions" type="button" role="menuitem" class="danger" :disabled="!canDeleteTables" @click="emit('delete-tables')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.deleteTables', { count: tableCount }) : t('m_d545721cef25') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.deleteTables }}</kbd></button>
     <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e4e4e0ad5de1') }}</button>
   </menu>
 </template>

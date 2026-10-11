@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { nextListSelection } from "../utils/listSelection.js";
 import { filterTablesByKeywords } from "../utils/tableKeywordSearch.js";
 
 export const HOME_SORT_MODES = Object.freeze({
@@ -93,14 +94,6 @@ function compareNullableNumber(left, right, direction = 1) {
   if (leftNumber === null) return 1;
   if (rightNumber === null) return -1;
   return (leftNumber - rightNumber) * direction;
-}
-
-function eventHasCtrl(event = {}) {
-  return Boolean(event.ctrlKey || event.metaKey);
-}
-
-function selectedArray(selected) {
-  return Array.from(selected);
 }
 
 function sourceArray(value) {
@@ -286,25 +279,15 @@ export function createDatabaseHomeController({
     const safeName = tableNameOf({ tableName: name });
     if (!safeName) return selectedNames.value;
     focusedName.value = safeName;
-    const current = new Set(selectedNames.value);
-    if (event.shiftKey && anchorName.value) {
-      const start = tableIndex(anchorName.value);
-      const end = tableIndex(safeName);
-      if (start >= 0 && end >= 0) {
-        const [from, to] = start <= end ? [start, end] : [end, start];
-        selectedNames.value = filteredTables.value.slice(from, to + 1).map((table) => table.tableName);
-        return selectedNames.value;
-      }
-    }
-    if (eventHasCtrl(event)) {
-      if (current.has(safeName)) current.delete(safeName);
-      else current.add(safeName);
-      selectedNames.value = selectedArray(current);
-      anchorName.value = safeName;
-      return selectedNames.value;
-    }
-    selectedNames.value = [safeName];
-    anchorName.value = safeName;
+    const next = nextListSelection({
+      order: filteredTables.value.map((table) => table.tableName),
+      selected: selectedNames.value,
+      anchor: anchorName.value,
+      name: safeName,
+      event,
+    });
+    selectedNames.value = next.selected;
+    anchorName.value = next.anchor;
     return selectedNames.value;
   }
 
@@ -322,16 +305,20 @@ export function createDatabaseHomeController({
     return selectedNames.value;
   }
 
+  // Arrow keys move by one row, PageUp/PageDown by a page and Home/End pass
+  // +/-Infinity to reach either end; Shift extends from the anchor.
   function moveSelection(delta, event = {}) {
     const list = filteredTables.value;
-    const step = Math.sign(Number(delta) || 0);
-    if (!list.length || !step) return "";
+    const amount = Number(delta) || 0;
+    if (!list.length || !amount) return "";
 
     const currentName = focusedName.value || selectedNames.value.at(-1) || "";
     const currentIndex = tableIndex(currentName);
-    const nextIndex = currentIndex < 0
-      ? (step > 0 ? 0 : list.length - 1)
-      : Math.max(0, Math.min(list.length - 1, currentIndex + step));
+    const lastIndex = list.length - 1;
+    let nextIndex;
+    if (!Number.isFinite(amount)) nextIndex = amount > 0 ? lastIndex : 0;
+    else if (currentIndex < 0) nextIndex = amount > 0 ? 0 : lastIndex;
+    else nextIndex = Math.max(0, Math.min(lastIndex, currentIndex + Math.trunc(amount)));
     const nextName = list[nextIndex]?.tableName || "";
     if (!nextName) return "";
 

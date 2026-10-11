@@ -224,7 +224,9 @@ from UI):
   (transparently reopens dead backend sessions — both on
   `table-sessions-invalidated` events and when a page fetch hits a
   session-expired error), `useTableSearch.js`,
-  `useSidebarVirtualTables.js`, `aliasStore.js`
+  `useSidebarVirtualTables.js`, `useSidebarTableSelection.js` (sidebar
+  Ctrl/Shift multi-selection; a plain click still opens the table),
+  `aliasStore.js`
 - Grid interactions: `useGridEditor.js`, `useVirtualGrid.js`,
   `useRowSelection.js`, `useColumnResize.js`, `useColumnReorder.js`, `useCellHighlight.js`,
   `usePersistentScrollbars.js`
@@ -275,7 +277,10 @@ from UI):
   `statusMessages.js` (classifies legacy zh-CN `statusText` messages into
   notice tones — quiet, info, success, warning, error — and maps their
   templates to `status.*` catalog keys for display); `searchKindLabels.js`
-  (shared localized labels for schema-search hit kinds)
+  (shared localized labels for schema-search hit kinds); `listSelection.js`
+  (shared table-list selection rules, open plans, the open-many guard and the
+  Delete / context-menu key checks); `menuKeyboard.js` (arrow/Home/End/Escape
+  navigation for context menus)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -514,6 +519,17 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   blocked actions and completed operations as notices. Progress chatter and
   results already visible in place stay quiet. When adding a status message,
   add a rule in `utils/statusMessages.js` if it should notify or be translated.
+- **List interactions** — The database home list and the sidebar table list
+  share `utils/listSelection.js`: click selects (the sidebar also opens),
+  Ctrl/Cmd+click toggles, Shift+click selects a range, Ctrl/Cmd+Shift adds a
+  range. Enter, double-click and the context menu act on the whole selection
+  when the target row belongs to it; only the row the user acted on becomes
+  the active tab and more than 15 tables ask first. Delete (Backspace on
+  macOS) deletes after a confirmation, F2 renames, Esc clears and Shift+F10
+  opens the menu. Context menus show the key that does the same thing in that
+  place (`.wb-context-shortcut`, `aria-hidden`). Destructive confirmations
+  focus Cancel; others focus the primary button. F5 is the rebindable
+  `refresh` shortcut and must never fall through to a WebView reload.
 - **Safety layers** — Writes flow through backup (layer 1) + audit (layer 2); a
   successful mutation always has a committed audit row so it can be rolled back.
 - **Node.js test runner** — JS/sidecar tests use `node:test` and

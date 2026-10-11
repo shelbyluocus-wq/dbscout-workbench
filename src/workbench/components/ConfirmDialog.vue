@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 
 const props = defineProps({
@@ -20,6 +20,10 @@ const emit = defineEmits(["confirm", "alternative", "cancel", "close"]);
 
 const dialogRef = ref(null);
 useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
+
+// Initial focus goes to the safe choice: Cancel for destructive actions,
+// the primary button otherwise, so Enter never deletes by reflex.
+const focusCancel = computed(() => props.danger && Boolean(props.cancelText));
 </script>
 
 <template>
@@ -51,7 +55,7 @@ useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
         <p v-if="note" class="wb-confirm-note">{{ note }}</p>
       </div>
       <footer class="wb-dialog-actions">
-        <button v-if="cancelText" type="button" @click="emit('cancel')">
+        <button v-if="cancelText" type="button" :autofocus="focusCancel" @click="emit('cancel')">
           {{ cancelText }}
         </button>
         <button
@@ -66,6 +70,7 @@ useEscClose(() => props.open, () => emit("cancel"), null, { dialogRef });
           type="button"
           class="wb-dialog-primary"
           :class="{ danger }"
+          :autofocus="!focusCancel"
           @click="emit('confirm')"
         >
           {{ confirmText }}

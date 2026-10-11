@@ -2,6 +2,7 @@ import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useConfirm } from "./composables/useConfirm.js";
+import { language } from "./i18n/index.js";
 import { buildRowKey, rowIdentityLabel } from "./utils/rowIdentity.js";
 import { getInsertRowKey } from "./utils/gridRowIdentity.js";
 import { createVisualRowModel } from "./utils/visualRows.js";
@@ -543,40 +544,74 @@ test("rowIdentityLabel formats primary-key identity for display", () => {
   assert.ok(long.endsWith("…"));
 });
 
-test("deleteRow confirm names the row by primary key and mentions rollback", async () => {
-  const { tab, selection } = createHarness();
-  const { confirmDialog, close } = useConfirm();
+async function inLanguage(locale, run) {
+  const previous = language.locale.value;
+  language.setLanguage(locale);
+  try {
+    await run();
+  } finally {
+    language.setLanguage(previous);
+  }
+}
 
-  const deletePromise = selection.deleteRow(tab, tab.rows[1]);
-  assert.match(confirmDialog.message, /player 中 id=2 的行/);
-  assert.match(confirmDialog.message, /备份中心回滚/);
-  assert.doesNotMatch(confirmDialog.message, /不可撤销/);
-  close(true);
-  await deletePromise;
+test("deleteRow confirm names the row by primary key and mentions rollback", async () => {
+  await inLanguage("zh-CN", async () => {
+    const { tab, selection } = createHarness();
+    const { confirmDialog, close } = useConfirm();
+
+    const deletePromise = selection.deleteRow(tab, tab.rows[1]);
+    assert.match(confirmDialog.message, /player 中 id=2 的行/);
+    assert.match(confirmDialog.message, /备份中心回滚/);
+    assert.doesNotMatch(confirmDialog.message, /不可撤销/);
+    close(true);
+    await deletePromise;
+  });
 });
 
 test("deleteRow falls back to generic wording without a primary key", async () => {
-  const { tab, selection } = createHarness();
-  const { confirmDialog, close } = useConfirm();
+  await inLanguage("zh-CN", async () => {
+    const { tab, selection } = createHarness();
+    const { confirmDialog, close } = useConfirm();
 
-  tab.primaryKeys = [];
-  const deletePromise = selection.deleteRow(tab, tab.rows[0]);
-  assert.match(confirmDialog.message, /player 的当前行/);
-  close(true);
-  await deletePromise;
+    tab.primaryKeys = [];
+    const deletePromise = selection.deleteRow(tab, tab.rows[0]);
+    assert.match(confirmDialog.message, /player 的当前行/);
+    close(true);
+    await deletePromise;
+  });
 });
 
 test("deleteSelectedRows confirm names the table and mentions rollback", async () => {
-  const { tab, selection } = createHarness();
-  const { confirmDialog, close } = useConfirm();
+  await inLanguage("zh-CN", async () => {
+    const { tab, selection } = createHarness();
+    const { confirmDialog, close } = useConfirm();
 
-  selection.toggleRowSelect(tab, tab.rows[0], {});
-  const deletePromise = selection.deleteSelectedRows(tab);
-  assert.match(confirmDialog.message, /player 中已选的 1 行/);
-  assert.match(confirmDialog.message, /备份中心回滚/);
-  assert.doesNotMatch(confirmDialog.message, /不可撤销/);
-  close(true);
-  await deletePromise;
+    selection.toggleRowSelect(tab, tab.rows[0], {});
+    const deletePromise = selection.deleteSelectedRows(tab);
+    assert.match(confirmDialog.message, /player 中已选的 1 行/);
+    assert.match(confirmDialog.message, /备份中心回滚/);
+    assert.doesNotMatch(confirmDialog.message, /不可撤销/);
+    close(true);
+    await deletePromise;
+  });
+});
+
+test("row deletion confirmations follow the interface language", async () => {
+  await inLanguage("en", async () => {
+    const { tab, selection } = createHarness();
+    const { confirmDialog, close } = useConfirm();
+
+    selection.toggleRowSelect(tab, tab.rows[0], {});
+    selection.toggleRowSelect(tab, tab.rows[1], { ctrlKey: true });
+    const deletePromise = selection.deleteSelectedRows(tab);
+    assert.equal(confirmDialog.title, "Delete selected rows");
+    assert.match(confirmDialog.message, /^Delete 2 selected rows from .*player\? You can roll this back in the Backup Center\.$/);
+    assert.equal(confirmDialog.confirmText, "Delete");
+    assert.equal(confirmDialog.cancelText, "Cancel");
+    assert.doesNotMatch(`${confirmDialog.title}${confirmDialog.message}`, /\p{Script=Han}/u);
+    close(false);
+    await deletePromise;
+  });
 });
 
 test("delete retries the post-delete refetch once and keeps the success message when the retry recovers", async () => {

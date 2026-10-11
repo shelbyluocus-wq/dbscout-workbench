@@ -9158,6 +9158,58 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: default;
 }
 
+.wb-shortcut-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wb-shortcut-scroll .wb-shortcut-list {
+  overflow: visible;
+}
+
+.wb-shortcut-reference {
+  margin: 2px 16px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-shortcut-reference h3 {
+  margin: 0 0 2px;
+  color: var(--wb-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-shortcut-reference p {
+  margin: 0 0 8px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+}
+
+.wb-shortcut-reference dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.wb-shortcut-reference dt {
+  min-width: 0;
+  color: var(--wb-text);
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+
+.wb-shortcut-reference dd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0;
+}
+
 .wb-shortcut-dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -22755,4 +22807,34 @@ label:has(input[type="checkbox"]:disabled) {
   .wb-context-menu {
     animation: none;
   }
+}
+
+/* List selection and shortcut hints ------------------------------------------
+   Context menus show the key that performs the same action in place, and the
+   sidebar table list marks a Ctrl/Shift multi-selection like the home list. */
+.wb-context-shortcut {
+  margin-left: auto;
+  padding-left: 24px;
+  color: var(--wb-quiet-text);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wb-context-menu button.danger .wb-context-shortcut {
+  color: color-mix(in srgb, var(--wb-danger) 72%, transparent);
+}
+
+.wb-table-item.is-selected {
+  background: var(--wb-list-selected);
+}
+
+.wb-table-item.is-selected:hover {
+  background: var(--wb-list-selected-hover);
+}
+
+.wb-table-item.active.is-selected,
+.wb-table-item.active.is-selected:hover {
+  background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
 }

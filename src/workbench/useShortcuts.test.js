@@ -1,9 +1,13 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
+import en from "./i18n/en.js";
+import zhCN from "./i18n/zhCN.js";
+import zhTW from "./i18n/zhTW.js";
 import {
   useShortcuts,
   DEFAULT_BINDINGS,
+  shortcutLabel,
   _resetSingletonForTests,
   isSafeInAppShortcut,
   matchesShortcutCombo,
@@ -67,6 +71,18 @@ test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cm
   assert.equal(matchesBinding("nextTab", keyEvent("Tab", { ctrl: true })), true);
   assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true, shift: true })), true);
   assert.equal(matchesBinding("previousTab", keyEvent("Tab", { ctrl: true })), false);
+});
+
+test("F5 refreshes by default and every action has a localized label", () => {
+  const { get, matchesBinding } = useShortcuts(fakeInvoke());
+  assert.equal(get("refresh"), "F5");
+  assert.equal(matchesBinding("refresh", keyEvent("F5")), true);
+  assert.equal(matchesBinding("refresh", keyEvent("F5", { ctrl: true })), false);
+  for (const action of Object.keys(DEFAULT_BINDINGS)) {
+    const key = `shortcut.${action}`;
+    for (const catalog of [en, zhCN, zhTW]) assert.ok(catalog[key], `${key} is missing`);
+    assert.notEqual(shortcutLabel(action), action);
+  }
 });
 
 test("shortcut helpers capture, compare, and validate favorite database bindings", () => {

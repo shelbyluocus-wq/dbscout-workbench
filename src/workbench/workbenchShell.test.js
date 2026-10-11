@@ -408,9 +408,8 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(pane, /@batch-export="[^"]*batch-export/);
   assert.match(pane, /@batch-import="[^"]*batch-import/);
   assert.match(pane, /@refresh="[^"]*refresh-home/);
-  assert.match(tableList, /@keydown\.delete\.prevent\.stop=/);
-  assert.match(tableList, /@keydown\.f2\.prevent\.stop=/);
-  assert.match(tableList, /@keydown\.enter\.prevent\.stop=/);
+  assert.match(tableList, /@keydown="handleRowKeydown\(table, \$event\)"/);
+  assert.match(tableList, /function handleRowKeydown\(table, event\)\s*\{[\s\S]*?key === "F2"[\s\S]*?handleRowRename\(table\)[\s\S]*?key === "Enter"[\s\S]*?handleRowOpen\(table\)[\s\S]*?isDeleteCommandKey\(event\)\) handleRowDelete\(table\)[\s\S]*?event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
   assert.match(tableList, /:ref="setRenameInput"/);
   assert.match(tableList, /@blur="submitRename"/);
   assert.match(tableList, /:aria-invalid="renameError/);
@@ -430,7 +429,7 @@ test("database homepage is wired as the current database table management tab", 
   assert.doesNotMatch(pasteHomeFlow, /home\.sortMode\s*=/);
   assert.match(home, /tableListRef\.value\?\.resetView\?\.\(\)/);
   assert.match(home, /@click="refreshHome"/);
-  assert.match(tableList, /defineExpose\(\{\s*focusList,\s*resetView,\s*scrollTableIntoView\s*\}\)/);
+  assert.match(tableList, /defineExpose\(\{\s*focusList,\s*pageRowCount,\s*resetView,\s*rowElement,\s*scrollTableIntoView\s*\}\)/);
   assert.match(orchestrator, /async\s+function\s+refreshHome[\s\S]*tab\.error\s*=\s*""/);
   assert.match(home, /defineExpose\(\{[\s\S]*copySelection[\s\S]*pasteTables[\s\S]*\}\)/);
   assert.match(pane, /function\s+copyHomeSelection/);
@@ -543,11 +542,13 @@ test("homepage table paste waits for the requested database to become committed"
 });
 
 test("homepage object shortcuts preserve native clipboard behavior in editable fields", () => {
-  const tableList = read("./components/DatabaseTableList.vue");
-  const handleKeydown = tableList.match(/function\s+handleKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  const home = read("./components/DatabaseHome.vue");
+  const handleKeydown = home.match(/function\s+handleHomeKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
-  assert.match(tableList, /function\s+isEditableShortcutTarget\(target\)/);
-  assert.match(handleKeydown, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return;/);
+  assert.match(home, /function\s+isEditableTypeaheadTarget\(target\)/);
+  assert.match(handleKeydown, /if\s*\(isEditableTypeaheadTarget\(event\.target\)\)\s*return;/);
+  // Rename, search and other inputs keep their own Delete, F2 and Enter keys.
+  assert.match(home, /function isHomeListCommandTarget\(target\)\s*\{[\s\S]*?closest\?\.\("button, input, textarea, select, a"\)/);
 });
 
 test("focused panes republish their current shortcut handlers after a split-pane focus change", () => {
@@ -1141,7 +1142,7 @@ test("readability copy pass uses explicit actions and localized ellipses", () =>
   assert.match(designEditor, /执行 ALTER TABLE/);
   assert.match(designEditor, /编辑字段备注/);
   assert.match(dataGrid, /class="wb-field-comment-text"[\s\S]*--wb-field-comment-lines/);
-  assert.match(rowSelection, /删除选中行/);
+  assert.match(rowSelection, /grid\.deleteSelectedRowsTitle/);
 
   const legacyEllipsisCopy = /(搜索值|加载中|重命名中|连接中|覆盖同步|发送到|正在检查|正在加载|搜索表名|Markdown 格式)[^"'<>]*\.\.\./;
   for (const source of [orchestrator, dataGrid, contextMenu, copyDialog, designEditor, sidebarPanel, updateDialog, pane]) {
@@ -1260,7 +1261,7 @@ test("context menu limits freeze and table actions to the surface that was right
   const orchestrator = read("./MySqlWorkbench.vue");
   const menu = read("./components/ContextMenu.vue");
 
-  assert.match(orchestrator, /openContextMenu\(event,\s*table,\s*\{\s*surface:\s*["']sidebar["']\s*\}\)/);
+  assert.match(orchestrator, /openContextMenu\(event,\s*table,\s*\{\s*surface:\s*["']sidebar["'],\s*tableNames:\s*table\?\.selectedTableNames\s*\}\)/);
   assert.match(orchestrator, /function\s+openInspectorContextMenu\(event,\s*selectedText\s*=\s*["']{2}\)[\s\S]*openContextMenu\(event,\s*focusedInspectorTab\.value,\s*\{[\s\S]*surface:\s*["']inspector["'][\s\S]*clipboardActions/);
   assert.match(orchestrator, /openContextMenu\(event,\s*targetTab,\s*\{[\s\S]*?surface:\s*["']grid["'][\s\S]*?clipboardActions/);
   assert.match(orchestrator, /@contextmenu="openInspectorContextMenu"/);
@@ -1284,7 +1285,7 @@ test("inspector selected text exposes a copy action in the context menu", () => 
   assert.match(orchestrator, /function\s+openInspectorContextMenu\(event,\s*selectedText\s*=\s*["']{2}\)/);
   assert.match(orchestrator, /const\s+hasSelectedText\s*=\s*Boolean\(text\.trim\(\)\)/);
   assert.match(orchestrator, /clipboardActions:\s*hasSelectedText[\s\S]*canCopy:\s*true[\s\S]*copy:\s*\(\)\s*=>\s*copyTextToClipboard\(text\)/);
-  assert.match(menu, /<template\s+v-if="showClipboardActions">[\s\S]*>复制<\/button>/);
+  assert.match(menu, /<template\s+v-if="showClipboardActions">[\s\S]*>复制<kbd class="wb-context-shortcut" aria-hidden="true">\{\{ shortcutHints\.copy \}\}<\/kbd><\/button>/);
 });
 
 test("workbench wires table design entry points from keyboard and context menu", () => {
@@ -1328,7 +1329,7 @@ test("database and table context menus share overwrite sync and send actions", (
   assert.match(menu, /<button\s+v-if="showTransferActions"[\s\S]*?@click="emit\('send-table'\)"[\s\S]*?发送到…/);
   assert.match(menu, /<button\s+v-if="showTransferActions"[\s\S]*?@click="emitSyncDatabase"[\s\S]*?覆盖同步…/);
   assert.match(menu, /sync-database/);
-  assert.match(menu, /名称与标记…<\/button>[\s\S]*>刷新<\/button>[\s\S]*<!-- 危险操作放最后 -->/);
+  assert.match(menu, /名称与标记…<\/button>[\s\S]*>刷新<kbd v-if="shortcutHints\.refresh"[^>]*>[^<]*<\/kbd><\/button>[\s\S]*<!-- 危险操作放最后 -->/);
   assert.match(orchestrator, /import\s+DatabaseSyncDialog\s+from\s+["']\.\/components\/DatabaseSyncDialog\.vue["']/);
   assert.match(orchestrator, /import\s+\{\s*useDatabaseSync\s*\}\s+from\s+["']\.\/composables\/useDatabaseSync\.js["']/);
   assert.match(orchestrator, /closeDatabaseTabs/);
@@ -1538,6 +1539,7 @@ test("table tab bar context menu can close all open tabs", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const refreshTabs = orchestrator.match(/async function refreshTabsFromMenu\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  const refreshDataTab = orchestrator.match(/async function refreshDataTab\(tab\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
   assert.match(tabs, /tab-contextmenu/);
   assert.match(tabs, /@contextmenu\.prevent\.stop="openTabContextMenu/);
@@ -1545,11 +1547,28 @@ test("table tab bar context menu can close all open tabs", () => {
   assert.match(orchestrator, /closePaneTabs/);
   assert.doesNotMatch(orchestrator, /closeAllTableTabs/);
   assert.match(orchestrator, /function\s+refreshTabsFromMenu/);
-  assert.match(refreshTabs, /refreshTabPage\(tab,\s*1,\s*\{\s*refreshSchema:\s*true\s*\}\)/);
-  assert.doesNotMatch(refreshTabs, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
+  assert.match(refreshTabs, /await refreshDataTab\(tab\)/);
+  assert.match(refreshTabs, /focusedPaneState\.refreshHomeView\?\.\(\)/);
+  assert.match(refreshDataTab, /refreshTabPage\(tab,\s*1,\s*\{\s*refreshSchema:\s*true\s*\}\)/);
+  assert.doesNotMatch(refreshDataTab, /refreshTabPage\(tab,\s*tab\.page\s*\|\|\s*1\)/);
   assert.match(orchestrator, /function\s+closeAllTabsFromMenu/);
   assert.match(orchestrator, /@tab-contextmenu="openTabContextMenu"/);
-  assert.match(orchestrator, />全部关闭</);
+  assert.match(orchestrator, /<ListX[^>]*\/>全部关闭</);
+});
+
+test("tab bar closes tabs with a middle click and offers close and close-others", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const tabs = read("./components/WorkbenchTabs.vue");
+  const closeOthers = orchestrator.match(/async function closeOtherTabsFromMenu\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(tabs, /@mousedown\.middle\.prevent/);
+  assert.match(tabs, /@auxclick="closeTabFromMiddleClick\(tab, \$event\)"/);
+  assert.match(tabs, /function closeTabFromMiddleClick\(tab, event\)\s*\{[\s\S]*?event\?\.button !== 1 \|\| !canCloseTab\(tab\)[\s\S]*?emit\("close-tab", tab\.id\)/);
+  assert.match(orchestrator, /@click="closeTabFromMenu"/);
+  assert.match(orchestrator, /@click="closeOtherTabsFromMenu"/);
+  assert.match(closeOthers, /guardTabDepartures\(tabsToClose\)/);
+  assert.match(closeOthers, /closePaneTabsRelative\(workspace, paneId, tabId, direction\)/);
+  assert.match(orchestrator, /class="wb-context-menu wb-tab-context-menu"[\s\S]*?role="menu"[\s\S]*?@keydown="handleTabContextMenuKeydown"/);
 });
 
 test("tab close discard guard keeps drafts whose insert request is still saving", () => {
@@ -1944,7 +1963,7 @@ test("workbench titlebar can pin the window with a customizable F8 shortcut", ()
   const shortcuts = read("./composables/useShortcuts.js");
   const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /import\s+\{\s*Pin\s*\}\s+from\s+["']lucide-vue-next["']/);
+  assert.match(orchestrator, /import\s+\{[^}]*\bPin\b[^}]*\}\s+from\s+["']lucide-vue-next["']/);
   assert.match(orchestrator, /import\s+\{\s*useWindowPin\s*\}\s+from\s+["']\.\/composables\/useWindowPin\.js["']/);
   assert.match(orchestrator, /const\s+windowPin\s*=\s*useWindowPin\(\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("pinWindow", event\)/);
@@ -2847,15 +2866,47 @@ test("sidebar connection and database nodes support drag reorder", () => {
 test("sidebar table rows expose F2 as the rename shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const sidebar = read("./components/WorkbenchSidebar.vue");
+  const listKeydown = sidebar.match(/function\s+handleTableListKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
 
   assert.match(sidebar, /"rename-table"/);
-  assert.match(sidebar, /function\s+renameSelectedTable/);
-  assert.match(sidebar, /event\.key\s*===\s*["']F2["']/);
-  assert.match(sidebar, /event\.preventDefault\(\)/);
-  assert.match(sidebar, /event\.stopPropagation\(\)/);
-  assert.match(sidebar, /@keydown="renameSelectedTable\(\$event,\s*entry\.table\)"/);
+  assert.match(listKeydown, /key === "F2" && plain[\s\S]*?emit\("rename-table", tablePayload\(table\)\)/);
+  assert.match(listKeydown, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
+  assert.match(sidebar, /class="wb-table-vlist"[\s\S]*?@keydown="handleTableListKeydown"/);
   assert.match(orchestrator, /function\s+openTableRenameFromSource/);
   assert.match(orchestrator, /@rename-table="openTableRenameFromSource"/);
+});
+
+test("sidebar connection and database rows rename with F2 and connections remove with Delete", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+
+  assert.match(sidebar, /@keydown="handleConnectionKeydown\(\$event, connection\.id\)"/);
+  assert.match(sidebar, /@keydown="handleDatabaseKeydown\(\$event, connection\.id, database\)"/);
+  assert.match(sidebar, /function handleConnectionKeydown\(event, connectionId\)\s*\{[\s\S]*?emit\("rename-connection", \{ connectionId \}\)[\s\S]*?isDeleteCommandKey\(event\)[\s\S]*?emit\("remove-connection", \{ connectionId \}\)/);
+  assert.match(sidebar, /function handleDatabaseKeydown\(event, connectionId, database\)\s*\{[\s\S]*?emit\("rename-database", \{ connectionId, database \}\)/);
+  assert.match(orchestrator, /@remove-connection="confirmRemoveConnection"/);
+  assert.match(orchestrator, /async function confirmRemoveConnection\(\{ connectionId = "" \} = \{\}\)\s*\{[\s\S]*?danger: true[\s\S]*?if \(!confirmed\) return;/);
+});
+
+test("sidebar Ctrl/Shift selection drives multi-open, delete and the context menu", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const menu = read("./components/ContextMenu.vue");
+
+  assert.match(sidebar, /useSidebarTableSelection\(\{ tables: filteredTables, activeTableName \}\)/);
+  assert.match(sidebar, /@click="onTableClick\(entry\.table, \$event\)"/);
+  assert.match(sidebar, /@dblclick="onTableDoubleClick\(entry\.table\)"/);
+  assert.match(sidebar, /'is-selected': tableSelection\.isMultiple\.value && tableSelection\.selectedSet\.value\.has\(entry\.table\.tableName\)/);
+  assert.match(sidebar, /emit\("delete-tables", \{[\s\S]*?origin: "sidebar"/);
+  assert.match(sidebar, /emit\("open-tables", \{ tables, activeName \}\)/);
+  assert.match(orchestrator, /@open-tables="openTablesFromSidebar"/);
+  assert.match(orchestrator, /@delete-tables="deleteHomeTables"/);
+  assert.match(orchestrator, /async function openTablesFromSidebar\([\s\S]*?confirmOpeningTables\(tables\.length/);
+  assert.match(orchestrator, /openTable\(table, \{ paneId, activate: tableName === activeName \}\)/);
+  assert.match(menu, /v-if="showSidebarTableActions"[^>]*@click="emit\('open-tables'\)"/);
+  assert.match(menu, /v-if="showSidebarTableActions"[^>]*class="danger"[^>]*:disabled="!canDeleteTables"[^>]*@click="emit\('delete-tables'\)"/);
+  assert.match(orchestrator, /@open-tables="openTablesFromContextMenu"/);
+  assert.match(orchestrator, /@delete-tables="deleteTablesFromContextMenu"/);
 });
 
 test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or not)", () => {

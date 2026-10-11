@@ -27,6 +27,8 @@ import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../s
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { computeTableBranchMinHeight, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
+import { useSidebarTableSelection } from "../composables/useSidebarTableSelection.js";
+import { isContextMenuKey, isDeleteCommandKey } from "../utils/listSelection.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 function themeLabel(theme) {
@@ -68,6 +70,9 @@ const emit = defineEmits([
   "rename-table",
   "rename-database",
   "rename-connection",
+  "remove-connection",
+  "open-tables",
+  "delete-tables",
   "contextmenu",
   "toggle-theme",
   "set-color-theme",
@@ -283,6 +288,19 @@ const {
   stickyHeaderSelector: ".wb-table-search-wrap",
 });
 
+const activeTableName = computed(() => (
+  props.activeTab?.connectionId === props.selectedConnectionId && props.activeTab?.database === props.selectedDatabase
+    ? String(props.activeTab?.tableName || "")
+    : ""
+));
+const tableSelection = useSidebarTableSelection({ tables: filteredTables, activeTableName });
+
+watch(() => [props.selectedConnectionId, props.selectedDatabase], () => tableSelection.clear());
+watch(() => props.treeQuery.trim(), (query) => {
+  if (query) tableSelection.clear();
+});
+watch(() => filteredTables.value.map((table) => table.tableName).join("\u001f"), () => tableSelection.prune());
+
 const tableBranchMinHeight = computed(() => {
   const height = computeTableBranchMinHeight({
     tableHeight: tableVirtualRange.value.totalHeight,
@@ -399,24 +417,125 @@ function onDatabaseClick(connectionId, database) {
   emit("select-database", { connectionId, database });
 }
 
-function openSelectedTable(table) {
-  emit("open-table", {
+function tablePayload(table) {
+  return {
     ...(table.raw || table),
     connectionId: props.selectedConnectionId,
     database: props.selectedDatabase,
+  };
+}
+
+function tableForName(name) {
+  return filteredTables.value.find((table) => table.tableName === name) || null;
+}
+
+function openSelectedTable(table) {
+  emit("open-table", tablePayload(table));
+}
+
+// Plain click opens the table at once (unchanged); Ctrl/Cmd and Shift clicks
+// only build the selection that Enter, double-click and Delete act on.
+function onTableClick(table, event) {
+  if (tableSelection.click(table.tableName, event) === "open") openSelectedTable(table);
+}
+
+function onTableDoubleClick(table) {
+  const plan = tableSelection.doubleClick(table.tableName);
+  if (plan) openTablePlan(plan);
+}
+
+function openTablePlan({ names = [], activeName = "" } = {}) {
+  const tables = names.map(tableForName).filter(Boolean).map(tablePayload);
+  if (!tables.length) return;
+  if (tables.length === 1) {
+    openSelectedTable(tables[0]);
+    return;
+  }
+  emit("open-tables", { tables, activeName });
+}
+
+function deleteTables(names) {
+  if (!names.length) return;
+  emit("delete-tables", {
+    connectionId: props.selectedConnectionId,
+    database: props.selectedDatabase,
+    tableNames: [...names],
+    origin: "sidebar",
   });
 }
 
-function renameSelectedTable(event, table) {
-  if (event.key === "F2") {
-    event.preventDefault();
-    event.stopPropagation();
-    emit("rename-table", {
-      ...(table.raw || table),
-      connectionId: props.selectedConnectionId,
-      database: props.selectedDatabase,
-    });
+function openTableContextMenu(event, table) {
+  const tableNames = tableSelection.targets(table.tableName);
+  emit("contextmenu", event, { ...tablePayload(table), selectedTableNames: tableNames });
+}
+
+// Rows are virtualized: scroll the target into view, then focus it once the
+// window has rendered it.
+function focusTableRow(name, attempt = 0) {
+  if (!name) return;
+  const index = filteredTables.value.findIndex((table) => table.tableName === name);
+  if (attempt === 0) scrollTableIntoView(index, { margin: 8, smooth: false });
+  const row = Array.from(tableListRef.value?.querySelectorAll?.(".wb-table-item") || [])
+    .find((element) => element.dataset.tableName === name);
+  if (row) {
+    row.focus({ preventScroll: true });
+    return;
   }
+  if (attempt < 4) requestAnimationFrame(() => focusTableRow(name, attempt + 1));
+}
+
+const TABLE_NAVIGATION_DELTAS = Object.freeze({ ArrowDown: 1, ArrowUp: -1, End: Infinity, Home: -Infinity });
+
+function handleTableListKeydown(event) {
+  const row = event.target?.closest?.(".wb-table-item");
+  const name = row?.dataset?.tableName || "";
+  const table = tableForName(name);
+  if (!table) return;
+  const key = String(event.key || "");
+  const command = event.ctrlKey || event.metaKey;
+  const plain = !command && !event.altKey && !event.shiftKey;
+  if (Object.hasOwn(TABLE_NAVIGATION_DELTAS, key) && !command && !event.altKey) {
+    focusTableRow(tableSelection.move(TABLE_NAVIGATION_DELTAS[key], { extend: event.shiftKey, from: name }));
+  } else if (key === "Enter" && plain) {
+    tableSelection.targets(name);
+    openTablePlan(tableSelection.openPlan(name));
+  } else if (key === "F2" && plain) {
+    emit("rename-table", tablePayload(table));
+  } else if (isDeleteCommandKey(event)) {
+    deleteTables(tableSelection.targets(name));
+  } else if (command && !event.shiftKey && !event.altKey && key.toLowerCase() === "a") {
+    tableSelection.selectAll();
+  } else if (key === "Escape" && tableSelection.isMultiple.value) {
+    tableSelection.clear();
+  } else if (isContextMenuKey(event)) {
+    const rect = row.getBoundingClientRect();
+    openTableContextMenu({ clientX: rect.left + 24, clientY: rect.bottom, keyboard: true }, table);
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+// F2 renames a connection or database alias and Delete removes a
+// connection, matching the table rows.
+function handleConnectionKeydown(event, connectionId) {
+  if (event.key === "F2" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    emit("rename-connection", { connectionId });
+  } else if (isDeleteCommandKey(event)) {
+    emit("remove-connection", { connectionId });
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function handleDatabaseKeydown(event, connectionId, database) {
+  if (event.key !== "F2" || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("rename-database", { connectionId, database });
 }
 
 function databaseTooltip(connectionId, database) {
@@ -639,6 +758,7 @@ defineExpose({ focusSearch, toggleSettings, settingsOpen });
             @drop.prevent.stop="dropConnection(connection.id, $event)"
             @dragend="clearSidebarDrag"
             @click="onConnectionClick(connection.id)"
+            @keydown="handleConnectionKeydown($event, connection.id)"
             @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'connection', connectionId: connection.id })"
           >
             <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
@@ -674,6 +794,7 @@ defineExpose({ focusSearch, toggleSettings, settingsOpen });
                   @drop.prevent.stop="dropDatabase(connection.id, database, $event)"
                   @dragend="clearSidebarDrag"
                   @click="onDatabaseClick(connection.id, database)"
+                  @keydown="handleDatabaseKeydown($event, connection.id, database)"
                   @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
@@ -712,6 +833,7 @@ defineExpose({ focusSearch, toggleSettings, settingsOpen });
                       :ref="setTableListElement"
                       class="wb-table-vlist"
                       :style="{ height: `${tableVirtualRange.totalHeight}px` }"
+                      @keydown="handleTableListKeydown"
                     >
                       <div
                         class="wb-table-vlist-window"
@@ -722,12 +844,15 @@ defineExpose({ focusSearch, toggleSettings, settingsOpen });
                           :key="entry.table.tableName"
                           class="wb-tree-row wb-table-item"
                           :data-table-name="entry.table.tableName"
-                          :class="{ active: isTableActive(entry.table) }"
+                          :class="{
+                            active: isTableActive(entry.table),
+                            'is-selected': tableSelection.isMultiple.value && tableSelection.selectedSet.value.has(entry.table.tableName),
+                          }"
                           :aria-current="isTableActive(entry.table) ? 'page' : undefined"
                           :title="tableTitle(entry.table)"
-                          @click="openSelectedTable(entry.table)"
-                          @keydown="renameSelectedTable($event, entry.table)"
-                          @contextmenu.prevent.stop="emit('contextmenu', $event, entry.table.raw || entry.table)"
+                          @click="onTableClick(entry.table, $event)"
+                          @dblclick="onTableDoubleClick(entry.table)"
+                          @contextmenu.prevent.stop="openTableContextMenu($event, entry.table)"
                         >
                           <component :is="tableTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">

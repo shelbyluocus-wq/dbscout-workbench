@@ -1,4 +1,5 @@
 import { reactive, readonly } from "vue";
+import { t } from "../i18n/index.js";
 
 const STORAGE_KEY = "dbscout-shortcut-bindings";
 
@@ -21,8 +22,13 @@ export const DEFAULT_BINDINGS = Object.freeze({
   previousTab: "Ctrl+Shift+Tab",
   undo: "Ctrl+Z",
   save: "Ctrl+S",
+  // F5 refreshes the home table list or the current table instead of letting
+  // the WebView reload the whole window (and lose unsaved work).
+  refresh: "F5",
 });
 
+// Simplified Chinese action names for messages still authored in Chinese;
+// interface labels come from `shortcutLabel`.
 export const SHORTCUT_LABELS = Object.freeze({
   openWindow: "打开主窗口",
   pinWindow: "钉住窗口",
@@ -37,7 +43,30 @@ export const SHORTCUT_LABELS = Object.freeze({
   previousTab: "上一个表",
   undo: "撤销",
   save: "保存",
+  refresh: "刷新",
 });
+
+const SHORTCUT_LABEL_KEYS = Object.freeze({
+  openWindow: "shortcut.openWindow",
+  pinWindow: "shortcut.pinWindow",
+  searchDatabase: "shortcut.searchDatabase",
+  searchTable: "shortcut.searchTable",
+  replaceInTable: "shortcut.replaceInTable",
+  openDesign: "shortcut.openDesign",
+  openSqlQuery: "shortcut.openSqlQuery",
+  openTableTransfer: "shortcut.openTableTransfer",
+  closeTab: "shortcut.closeTab",
+  nextTab: "shortcut.nextTab",
+  previousTab: "shortcut.previousTab",
+  undo: "shortcut.undo",
+  save: "shortcut.save",
+  refresh: "shortcut.refresh",
+});
+
+export function shortcutLabel(action) {
+  const key = SHORTCUT_LABEL_KEYS[action];
+  return key ? t(key) : String(action || "");
+}
 
 // Actions that are global (OS-level) and therefore routed through the Rust
 // register_global_shortcut command when rebound.

@@ -70,11 +70,14 @@ test("homepage arrow keys move table selection and keep the target visible", () 
   const tableList = read("./components/DatabaseTableList.vue");
   const controller = read("./composables/useDatabaseHome.js");
 
-  assert.match(home, /key !== "ArrowUp" && key !== "ArrowDown"/);
+  assert.match(home, /const HOME_NAVIGATION_KEYS = new Set\(\["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"\]\)/);
   assert.match(home, /isHomeTableNavigationTarget\(event\.target\)/);
   assert.match(home, /\.wb-tab\[data-kind="home"\]\.active/);
   assert.match(home, /if \(handleHomeArrowKeydown\(event\)\) \{[\s\S]*?event\.stopPropagation/);
-  assert.match(home, /const delta = key === "ArrowDown" \? 1 : -1/);
+  assert.match(home, /if \(key === "ArrowDown"\) return 1;\s*if \(key === "ArrowUp"\) return -1;/);
+  assert.match(home, /if \(key === "PageDown"\) return page;[\s\S]*?return key === "End" \? Infinity : -Infinity;/);
+  // Home, End and the page keys keep editing the search text.
+  assert.match(home, /if \(fromSearch && key !== "ArrowUp" && key !== "ArrowDown"\) return false;/);
   assert.match(home, /controller\.moveSelection\(delta, event\)/);
   assert.match(home, /typeahead\.dismiss\(\)/);
   assert.match(home, /scrollTableIntoView\?\.\(name, \{ block: "nearest" \}\)/);
@@ -113,18 +116,46 @@ test("homepage Enter opens tables selected from the homepage tab", () => {
   const home = read("./components/DatabaseHome.vue");
 
   assert.match(home, /function\s+handleHomeEnterKeydown\(event\)/);
-  assert.match(home, /target === root \|\| target\?\.closest\?\.\('\.wb-tab\[data-kind="home"\]\.active'\)/);
-  assert.match(home, /controller\.selectedNames\.value\.forEach\(\(name\) => openTable\(name\)\)/);
+  assert.match(home, /isHomeListCommandTarget\(target\) \|\| target\?\.closest\?\.\('\.wb-tab\[data-kind="home"\]\.active'\)/);
+  assert.match(home, /void openSelection\(controller\.focusedName\.value\)/);
   assert.match(home, /if \(typeahead\.handleKeydown\(event\)\)[\s\S]*?if \(handleHomeEnterKeydown\(event\)\)/);
 });
 
 test("homepage Enter on a ctrl or shift selected row opens every selected table", () => {
+  const home = read("./components/DatabaseHome.vue");
   const tableList = read("./components/DatabaseTableList.vue");
 
-  assert.match(tableList, /import\s+\{\s*homeEnterOpenNames\s*\}\s+from\s+"\.\.\/utils\/homeEnterOpen\.js"/);
-  assert.match(tableList, /function\s+openEnteredTables\(focusedName = ""\)\s*\{[\s\S]*?homeEnterOpenNames\(focusedName,\s*props\.selectedNames\)/);
-  assert.match(tableList, /function\s+handleRowOpen\(table\)\s*\{[\s\S]*?if\s*\(!selectedSet\.value\.has\(name\)\)\s*selectForAction\(table\);[\s\S]*?openEnteredTables\(name\)/);
-  assert.match(tableList, /if\s*\(key === "Enter"\)\s*\{[\s\S]*?openEnteredTables\(\)/);
+  assert.match(tableList, /function\s+handleRowOpen\(table\)\s*\{[\s\S]*?const name = selectForAction\(table\);[\s\S]*?emit\("open-selection", name\)/);
+  assert.match(home, /@open-selection="openSelection"/);
+  assert.match(home, /function openSelection\(focusedName = ""\)\s*\{[\s\S]*?selectionOpenPlan\(focusedName, controller\.selectedNames\.value, order\)/);
+  // Only the table the user acted on takes focus; the rest open in the background.
+  assert.match(home, /names\.forEach\(\(name\) => openTable\(name, \{ activate: name === activeName \}\)\)/);
+  assert.match(home, /confirmOpeningTables\(names\.length, \{ confirm, t \}\)/);
+});
+
+test("homepage double-click anywhere on a row opens the selection it belongs to", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const selectTable = home.match(/function\s+selectTable\(name, event = \{\}\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(tableList, /class="wb-dbhome-object-row"[\s\S]*?@click="select\(table, \$event\)"[\s\S]*?@dblclick="handleRowDoubleClick\(table, \$event\)"/);
+  assert.doesNotMatch(tableList, /@dblclick="emit\('open-table'/);
+  assert.match(home, /@activate-row="activateRow"/);
+  assert.match(selectTable, /if \(plain && Number\(event\?\.detail\) > 1\) return;/);
+  assert.match(selectTable, /selectionRecall\.remember\(name, controller\.selectedNames\.value\)/);
+  assert.match(home, /function activateRow\(name\)\s*\{[\s\S]*?selectionRecall\.recall\(name\)[\s\S]*?controller\.setSelection\(restored\)[\s\S]*?openSelection\(name\)/);
+});
+
+test("homepage Delete, F2, Esc and Shift+F10 work wherever list focus sits", () => {
+  const home = read("./components/DatabaseHome.vue");
+  const listKeydown = home.match(/function\s+handleHomeListKeydown\(event\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
+
+  assert.match(home, /function handleHomeKeydown\(event\)\s*\{[\s\S]*?handleHomeListKeydown\(event\);/);
+  assert.match(listKeydown, /isDeleteCommandKey\(event\)[\s\S]*?deleteSelection\(\)/);
+  assert.match(listKeydown, /key === "F2"[\s\S]*?renameFromKeyboard\(\)/);
+  assert.match(listKeydown, /isContextMenuKey\(event\)[\s\S]*?openKeyboardContextMenu\(\)/);
+  assert.match(listKeydown, /key === "Escape"[\s\S]*?cancelRename\(\)[\s\S]*?clearSelection\(\)/);
+  assert.doesNotMatch(home, /@keydown\.esc="closeMenu"/);
 });
 
 test("homepage search highlights matching table names and comments in visible rows", () => {
@@ -197,16 +228,17 @@ test("homepage context menu deletes the complete multi-table selection after con
   const home = read("./components/DatabaseHome.vue");
   const orchestrator = read("./MySqlWorkbench.vue");
 
-  assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*`删除 \$\{menu\.selectedNames\.length\} 张表`\s*:\s*["']删除表["']\)/);
+  assert.match(home, /deleteMenuLabel\s*=\s*computed\(\(\)\s*=>\s*menu\.selectedNames\.length\s*>\s*1\s*\?\s*t\("home\.deleteTables", \{ count: menu\.selectedNames\.length \}\)\s*:\s*["']删除表["']\)/);
   assert.match(home, /menu\.selectedNames\s*=\s*\[\.\.\.controller\.selectedNames\.value\]/);
-  assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*><Trash2 :size="14" class="wb-context-icon"[^>]*\/>\{\{ deleteMenuLabel \}\}<\/button>/);
+  assert.match(home, /<button[^>]*class="danger"[^>]*@click="deleteSelection\(menu\.tableName, menu\.selectedNames\)"[^>]*><Trash2 :size="14" class="wb-context-icon"[^>]*\/>\{\{ deleteMenuLabel \}\}<kbd class="wb-context-shortcut" aria-hidden="true">\{\{ menuShortcuts\.delete \}\}<\/kbd><\/button>/);
   assert.match(home, /if\s*\(tableName\s*&&\s*!controller\.selectedSet\.value\.has\(tableName\)\)\s*controller\.selectTable\(tableName,\s*\{\}\)/);
   assert.match(home, /tableNames,\s*\n\s*\}\)/);
   assert.match(orchestrator, /const\s+confirmed\s*=\s*await\s+confirmDialogConfirm\(/);
-  assert.match(orchestrator, /title:\s*tableNames\.length\s*===\s*1\s*\?\s*"删除表"\s*:\s*`删除 \$\{tableNames\.length\} 张表`/);
-  assert.match(orchestrator, /message:\s*`即将从 \$\{source\.database\} 删除以下表`/);
+  assert.match(orchestrator, /title:\s*count\s*===\s*1\s*\?\s*'删除表'\s*:\s*t\("home\.deleteTables", \{ count \}\)/);
+  assert.match(orchestrator, /message:\s*t\("home\.deleteMessage", \{ database: source\.database \}\)/);
   assert.match(orchestrator, /items:\s*tableNames/);
-  assert.match(orchestrator, /note:\s*"删除表会同时移除数据和结构，此操作不可撤销。"/);
+  assert.match(orchestrator, /note:\s*t\("home\.deleteNote"\)/);
+  assert.match(orchestrator, /danger:\s*true/);
   assert.match(orchestrator, /if\s*\(!confirmed\)\s*return/);
   assert.match(orchestrator, /const batch = tableNames\.slice\(offset, offset \+ 32\)/);
   assert.match(orchestrator, /invokeWorkbench\("drop_tables",\s*\{[\s\S]*?tables:\s*batch/);

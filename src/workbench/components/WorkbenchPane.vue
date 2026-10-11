@@ -1329,6 +1329,10 @@ function pasteHomeTables() {
   return databaseHomeRef.value?.pasteTables?.() === true;
 }
 
+function refreshHomeView() {
+  return databaseHomeRef.value?.refresh?.() === true;
+}
+
 function focusCurrentSearch() {
   if (activeHomeTab.value) return databaseHomeRef.value?.focusSearch?.() === true;
   if (!activeDataTab.value) return false;
@@ -1584,6 +1588,7 @@ function emitPaneState() {
     handleOpenDesignKeydown,
     copyHomeSelection,
     pasteHomeTables,
+    refreshHomeView,
     copyGridSelection,
     pasteGridSelection,
     pasteCopiedRowsAbove,

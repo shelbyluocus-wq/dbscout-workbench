@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "./i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { Pin } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, ListX, Pin, RefreshCw, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -59,7 +59,9 @@ import {
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
-import { isMacOSPlatform } from "./utils/desktopPlatform.js";
+import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
+import { handleMenuKeydown } from "./utils/menuKeyboard.js";
+import { confirmOpeningTables } from "./utils/listSelection.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
 import { rememberRecentSqlFile } from "./utils/sqlRecentFiles.js";
 import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js";
@@ -2610,6 +2612,21 @@ function closeTabContextMenu() {
   tabContextMenu.tabId = "";
 }
 
+const tabContextMenuRef = ref(null);
+const tabContextTab = computed(() => {
+  const pane = workspace.panes?.[tabContextMenu.paneId || workspace.focusedPaneId];
+  const tabId = tabContextMenu.tabId || pane?.activeTabId || "";
+  return workspace.tabs.find((tab) => tab.id === tabId) || null;
+});
+const tabContextMenuShortcuts = computed(() => ({
+  refresh: formatShortcutForPlatform(shortcutHelper.get("refresh")),
+  close: formatShortcutForPlatform(shortcutHelper.get("closeTab")),
+}));
+
+function handleTabContextMenuKeydown(event) {
+  handleMenuKeydown(event, tabContextMenuRef.value, { close: closeTabContextMenu });
+}
+
 const tabContextNeighborAvailability = computed(() => {
   const pane = workspace.panes?.[tabContextMenu.paneId || workspace.focusedPaneId];
   const tabId = tabContextMenu.tabId || pane?.activeTabId || "";
@@ -2621,14 +2638,47 @@ const tabContextNeighborAvailability = computed(() => {
   };
 });
 
+async function refreshDataTab(tab) {
+  if (!tab || (tab.kind || "data") !== "data") return;
+  const result = await refreshTabPage(tab, 1, { refreshSchema: true });
+  if (result?.ok) await resumeSearchAfterTableRefresh(tab);
+}
+
 async function refreshTabsFromMenu() {
   const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
   const pane = workspace.panes?.[paneId];
   const tab = workspace.tabs.find((item) => item.id === (tabContextMenu.tabId || pane?.activeTabId));
   closeTabContextMenu();
-  if (!tab || (tab.kind || "data") !== "data") return;
-  const result = await refreshTabPage(tab, 1, { refreshSchema: true });
-  if (result?.ok) await resumeSearchAfterTableRefresh(tab);
+  if (!tab) return;
+  if (tab.kind === "home" && tab.id === focusedPaneState.activeHomeTab?.id) {
+    focusedPaneState.refreshHomeView?.();
+    return;
+  }
+  await refreshDataTab(tab);
+}
+
+async function closeTabFromMenu() {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const tab = tabContextTab.value;
+  closeTabContextMenu();
+  if (!tab || tab.kind === "home" || tab.opening) return;
+  await closeTab(paneId, tab.id);
+}
+
+async function closeOtherTabsFromMenu() {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const pane = workspace.panes?.[paneId];
+  const tabId = tabContextTab.value?.id || "";
+  const directions = ["left", "right"];
+  const tabsToClose = directions.flatMap((direction) => (
+    closableRelativeTabsInPane(workspace.tabs, pane?.tabIds, tabId, direction)
+  ));
+  closeTabContextMenu();
+  if (!tabId || !tabsToClose.length || !(await guardTabDepartures(tabsToClose))) return;
+  resetGridState();
+  const closedTabs = directions.flatMap((direction) => closePaneTabsRelative(workspace, paneId, tabId, direction));
+  closedTabs.forEach(clearTabCellErrors);
+  pruneEmptyPanesInLayout(workspace);
 }
 
 async function closeAllTabsFromMenu() {
@@ -2714,6 +2764,13 @@ async function executeDatabaseSync() {
 }
 
 function openTableCopyFromContext() {
+  if (contextMenu.tableNames.length > 1) {
+    const selection = contextMenuTableSource();
+    closeContextMenu();
+    closeTabContextMenu();
+    sendHomeTables(selection);
+    return;
+  }
   const source = {
     connectionId: contextMenu.connectionId,
     database: contextMenu.database,
@@ -3061,9 +3118,11 @@ async function focusHomeTable(table, paneId = workspace.focusedPaneId) {
   }
 }
 
+// A multi-table open marks every table but the one the user acted on with
+// `activate: false`, so they load in the background without taking focus.
 async function openTableFromHome(table, paneId = workspace.focusedPaneId) {
   focusedPaneState.captureActiveTableViewState?.();
-  await openTable(table, { paneId });
+  await openTable(table, { paneId, activate: table?.activate !== false });
   rememberOpenedHomeTable(normalizeTableName(table));
 }
 
@@ -3207,13 +3266,14 @@ async function deleteHomeTables(source = {}) {
   }
   busy.value = true;
   try {
+    const count = tableNames.length;
     const confirmed = await confirmDialogConfirm({
-      title: tableNames.length === 1 ? "删除表" : `删除 ${tableNames.length} 张表`,
-      message: `即将从 ${source.database} 删除以下表`,
+      title: count === 1 ? t('m_d545721cef25') : t("home.deleteTables", { count }),
+      message: t("home.deleteMessage", { database: source.database }),
       items: tableNames,
-      note: "删除表会同时移除数据和结构，此操作不可撤销。",
-      confirmText: tableNames.length === 1 ? "删除表" : "删除所选表",
-      cancelText: "取消",
+      note: t("home.deleteNote"),
+      confirmText: count === 1 ? t('m_d545721cef25') : t("home.deleteSelectedTables"),
+      cancelText: t('m_2cd0f3be8738'),
       danger: true,
     });
     if (!confirmed) return;
@@ -3263,7 +3323,9 @@ async function deleteHomeTables(source = {}) {
     } catch (error) {
       refreshError = `；列表刷新失败：${String(error?.message || error)}，请重试刷新`;
     }
-    const home = openCurrentDatabaseHome({ activate: true });
+    // Deleting from the sidebar keeps the current tab; the home page only
+    // takes over when the deletion started there.
+    const home = openCurrentDatabaseHome({ activate: source.origin !== "sidebar" });
     if (home) home.selectedTableNames = failed.map((item) => item.name);
     statusText.value = summary + refreshError;
   } catch (error) {
@@ -3403,23 +3465,91 @@ async function handleTableDesignApplied(event = {}, options = {}) {
   }
 }
 
+const contextMenuRef = ref(null);
+let contextMenuReturnFocus = null;
+const contextMenuCanDeleteTables = computed(() => {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  return contextMenu.kind === "table"
+    && !isReadOnlyConnection(connectionId)
+    && connectionCapability(connectionId, "renameDrop");
+});
+
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
-  openContextMenu(event, table, { surface: "sidebar" });
+  openContextMenu(event, table, { surface: "sidebar", tableNames: table?.selectedTableNames });
   configureHitResultContextMenu(focusedPaneState.activeDataTab);
+  // Opened with Shift+F10 or the Menu key: move focus into the menu; it
+  // returns to the row when the menu closes (see the watcher below).
+  contextMenuReturnFocus = event?.keyboard ? document.activeElement : null;
+  if (event?.keyboard) nextTick(() => contextMenuRef.value?.focusFirstItem?.());
+}
+
+// Runs before the menu leaves the DOM, while its focused item still exists, so
+// Escape, an action or a dialog's focus return all land back on the row.
+watch(() => contextMenu.open, (open) => {
+  if (open) return;
+  const returnFocus = contextMenuReturnFocus;
+  contextMenuReturnFocus = null;
+  if (returnFocus?.isConnected && document.activeElement?.closest?.(".wb-context-menu")) {
+    returnFocus.focus({ preventScroll: true });
+  }
+});
+
+function contextMenuTableSource() {
+  return {
+    connectionId: String(contextMenu.connectionId || selectedConnectionId.value || ""),
+    database: String(contextMenu.database || selectedDatabase.value || ""),
+    tableNames: contextMenu.tableNames.length ? [...contextMenu.tableNames] : [contextMenu.tableName].filter(Boolean),
+  };
+}
+
+// Opens several sidebar tables: the one the user acted on becomes the active
+// tab, the others load in the background in list order.
+async function openTablesFromSidebar({ tables = [], activeName = "" } = {}) {
+  if (!tables.length || !(await confirmOpeningTables(tables.length, { confirm: confirmDialogConfirm, t }))) return;
+  focusedPaneState.captureActiveTableViewState?.();
+  const paneId = workspace.focusedPaneId;
+  await Promise.all(tables.map(async (table) => {
+    const tableName = normalizeTableName(table);
+    await openTable(table, { paneId, activate: tableName === activeName });
+    rememberOpenedHomeTable(tableName);
+  }));
+}
+
+function openTablesFromContextMenu() {
+  const source = contextMenuTableSource();
+  const activeName = contextMenu.tableName;
+  closeContextMenu();
+  const tables = source.tableNames.map((tableName) => ({
+    ...(workspace.schema.find((entry) => normalizeTableName(entry) === tableName) || {}),
+    connectionId: source.connectionId,
+    database: source.database,
+    tableName,
+  }));
+  void openTablesFromSidebar({ tables, activeName });
+}
+
+function deleteTablesFromContextMenu() {
+  const source = contextMenuTableSource();
+  closeContextMenu();
+  void deleteHomeTables({ ...source, origin: "sidebar" });
 }
 
 async function removeConnectionFromContext() {
   const connectionId = contextMenu.connectionId;
   closeContextMenu();
+  await confirmRemoveConnection({ connectionId });
+}
+
+async function confirmRemoveConnection({ connectionId = "" } = {}) {
   if (!connectionId) return;
   const connection = connections.value.find((item) => item.id === connectionId);
   const label = connectionLabel(connectionId, connection?.label || connectionId);
   const confirmed = await confirmDialogConfirm({
-    title: "移除连接",
-    message: `确定移除连接「${label}」？将同时关闭该连接下的所有标签页，之后可以重新添加。`,
-    confirmText: "移除",
-    cancelText: "取消",
+    title: t("sidebar.removeConnectionTitle"),
+    message: t("sidebar.removeConnectionMessage", { name: label }),
+    confirmText: t("sidebar.removeConnectionConfirm"),
+    cancelText: t('m_2cd0f3be8738'),
     danger: true,
   });
   if (!confirmed) return;
@@ -3996,6 +4126,21 @@ async function handleReplacedAll(payload) {
 }
 
 
+// F5 refreshes what the focused pane shows: the home table list or the
+// current table. The SQL editor keeps F5 for running the query. Everywhere
+// else the key must not fall through to the WebView, whose reload would
+// discard unsaved work.
+function handleRefreshKeydown(event) {
+  if (!shortcutHelper.matchesBinding("refresh", event)) return false;
+  if (event.target?.closest?.(".cm-editor")) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  if (focusedPaneState.isEditing?.()) return true;
+  if (activeTab.value?.kind === "home") focusedPaneState.refreshHomeView?.();
+  else if (activeDataTab.value) void refreshDataTab(activeDataTab.value);
+  return true;
+}
+
 function handleCloseTabKeydown(event) {
   if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
@@ -4116,6 +4261,7 @@ function handleGlobalShortcutKeydown(event) {
   }
   if (handleOpenSqlQueryKeydown(event)) return;
   if (handleOpenTableTransferKeydown(event)) return;
+  if (handleRefreshKeydown(event)) return;
   if (handleCloseTabKeydown(event)) return;
   if (handleOpenDesignShortcut(event)) return;
   if (handleCycleTabKeydown(event)) return;
@@ -4801,6 +4947,9 @@ onBeforeUnmount(() => {
         @reorder-connections="reorderConnections"
         @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"
+        @open-tables="openTablesFromSidebar"
+        @delete-tables="deleteHomeTables"
+        @remove-connection="confirmRemoveConnection"
         @rename-table="openTableRenameFromSource"
         @rename-database="openDatabaseAliasDialog"
         @rename-connection="openConnectionAliasDialog"
@@ -4960,6 +5109,7 @@ onBeforeUnmount(() => {
     />
 
     <ContextMenu
+      ref="contextMenuRef"
       :open="contextMenu.open"
       :x="contextMenu.x"
       :y="contextMenu.y"
@@ -4987,6 +5137,11 @@ onBeforeUnmount(() => {
       :freeze-row-label="freezeRowLabel"
       :freeze-column-label="freezeColumnLabel"
       :freeze-cell-label="freezeCellLabel"
+      :table-count="contextMenu.tableNames.length || 1"
+      :can-delete-tables="contextMenuCanDeleteTables"
+      @close="closeContextMenu"
+      @open-tables="openTablesFromContextMenu"
+      @delete-tables="deleteTablesFromContextMenu"
       @refresh="refreshFromContextMenu"
       @copy="copyFromContextMenu"
       @paste="pasteFromContextMenu"
@@ -5026,14 +5181,23 @@ onBeforeUnmount(() => {
 
     <menu
       v-if="tabContextMenu.open"
+      ref="tabContextMenuRef"
       class="wb-context-menu wb-tab-context-menu"
       :style="{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }"
+      role="menu"
+      tabindex="-1"
+      :aria-label="t('tabs.menu')"
       @click.stop
+      @contextmenu.prevent.stop
+      @keydown="handleTabContextMenuKeydown"
     >
-      <button type="button" @click="refreshTabsFromMenu">{{ t('m_aee887434131') }}</button>
-      <button type="button" :disabled="!tabContextNeighborAvailability.left" @click="closeRelativeTabsFromMenu('left')">{{ t('m_bc066eb3c8b6') }}</button>
-      <button type="button" :disabled="!tabContextNeighborAvailability.right" @click="closeRelativeTabsFromMenu('right')">{{ t('m_9594d7707c4b') }}</button>
-      <button type="button" @click="closeAllTabsFromMenu">{{ t('m_34f7336d3983') }}</button>
+      <button type="button" role="menuitem" :disabled="!['home', 'data'].includes(tabContextTab?.kind || 'data')" @click="refreshTabsFromMenu"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="tabContextMenuShortcuts.refresh" class="wb-context-shortcut" aria-hidden="true">{{ tabContextMenuShortcuts.refresh }}</kbd></button>
+      <hr class="wb-context-separator" role="separator" />
+      <button type="button" role="menuitem" :disabled="!tabContextTab || tabContextTab.kind === 'home' || tabContextTab.opening" @click="closeTabFromMenu"><X :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tabs.close') }}<kbd v-if="tabContextMenuShortcuts.close" class="wb-context-shortcut" aria-hidden="true">{{ tabContextMenuShortcuts.close }}</kbd></button>
+      <button type="button" role="menuitem" :disabled="!tabContextNeighborAvailability.left && !tabContextNeighborAvailability.right" @click="closeOtherTabsFromMenu"><CopyX :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tabs.closeOthers') }}</button>
+      <button type="button" role="menuitem" :disabled="!tabContextNeighborAvailability.left" @click="closeRelativeTabsFromMenu('left')"><ArrowLeftToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_bc066eb3c8b6') }}</button>
+      <button type="button" role="menuitem" :disabled="!tabContextNeighborAvailability.right" @click="closeRelativeTabsFromMenu('right')"><ArrowRightToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_9594d7707c4b') }}</button>
+      <button type="button" role="menuitem" @click="closeAllTabsFromMenu"><ListX :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_34f7336d3983') }}</button>
     </menu>
 
     <DatabaseSyncDialog

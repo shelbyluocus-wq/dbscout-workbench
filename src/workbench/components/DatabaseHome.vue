@@ -20,10 +20,22 @@ import {
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
+import { useConfirm } from "../composables/useConfirm.js";
+import { useShortcuts } from "../composables/useShortcuts.js";
 import { useTableFavoriteStore } from "../composables/tableFavoriteStore.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
+import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { focusMenuItem, handleMenuKeydown } from "../utils/menuKeyboard.js";
+import {
+  confirmOpeningTables,
+  createSelectionRecall,
+  isContextMenuKey,
+  isDeleteCommandKey,
+  isPlainSelectionEvent,
+  selectionOpenPlan,
+} from "../utils/listSelection.js";
 import DatabaseTableList from "./DatabaseTableList.vue";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
@@ -121,7 +133,25 @@ const databaseHomeDecorationStyle = computed(() => {
   };
 });
 const selectedCount = computed(() => controller.selectedNames.value.length);
-const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? `删除 ${menu.selectedNames.length} 张表` : t('m_d545721cef25'));
+const { confirm } = useConfirm();
+const shortcuts = useShortcuts();
+// A double-click on a row inside a multi-selection opens the whole selection.
+const selectionRecall = createSelectionRecall();
+// The context menu acts on the selection when the clicked row belongs to it.
+const menuTargetCount = computed(() => (
+  menu.tableName && menu.selectedNames.includes(menu.tableName) ? menu.selectedNames.length : 1
+));
+const openMenuLabel = computed(() => menuTargetCount.value > 1 ? t("home.openTables", { count: menuTargetCount.value }) : t('m_bf8ef131aa2d'));
+const deleteMenuLabel = computed(() => menu.selectedNames.length > 1 ? t("home.deleteTables", { count: menu.selectedNames.length }) : t('m_d545721cef25'));
+const menuShortcuts = computed(() => ({
+  open: "Enter",
+  design: formatShortcutForPlatform(shortcuts.get("openDesign")),
+  rename: "F2",
+  copy: formatShortcutForPlatform("Ctrl+C"),
+  paste: formatShortcutForPlatform("Ctrl+V"),
+  refresh: formatShortcutForPlatform(shortcuts.get("refresh")),
+  delete: "Delete",
+}));
 const tableCount = computed(() => controller.tables.value.length);
 const visibleCount = computed(() => controller.filteredTables.value.length);
 const readOnly = computed(() => Boolean(props.tab.readOnly || props.tab.read_only));
@@ -257,6 +287,9 @@ watch(
 );
 
 function closeMenu() {
+  // A menu driven from the keyboard hands focus back to the list before its
+  // items disappear, so the next key (or a dialog's focus return) still lands.
+  if (contextMenuRef.value?.contains?.(document.activeElement)) homeRootRef.value?.focus?.({ preventScroll: true });
   menu.open = false;
   menu.tableName = "";
   menu.blank = false;
@@ -278,9 +311,16 @@ function tablePayload(name) {
   };
 }
 
-function selectTable(name, event) {
+function selectTable(name, event = {}) {
+  if (!name) return;
+  const plain = isPlainSelectionEvent(event);
+  // The second click of a double-click must leave the selection alone: the
+  // double-click that follows opens it.
+  if (plain && Number(event?.detail) > 1) return;
+  if (plain) selectionRecall.remember(name, controller.selectedNames.value);
+  else selectionRecall.clear();
   controller.selectTable(name, event);
-  if (name) emit("focus-table", tablePayload(name));
+  emit("focus-table", tablePayload(name));
 }
 
 function clearSelection() {
@@ -297,18 +337,45 @@ function isHomeTableNavigationTarget(target) {
   return Boolean(surface && root.contains(surface) && !target.closest?.(".wb-dbhome-table-header"));
 }
 
+// The page itself, the list surface and a table-name button take list
+// commands (Enter, Delete, F2, Esc, Shift+F10). Other controls inside rows,
+// such as the favorite star, keep their own keys.
+function isHomeListCommandTarget(target) {
+  const root = homeRootRef.value;
+  if (!root || !target) return false;
+  if (target === root) return true;
+  if (target === searchInputRef.value || !isHomeTableNavigationTarget(target)) return false;
+  const control = target.closest?.("button, input, textarea, select, a");
+  return !control || control.classList?.contains("wb-dbhome-object-name-button");
+}
+
+const HOME_NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+
+function homeNavigationDelta(key) {
+  const page = Math.max(1, tableListRef.value?.pageRowCount?.() || 10);
+  if (key === "ArrowDown") return 1;
+  if (key === "ArrowUp") return -1;
+  if (key === "PageDown") return page;
+  if (key === "PageUp") return -page;
+  return key === "End" ? Infinity : -Infinity;
+}
+
 function handleHomeArrowKeydown(event) {
   const key = String(event.key || "");
-  if (!isHomeTableNavigationTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (key !== "ArrowUp" && key !== "ArrowDown") return false;
+  if (!isHomeTableNavigationTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (!HOME_NAVIGATION_KEYS.has(key)) return false;
+  const fromSearch = event.target === searchInputRef.value;
+  // Home, End and the page keys keep moving the caret inside the search box.
+  if (fromSearch && key !== "ArrowUp" && key !== "ArrowDown") return false;
 
   event.preventDefault();
   typeahead.dismiss();
-  const delta = key === "ArrowDown" ? 1 : -1;
-  const name = event.target === searchInputRef.value
+  const delta = homeNavigationDelta(key);
+  const name = fromSearch
     ? moveSearchSelection(delta, event)
     : controller.moveSelection(delta, event);
-  if (!name) return;
+  if (!name) return true;
+  selectionRecall.clear();
   emit("focus-table", tablePayload(name));
   nextTick(() => tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" }));
   return true;
@@ -354,29 +421,68 @@ function handleSearchKeydown(event) {
 }
 
 function handleHomeEnterKeydown(event) {
-  const root = homeRootRef.value;
   const target = event.target;
-  const isHomeEntryTarget = target === root || target?.closest?.('.wb-tab[data-kind="home"].active');
+  const isHomeEntryTarget = isHomeListCommandTarget(target) || target?.closest?.('.wb-tab[data-kind="home"].active');
   if (!isHomeEntryTarget || String(event.key || "") !== "Enter") return false;
-  if (event.ctrlKey || event.metaKey || event.altKey || !controller.selectedNames.value.length) return false;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !controller.selectedNames.value.length) return false;
 
   event.preventDefault();
-  controller.selectedNames.value.forEach((name) => openTable(name));
+  void openSelection(controller.focusedName.value);
   return true;
 }
 
+// Delete, F2, Esc and Shift+F10 act on the selection wherever the keyboard
+// focus sits in the list: the page after a click or drag selection, the list
+// surface, or a table-name button (which handles its own row first).
+function handleHomeListKeydown(event) {
+  if (!isHomeListCommandTarget(event.target)) return false;
+  const key = String(event.key || "");
+  const command = event.ctrlKey || event.metaKey;
+  if (isDeleteCommandKey(event)) {
+    if (!controller.selectedNames.value.length) return false;
+    event.preventDefault();
+    deleteSelection();
+    return true;
+  }
+  if (key === "F2" && !command && !event.altKey && !event.shiftKey) {
+    event.preventDefault();
+    renameFromKeyboard();
+    return true;
+  }
+  if (isContextMenuKey(event)) {
+    event.preventDefault();
+    openKeyboardContextMenu();
+    return true;
+  }
+  if (key === "Escape" && !command && !event.altKey) {
+    if (controller.renamingName.value) cancelRename();
+    else if (controller.selectedNames.value.length) clearSelection();
+    else return false;
+    event.preventDefault();
+    return true;
+  }
+  return false;
+}
+
 function handleHomeKeydown(event) {
+  if (String(event.key || "") === "Escape" && menu.open) {
+    event.preventDefault();
+    closeMenu();
+    return;
+  }
   if (isEditableTypeaheadTarget(event.target)) return;
   const key = String(event.key || "");
-  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "a") {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && key.toLowerCase() === "a") {
     event.preventDefault();
     controller.selectAllFiltered();
+    selectionRecall.clear();
     const focusedName = controller.focusedName.value || controller.selectedNames.value.at(-1) || "";
     if (focusedName) emit("focus-table", tablePayload(focusedName));
     return;
   }
   if (handleHomeArrowKeydown(event)) return;
-  handleHomeEnterKeydown(event);
+  if (handleHomeEnterKeydown(event)) return;
+  handleHomeListKeydown(event);
 }
 
 function splitHome(direction) {
@@ -402,9 +508,33 @@ function handleCompactAction(actionId) {
   else if (actionId === "right" || actionId === "down") splitHome(actionId);
 }
 
-function openTable(name) {
+function openTable(name, { activate = true } = {}) {
   if (!name) return;
-  emit("open-table", tablePayload(name));
+  emit("open-table", activate ? tablePayload(name) : { ...tablePayload(name), activate: false });
+}
+
+// Opens tables in list order; only the table the user acted on becomes the
+// active tab. A large selection asks first.
+async function openTables({ names = [], activeName = "" } = {}) {
+  if (!names.length || !(await confirmOpeningTables(names.length, { confirm, t }))) return false;
+  names.forEach((name) => openTable(name, { activate: name === activeName }));
+  return true;
+}
+
+function openSelection(focusedName = "") {
+  const order = controller.filteredTables.value.map((table) => table.tableName);
+  return openTables(selectionOpenPlan(focusedName, controller.selectedNames.value, order));
+}
+
+// Double-clicking any part of a row opens it; inside a multi-selection it
+// opens every selected table (the first click had collapsed the selection,
+// so restore it first).
+function activateRow(name) {
+  if (!name || controller.renamingName.value === name) return;
+  const restored = selectionRecall.recall(name);
+  if (restored) controller.setSelection(restored);
+  controller.focusedName.value = name;
+  void openSelection(name);
 }
 
 function openDesign(name = controller.selectedNames.value[0]) {
@@ -458,9 +588,16 @@ function pasteTables() {
 
 function startRename(name = "") {
   if (!name && selectedCount.value !== 1) return;
-  if (name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
+  if (name && (!controller.selectedSet.value.has(name) || selectedCount.value > 1)) controller.selectTable(name, {});
   controller.startRename(name);
   closeMenu();
+}
+
+// F2 renames the single selected table, or the focused one of a selection.
+function renameFromKeyboard() {
+  const focused = controller.focusedName.value;
+  if (selectedCount.value > 1 && focused && controller.selectedSet.value.has(focused)) startRename(focused);
+  else startRename();
 }
 
 function cancelRename() {
@@ -520,12 +657,14 @@ function sendSelection() {
   closeMenu();
 }
 
+// Read-only and unsupported connections still emit, so the workbench can say
+// why nothing was deleted instead of ignoring the key press.
 function deleteSelection(name = "", selectedNames = null) {
   if (!Array.isArray(selectedNames) && name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
   const tableNames = Array.isArray(selectedNames)
     ? [...selectedNames]
     : [...controller.selectedNames.value];
-  if (!controller.canDelete.value || !tableNames.length) return;
+  if (!tableNames.length) return;
   emit("delete-tables", {
     connectionId: props.tab.connectionId,
     database: props.tab.database,
@@ -560,6 +699,28 @@ function openContextMenu(event, tableName) {
   menu.tableName = tableName || "";
   menu.selectedNames = [...controller.selectedNames.value];
   menu.blank = !tableName;
+}
+
+// Shift+F10 / Menu key: open the menu under the focused row (or the list when
+// nothing is selected) and move focus into it.
+function openKeyboardContextMenu() {
+  const focused = controller.focusedName.value;
+  const name = focused && controller.selectedSet.value.has(focused)
+    ? focused
+    : controller.selectedNames.value.at(-1) || "";
+  if (name) tableListRef.value?.scrollTableIntoView?.(name, { block: "nearest" });
+  nextTick(() => {
+    const anchor = name
+      ? tableListRef.value?.rowElement?.(name)
+      : homeRootRef.value?.querySelector?.(".wb-dbhome-table-surface");
+    const rect = anchor?.getBoundingClientRect?.();
+    openContextMenu({ clientX: (rect?.left || 0) + 24, clientY: name ? rect?.bottom || 0 : (rect?.top || 0) + 8 }, name);
+    nextTick(() => focusMenuItem(contextMenuRef.value, "first"));
+  });
+}
+
+function handleContextMenuKeydown(event) {
+  handleMenuKeydown(event, contextMenuRef.value, { close: closeMenu });
 }
 
 function onWindowPointerDown(event) {
@@ -642,7 +803,12 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleTypeaheadKeydown, { capture: true });
 });
 
-defineExpose({ copySelection, pasteTables, focusSearch });
+function refresh() {
+  refreshHome();
+  return true;
+}
+
+defineExpose({ copySelection, pasteTables, focusSearch, refresh });
 </script>
 
 <template>
@@ -653,7 +819,6 @@ defineExpose({ copySelection, pasteTables, focusSearch });
     :style="databaseHomeDecorationStyle"
     tabindex="-1"
     @click.capture="handleHomeSurfaceClick"
-    @keydown.esc="closeMenu"
     @keydown="handleHomeKeydown"
   >
     <header class="wb-dbhome-header">
@@ -785,7 +950,8 @@ defineExpose({ copySelection, pasteTables, focusSearch });
       :read-only="readOnly"
       :busy="busy"
       @select-table="selectTable"
-      @open-table="openTable"
+      @open-selection="openSelection"
+      @activate-row="activateRow"
       @open-design="openDesign"
       @start-rename="startRename"
       @rename-draft="updateRenameDraft"
@@ -827,18 +993,21 @@ defineExpose({ copySelection, pasteTables, focusSearch });
         class="wb-context-menu wb-dbhome-context-menu"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         role="menu"
+        tabindex="-1"
         :aria-label="t('m_d2061cf8e332')"
         @click.stop
+        @contextmenu.prevent.stop
+        @keydown="handleContextMenuKeydown"
       >
-        <button v-if="!menu.blank" type="button" role="menuitem" @click="openTable(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_bf8ef131aa2d') }}</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!controller.canRename.value" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
-        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}</button>
-        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}</button>
+        <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.copy }}</kbd></button>
+        <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.paste }}</kbd></button>
         <hr class="wb-context-separator" role="separator" />
-        <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}</button>
-        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || !canRenameDrop || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}</button>
+        <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="menuShortcuts.refresh" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.refresh }}</kbd></button>
+        <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || !canRenameDrop || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.delete }}</kbd></button>
       </menu>
     </Teleport>
   </section>

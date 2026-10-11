@@ -14,7 +14,7 @@ import {
   moveHomeColumn,
   saveHomeColumnLayout,
 } from "../homeColumnLayout.js";
-import { homeEnterOpenNames } from "../utils/homeEnterOpen.js";
+import { isDeleteCommandKey } from "../utils/listSelection.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { matchTableKeywords, parseSearchKeywords } from "../utils/tableKeywordSearch.js";
 import { matchTableSearch } from "../utils/tableSearch.js";
@@ -42,7 +42,8 @@ const props = defineProps({
 
 const emit = defineEmits([
   "select-table",
-  "open-table",
+  "open-selection",
+  "activate-row",
   "open-design",
   "visible-tables",
   "start-rename",
@@ -75,12 +76,20 @@ const dropTarget = ref(null);
 const headerMenu = ref({ open: false, x: 0, y: 0 });
 const selectionBox = ref(null);
 const boxSelectedNames = ref([]);
+// Ctrl/Cmd+drag adds the box to the selection the drag started with;
+// a plain drag replaces it, so the old selection is not shown meanwhile.
+const boxBaseNames = ref([]);
 const suppressHeaderClick = ref(false);
 
 const selectedSet = computed(() => new Set(props.selectedNames));
 const favoriteSet = computed(() => new Set(props.favoriteNames));
 const boxSelectedSet = computed(() => new Set(boxSelectedNames.value));
-const renderedSelectedSet = computed(() => new Set([...props.selectedNames, ...boxSelectedNames.value]));
+const boxPreviewActive = computed(() => Boolean(selectionBox.value)
+  && selectionBox.value.width >= 4
+  && selectionBox.value.height >= 4);
+const renderedSelectedSet = computed(() => (boxPreviewActive.value
+  ? new Set([...boxBaseNames.value, ...boxSelectedNames.value])
+  : selectedSet.value));
 const tableIcon = computed(() => databaseTableIconComponent(props.databaseDecoration));
 const columns = computed(() => columnLayout.value.map((item) => {
   const definition = homeColumnDefinition(item.key);
@@ -242,15 +251,11 @@ function handleRowRename(table) {
   emit("start-rename", name);
 }
 
-function openEnteredTables(focusedName = "") {
-  homeEnterOpenNames(focusedName, props.selectedNames).forEach((name) => emit("open-table", name));
-}
-
+// Enter on a row inside the selection opens the whole selection; a row
+// outside it is selected and opened on its own.
 function handleRowOpen(table) {
-  const name = tableName(table);
-  if (!name) return;
-  if (!selectedSet.value.has(name)) selectForAction(table);
-  openEnteredTables(name);
+  const name = selectForAction(table);
+  if (name) emit("open-selection", name);
 }
 
 function handleRowDelete(table) {
@@ -258,8 +263,31 @@ function handleRowDelete(table) {
   emit("delete");
 }
 
+// Keys a focused table-name button acts on. Everything else (arrows, Home,
+// End, Escape, Shift+F10) bubbles to the home page, which owns navigation.
+function handleRowKeydown(table, event) {
+  const key = String(event.key || "");
+  const command = event.ctrlKey || event.metaKey;
+  const lowerKey = key.toLowerCase();
+  if (command && !event.shiftKey && !event.altKey && lowerKey === "c") handleRowCopy(table);
+  else if (command && !event.shiftKey && !event.altKey && lowerKey === "v") handleRowPaste();
+  else if (key === "F2" && !command && !event.altKey && !event.shiftKey) handleRowRename(table);
+  else if (key === "Enter" && !command && !event.altKey && !event.shiftKey) handleRowOpen(table);
+  else if (isDeleteCommandKey(event)) handleRowDelete(table);
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function handleRowDoubleClick(table, event) {
+  if (event?.button !== undefined && event.button !== 0) return;
+  const name = tableName(table);
+  if (name) emit("activate-row", name);
+}
+
 function handleBlankPointer(event) {
   headerMenu.value.open = false;
+  if (event.ctrlKey || event.metaKey) return;
   if (!event.target?.closest?.(".wb-dbhome-object-row, .wb-dbhome-table-header")) emit("blank-click", event);
 }
 
@@ -305,6 +333,8 @@ function beginBoxSelection(event) {
   if (!rect) return;
   event.preventDefault();
   boxSelectedNames.value = [];
+  const additive = Boolean(event.ctrlKey || event.metaKey);
+  boxBaseNames.value = additive ? [...props.selectedNames] : [];
   selectionBox.value = {
     startX: event.clientX,
     startY: event.clientY,
@@ -312,6 +342,7 @@ function beginBoxSelection(event) {
     y: event.clientY,
     width: 0,
     height: 0,
+    additive,
   };
   window.addEventListener("pointermove", updateBoxSelection);
   window.addEventListener("pointerup", finishBoxSelection, { once: true });
@@ -354,9 +385,10 @@ function finishBoxSelection(event) {
   window.removeEventListener("pointermove", updateBoxSelection);
   if (event) updateBoxSelection(event);
   const box = selectionBox.value;
-  const selected = [...boxSelectedNames.value];
+  const selected = [...new Set([...boxBaseNames.value, ...boxSelectedNames.value])];
   selectionBox.value = null;
   boxSelectedNames.value = [];
+  boxBaseNames.value = [];
   if (!box || box.width < 4 || box.height < 4) return;
   emit("box-selection-complete");
   emit("replace-selection", selected);
@@ -433,50 +465,6 @@ function resetColumnLayout() {
   animateColumnMove(before);
 }
 
-function isEditableShortcutTarget(target) {
-  if (!target) return false;
-  return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
-}
-
-function handleKeydown(event) {
-  if (isEditableShortcutTarget(event.target)) return;
-  const key = String(event.key || "");
-  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "a") {
-    event.preventDefault();
-    emit("replace-selection", props.tables.map((table) => tableName(table)).filter(Boolean));
-    return;
-  }
-  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "c") {
-    event.preventDefault();
-    emit("copy");
-    return;
-  }
-  if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "v") {
-    event.preventDefault();
-    emit("paste");
-    return;
-  }
-  if (key === "F2") {
-    event.preventDefault();
-    emit("start-rename");
-    return;
-  }
-  if (key === "Enter") {
-    event.preventDefault();
-    openEnteredTables();
-    return;
-  }
-  if (key === "Delete") {
-    event.preventDefault();
-    emit("delete");
-    return;
-  }
-  if (key === "Escape" && props.renamingName) {
-    event.preventDefault();
-    emit("cancel-rename");
-  }
-}
-
 function submitRename() {
   if (renameSubmissionHandled.value) return;
   renameSubmissionHandled.value = true;
@@ -499,6 +487,17 @@ function setRenameInput(element) {
 
 function focusList() {
   scrollerRef.value?.focus?.();
+}
+
+// Rows that fit in the viewport, for PageUp/PageDown.
+function pageRowCount() {
+  const height = scrollerRef.value?.clientHeight || viewportHeight.value;
+  return Math.max(1, Math.floor(height / ROW_HEIGHT) - 1);
+}
+
+function rowElement(name) {
+  const rows = scrollerRef.value?.querySelectorAll?.(".wb-dbhome-object-row") || [];
+  return Array.from(rows).find((row) => row.dataset.tableName === name) || null;
 }
 
 function scrollTableIntoView(name, { block = "center" } = {}) {
@@ -528,6 +527,7 @@ function resetView() {
   columnResize.value = null;
   selectionBox.value = null;
   boxSelectedNames.value = [];
+  boxBaseNames.value = [];
   suppressHeaderClick.value = false;
   renameSubmissionHandled.value = false;
   scrollTop.value = 0;
@@ -581,7 +581,7 @@ onBeforeUnmount(() => {
   surfaceObserver = null;
 });
 
-defineExpose({ focusList, resetView, scrollTableIntoView });
+defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoView });
 </script>
 
 <template>
@@ -593,7 +593,6 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
     :aria-label="t('m_ad3702d6aeb7')"
     :aria-multiselectable="true"
     @scroll="onScroll"
-    @keydown="handleKeydown"
     @pointerdown="handleBlankPointer"
     @pointerdown.left="beginBoxSelection"
     @contextmenu.prevent.stop="emit('blank-contextmenu', $event)"
@@ -664,6 +663,8 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
           }"
           :style="{ gridTemplateColumns }"
           :data-table-name="tableName(table)"
+          @click="select(table, $event)"
+          @dblclick="handleRowDoubleClick(table, $event)"
           @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
         >
           <span
@@ -677,7 +678,6 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
               'is-end': column.align === 'end',
             }"
             :title="columnCellValue(table, column.key)"
-            @click="column.key !== 'name' && select(table, $event)"
           >
             <template v-if="column.key === 'name'">
               <component :is="tableIcon" :size="15" class="wb-tree-kind-icon wb-dbhome-table-icon" aria-hidden="true" />
@@ -704,16 +704,8 @@ defineExpose({ focusList, resetView, scrollTableIntoView });
                 class="wb-dbhome-object-name-button"
                 role="option"
                 :aria-selected="renderedSelectedSet.has(tableName(table)) ? 'true' : 'false'"
-                @click.stop="select(table, $event)"
-                @dblclick="emit('open-table', tableName(table))"
                 @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
-                @keydown.ctrl.c.prevent.stop="handleRowCopy(table)"
-                @keydown.meta.c.prevent.stop="handleRowCopy(table)"
-                @keydown.ctrl.v.prevent.stop="handleRowPaste"
-                @keydown.meta.v.prevent.stop="handleRowPaste"
-                @keydown.f2.prevent.stop="handleRowRename(table)"
-                @keydown.enter.prevent.stop="handleRowOpen(table)"
-                @keydown.delete.prevent.stop="handleRowDelete(table)"
+                @keydown="handleRowKeydown(table, $event)"
                 v-html="highlightedTableField(table, 'tableName')"
               ></button>
               <button

@@ -204,6 +204,13 @@ function activateTab(tab) {
   if (!tab?.opening) emit("activate-tab", tab.id);
 }
 
+// Middle-click closes a tab, as in browsers and editors.
+function closeTabFromMiddleClick(tab, event) {
+  if (event?.button !== 1 || !canCloseTab(tab)) return;
+  event.preventDefault();
+  emit("close-tab", tab.id);
+}
+
 function tabClass(tab) {
   return {
     active: tab.id === props.activeTabId,
@@ -276,6 +283,8 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
         @drop.prevent.stop="dropTab(tab.id, $event)"
         @dragend="clearTabDrag"
         @click="activateTab(tab)"
+        @mousedown.middle.prevent
+        @auxclick="closeTabFromMiddleClick(tab, $event)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
         @keydown.enter.prevent="activateTab(tab)"

@@ -20,6 +20,8 @@ export function useContextMenu(
     kind: "general",
     surface: "general",
     tableName: "",
+    // Sidebar multi-selection the table actions apply to (includes tableName).
+    tableNames: [],
     tableComment: "",
     connectionId: "",
     database: "",
@@ -86,7 +88,14 @@ export function useContextMenu(
   function openContextMenu(
     event,
     target = null,
-    { columnIndex = -1, surface = "general", menuHeight = DEFAULT_MENU_HEIGHT, clipboardActions = null, commentTarget = null } = {},
+    {
+      columnIndex = -1,
+      surface = "general",
+      menuHeight = DEFAULT_MENU_HEIGHT,
+      clipboardActions = null,
+      commentTarget = null,
+      tableNames = null,
+    } = {},
   ) {
     const tableName = normalizeTableName(target);
     const kind = target?.kind === "database"
@@ -103,6 +112,7 @@ export function useContextMenu(
     contextMenu.kind = kind;
     contextMenu.surface = String(surface || "general");
     contextMenu.tableName = kind === "table" ? tableName : "";
+    contextMenu.tableNames = kind === "table" ? selectionNames(tableNames, tableName) : [];
     contextMenu.tableComment = kind === "table" ? normalizeTableComment(target) : "";
     contextMenu.connectionId = String(target?.connectionId || target?.connection_id || "");
     contextMenu.database = String(target?.database || "");
@@ -135,6 +145,7 @@ export function useContextMenu(
     contextMenu.surface = "grid";
     contextMenu.tableScoped = false;
     contextMenu.tableName = "";
+    contextMenu.tableNames = [];
     contextMenu.tableComment = "";
     contextMenu.connectionId = "";
     contextMenu.database = "";
@@ -152,6 +163,11 @@ export function useContextMenu(
     contextMenu.commentTarget = null;
     resetClipboardContext();
     resetHitResultContext();
+  }
+
+  function selectionNames(names, tableName) {
+    const list = Array.isArray(names) ? names.map((name) => String(name || "")).filter(Boolean) : [];
+    return list.includes(tableName) ? [...new Set(list)] : [tableName];
   }
 
   function normalizeCommentTarget(target) {
@@ -259,8 +275,14 @@ export function useContextMenu(
       tableName: contextMenu.tableName,
       tableComment: contextMenu.tableComment,
     };
+    const tableNames = [...contextMenu.tableNames];
     closeContextMenu();
     if (!source.tableName) return;
+    // A sidebar multi-selection opens the design of every selected table.
+    if (tableNames.length > 1) {
+      openTableDesign?.(tableNames.map((tableName) => ({ ...source, tableName, tableComment: "" })));
+      return;
+    }
     openTableDesign?.(source);
   }
 
