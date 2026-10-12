@@ -661,6 +661,7 @@ pub async fn bind_client(app: &AppHandle, context: &Arc<Context>, path: &str) ->
             dialect: candidate.dialect,
             confirmed_at: now_text(),
         });
+        record.client_declined = false;
         if changed {
             record.baseline = None;
         }
@@ -677,6 +678,7 @@ pub async fn unbind_client(app: &AppHandle, context: &Arc<Context>) -> Result<()
         let record = store.server_mut(&server_key);
         record.client = None;
         record.baseline = None;
+        record.client_declined = true;
         store.save()
     })
     .await??;
@@ -821,11 +823,16 @@ pub struct Overview {
     pub totals: StatusTotals,
     pub review_count: usize,
     pub revision: u64,
+    /// No client is bound because the user removed one. Do not apply a
+    /// recommendation until they choose a folder themselves.
+    pub client_declined: bool,
 }
 
 pub async fn overview(app: &AppHandle, context: &Arc<Context>) -> Result<Overview, String> {
     let (_, current) = index(app, context).await?;
-    let client = binding(app, &context.server_key).await?.map(|binding| ClientView {
+    let record = server_record(app, &context.server_key).await?;
+    let client_declined = record.as_ref().is_some_and(|record| record.client_declined);
+    let client = record.and_then(|record| record.client).map(|binding| ClientView {
         exists: Path::new(&binding.path).is_dir(),
         path: binding.path,
         dialect: binding.dialect,
@@ -851,6 +858,7 @@ pub async fn overview(app: &AppHandle, context: &Arc<Context>) -> Result<Overvie
         totals: current.totals.clone(),
         review_count: current.totals.needs_review(),
         revision: context.revision.load(Ordering::SeqCst),
+        client_declined,
     })
 }
 

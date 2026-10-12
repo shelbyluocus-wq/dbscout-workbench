@@ -65,7 +65,7 @@ test("the demo server opens bound to the jswz client with a little history to re
   assert.equal(overview.reviewCount, 2);
   assert.equal(overview.totals.stale, 1);
   assert.equal(overview.totals.conflict, 1);
-  assert.equal(overview.totals.newUnconfirmed, 1);
+  assert.equal(overview.totals.newUnconfirmed, 0);
 
   const monster = await call("config_relations_table", { table: "monster" });
   assert.equal(byId(monster.outgoing, "monster.skill_id_2>skill.id").reason, "codeChanged");
@@ -73,9 +73,14 @@ test("the demo server opens bound to the jswz client with a little history to re
   const conflict = byId(shop.outgoing, "shop.item_id>item.id");
   assert.equal(conflict.status, "conflict");
   assert.equal(conflict.codeTarget, "equip.id");
-  assert.equal(byId(shop.outgoing, "shop.item_id>equip.id").reason, "codeOnly");
+  const codeOnly = byId(shop.outgoing, "shop.item_id>equip.id");
+  assert.equal(codeOnly.status, "confirmed");
+  assert.equal(codeOnly.reason, "codeOnly");
   const hero = await call("config_relations_table", { table: "hero" });
-  assert.equal(byId(hero.outgoing, "hero.passive_id>skill.id").isNew, true);
+  const passive = byId(hero.outgoing, "hero.passive_id>skill.id");
+  assert.equal(passive.status, "confirmed");
+  assert.equal(passive.reason, "codeOnly");
+  assert.equal(passive.isNew, false);
   assert.equal(byId(hero.outgoing, "hero.skill_id>skill.id").reason, "matchesCode");
   assert.deepEqual(hero.tables.skill, { name: "skill", comment: "技能配置表" });
 
@@ -110,8 +115,7 @@ test("confirming a conflict or a stale relation clears its reminder", async () =
     reviewCount: 0,
   });
   const list = await call("config_relations_review_list");
-  assert.equal(list.items.some((view) => view.status === "stale" || view.status === "conflict"), false);
-  assert.ok(list.items.every((view) => view.status === "unconfirmed"));
+  assert.equal(list.items.length, 0);
   assert.equal(list.overview.reviewCount, 0);
 });
 
@@ -187,7 +191,9 @@ test("every database of a server shares the client binding and the decisions", a
   assert.equal(staging.client, null);
   assert.equal(staging.codeStatus, "noClient");
   const shop = await call("config_relations_table", { connectionId: "staging", table: "shop" });
-  assert.equal(byId(shop.outgoing, "shop.item_id>item.id").reason, "commentWithoutClient");
+  const commentOnly = byId(shop.outgoing, "shop.item_id>item.id");
+  assert.equal(commentOnly.status, "confirmed");
+  assert.equal(commentOnly.reason, "commentWithoutClient");
 });
 
 test("switching clients rechecks what the new client no longer reads", async () => {
@@ -195,6 +201,7 @@ test("switching clients rechecks what the new client no longer reads", async () 
   await call("config_relations_overview");
   let overview = await call("config_relations_unbind_client");
   assert.equal(overview.client, null);
+  assert.equal(overview.clientDeclined, true);
   assert.equal(overview.codeStatus, "noClient");
   assert.equal(overview.reviewCount, 0, "without code nothing can be judged stale");
   const shop = await call("config_relations_table", { table: "shop" });
@@ -203,6 +210,7 @@ test("switching clients rechecks what the new client no longer reads", async () 
 
   overview = await call("config_relations_bind_client", { path: "D:/Versions/nzg/" });
   assert.equal(overview.client.path, "D:\\Versions\\nzg");
+  assert.equal(overview.clientDeclined, false);
   assert.equal(overview.client.dialect, "nzg");
   assert.equal(overview.codeStatus, "ready");
   assert.ok(overview.reviewCount > 2);

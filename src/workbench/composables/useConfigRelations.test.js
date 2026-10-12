@@ -160,6 +160,85 @@ test("refresh, review lists and client changes keep the overview current", async
   assert.equal(backend.calls.at(-1).request.verdict, null, "a missing verdict restores the relation");
 });
 
+test("the recommended folder is bound on its own", async () => {
+  const invoke = async (command, payload = {}) => {
+    if (command === "config_relations_overview") {
+      return { revision: 1, reviewCount: 0, client: null, clientDeclined: false };
+    }
+    if (command === "config_relations_discover_clients") {
+      return [{ path: "D:\\client\\jswz", recommended: true, matchedTables: 10, totalTables: 12 }];
+    }
+    if (command === "config_relations_bind_client") {
+      return { revision: 2, reviewCount: 0, client: { path: payload.request.path }, clientDeclined: false };
+    }
+    return null;
+  };
+  const relations = useConfigRelations({ invoke, listen: null, debounceMs: 0 });
+  const entry = relations.entryFor(SCOPE);
+  const overview = await relations.loadOverview(SCOPE);
+  assert.equal(overview.client, null, "opening the database does not wait for the folder scan");
+  await sleep(20);
+  assert.equal(entry.overview.client.path, "D:\\client\\jswz");
+  assert.equal(entry.autoBinding, false);
+});
+
+test("an unbound database adopts the recommended client without asking first", async () => {
+  let releaseDiscover;
+  const discoverGate = new Promise((resolve) => {
+    releaseDiscover = resolve;
+  });
+  const binds = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "config_relations_overview") {
+      return { revision: 1, reviewCount: 0, client: null, clientDeclined: false };
+    }
+    if (command === "config_relations_discover_clients") {
+      await discoverGate;
+      return [
+        { path: "D:\\other", recommended: false },
+        { path: "D:\\client\\jswz", recommended: true },
+      ];
+    }
+    if (command === "config_relations_bind_client") {
+      binds.push(payload.request.path);
+      return {
+        revision: 2,
+        reviewCount: 0,
+        client: { path: payload.request.path },
+        clientDeclined: false,
+      };
+    }
+    return null;
+  };
+  const relations = useConfigRelations({ invoke, listen: null, debounceMs: 0 });
+  const entry = relations.entryFor(SCOPE);
+  await relations.loadOverview(SCOPE);
+  assert.equal(entry.autoBinding, true, "the overview is back before the folder is chosen");
+  assert.deepEqual(binds, []);
+
+  await relations.bindClient(SCOPE, "D:\\manual");
+  releaseDiscover();
+  await sleep(20);
+  assert.deepEqual(binds, ["D:\\manual"], "a manual folder wins over the recommendation still being looked up");
+  assert.equal(entry.autoBinding, false);
+  assert.equal(entry.overview.client.path, "D:\\manual");
+});
+
+test("a removed client is not replaced by the recommendation", async () => {
+  const commands = [];
+  const invoke = async (command) => {
+    commands.push(command);
+    if (command === "config_relations_overview") {
+      return { revision: 1, reviewCount: 0, client: null, clientDeclined: true };
+    }
+    return null;
+  };
+  const relations = useConfigRelations({ invoke, listen: null, debounceMs: 0 });
+  await relations.loadOverview(SCOPE);
+  await sleep(20);
+  assert.deepEqual(commands, ["config_relations_overview"]);
+});
+
 test("lookups without a usable scope resolve quietly", async () => {
   const backend = fakeBackend();
   const relations = useConfigRelations({ invoke: backend.invoke, listen: null });

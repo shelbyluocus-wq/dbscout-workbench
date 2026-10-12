@@ -86,7 +86,7 @@ pub enum StatusReason {
     MatchesCode,
     /// Confirmed by a person.
     Manual,
-    /// Only code shows it; waiting for a person.
+    /// Only code shows it.
     CodeOnly,
     /// Only a comment declares it and the bound client code does not show it.
     CommentOnly,

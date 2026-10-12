@@ -88,15 +88,17 @@ test("coverage gaps explain what the list may be missing", () => {
   assert.equal(coverageGapText(null, translate), "");
 });
 
-test("only stale and conflicting relations need review; unconfirmed ones stay actionable", () => {
+test("only stale and conflicting relations ask for a decision", () => {
   assert.equal(relationStatusLabel("stale", translate), "relations.status.stale");
   assert.equal(relationStatusLabel("weird", translate), "relations.status.unconfirmed");
   assert.equal(relationReasonLabel("", translate), "relations.reason.codeOnly");
   assert.equal(relationNeedsReview({ status: "stale" }), true);
   assert.equal(relationNeedsReview({ status: "conflict" }), true);
   assert.equal(relationNeedsReview({ status: "unconfirmed" }), false);
-  assert.equal(relationIsActionable({ status: "unconfirmed" }), true);
+  assert.equal(relationIsActionable({ status: "unconfirmed" }), false);
   assert.equal(relationIsActionable({ status: "confirmed" }), false);
+  assert.equal(relationIsActionable({ status: "stale" }), true);
+  assert.equal(relationIsActionable({ status: "conflict" }), true);
   assert.equal(relationIsActionable({ status: "rejected" }), false);
 });
 

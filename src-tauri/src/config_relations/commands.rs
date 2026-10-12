@@ -104,8 +104,7 @@ pub struct RowReferences {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewList {
-    /// Every relation still waiting for a person: stale, conflicting and
-    /// unconfirmed ones.
+    /// Relations still waiting for a person: stale and conflicting ones.
     pub items: Vec<RelationView>,
     pub tables: BTreeMap<String, TableLabel>,
     pub overview: Overview,

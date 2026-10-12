@@ -1555,6 +1555,7 @@ export default Object.freeze({
   "relations.client.missing": "目录不存在",
   "relations.client.unbound": "绑定游戏客户端目录后，注释里的关联会和真实读取代码互相核对。",
   "relations.client.discovering": "正在本机查找客户端目录…",
+  "relations.client.applying": "正在使用推荐的客户端目录…",
   "relations.client.none": "没有自动找到客户端目录，可以手动选择。",
   "relations.client.matched": "覆盖 {matched}/{total} 张配置表",
   "relations.client.updatedAt": "最近更新 {time}",

@@ -1556,6 +1556,7 @@ export default Object.freeze({
   "relations.client.missing": "目錄不存在",
   "relations.client.unbound": "綁定遊戲用戶端目錄後，註解裡的關聯會和真實讀取程式碼互相核對。",
   "relations.client.discovering": "正在本機尋找用戶端目錄…",
+  "relations.client.applying": "正在使用推薦的用戶端目錄…",
   "relations.client.none": "沒有自動找到用戶端目錄，可以手動選擇。",
   "relations.client.matched": "涵蓋 {matched}/{total} 張配置表",
   "relations.client.updatedAt": "最近更新 {time}",

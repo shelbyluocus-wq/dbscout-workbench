@@ -1,7 +1,7 @@
 <script setup>
-// 关联复核 dialog: binds the game client folder for the current MySQL server
-// and lists the relations still waiting for a person (stale, conflicting,
-// unconfirmed). Everything is scoped to the currently selected config database.
+// 关联复核 dialog: the recommended client folder is applied on its own, and the
+// user can still pick another. Lists relations whose client code changed or
+// disagrees with a comment. Everything is scoped to the current config database.
 import { t } from "../i18n/index.js";
 import { computed, onMounted, ref, watch } from "vue";
 import { LoaderCircle, RefreshCw, X } from "lucide-vue-next";
@@ -67,7 +67,6 @@ const reviewGroups = computed(() => {
   const groups = [
     { status: "stale", label: t("relations.review.group.stale") },
     { status: "conflict", label: t("relations.review.group.conflict") },
-    { status: "unconfirmed", label: t("relations.review.group.unconfirmed") },
   ];
   return groups
     .map((group) => ({ ...group, items: reviewItems.value.filter((item) => item.status === group.status) }))
@@ -113,6 +112,7 @@ function openSourceTable(item) {
 // ── client binding ─────────────────────────────────────────────
 
 const client = computed(() => overview.value?.client || null);
+const autoBinding = computed(() => Boolean(entry.value?.autoBinding));
 const codeStatus = computed(() => overview.value?.codeStatus || "noClient");
 const candidates = ref([]);
 const discovering = ref(false);
@@ -183,10 +183,25 @@ async function reanalyze() {
   }
 }
 
+// A recommendation that does not fit falls back to the manual list. A choice
+// the user is already making must not be replaced by that list mid-click.
+function showManualFolders() {
+  if (client.value || autoBinding.value || entry.value?.loading || bindBusyPath.value || discovering.value) return;
+  void discover();
+}
+
+watch(autoBinding, (binding, previous) => {
+  if (previous && !binding) showManualFolders();
+});
+
+watch(() => entry.value?.loading, (loading, previous) => {
+  if (previous && !loading) showManualFolders();
+});
+
 onMounted(async () => {
   if (!props.supported) return;
   const current = await props.relations.loadOverview(props.scope);
-  if (!current?.client) await discover();
+  if (!current?.client && !entry.value?.autoBinding && !entry.value?.loading) await discover();
   await loadReviewList();
 });
 </script>
@@ -252,9 +267,9 @@ onMounted(async () => {
 
             <div v-else class="wb-relations-client-unbound">
               <p class="wb-relations-muted">{{ t('relations.client.unbound') }}</p>
-              <p v-if="discovering" class="wb-relations-muted">
+              <p v-if="autoBinding || discovering" class="wb-relations-muted">
                 <LoaderCircle :size="12" class="wb-relations-spin" aria-hidden="true" />
-                {{ t('relations.client.discovering') }}
+                {{ autoBinding ? t('relations.client.applying') : t('relations.client.discovering') }}
               </p>
               <template v-else>
                 <article

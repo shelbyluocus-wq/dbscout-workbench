@@ -1,11 +1,12 @@
 //! Merges comment, code and format evidence into relations and decides each
 //! relation's review status.
 //!
-//! Review rules: a person confirms relations that only code shows; relations a
-//! comment declares are checked against the code by the tool — agreement
-//! confirms them automatically, disagreement asks for review. A confirmed
-//! relation asks for review again only when the code usages it relied on
-//! change or disappear, so unrelated code edits never disturb anyone.
+//! Review rules: a relation found in a comment, in client code, or in the data
+//! is confirmed immediately. Agreement between a comment and the code is
+//! recorded so later edits can be compared; disagreement still asks for
+//! review. A confirmed relation asks for review again only when the code
+//! usages it relied on change or disappear, so unrelated code edits never
+//! disturb anyone.
 //! Confirming a comment over disagreeing code settles the conflict until code
 //! starts reading the column from another table in a new place.
 
@@ -288,10 +289,10 @@ impl Verdicts<'_> {
                 self.record(&id, key, candidate, true);
                 (RelationStatus::Confirmed, StatusReason::MatchesCode)
             }
-            None if has_code => (RelationStatus::Unconfirmed, StatusReason::CodeOnly),
-            None if has_comment && self.code_ready => (RelationStatus::Unconfirmed, StatusReason::CommentOnly),
-            None if has_comment => (RelationStatus::Unconfirmed, StatusReason::CommentWithoutClient),
-            None => (RelationStatus::Unconfirmed, StatusReason::FormatOnly),
+            None if has_code => (RelationStatus::Confirmed, StatusReason::CodeOnly),
+            None if has_comment && self.code_ready => (RelationStatus::Confirmed, StatusReason::CommentOnly),
+            None if has_comment => (RelationStatus::Confirmed, StatusReason::CommentWithoutClient),
+            None => (RelationStatus::Confirmed, StatusReason::FormatOnly),
         };
         let is_new = status == RelationStatus::Unconfirmed
             && self.baseline.is_some_and(|baseline| !baseline.contains(&id));
@@ -479,12 +480,12 @@ impl RelationIndex {
         self.relations.iter().find(|view| view.id == id)
     }
 
-    /// Relations a person still has to look at: stale, conflicting and
-    /// unconfirmed ones.
+    /// Relations a person still has to look at: stale and conflicting ones.
+    /// Newly found relations are already confirmed.
     pub fn open_items(&self) -> Vec<RelationView> {
         self.relations
             .iter()
-            .filter(|view| view.status.needs_review() || view.status == RelationStatus::Unconfirmed)
+            .filter(|view| view.status.needs_review())
             .cloned()
             .collect()
     }
@@ -603,15 +604,15 @@ mod tests {
     }
 
     #[test]
-    fn without_client_comments_and_formats_wait_for_review() {
+    fn without_client_comments_and_formats_are_confirmed() {
         let index = assemble_with(&CodeState::NoClient, None);
         assert_eq!(
             status_of(&index, "rewardprop.itemid>goodsprop.id"),
-            (RelationStatus::Unconfirmed, StatusReason::CommentWithoutClient)
+            (RelationStatus::Confirmed, StatusReason::CommentWithoutClient)
         );
         assert_eq!(
             status_of(&index, "rewardprop.items[]>goodsprop.id"),
-            (RelationStatus::Unconfirmed, StatusReason::FormatOnly)
+            (RelationStatus::Confirmed, StatusReason::FormatOnly)
         );
         let coverage = index.coverage("goodsprop");
         assert!(!coverage.complete);
@@ -634,7 +635,7 @@ mod tests {
         assert_eq!(decision.code_fingerprints, BTreeSet::from(["f1".to_string()]));
         assert_eq!(
             status_of(&index, "rewardprop.target>heroprop.id"),
-            (RelationStatus::Unconfirmed, StatusReason::CommentOnly)
+            (RelationStatus::Confirmed, StatusReason::CommentOnly)
         );
         let view = index.find("rewardprop.itemid>goodsprop.id").unwrap();
         assert_eq!(view.evidence.len(), 2, "comment + code evidence");
@@ -649,7 +650,7 @@ mod tests {
         assert_eq!(view.code_target.as_deref(), Some("goodsprop.ID"));
         assert_eq!(
             status_of(&index, "rewardprop.target>goodsprop.id"),
-            (RelationStatus::Unconfirmed, StatusReason::CodeOnly)
+            (RelationStatus::Confirmed, StatusReason::CodeOnly)
         );
         assert_eq!(index.totals.needs_review(), 1);
     }
@@ -759,8 +760,9 @@ mod tests {
         let more = report(vec![code(("rewardprop", "HeroID"), ("heroprop", "ID"), "h9")]);
         let index = assemble_with(&more, Some(&record));
         let view = index.find("rewardprop.heroid>heroprop.id").unwrap();
-        assert_eq!(view.status, RelationStatus::Unconfirmed);
-        assert!(view.is_new);
+        assert_eq!(view.status, RelationStatus::Confirmed);
+        assert_eq!(view.reason, StatusReason::CodeOnly);
+        assert!(!view.is_new);
     }
 
     #[test]
@@ -769,9 +771,11 @@ mod tests {
         record.baseline = Some(BTreeSet::from(["rewardprop.items[]>goodsprop.id".to_string()]));
         let code = report(vec![code(("rewardprop", "HeroID"), ("heroprop", "ID"), "h1")]);
         let index = assemble_with(&code, Some(&record));
-        assert!(index.find("rewardprop.heroid>heroprop.id").unwrap().is_new);
+        let hero = index.find("rewardprop.heroid>heroprop.id").unwrap();
+        assert_eq!(hero.status, RelationStatus::Confirmed);
+        assert!(!hero.is_new, "a newly found relation is confirmed, not queued for review");
         assert!(!index.find("rewardprop.items[]>goodsprop.id").unwrap().is_new);
-        assert_eq!(index.totals.new_unconfirmed, 3);
+        assert_eq!(index.totals.new_unconfirmed, 0);
         assert_eq!(index.totals.needs_review(), 0, "new relations never raise the review badge");
     }
 

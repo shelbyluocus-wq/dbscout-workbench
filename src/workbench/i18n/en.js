@@ -1555,6 +1555,7 @@ export default Object.freeze({
   "relations.client.missing": "Folder no longer exists",
   "relations.client.unbound": "Bind the game client folder so comments can be cross-checked against the code that reads them.",
   "relations.client.discovering": "Looking for client folders on this machine…",
+  "relations.client.applying": "Using the recommended client folder…",
   "relations.client.none": "No client folder was found automatically; choose one manually.",
   "relations.client.matched": "Matches {matched} of {total} config tables",
   "relations.client.updatedAt": "Last updated {time}",

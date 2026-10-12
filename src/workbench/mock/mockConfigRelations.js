@@ -190,7 +190,7 @@ export function createMockConfigRelations({
 
   function seededServer(key) {
     const seed = SEEDED_SERVERS[key];
-    const state = { client: null, baseline: null, decisions: new Map() };
+    const state = { client: null, clientDeclined: false, baseline: null, decisions: new Map() };
     if (!seed) return state;
     state.client = { ...seed.client };
     state.baseline = new Set(RELATION_DEFS.map((def) => def.id).filter((id) => !seed.newSinceBinding.includes(id)));
@@ -375,11 +375,11 @@ export function createMockConfigRelations({
       recordAgreement(state, candidate, fingerprints, true);
       [status, reason] = ["confirmed", "matchesCode"];
     } else if (hasCode) {
-      [status, reason] = ["unconfirmed", "codeOnly"];
+      [status, reason] = ["confirmed", "codeOnly"];
     } else if (hasComment) {
-      [status, reason] = ["unconfirmed", codeReady ? "commentOnly" : "commentWithoutClient"];
+      [status, reason] = ["confirmed", codeReady ? "commentOnly" : "commentWithoutClient"];
     } else {
-      [status, reason] = ["unconfirmed", "formatOnly"];
+      [status, reason] = ["confirmed", "formatOnly"];
     }
     return {
       id: candidate.id,
@@ -582,6 +582,7 @@ export function createMockConfigRelations({
     const state = serverState(context.serverKey);
     const changed = !state.client || !samePath(state.client.path, candidate.path);
     state.client = { path: candidate.path, dialect: candidate.dialect, confirmedAt: now() };
+    state.clientDeclined = false;
     if (changed) state.baseline = null;
     for (const other of contextsFor(context.serverKey)) restartAnalysis(other);
   }
@@ -590,6 +591,7 @@ export function createMockConfigRelations({
     const state = serverState(context.serverKey);
     state.client = null;
     state.baseline = null;
+    state.clientDeclined = true;
     for (const other of contextsFor(context.serverKey)) restartAnalysis(other);
   }
 
@@ -611,6 +613,7 @@ export function createMockConfigRelations({
       refreshing: context.refreshing,
       totals,
       reviewCount: totals.stale + totals.conflict,
+      clientDeclined: Boolean(state.clientDeclined),
       revision: context.revision,
     };
   }
@@ -708,7 +711,7 @@ export function createMockConfigRelations({
 
   function reviewList(context) {
     const built = buildIndex(context);
-    const items = built.views.filter((view) => ["stale", "conflict", "unconfirmed"].includes(view.status));
+    const items = built.views.filter((view) => ["stale", "conflict"].includes(view.status));
     return { items, tables: tableLabels(built.tables, items), overview: overview(context) };
   }
 

@@ -49,6 +49,10 @@ pub struct Decision {
 pub struct ServerRecord {
     #[serde(default)]
     pub client: Option<ClientBinding>,
+    /// The user removed the client on purpose. A recommendation must not
+    /// bind itself again until they pick a folder.
+    #[serde(default)]
+    pub client_declined: bool,
     /// Relation ids present after the bound client was first read; later
     /// relations are flagged as new until reviewed.
     #[serde(default)]

@@ -23,6 +23,10 @@ export function useConfigRelations({
   const entries = new Map();
   const tableCache = new Map();
   const pendingOverviewTimers = new Map();
+  // One automatic bind at a time per connection. A manual choice bumps the
+  // generation so a recommendation still being looked up cannot overwrite it.
+  const autoBindGeneration = new Map();
+  const autoBindInFlight = new Set();
   let unlisten = null;
   let attachPromise = null;
 
@@ -40,6 +44,8 @@ export function useConfigRelations({
         loading: false,
         revision: 0,
         requestToken: 0,
+        // True while a recommended client folder is being applied on its own.
+        autoBinding: false,
       });
       entries.set(key, entry);
     }
@@ -65,6 +71,7 @@ export function useConfigRelations({
       });
       if (token !== entry.requestToken) return entry.overview;
       applyOverview(entry, overview);
+      scheduleRecommendedClient(entry, overview);
       return entry.overview;
     } catch (error) {
       // Keep the last good overview; a transient failure must not blank the UI.
@@ -202,9 +209,46 @@ export function useConfigRelations({
     return invoke("config_relations_inspect_client", scopeRequest(entry, { path: String(path || "") }));
   }
 
-  async function bindClient(scope, path) {
+  function cancelAutoBind(entry) {
+    if (!entry) return;
+    autoBindGeneration.set(entry.connectionId, (autoBindGeneration.get(entry.connectionId) || 0) + 1);
+    entry.autoBinding = false;
+  }
+
+  // Applies the recommended folder when nothing is bound and the user has not
+  // removed one. The overview returns first; finding the folder stays in the
+  // background so opening a database does not wait on a disk scan.
+  function scheduleRecommendedClient(entry, overview) {
+    if (!overview || !Object.hasOwn(overview, "client") || overview.client || overview.clientDeclined) return;
+    if (autoBindInFlight.has(entry.connectionId)) return;
+    const generation = autoBindGeneration.get(entry.connectionId) || 0;
+    autoBindInFlight.add(entry.connectionId);
+    entry.autoBinding = true;
+    void (async () => {
+      try {
+        const candidates = await discoverClients(entry) || [];
+        if ((autoBindGeneration.get(entry.connectionId) || 0) !== generation) return;
+        const current = entries.get(entry.key);
+        if (!current || current.overview?.client || current.overview?.clientDeclined) return;
+        const recommended = candidates.find((item) => item?.recommended && item.path);
+        if (!recommended) return;
+        await bindClient(entry, recommended.path, { automatic: true });
+      } catch {
+        // The dialog can still list folders and let the user pick one.
+      } finally {
+        autoBindInFlight.delete(entry.connectionId);
+        const current = entries.get(entry.key);
+        if (current && (autoBindGeneration.get(entry.connectionId) || 0) === generation) {
+          current.autoBinding = false;
+        }
+      }
+    })();
+  }
+
+  async function bindClient(scope, path, { automatic = false } = {}) {
     const entry = entryFor(scope);
     if (!entry) return null;
+    if (!automatic) cancelAutoBind(entry);
     const overview = await invoke("config_relations_bind_client", scopeRequest(entry, { path: String(path || "") }));
     applyOverview(entry, overview);
     return overview;
@@ -213,6 +257,7 @@ export function useConfigRelations({
   async function unbindClient(scope) {
     const entry = entryFor(scope);
     if (!entry) return null;
+    cancelAutoBind(entry);
     const overview = await invoke("config_relations_unbind_client", scopeRequest(entry));
     applyOverview(entry, overview);
     return overview;

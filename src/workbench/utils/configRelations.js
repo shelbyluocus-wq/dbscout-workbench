@@ -29,8 +29,10 @@ export function relationNeedsReview(relation) {
   return relation?.status === "stale" || relation?.status === "conflict";
 }
 
+// Confirmed relations are already in effect. Only a stale or conflicting one
+// still offers confirm / not-a-relation.
 export function relationIsActionable(relation) {
-  return relationNeedsReview(relation) || relation?.status === "unconfirmed";
+  return relationNeedsReview(relation);
 }
 
 // `tables` is the backend's lowercase-name -> { name, comment } map.
