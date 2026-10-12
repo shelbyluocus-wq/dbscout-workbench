@@ -2278,7 +2278,7 @@ test("inspector field remarks select the matching cell on the current visual row
   const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*"open-relation",\s*"open-relations-review",\s*\]\)/);
+  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*"open-relation",\s*"open-relations-review",\s*"open-table",\s*\]\)/);
   assert.match(inspector, /<article[\s\S]*class="wb-schema-column"/);
   assert.match(inspector, /role="button"/);
   assert.match(inspector, /tabindex="0"/);
@@ -2604,7 +2604,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /cellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
   assert.match(dataGrid, /@mousedown\.left="onCellRangeStart\(tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
   assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
-  assert.match(dataGrid, /highlightInsertCellByName\(tab, insertRow, columnMeta\.name\)/);
+  assert.match(dataGrid, /insertRowCellValueByName\(tab, insertRow, columnMeta\.name\)/);
   assert.match(dataGrid, /is-unsaved/);
   assert.match(dataGrid, /title="新增未保存"/);
   assert.match(dataGrid, /data-insert-row-id/);

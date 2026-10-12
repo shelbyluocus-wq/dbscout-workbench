@@ -21,8 +21,10 @@ import { columnName } from "../utils/normalize.js";
 import { columnTypeKind } from "../utils/columnTypes.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
+import { createTableMentionIndex } from "../utils/tableMentions.js";
 import { useAliases } from "../composables/aliasStore.js";
 import ConfigRelationsPanel from "./ConfigRelationsPanel.vue";
+import TableMentionText from "./TableMentionText.vue";
 
 const props = defineProps({
   activeTab: { type: Object, default: null },
@@ -34,6 +36,7 @@ const props = defineProps({
   schemaSearchIndex: { type: Number, default: -1 },
   relations: { type: Object, default: null },
   relationsSupported: { type: Boolean, default: false },
+  schema: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits([
@@ -44,6 +47,7 @@ const emit = defineEmits([
   "schema-search-next",
   "open-relation",
   "open-relations-review",
+  "open-table",
 ]);
 
 const { databaseLabel } = useAliases();
@@ -68,6 +72,20 @@ const showRelationsToggle = computed(() =>
   Boolean(props.relationsSupported && props.relations && props.activeTab?.tableName && (props.activeTab?.kind || "data") === "data"));
 const inspectorView = ref("fields");
 const effectiveView = computed(() => (showRelationsToggle.value ? inspectorView.value : "fields"));
+const mentionTables = computed(() => createTableMentionIndex(props.schema, {
+  connectionId: props.activeTab?.connectionId,
+  database: props.activeTab?.database,
+}));
+
+function openMentionedTable(table) {
+  if (!table?.name) return;
+  emit("open-table", {
+    connectionId: props.activeTab?.connectionId || "",
+    database: props.activeTab?.database || "",
+    tableName: table.name,
+    tableComment: table.comment || "",
+  });
+}
 
 const COLUMN_KIND_ICONS = Object.freeze({
   key: KeyRound,
@@ -254,11 +272,14 @@ watch(
           :title="tableSource"
         >{{ tableSource }}</strong>
         <strong v-else class="wb-inspector-table-source">{{ t('m_88ac482e6e23') }}</strong>
-        <span
+        <TableMentionText
           v-if="tableComment"
           class="wb-inspector-table-comment"
           :title="tableComment"
-        >{{ tableComment }}</span>
+          :text="tableComment"
+          :tables="mentionTables"
+          @open="openMentionedTable"
+        />
         <span v-else class="wb-inspector-table-comment is-empty">{{ t('m_dbc8f66df4fd') }}</span>
       </div>
     </header>
@@ -288,8 +309,10 @@ watch(
       :tab="activeTab"
       :selected-cell="selectedCell"
       :relations="relations"
+      :mention-tables="mentionTables"
       @open-relation="emit('open-relation', $event)"
       @open-review="emit('open-relations-review')"
+      @open-table="emit('open-table', $event)"
     />
     <template v-if="effectiveView === 'fields'">
     <div class="wb-inspector-section-head">
@@ -400,11 +423,20 @@ watch(
             <span v-if="columnLength(column)" class="wb-schema-field-length">{{ columnLength(column) }}</span>
             <span v-if="isPrimaryKey(column)" class="wb-schema-key-badge">{{ t('m_ecfc9d2e0157') }}</span>
           </span>
-          <small
-            v-if="columnRemark(column)"
-            class="wb-schema-field-comment"
-            v-html="highlightSchemaSearchText(columnRemark(column))"
-          ></small>
+          <template v-if="columnRemark(column)">
+            <small
+              v-if="hasColumnSearchQuery"
+              class="wb-schema-field-comment"
+              v-html="highlightSchemaSearchText(columnRemark(column))"
+            ></small>
+            <TableMentionText
+              v-else
+              class="wb-schema-field-comment"
+              :text="columnRemark(column)"
+              :tables="mentionTables"
+              @open="openMentionedTable"
+            />
+          </template>
         </span>
       </article>
       <p

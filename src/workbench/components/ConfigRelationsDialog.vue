@@ -9,9 +9,8 @@ import { useEscClose } from "../composables/useEscClose.js";
 import {
   clientDialectLabel,
   relationTitle,
-  tableDisplayComment,
-  tableDisplayName,
 } from "../utils/configRelations.js";
+import { createTableMentionIndex } from "../utils/tableMentions.js";
 import ConfigRelationCard from "./ConfigRelationCard.vue";
 
 const props = defineProps({
@@ -19,6 +18,7 @@ const props = defineProps({
   scope: { type: Object, required: true },
   scopeLabel: { type: String, default: "" },
   supported: { type: Boolean, default: false },
+  schema: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(["close", "open-table"]);
@@ -100,12 +100,15 @@ async function confirmAll() {
   }
 }
 
-function openSourceTable(item) {
+const mentionTables = computed(() => createTableMentionIndex(props.schema, props.scope));
+
+function openNamedTable(table) {
+  if (!table?.name) return;
   emit("open-table", {
     connectionId: props.scope.connectionId,
     database: props.scope.database,
-    tableName: tableDisplayName(reviewTables.value, item.sourceTable),
-    tableComment: tableDisplayComment(reviewTables.value, item.sourceTable),
+    tableName: table.name,
+    tableComment: table.comment || "",
   });
 }
 
@@ -317,11 +320,11 @@ onMounted(async () => {
                 v-for="item in group.items"
                 :key="item.id"
                 :relation="item"
+                :tables="mentionTables"
                 :title="relationTitle(item, reviewTables)"
                 :title-hint="t('relations.action.openTable')"
-                openable
                 :busy="pendingIds.has(item.id)"
-                @open="openSourceTable(item)"
+                @open="openNamedTable"
                 @review="submitReview(item.id, $event)"
               />
             </div>

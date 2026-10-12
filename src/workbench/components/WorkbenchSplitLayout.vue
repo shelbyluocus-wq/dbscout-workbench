@@ -88,6 +88,7 @@ const emit = defineEmits([
   "rename-sql-document",
   "delete-sql-document",
   "open-sql-file",
+  "open-table",
 ]);
 
 const draggingSplit = ref(null);
@@ -249,6 +250,7 @@ onBeforeUnmount(finishResize);
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
         @open-home-table="(...args) => emit('open-home-table', ...args)"
+        @open-table="emit('open-table', $event)"
         @copy-home-tables="emit('copy-home-tables', $event)"
         @paste-home-tables="emit('paste-home-tables', $event)"
         @rename-home-table="emit('rename-home-table', $event)"
@@ -337,6 +339,7 @@ onBeforeUnmount(finishResize);
         @schema-search-previous="emit('schema-search-previous')"
         @schema-search-next="emit('schema-search-next')"
         @open-home-table="(...args) => emit('open-home-table', ...args)"
+        @open-table="emit('open-table', $event)"
         @copy-home-tables="emit('copy-home-tables', $event)"
         @paste-home-tables="emit('paste-home-tables', $event)"
         @rename-home-table="emit('rename-home-table', $event)"
@@ -415,6 +418,7 @@ onBeforeUnmount(finishResize);
     @schema-search-previous="emit('schema-search-previous')"
     @schema-search-next="emit('schema-search-next')"
     @open-home-table="(...args) => emit('open-home-table', ...args)"
+    @open-table="emit('open-table', $event)"
     @copy-home-tables="emit('copy-home-tables', $event)"
     @paste-home-tables="emit('paste-home-tables', $event)"
     @rename-home-table="emit('rename-home-table', $event)"

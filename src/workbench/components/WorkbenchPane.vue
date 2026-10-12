@@ -119,6 +119,7 @@ const emit = defineEmits([
   "rename-sql-document",
   "delete-sql-document",
   "open-sql-file",
+  "open-table",
 ]);
 
 const activeDataTab = computed(() => {
@@ -1768,6 +1769,7 @@ onMounted(() => emitPaneState());
     <DataGrid
       v-if="activeDataTab"
       :tab="activeDataTab"
+      :schema="schema"
       :engine-kind="activeEngineKind"
       :active-columns="activeColumns"
       :active-column-meta="activeColumnMeta"
@@ -1857,6 +1859,7 @@ onMounted(() => emitPaneState());
       @row-contextmenu="openRowContextMenu"
       @retry-load="retryGridLoad"
       @jump-boundary="jumpGridBoundary"
+      @open-table="emit('open-table', $event)"
     />
 
     <CellDetailPanel

@@ -979,7 +979,11 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
 
 function openConfigRelationTable({ connectionId, database, tableName, tableComment = "" }) {
   if (!tableName) return;
-  const table = workspace.schema.find((item) => normalizeTableName(item) === tableName);
+  const wantedDatabase = String(database || "").toLowerCase();
+  const table = workspace.schema.find((item) =>
+    normalizeTableName(item) === tableName
+    && (!connectionId || item.connectionId === connectionId)
+    && (!wantedDatabase || String(item.database || "").toLowerCase() === wantedDatabase));
   void openTable(
     table || { connectionId, database, tableName, tableComment },
     { initialState: null },
@@ -5104,6 +5108,7 @@ onBeforeUnmount(() => {
           @schema-search-previous="focusedPaneState.goToPreviousSchemaSearchMatch?.()"
           @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
           @open-home-table="openTableFromHome"
+          @open-table="openConfigRelationTable"
           @copy-home-tables="copyHomeTables"
           @paste-home-tables="pasteHomeTables"
           @rename-home-table="renameHomeTable"
@@ -5163,8 +5168,10 @@ onBeforeUnmount(() => {
         @schema-search-next="focusedPaneState.goToNextSchemaSearchMatch?.()"
         :relations="configRelations"
         :relations-supported="relationsSupportedForTab(focusedInspectorTab)"
+        :schema="workspace.schema"
         @open-relation="openRelationTab"
         @open-relations-review="openConfigRelationsReview"
+        @open-table="openConfigRelationTable"
       />
     </section>
 
@@ -5367,6 +5374,7 @@ onBeforeUnmount(() => {
       :scope="{ connectionId: selectedConnectionId, database: selectedDatabase }"
       :scope-label="configRelationsScopeLabel"
       :supported="configRelationsSupported"
+      :schema="workspace.schema"
       @close="configRelationsDialogOpen = false"
       @open-table="openConfigRelationTable"
     />

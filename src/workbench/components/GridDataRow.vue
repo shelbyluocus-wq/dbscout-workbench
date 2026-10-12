@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { splitTableMentions } from "../utils/tableMentions.js";
 defineProps({
   tabId: String,
   row: Object,
@@ -25,8 +26,9 @@ defineProps({
   highlightHtml: Function,
   isSearchMatch: Function,
   cellDomId: Function,
+  tableIndex: { type: Object, default: null },
 });
-const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextmenu", "row-resize-start", "row-resize-reset", "edit-input", "cell-blur", "finish-edit", "cancel-edit", "tab-edit"]);
+const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextmenu", "row-resize-start", "row-resize-reset", "edit-input", "cell-blur", "finish-edit", "cancel-edit", "tab-edit", "open-table"]);
 </script>
 
 <template>
@@ -113,6 +115,19 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                 />
                 <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" :aria-label="t('m_122f6009c477')">NULL</span>
                 <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightHtml(row, columnMeta.name, rowKey)"></span>
+                <span v-else-if="!columnMeta.isNumeric && splitTableMentions(displayText(row, columnMeta.name, rowKey), tableIndex)" class="wb-cell-text">
+                  <template v-for="(part, partIndex) in splitTableMentions(displayText(row, columnMeta.name, rowKey), tableIndex)" :key="partIndex">
+                    <button
+                      v-if="part.table"
+                      type="button"
+                      class="wb-table-mention"
+                      :title="t('relations.action.openTable')"
+                      @mousedown.stop.prevent
+                      @click.stop.prevent="emit('open-table', part.table)"
+                    >{{ part.text }}</button>
+                    <template v-else>{{ part.text }}</template>
+                  </template>
+                </span>
                 <span v-else class="wb-cell-text">{{ displayText(row, columnMeta.name, rowKey) }}</span>
               </td>
 </template>

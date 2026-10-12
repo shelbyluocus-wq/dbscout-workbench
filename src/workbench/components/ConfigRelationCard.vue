@@ -11,13 +11,14 @@ import {
   relationReasonLabel,
   relationStatusLabel,
 } from "../utils/configRelations.js";
+import TableMentionText from "./TableMentionText.vue";
 
 const props = defineProps({
   relation: { type: Object, required: true },
   title: { type: String, required: true },
   titleHint: { type: String, default: "" },
-  // The title opens the relation's source table.
-  openable: { type: Boolean, default: false },
+  // Current-database table index. Names in the title link only when present.
+  tables: { type: Object, default: null },
   busy: { type: Boolean, default: false },
 });
 
@@ -33,14 +34,13 @@ const showStatus = computed(() => !rejected.value && props.relation.status !== "
     <div class="wb-relation-card-head">
       <span v-if="showStatus" class="wb-relation-status" :class="`is-${relation.status}`">{{ relationStatusLabel(relation.status, t) }}</span>
       <span v-if="relation.isNew && !rejected" class="wb-relation-new">{{ t('relations.review.new') }}</span>
-      <button
-        v-if="openable"
-        type="button"
-        class="wb-relation-card-title wb-relation-card-link"
-        :title="titleHint"
-        @click="emit('open')"
-      >{{ title }}</button>
-      <span v-else class="wb-relation-card-title" :title="titleHint || title">{{ title }}</span>
+      <TableMentionText
+        class="wb-relation-card-title"
+        :title="titleHint || title"
+        :text="title"
+        :tables="tables"
+        @open="emit('open', $event)"
+      />
       <span v-if="relation.kind === 'list'" class="wb-relation-kind">{{ t('relations.kindList') }}</span>
     </div>
     <template v-if="!rejected">
@@ -53,7 +53,13 @@ const showStatus = computed(() => !rejected.value && props.relation.status !== "
           :title="relationEvidenceTitle(evidence)"
         >{{ t(`relations.evidence.${evidence.type}`) }}</span>
       </div>
-      <p v-if="relation.codeTarget" class="wb-relation-codetarget">{{ t('relations.codeTarget', { target: relation.codeTarget }) }}</p>
+      <p v-if="relation.codeTarget" class="wb-relation-codetarget">
+        <TableMentionText
+          :text="t('relations.codeTarget', { target: relation.codeTarget })"
+          :tables="tables"
+          @open="emit('open', $event)"
+        />
+      </p>
     </template>
     <div v-if="rejected" class="wb-relation-card-actions">
       <button
@@ -147,25 +153,6 @@ const showStatus = computed(() => !rejected.value && props.relation.status !== "
   color: var(--wb-text);
   font-size: 12px;
   font-weight: 600;
-}
-
-.wb-relation-card-link {
-  min-height: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  text-align: left;
-}
-
-.wb-relation-card-link:hover,
-.wb-relation-card-link:active {
-  background: none;
-}
-
-.wb-relation-card-link:hover {
-  color: var(--wb-accent-strong);
-  text-decoration: underline;
 }
 
 .wb-relation-card-meta {

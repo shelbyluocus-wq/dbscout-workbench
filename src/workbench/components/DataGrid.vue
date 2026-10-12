@@ -6,7 +6,7 @@ import { isCellPending, getCellError, collectCellStatesForTable } from "../editS
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
 import { isNumericColumnType } from "../utils/columnTypes.js";
-import { displayCellValue, escapeHtml } from "../utils/cellDisplay.js";
+import { displayCellValue } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
 import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
 import { useColumnResize, ensureColumnWidthState } from "../composables/useColumnResize.js";
@@ -18,6 +18,8 @@ import { applyResolvedFreeze, resolveFreezeTarget } from "../utils/freezeSelecti
 import { sampleNextFrame } from "../utils/performanceMarks.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { relationChipLabel } from "../utils/configRelations.js";
+import { createTableMentionIndex } from "../utils/tableMentions.js";
+import TableMentionText from "./TableMentionText.vue";
 import { useConfigRelationContext } from "../composables/configRelationContext.js";
 import {
   createTableImportToolbarActions,
@@ -46,6 +48,7 @@ defineExpose({ gridWrapRef });
 
 const props = defineProps({
   tab: { type: Object, default: null },
+  schema: { type: Array, default: () => [] },
   activeColumns: { type: Array, default: () => [] },
   columnWindow: { type: Object, default: null },
   activeColumnMeta: { type: Array, default: () => [] },
@@ -253,7 +256,23 @@ const emit = defineEmits([
   'select-field-comment',
   'retry-load',
   'jump-boundary',
+  'open-table',
 ]);
+
+const tableMentionIndex = computed(() => createTableMentionIndex(props.schema, {
+  connectionId: props.tab?.connectionId,
+  database: props.tab?.database,
+}));
+
+function openMentionedTable(table) {
+  if (!table?.name) return;
+  emit("open-table", {
+    connectionId: props.tab?.connectionId || "",
+    database: props.tab?.database || "",
+    tableName: table.name,
+    tableComment: table.comment || "",
+  });
+}
 
 function colStyle(tab, colName) {
   const w = getColumnWidth(tab, colName);
@@ -623,10 +642,6 @@ function insertRowKey(tab, insertRow) {
 
 function insertRowCellValueByName(tab, insertRow, name) {
   return props.getInsertDraft(tab, insertRow?.id)[name] || "";
-}
-
-function highlightInsertCellByName(tab, insertRow, name) {
-  return escapeHtml(insertRowCellValueByName(tab, insertRow, name));
 }
 
 function isSearchMatchCell(tab, row, column, rowKey) {
@@ -1500,11 +1515,14 @@ function handleTableContextMenu(event) {
               :title="columnMeta.comment || t('m_d631217b36b5')"
               @click.stop="selectFieldComment(columnMeta)"
             >
-              <span
+              <TableMentionText
                 v-if="fieldCommentsExpanded"
                 class="wb-field-comment-text"
                 :style="{ '--wb-field-comment-lines': fieldCommentLineCount }"
-              >{{ columnMeta.comment || '—' }}</span>
+                :text="columnMeta.comment || '—'"
+                :tables="tableMentionIndex"
+                @open="openMentionedTable"
+              />
               <span v-else class="wb-field-comment-collapsed-mark" aria-hidden="true"></span>
             </th>
 </template>
@@ -1528,6 +1546,8 @@ function handleTableContextMenu(event) {
               :highlight-html="highlightHtml"
               :is-search-match="isSearchMatch"
               :cell-dom-id="gridCellDomId"
+              :table-index="tableMentionIndex"
+              @open-table="openMentionedTable"
               @row-select-start="(row, index, event) => onRowSelectStart(tab, row, index, event)"
               @toggle-row-select="(row, event) => emit('toggle-row-select', tab, row, event)"
               @row-contextmenu="(event, row, index) => emit('row-contextmenu', event, tab, row, index)"
@@ -1649,7 +1669,13 @@ function handleTableContextMenu(event) {
                   @keydown.escape.prevent.stop="emit('cancel-edit')"
                   @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
                 />
-                <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
+                <TableMentionText
+                  v-else
+                  class="wb-cell-text"
+                  :text="insertRowCellValueByName(tab, insertRow, columnMeta.name)"
+                  :tables="columnMeta.isNumeric ? null : tableMentionIndex"
+                  @open="openMentionedTable"
+                />
               </td>
 </template>
             </tr>
@@ -1663,6 +1689,8 @@ function handleTableContextMenu(event) {
               :highlight-html="highlightHtml"
               :is-search-match="isSearchMatch"
               :cell-dom-id="gridCellDomId"
+              :table-index="tableMentionIndex"
+              @open-table="openMentionedTable"
               @row-select-start="(row, index, event) => onRowSelectStart(tab, row, index, event)"
               @toggle-row-select="(row, event) => emit('toggle-row-select', tab, row, event)"
               @row-contextmenu="(event, row, index) => emit('row-contextmenu', event, tab, row, index)"
@@ -1796,7 +1824,13 @@ function handleTableContextMenu(event) {
                 @keydown.escape.prevent.stop="emit('cancel-edit')"
                 @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
               />
-              <span v-else class="wb-cell-text" v-html="highlightInsertCellByName(tab, insertRow, columnMeta.name)"></span>
+              <TableMentionText
+                  v-else
+                  class="wb-cell-text"
+                  :text="insertRowCellValueByName(tab, insertRow, columnMeta.name)"
+                  :tables="columnMeta.isNumeric ? null : tableMentionIndex"
+                  @open="openMentionedTable"
+                />
             </td>
 </template>
           </tr>

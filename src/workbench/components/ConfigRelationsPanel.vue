@@ -7,7 +7,6 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { findRowByKey } from "../utils/rowIdentity.js";
 import {
   coverageGapText,
-  isEmptyReferenceValue,
   referenceValuesFromCell,
   relationRelevantColumns,
   relationTitle,
@@ -16,14 +15,17 @@ import {
   tableDisplayName,
 } from "../utils/configRelations.js";
 import ConfigRelationCard from "./ConfigRelationCard.vue";
+import TableMentionText from "./TableMentionText.vue";
 
 const props = defineProps({
   tab: { type: Object, default: null },
   selectedCell: { type: Object, default: null },
   relations: { type: Object, required: true },
+  // Tables that exist in this tab's database. Mentioned names link only here.
+  mentionTables: { type: Object, default: null },
 });
 
-const emit = defineEmits(["open-relation", "open-review"]);
+const emit = defineEmits(["open-relation", "open-review", "open-table"]);
 
 const ROW_LOOKUP_DEBOUNCE_MS = 120;
 const ROW_CHANNEL = "inspector";
@@ -186,14 +188,17 @@ function relationCellHasValues(relation) {
   return relationCellValues(relation).length > 0;
 }
 
-function referencedKeyValue(relation) {
-  const row = selectedRow.value;
-  if (!row) return "";
-  const value = String(rowCellValue(row, relation.targetColumn) ?? "").trim();
-  return isEmptyReferenceValue(value) ? "" : value;
-}
-
 // ── jumps ──────────────────────────────────────────────────────
+
+function openNamedTable(table) {
+  if (!table?.name) return;
+  emit("open-table", {
+    connectionId: scope.value.connectionId,
+    database: scope.value.database,
+    tableName: table.name,
+    tableComment: table.comment || "",
+  });
+}
 
 function jumpToTargets(relation, values) {
   const keys = values.length ? values : relationCellValues(relation);
@@ -207,30 +212,6 @@ function jumpToTargets(relation, values) {
     relationFilter: { column: relation.targetColumn, kind: "equals", values: keys },
     relationOrigin: {
       direction: "outgoing",
-      sourceTable: relation.sourceTable,
-      sourceColumn: relation.sourceColumn,
-      targetTable: relation.targetTable,
-      targetColumn: relation.targetColumn,
-    },
-  });
-}
-
-function jumpToIncoming(relation, value) {
-  const key = String(value || referencedKeyValue(relation) || "");
-  if (!key) return;
-  emit("open-relation", {
-    connectionId: scope.value.connectionId,
-    database: scope.value.database,
-    tableName: tableDisplayName(tables.value, relation.sourceTable),
-    tableComment: tableDisplayComment(tables.value, relation.sourceTable),
-    readOnly: Boolean(props.tab?.readOnly),
-    relationFilter: {
-      column: relation.sourceColumn,
-      kind: relation.kind === "list" ? "listContains" : "equals",
-      values: [key],
-    },
-    relationOrigin: {
-      direction: "incoming",
       sourceTable: relation.sourceTable,
       sourceColumn: relation.sourceColumn,
       targetTable: relation.targetTable,
@@ -310,12 +291,13 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
         <div v-if="outgoingRows.length" class="wb-relations-group">
           <div class="wb-relations-group-label">{{ t('relations.row.outgoing') }}</div>
           <article v-for="entry in outgoingRows" :key="entry.relation.id" class="wb-relation-line">
-            <button
-              type="button"
-              class="wb-relation-line-title wb-relations-link-btn"
+            <TableMentionText
+              class="wb-relation-line-title"
               :title="tableDisplayComment(tables, entry.relation.targetTable)"
-              @click="jumpToTargets(entry.relation, [])"
-            >{{ entry.relation.sourceColumn }} → {{ tableDisplayName(tables, entry.relation.targetTable) }}</button>
+              :text="`${entry.relation.sourceColumn} → ${tableDisplayName(tables, entry.relation.targetTable)}`"
+              :tables="mentionTables"
+              @open="openNamedTable"
+            />
             <span class="wb-relation-targets">
               <button
                 v-for="target in entry.result?.targets || []"
@@ -336,13 +318,13 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
         <div v-if="incomingRows.length" class="wb-relations-group">
           <div class="wb-relations-group-label">{{ t('relations.row.incoming') }}</div>
           <article v-for="entry in incomingRows" :key="entry.relation.id" class="wb-relation-line">
-            <button
-              type="button"
-              class="wb-relation-line-title wb-relations-link-btn"
+            <TableMentionText
+              class="wb-relation-line-title"
               :title="tableDisplayComment(tables, entry.relation.sourceTable)"
-              :disabled="!referencedKeyValue(entry.relation)"
-              @click="jumpToIncoming(entry.relation)"
-            >{{ tableDisplayName(tables, entry.relation.sourceTable) }}.{{ entry.relation.sourceColumn }}</button>
+              :text="`${tableDisplayName(tables, entry.relation.sourceTable)}.${entry.relation.sourceColumn}`"
+              :tables="mentionTables"
+              @open="openNamedTable"
+            />
             <span class="wb-relation-targets">
               <span v-if="entry.result" class="wb-relation-incoming-count">
                 <template v-if="entry.result.count === null">{{ t('relations.incoming.countFailed') }}</template>
@@ -366,8 +348,10 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
           v-for="relation in outgoingGroups.active"
           :key="relation.id"
           :relation="relation"
+          :tables="mentionTables"
           :title="`${relation.sourceColumn} → ${tableDisplayName(tables, relation.targetTable)}.${relation.targetColumn}`"
           :busy="pendingReview.has(relation.id)"
+          @open="openNamedTable"
           @review="submitReview(relation, $event)"
         />
         <p v-if="!outgoingRelations.length" class="wb-relations-muted">—</p>
@@ -377,8 +361,10 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
           v-for="relation in incomingGroups.active"
           :key="relation.id"
           :relation="relation"
+          :tables="mentionTables"
           :title="`${tableDisplayName(tables, relation.sourceTable)}.${relation.sourceColumn} → ${relation.targetColumn}`"
           :busy="pendingReview.has(relation.id)"
+          @open="openNamedTable"
           @review="submitReview(relation, $event)"
         />
         <p v-if="!incomingRelations.length" class="wb-relations-muted">—</p>
@@ -389,8 +375,10 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
             v-for="relation in rejectedRelations"
             :key="relation.id"
             :relation="relation"
+            :tables="mentionTables"
             :title="relationTitle(relation, tables)"
             :busy="pendingReview.has(relation.id)"
+            @open="openNamedTable"
             @review="submitReview(relation, $event)"
           />
         </template>

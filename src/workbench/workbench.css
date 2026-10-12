@@ -21409,6 +21409,32 @@ label:has(input[type="checkbox"]:disabled) {
   padding-block: 0;
 }
 
+button.wb-table-mention {
+  display: inline;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--wb-accent-strong);
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button.wb-table-mention:hover,
+button.wb-table-mention:active {
+  border: 0;
+  background: none;
+  color: var(--wb-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .wb-field-comment-text {
   display: block;
   overflow: hidden;
