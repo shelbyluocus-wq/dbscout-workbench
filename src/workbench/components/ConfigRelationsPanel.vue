@@ -16,6 +16,7 @@ import {
 } from "../utils/configRelations.js";
 import ConfigRelationCard from "./ConfigRelationCard.vue";
 import TableMentionText from "./TableMentionText.vue";
+import IncomingRelationRows from "./IncomingRelationRows.vue";
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -55,6 +56,7 @@ async function loadTableRelations() {
     tableError.value = "";
     return;
   }
+  tableData.value = null;
   tableLoading.value = true;
   try {
     const data = await props.relations.tableRelations(scope.value, name);
@@ -121,6 +123,11 @@ let rowTimer = null;
 
 function scheduleRowLoad() {
   clearTimeout(rowTimer);
+  rowToken += 1;
+  rowTargets.value = [];
+  rowIncoming.value = [];
+  rowError.value = "";
+  rowLoading.value = false;
   rowTimer = setTimeout(() => void loadRowRelations(), ROW_LOOKUP_DEBOUNCE_MS);
 }
 
@@ -152,7 +159,7 @@ async function loadRowRelations() {
   }
 }
 
-watch([rowSignature, tableData, () => props.tab?.id], scheduleRowLoad, { immediate: true });
+watch([scopeKey, tableName, rowSignature, tableData, () => props.tab?.id, () => props.selectedCell?.rowKey], scheduleRowLoad, { immediate: true, flush: "sync" });
 
 onBeforeUnmount(() => {
   clearTimeout(rowTimer);
@@ -217,6 +224,19 @@ function jumpToTargets(relation, values) {
       targetTable: relation.targetTable,
       targetColumn: relation.targetColumn,
     },
+  });
+}
+
+function jumpToIncomingRow(relation, row) {
+  const [column, value] = Object.entries(row.identity || {})[0] || [];
+  if (!column || value == null) return;
+  emit("open-relation", {
+    ...scope.value,
+    tableName: tableDisplayName(tables.value, relation.sourceTable),
+    tableComment: tableDisplayComment(tables.value, relation.sourceTable),
+    readOnly: Boolean(props.tab?.readOnly),
+    relationFilter: { column, kind: "equals", values: [value] },
+    rowIdentity: row.identity,
   });
 }
 
@@ -317,22 +337,23 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
 
         <div v-if="incomingRows.length" class="wb-relations-group">
           <div class="wb-relations-group-label">{{ t('relations.row.incoming') }}</div>
-          <article v-for="entry in incomingRows" :key="entry.relation.id" class="wb-relation-line">
-            <TableMentionText
-              class="wb-relation-line-title"
-              :title="tableDisplayComment(tables, entry.relation.sourceTable)"
-              :text="`${tableDisplayName(tables, entry.relation.sourceTable)}.${entry.relation.sourceColumn}`"
-              :tables="mentionTables"
-              @open="openNamedTable"
+          <template v-for="entry in incomingRows" :key="entry.relation.id">
+            <IncomingRelationRows
+              v-if="entry.result"
+              :title="`${tableDisplayName(tables, entry.relation.sourceTable)}.${entry.relation.sourceColumn}`"
+              :count="entry.result.count"
+              :context="{
+                scope,
+                tableName: tableDisplayName(tables, entry.relation.sourceTable),
+                relation: entry.relation,
+                value: entry.result.value,
+                rowKey: selectedCell?.rowKey,
+                revision,
+              }"
+              @open-row="jumpToIncomingRow(entry.relation, $event)"
             />
-            <span class="wb-relation-targets">
-              <span v-if="entry.result" class="wb-relation-incoming-count">
-                <template v-if="entry.result.count === null">{{ t('relations.incoming.countFailed') }}</template>
-                <template v-else>{{ t('relations.incoming.rows', { count: entry.result.count }) }}</template>
-              </span>
-              <span v-else class="wb-relations-muted">…</span>
-            </span>
-          </article>
+            <span v-else class="wb-relations-muted">{{ tableDisplayName(tables, entry.relation.sourceTable) }}.{{ entry.relation.sourceColumn }} · …</span>
+          </template>
         </div>
 
         <p v-if="!outgoingRows.length && !incomingRows.length && !rowLoading" class="wb-relations-muted">
@@ -505,12 +526,6 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
 .wb-relation-target.is-unknown {
   color: var(--wb-secondary-text);
   cursor: default;
-}
-
-.wb-relation-incoming-count {
-  color: var(--wb-accent-strong);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
 }
 
 .wb-relations-coverage {

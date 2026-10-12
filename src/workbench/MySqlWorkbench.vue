@@ -962,10 +962,12 @@ function openConfigRelationsReview() {
   configRelationsDialogOpen.value = true;
 }
 
-async function openRelationTab({ connectionId, database, tableName, tableComment = "", readOnly = false, relationFilter, relationOrigin }) {
+let relationJumpToken = 0;
+async function openRelationTab({ connectionId, database, tableName, tableComment = "", readOnly = false, relationFilter, relationOrigin, rowIdentity }) {
+  const token = ++relationJumpToken;
   const filter = normalizeRelationFilter(relationFilter);
   if (!filter || !tableName) return;
-  await openTable(
+  const tab = await openTable(
     { connectionId, database, tableName, tableComment, readOnly },
     {
       initialState: {
@@ -975,6 +977,23 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
       },
     },
   );
+  if (!rowIdentity || !tab || tab.loadError || token !== relationJumpToken) return;
+  await nextTick();
+  // Match all composite-key fields, continuing through the first-key filter
+  // when the requested record is not in its initially loaded page.
+  let rowIndex = findRowIndexByIdentity(tab, rowIdentity);
+  let page = 0;
+  while (rowIndex < 0 && (page === 0 || tab.hasMore) && token === relationJumpToken && tab.id === focusedPaneState.activeDataTab?.id) {
+    const result = await fetchPage(tab, ++page);
+    if (!result?.ok) break;
+    rowIndex = findRowIndexByIdentity(tab, rowIdentity);
+  }
+  if (token !== relationJumpToken || tab.id !== focusedPaneState.activeDataTab?.id) return;
+  if (rowIndex >= 0) {
+    focusedPaneState.selectCellAt?.(tab, rowIndex, 0);
+  } else {
+    setStatus(t("relations.incoming.rowMissing"), { tone: "warning" });
+  }
 }
 
 function openConfigRelationTable({ connectionId, database, tableName, tableComment = "" }) {

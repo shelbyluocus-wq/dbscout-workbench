@@ -109,7 +109,10 @@ capabilities:
   database column comments, a static scan of the bound game client's source
   code, and recognisable list formats in the data. A table tab's inspector
   gains a relation page listing the rows the selected row points to and the
-  rows that point back, each with click-to-jump; the tab bar tags tables that
+  rows that point back, each with click-to-jump. Incoming row cards expand on demand into full
+  primary-key lists (50 rows per batch); composite-key jumps match every key.
+  `IncomingRelationRows.vue` renders these cards and `incomingRelationRows.js`
+  owns their paging and stale-request guards. The tab bar tags tables that
   take part in relations, and a review dialog (with an activity-rail badge
   counting what needs attention) lets the user confirm or reject candidates.
   Each MySQL server binds to its game client folder (auto-discovered across
