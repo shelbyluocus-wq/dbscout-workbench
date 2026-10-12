@@ -25,12 +25,13 @@ const emit = defineEmits(["open", "review"]);
 
 const rejected = computed(() => props.relation.status === "rejected");
 const actionable = computed(() => relationIsActionable(props.relation));
+const showStatus = computed(() => !rejected.value && props.relation.status !== "confirmed");
 </script>
 
 <template>
   <article class="wb-relation-card" :class="{ 'is-rejected': rejected }">
     <div class="wb-relation-card-head">
-      <span v-if="!rejected" class="wb-relation-status" :class="`is-${relation.status}`">{{ relationStatusLabel(relation.status, t) }}</span>
+      <span v-if="showStatus" class="wb-relation-status" :class="`is-${relation.status}`">{{ relationStatusLabel(relation.status, t) }}</span>
       <span v-if="relation.isNew && !rejected" class="wb-relation-new">{{ t('relations.review.new') }}</span>
       <button
         v-if="openable"
@@ -115,12 +116,6 @@ const actionable = computed(() => relationIsActionable(props.relation));
   color: var(--wb-secondary-text);
   font-size: 10.5px;
   line-height: 16px;
-}
-
-.wb-relation-status.is-confirmed {
-  border-color: var(--wb-accent-soft);
-  background: var(--wb-accent-soft);
-  color: var(--wb-accent-strong);
 }
 
 .wb-relation-status.is-stale {
