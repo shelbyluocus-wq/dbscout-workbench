@@ -1,8 +1,23 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { Cloud, FileText, FolderOpen, FolderSearch, HardDrive, LoaderCircle, TriangleAlert, User, X } from "lucide-vue-next";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  Cloud,
+  FileText,
+  FolderOpen,
+  FolderSearch,
+  HardDrive,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  Trash2,
+  TriangleAlert,
+  User,
+  X,
+} from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
+import { TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH } from "../composables/useTableTransfer.js";
 
 const props = defineProps({
   transfer: { type: Object, required: true },
@@ -111,6 +126,114 @@ const runDisabledReason = computed(() => {
   if (!activeTemplate.value?.projectRoot) return "请先选择游戏工程文件夹";
   return "运行脚本 → 定位产出 → SVN 更新 → 覆盖拷贝进 assets";
 });
+
+// Inline template naming. "add" shows the name field where the new tab will
+// appear; "rename" swaps the template's own tab for the field. The add button
+// and template actions hide meanwhile: leaving the field saves the name, which
+// can switch the active template before their click handler runs.
+const PENDING_TEMPLATE_ID = "__pending__";
+const { confirm } = useConfirm();
+const nameEdit = reactive({ mode: "", templateId: "", draft: "" });
+
+const tabItems = computed(() =>
+  nameEdit.mode === "add" ? [...templates.value, { id: PENDING_TEMPLATE_ID }] : templates.value,
+);
+const editingTabId = computed(() => {
+  if (nameEdit.mode === "add") return PENDING_TEMPLATE_ID;
+  return nameEdit.mode === "rename" ? nameEdit.templateId : "";
+});
+const nameProblem = computed(() =>
+  nameEdit.mode ? props.transfer.validateTemplateName(nameEdit.draft, nameEdit.templateId) : "",
+);
+const nameError = computed(() => {
+  if (nameProblem.value === "invalid") return t("tableTransfer.nameRequired");
+  if (nameProblem.value === "duplicate") return t("tableTransfer.nameDuplicate");
+  return "";
+});
+
+const vSelectOnMount = {
+  mounted(element) {
+    element.focus({ preventScroll: true });
+    element.select();
+  },
+};
+
+function templateTitle(template) {
+  return template.builtIn
+    ? t("tableTransfer.builtInTemplateHint")
+    : t("tableTransfer.customTemplateHint", { name: template.name });
+}
+
+function startAddTemplate() {
+  if (isRunning.value) return;
+  nameEdit.mode = "add";
+  nameEdit.templateId = "";
+  nameEdit.draft = props.transfer.suggestTemplateName(t("tableTransfer.defaultTemplateName"));
+}
+
+function startRenameTemplate(template) {
+  if (isRunning.value || !template || template.builtIn) return;
+  props.transfer.setActiveTemplate(template.id);
+  nameEdit.mode = "rename";
+  nameEdit.templateId = template.id;
+  nameEdit.draft = template.name;
+}
+
+function endNameEdit({ refocus = false } = {}) {
+  nameEdit.mode = "";
+  nameEdit.templateId = "";
+  nameEdit.draft = "";
+  if (!refocus) return;
+  void nextTick(() => dialogRef.value?.querySelector('[role="tab"][aria-selected="true"]')?.focus());
+}
+
+function commitNameEdit({ fromBlur = false } = {}) {
+  if (!nameEdit.mode) return;
+  const { status } =
+    nameEdit.mode === "add"
+      ? props.transfer.addTemplate(nameEdit.draft)
+      : props.transfer.renameTemplate(nameEdit.templateId, nameEdit.draft);
+  // Enter keeps an unusable name open with its error; leaving the field drops
+  // the edit instead of pulling focus back.
+  if (["created", "renamed", "unchanged"].includes(status) || fromBlur) {
+    endNameEdit({ refocus: !fromBlur });
+  }
+}
+
+function onNameBlur() {
+  // Switching to another window blurs the field too. Keep the edit open so a
+  // name copied from elsewhere can still be pasted; focus returns on the way back.
+  if (!document.hasFocus()) return;
+  commitNameEdit({ fromBlur: true });
+}
+
+function onNameKeydown(event) {
+  // Chinese input methods use Enter/Esc too; WebKit reports the Enter that
+  // ends a composition with keyCode 229 rather than isComposing.
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    commitNameEdit();
+  } else if (event.key === "Escape") {
+    // A prevented Escape tells the dialog layer to keep this dialog open.
+    event.preventDefault();
+    endNameEdit({ refocus: true });
+  }
+}
+
+async function deleteActiveTemplate() {
+  const template = activeTemplate.value;
+  if (isRunning.value || !template || template.builtIn) return;
+  const confirmed = await confirm({
+    title: t("m_f5a3ec56b46f"),
+    message: t("tableTransfer.deleteTemplateMessage", { name: template.name }),
+    note: t("tableTransfer.deleteTemplateNote"),
+    confirmText: t("m_2f9daa828907"),
+    cancelText: t("m_2cd0f3be8738"),
+    danger: true,
+  });
+  if (confirmed) props.transfer.deleteTemplate(template.id);
+}
 </script>
 
 <template>
@@ -142,21 +265,78 @@ const runDisabledReason = computed(() => {
 
       <div class="wb-table-transfer-body">
         <!-- 模板页签 -->
-        <div class="wb-table-transfer-tabs" role="tablist" :aria-label="t('m_fc621ca9bf0b')">
+        <div class="wb-table-transfer-templates">
+          <div class="wb-table-transfer-tabs" role="tablist" :aria-label="t('m_fc621ca9bf0b')">
+            <template v-for="item in tabItems" :key="item.id">
+              <input
+                v-if="item.id === editingTabId"
+                v-model="nameEdit.draft"
+                v-select-on-mount
+                type="text"
+                class="wb-table-transfer-name-input"
+                :maxlength="TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH"
+                :placeholder="t('tableTransfer.templateName')"
+                :aria-label="t('tableTransfer.templateName')"
+                :aria-invalid="nameProblem ? 'true' : 'false'"
+                :aria-describedby="nameError ? 'wb-table-transfer-name-error' : undefined"
+                @keydown="onNameKeydown"
+                @blur="onNameBlur"
+              />
+              <button
+                v-else
+                type="button"
+                role="tab"
+                :aria-selected="item.id === activeTemplate.id"
+                class="wb-table-transfer-tab"
+                :class="{ 'is-active': item.id === activeTemplate.id }"
+                :title="templateTitle(item)"
+                :disabled="isRunning"
+                @click="transfer.setActiveTemplate(item.id)"
+                @dblclick="startRenameTemplate(item)"
+                @keydown.f2.prevent="startRenameTemplate(item)"
+              >
+                {{ item.name }}
+              </button>
+            </template>
+          </div>
           <button
-            v-for="template in templates"
-            :key="template.id"
+            v-if="!nameEdit.mode"
             type="button"
-            role="tab"
-            :aria-selected="template.id === activeTemplate.id"
-            class="wb-table-transfer-tab"
-            :class="{ 'is-active': template.id === activeTemplate.id }"
+            class="wb-table-transfer-add"
+            :title="t('tableTransfer.addTemplateHint')"
             :disabled="isRunning"
-            @click="transfer.setActiveTemplate(template.id)"
+            @click="startAddTemplate"
           >
-            {{ template.name }}
+            <Plus :size="14" aria-hidden="true" /> {{ t('tableTransfer.addTemplate') }}
           </button>
+          <div v-if="!nameEdit.mode && !activeTemplate.builtIn" class="wb-table-transfer-template-actions">
+            <button
+              type="button"
+              :title="t('m_1bf7e836eb4c')"
+              :disabled="isRunning"
+              @click="startRenameTemplate(activeTemplate)"
+            >
+              <Pencil :size="14" aria-hidden="true" /> {{ t('m_0d0cbac2eee5') }}
+            </button>
+            <button
+              type="button"
+              class="is-danger"
+              :title="t('m_f5a3ec56b46f')"
+              :disabled="isRunning"
+              @click="deleteActiveTemplate"
+            >
+              <Trash2 :size="14" aria-hidden="true" /> {{ t('m_2f9daa828907') }}
+            </button>
+          </div>
         </div>
+        <p
+          v-if="nameError"
+          id="wb-table-transfer-name-error"
+          class="wb-table-transfer-name-error"
+          aria-live="polite"
+        >
+          {{ nameError }}
+        </p>
 
         <!-- 配置项 -->
         <div class="wb-table-transfer-form">
@@ -326,18 +506,32 @@ const runDisabledReason = computed(() => {
   overflow: auto;
 }
 
-.wb-table-transfer-tabs {
+.wb-table-transfer-templates {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 
+.wb-table-transfer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
 .wb-table-transfer-tab {
-  padding: 5px 16px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 16px;
+  overflow: hidden;
   border: 1px solid var(--wb-border-strong);
   border-radius: 4px;
   background: var(--wb-pane-header);
   color: var(--wb-text);
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -350,6 +544,74 @@ const runDisabledReason = computed(() => {
 .wb-table-transfer-tab:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.wb-table-transfer-name-input {
+  width: 180px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 4px;
+  background: var(--wb-cell-editor);
+  color: var(--wb-text);
+  font-size: 13px;
+}
+
+.wb-table-transfer-name-input[aria-invalid="true"] {
+  border-color: var(--wb-danger);
+  outline-color: var(--wb-danger);
+}
+
+.wb-table-transfer-add,
+.wb-table-transfer-template-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.wb-table-transfer-add {
+  border: 1px dashed var(--wb-border-strong);
+  background: transparent;
+  color: var(--wb-text);
+}
+
+.wb-table-transfer-add:hover:not(:disabled) {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-table-transfer-template-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.wb-table-transfer-template-actions button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-transfer-template-actions button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-table-transfer-template-actions button.is-danger:hover:not(:disabled) {
+  color: var(--wb-danger);
+}
+
+/* Sits right under the template row; the body's 12px gap would detach it. */
+.wb-table-transfer-name-error {
+  margin: -6px 0 0;
+  color: var(--wb-danger);
+  font-size: 12px;
 }
 
 /* Two-column form: the label column is as wide as the longest label in the

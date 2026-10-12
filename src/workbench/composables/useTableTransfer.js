@@ -2,6 +2,7 @@ import { computed, reactive, shallowRef } from "vue";
 
 export const TABLE_TRANSFER_TEMPLATES_KEY = "dbscout_table_transfer_templates";
 export const TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY = "dbscout_table_transfer_active_template";
+export const TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH = 40;
 
 const PROGRESS_EVENT_NAME = "table-transfer-progress";
 const MAX_LOG_LINES = 500;
@@ -14,8 +15,10 @@ export const TABLE_TRANSFER_STAGE_LABELS = Object.freeze({
   done: "完成",
 });
 
-// 固定两个预置模板（决胜1/决胜2）：名称与 id 固定，字段可编辑并自动保存。
-// 打开对话框时会在非 C 盘按决胜工程结构自动探测脚本和工程；已有有效路径不覆盖。
+// Built-in templates (决胜1/决胜2) keep a fixed id and name and cannot be
+// deleted, because path discovery on dialog open is keyed by these ids. User
+// templates follow them in creation order, carry their own unique name and are
+// never auto-discovered. Every template's fields are edited and saved alike.
 const PRESET_TEMPLATES = Object.freeze([
   Object.freeze({
     id: "juesheng-1",
@@ -33,53 +36,72 @@ const PRESET_TEMPLATES = Object.freeze([
   }),
 ]);
 
+const PRESET_IDS = new Set(PRESET_TEMPLATES.map((preset) => preset.id));
+const PERSISTED_TEMPLATE_FIELDS = Object.freeze(["id", "name", "scriptPath", "projectRoot", "conflictStrategy"]);
+
 function sanitizeConflictStrategy(value) {
   if (value === "mine" || value === "manual") return value;
   return "theirs";
 }
 
-function sanitizeTemplate(entry, preset) {
+function sanitizeTemplateName(value) {
+  const name = String(value ?? "").trim();
+  return Array.from(name).slice(0, TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH).join("").trim();
+}
+
+function sanitizeTemplate(entry) {
+  const id = String(entry?.id || "").trim();
+  const preset = PRESET_TEMPLATES.find((item) => item.id === id) || null;
   return {
-    id: String(entry?.id || preset.id).trim(),
-    name: preset.name,
+    id,
+    name: preset ? preset.name : sanitizeTemplateName(entry?.name),
+    builtIn: Boolean(preset),
     scriptPath: String(entry?.scriptPath || "").trim(),
-    projectRoot: String(entry?.projectRoot || preset.projectRoot || "").trim(),
+    projectRoot: String(entry?.projectRoot || preset?.projectRoot || "").trim(),
     conflictStrategy: sanitizeConflictStrategy(entry?.conflictStrategy),
   };
 }
 
-function readTemplates(storage) {
-  let stored = [];
+function readStoredTemplates(storage) {
   try {
     const parsed = JSON.parse(storage?.getItem?.(TABLE_TRANSFER_TEMPLATES_KEY) || "[]");
-    if (Array.isArray(parsed)) stored = parsed;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    stored = [];
+    return [];
   }
+}
+
+function readTemplates(storage) {
   const storedById = new Map();
-  for (const entry of stored) {
+  for (const entry of readStoredTemplates(storage)) {
     const id = String(entry?.id || "").trim();
     if (id) storedById.set(id, entry);
   }
-  return PRESET_TEMPLATES.map((preset) =>
-    sanitizeTemplate({ ...preset, ...(storedById.get(preset.id) || {}) }, preset),
+  const builtIns = PRESET_TEMPLATES.map((preset) =>
+    sanitizeTemplate({ ...preset, ...(storedById.get(preset.id) || {}), id: preset.id }),
   );
+  const custom = [...storedById]
+    .filter(([id]) => !PRESET_IDS.has(id))
+    .map(([id, entry]) => sanitizeTemplate({ ...entry, id }))
+    .filter((template) => template.name);
+  return [...builtIns, ...custom];
 }
 
 function writeTemplates(storage, templates) {
   try {
-    storage?.setItem?.(TABLE_TRANSFER_TEMPLATES_KEY, JSON.stringify(templates));
+    storage?.setItem?.(TABLE_TRANSFER_TEMPLATES_KEY, JSON.stringify(templates, PERSISTED_TEMPLATE_FIELDS));
   } catch {
     // best-effort persistence
   }
 }
 
-function readActiveTemplateId(storage) {
+function readActiveTemplateId(storage, templates) {
+  const fallback = templates[0]?.id || "";
   try {
     const value = String(storage?.getItem?.(TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY) || "").trim();
-    return PRESET_TEMPLATES.some((preset) => preset.id === value) ? value : PRESET_TEMPLATES[0].id;
+    return templates.some((template) => template.id === value) ? value : fallback;
   } catch {
-    return PRESET_TEMPLATES[0].id;
+    return fallback;
   }
 }
 
@@ -94,6 +116,14 @@ function writeActiveTemplateId(storage, id) {
 function defaultJobId() {
   const random = Math.random().toString(36).slice(2, 10);
   return `table-transfer-${Date.now().toString(36)}-${random}`;
+}
+
+function createTemplateId(templates) {
+  let id = "";
+  do {
+    id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  } while (templates.some((template) => template.id === id));
+  return id;
 }
 
 function errorMessage(error) {
@@ -132,7 +162,7 @@ export function useTableTransfer({
   createJobId = defaultJobId,
 } = {}) {
   const templates = shallowRef(readTemplates(storage));
-  const activeTemplateId = shallowRef(readActiveTemplateId(storage));
+  const activeTemplateId = shallowRef(readActiveTemplateId(storage, templates.value));
   const result = shallowRef(null);
   const dialog = reactive({
     open: false,
@@ -168,24 +198,88 @@ export function useTableTransfer({
     writeActiveTemplateId(storage, id);
   }
 
-  function updateTemplate(id, patch = {}) {
-    const next = templates.value.map((template) => {
-      if (template.id !== id) return template;
-      const preset = PRESET_TEMPLATES.find((item) => item.id === id) || template;
-      return sanitizeTemplate({ ...template, ...patch }, preset);
-    });
+  function commitTemplates(next) {
     templates.value = next;
     writeTemplates(storage, next);
+  }
+
+  function updateTemplate(id, patch = {}) {
+    const target = templates.value.find((template) => template.id === id);
+    if (!target) return;
+    // Names only change through renameTemplate, which rejects duplicates.
+    const {
+      scriptPath = target.scriptPath,
+      projectRoot = target.projectRoot,
+      conflictStrategy = target.conflictStrategy,
+    } = patch;
+    const updated = sanitizeTemplate({ ...target, scriptPath, projectRoot, conflictStrategy });
+    commitTemplates(templates.value.map((template) => (template.id === id ? updated : template)));
+  }
+
+  /** "" when the name can be used, otherwise "invalid" (empty) or "duplicate". */
+  function validateTemplateName(name, exceptId = "") {
+    const value = sanitizeTemplateName(name);
+    if (!value) return "invalid";
+    const taken = templates.value.some((template) => template.id !== exceptId && template.name === value);
+    return taken ? "duplicate" : "";
+  }
+
+  function suggestTemplateName(base) {
+    const root = sanitizeTemplateName(base);
+    const taken = new Set(templates.value.map((template) => template.name));
+    if (!root || !taken.has(root)) return root;
+    let index = 2;
+    while (taken.has(`${root} ${index}`)) index += 1;
+    return `${root} ${index}`;
+  }
+
+  function addTemplate(name) {
+    if (isRunning.value) return { status: "busy", template: null };
+    const problem = validateTemplateName(name);
+    if (problem) return { status: problem, template: null };
+    const template = sanitizeTemplate({ id: createTemplateId(templates.value), name });
+    commitTemplates([...templates.value, template]);
+    setActiveTemplate(template.id);
+    return { status: "created", template };
+  }
+
+  function renameTemplate(id, name) {
+    if (isRunning.value) return { status: "busy" };
+    const target = templates.value.find((template) => template.id === id);
+    if (!target) return { status: "missing" };
+    if (target.builtIn) return { status: "builtIn" };
+    const value = sanitizeTemplateName(name);
+    if (value === target.name) return { status: "unchanged" };
+    const problem = validateTemplateName(value, id);
+    if (problem) return { status: problem };
+    commitTemplates(
+      templates.value.map((template) => (template.id === id ? { ...template, name: value } : template)),
+    );
+    return { status: "renamed" };
+  }
+
+  function deleteTemplate(id) {
+    if (isRunning.value) return false;
+    const index = templates.value.findIndex((template) => template.id === id);
+    if (index < 0 || templates.value[index].builtIn) return false;
+    const next = templates.value.filter((template) => template.id !== id);
+    commitTemplates(next);
+    if (activeTemplateId.value === id) {
+      // Like closing a tab: the right neighbour takes over, otherwise the left
+      // one (built-in templates always come first, so one exists).
+      setActiveTemplate((next[index] || next[index - 1]).id);
+    }
+    return true;
   }
 
   async function discoverAndFill() {
     if (!invokeWorkbench) return;
     try {
-      const current = templates.value.map((template) => ({
-        id: template.id,
-        scriptPath: template.scriptPath,
-        projectRoot: template.projectRoot,
-      }));
+      // Only built-in templates have a known folder layout. Sending user
+      // templates with empty paths would also force a drive scan on every open.
+      const current = templates.value
+        .filter((template) => template.builtIn)
+        .map(({ id, scriptPath, projectRoot }) => ({ id, scriptPath, projectRoot }));
       const resolved = await invokeWorkbench("table_transfer_discover_paths", { templates: current });
       if (!Array.isArray(resolved)) return;
       for (const item of resolved) {
@@ -377,6 +471,11 @@ export function useTableTransfer({
     stageLabel,
     setActiveTemplate,
     updateTemplate,
+    validateTemplateName,
+    suggestTemplateName,
+    addTemplate,
+    renameTemplate,
+    deleteTemplate,
     pickScript,
     pickProjectDir,
     revealPath,

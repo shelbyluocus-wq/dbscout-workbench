@@ -1575,5 +1575,15 @@ export default Object.freeze({
   "relations.review.new": "新增",
   "relations.refresh": "重新分析",
   "relations.refreshing": "正在分析…",
-  "relations.codeTarget": "代码实际读取：{target}"
+  "relations.codeTarget": "代码实际读取：{target}",
+  "tableTransfer.addTemplate": "新建模板",
+  "tableTransfer.addTemplateHint": "新建一个模板，单独设置转表脚本、游戏工程和冲突处理",
+  "tableTransfer.defaultTemplateName": "新模板",
+  "tableTransfer.templateName": "模板名称",
+  "tableTransfer.nameRequired": "请输入模板名称",
+  "tableTransfer.nameDuplicate": "已有同名模板，请换一个名称",
+  "tableTransfer.builtInTemplateHint": "内置模板，会自动查找转表脚本和游戏工程",
+  "tableTransfer.customTemplateHint": "{name}（双击重命名）",
+  "tableTransfer.deleteTemplateMessage": "确定删除模板“{name}”？",
+  "tableTransfer.deleteTemplateNote": "只删除这个模板保存的脚本、工程路径和冲突设置，不会改动磁盘上的文件。"
 });

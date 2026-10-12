@@ -3812,6 +3812,21 @@ test("table transfer failure banner stays inside the dialog", () => {
   );
 });
 
+test("table transfer dialog lets users add, rename and delete their own templates", () => {
+  const dialog = read("./components/TableTransferDialog.vue");
+  // A new template is named in place, where its tab is about to appear.
+  assert.match(dialog, /class="wb-table-transfer-add"[\s\S]*?@click="startAddTemplate"/);
+  assert.match(dialog, /@dblclick="startRenameTemplate\(item\)"/);
+  // Built-in templates keep their fixed name, so only user templates offer
+  // rename/delete, and nothing else acts on a template while a name is typed.
+  assert.match(dialog, /v-if="!nameEdit\.mode && !activeTemplate\.builtIn" class="wb-table-transfer-template-actions"/);
+  // Switching windows (e.g. to copy a name) must not save a half-typed name.
+  assert.match(dialog, /function onNameBlur\(\) \{[\s\S]*?if \(!document\.hasFocus\(\)\) return;/);
+  // Chinese input methods confirm candidates with Enter; that must not commit the name.
+  assert.match(dialog, /event\.isComposing \|\| event\.keyCode === 229/);
+  assert.match(dialog, /deleteTemplateMessage[\s\S]*?danger: true[\s\S]*?props\.transfer\.deleteTemplate\(template\.id\)/);
+});
+
 test("startup update check waits until the workspace is usable and idle", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const mounted = orchestrator.match(/onMounted\(async \(\) => \{[\s\S]*?\n\}\);/)?.[0] || "";

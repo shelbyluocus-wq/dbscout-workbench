@@ -1575,5 +1575,15 @@ export default Object.freeze({
   "relations.review.new": "New",
   "relations.refresh": "Re-analyze",
   "relations.refreshing": "Analyzing…",
-  "relations.codeTarget": "The code actually reads: {target}"
+  "relations.codeTarget": "The code actually reads: {target}",
+  "tableTransfer.addTemplate": "New template",
+  "tableTransfer.addTemplateHint": "Add a template with its own conversion script, game project and conflict handling",
+  "tableTransfer.defaultTemplateName": "New template",
+  "tableTransfer.templateName": "Template name",
+  "tableTransfer.nameRequired": "Enter a template name.",
+  "tableTransfer.nameDuplicate": "A template with this name already exists. Choose another name.",
+  "tableTransfer.builtInTemplateHint": "Built-in template. The script and project are found automatically.",
+  "tableTransfer.customTemplateHint": "{name} · Double-click to rename",
+  "tableTransfer.deleteTemplateMessage": "Delete the template \"{name}\"?",
+  "tableTransfer.deleteTemplateNote": "Only the saved script, project folder and conflict setting are removed. Files on disk are not touched."
 });

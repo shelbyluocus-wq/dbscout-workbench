@@ -94,10 +94,13 @@ capabilities:
   handling (cleanup, `--accept theirs-full/mine-full` per template, tree
   conflicts on Prefer remote use cleanup + revert, or postpone and stop before copy
   when the template is Resolve conflicts manually), then merge-copies
-  the package into the project `assets` without deleting extras. Two fixed
-  localStorage templates (Game 1/Game 2) remember script path, project root, and
-  conflict strategy. Opening the dialog auto-discovers script/project paths on
-  non-C drives using the SVN relative layout (`chengxu/client/jswz` +
+  the package into the project `assets` without deleting extras. Templates in
+  localStorage remember script path, project root, and conflict strategy: two
+  built-in ones (Game 1/Game 2) keep fixed names and can't be deleted; users add
+  their own with New template, named inline (unique, at most 40 characters),
+  renamed by double-click/F2/Rename and deleted after a confirmation. Opening
+  the dialog auto-discovers script/project paths for the built-in templates
+  only, on non-C drives using the SVN relative layout (`chengxu/client/jswz` +
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
   Path rows have a Browse button that reveals the script/project in Explorer.

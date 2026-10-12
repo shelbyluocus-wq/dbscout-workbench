@@ -1576,5 +1576,15 @@ export default Object.freeze({
   "relations.review.new": "新增",
   "relations.refresh": "重新分析",
   "relations.refreshing": "正在分析…",
-  "relations.codeTarget": "程式碼實際讀取：{target}"
+  "relations.codeTarget": "程式碼實際讀取：{target}",
+  "tableTransfer.addTemplate": "新增模板",
+  "tableTransfer.addTemplateHint": "新增一個模板，單獨設定轉表指令碼、遊戲專案和衝突處理",
+  "tableTransfer.defaultTemplateName": "新模板",
+  "tableTransfer.templateName": "模板名稱",
+  "tableTransfer.nameRequired": "請輸入模板名稱",
+  "tableTransfer.nameDuplicate": "已有同名模板，請換一個名稱",
+  "tableTransfer.builtInTemplateHint": "內建模板，會自動尋找轉表指令碼和遊戲專案",
+  "tableTransfer.customTemplateHint": "{name}（按兩下重新命名）",
+  "tableTransfer.deleteTemplateMessage": "確定刪除模板「{name}」？",
+  "tableTransfer.deleteTemplateNote": "只會刪除這個模板儲存的指令碼、專案路徑和衝突設定，不會更動磁碟上的檔案。"
 });

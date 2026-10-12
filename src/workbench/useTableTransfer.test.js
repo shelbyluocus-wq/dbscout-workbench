@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY,
+  TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH,
   TABLE_TRANSFER_TEMPLATES_KEY,
   projectFolderToReveal,
   summarizeTransferError,
@@ -63,7 +64,8 @@ test("stored template fields override presets but names stay fixed", () => {
   assert.equal(first.name, "决胜1");
   assert.equal(first.scriptPath, "D:\\tool\\gen.bat");
   assert.equal(first.conflictStrategy, "mine");
-  // 未知 id 不会混进来，仍是固定两个模板。
+  assert.equal(first.builtIn, true);
+  // An unknown entry without a name is not a user template and is ignored.
   assert.equal(transfer.templates.value.length, 2);
 });
 
@@ -184,6 +186,171 @@ test("setActiveTemplate persists and rejects unknown ids", () => {
 
   transfer.setActiveTemplate("nope");
   assert.equal(transfer.activeTemplateId.value, "juesheng-2");
+});
+
+test("user templates are added with their own name and survive a reload", () => {
+  const storage = createStorage();
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
+
+  const created = transfer.addTemplate("  决胜2-分支  ");
+  assert.equal(created.status, "created");
+  assert.equal(created.template.name, "决胜2-分支");
+  assert.equal(created.template.builtIn, false);
+  assert.equal(created.template.conflictStrategy, "theirs");
+  assert.equal(transfer.activeTemplateId.value, created.template.id);
+  transfer.updateTemplate(created.template.id, {
+    scriptPath: "E:\\branch\\gen.bat",
+    projectRoot: "E:\\branch\\jswz",
+    conflictStrategy: "mine",
+  });
+
+  const persisted = JSON.parse(storage.store[TABLE_TRANSFER_TEMPLATES_KEY]);
+  assert.ok(persisted.every((entry) => !Object.hasOwn(entry, "builtIn")), "built-in flag is derived, not stored");
+
+  const reloaded = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
+  assert.deepEqual(reloaded.templates.value.map((template) => template.name), ["决胜1", "决胜2", "决胜2-分支"]);
+  assert.deepEqual(reloaded.activeTemplate.value, {
+    id: created.template.id,
+    name: "决胜2-分支",
+    builtIn: false,
+    scriptPath: "E:\\branch\\gen.bat",
+    projectRoot: "E:\\branch\\jswz",
+    conflictStrategy: "mine",
+  });
+});
+
+test("template names must be non-empty, unique and short", () => {
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage: createStorage() });
+  assert.equal(transfer.addTemplate("   ").status, "invalid");
+  assert.equal(transfer.addTemplate(" 决胜1 ").status, "duplicate");
+  assert.equal(transfer.templates.value.length, 2);
+
+  const { template } = transfer.addTemplate("分支");
+  assert.equal(transfer.validateTemplateName("分支"), "duplicate");
+  assert.equal(transfer.validateTemplateName("分支", template.id), "");
+  assert.equal(transfer.renameTemplate(template.id, "决胜2").status, "duplicate");
+  assert.equal(transfer.renameTemplate(template.id, "  ").status, "invalid");
+  assert.equal(transfer.renameTemplate(template.id, " 分支 ").status, "unchanged");
+  assert.equal(transfer.renameTemplate(template.id, " 主干 ").status, "renamed");
+  assert.equal(transfer.templates.value[2].name, "主干");
+
+  const capped = transfer.addTemplate("长".repeat(60)).template;
+  assert.equal(capped.name, "长".repeat(TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH));
+});
+
+test("suggestTemplateName numbers repeated default names", () => {
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage: createStorage() });
+  assert.equal(transfer.suggestTemplateName("新模板"), "新模板");
+  transfer.addTemplate(transfer.suggestTemplateName("新模板"));
+  assert.equal(transfer.suggestTemplateName("新模板"), "新模板 2");
+  transfer.addTemplate(transfer.suggestTemplateName("新模板"));
+  assert.equal(transfer.suggestTemplateName("新模板"), "新模板 3");
+});
+
+test("built-in templates keep their name and cannot be deleted", () => {
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage: createStorage() });
+  assert.equal(transfer.renameTemplate("juesheng-1", "我的决胜").status, "builtIn");
+  assert.equal(transfer.renameTemplate("missing", "x").status, "missing");
+  assert.equal(transfer.deleteTemplate("juesheng-1"), false);
+  assert.equal(transfer.deleteTemplate("missing"), false);
+
+  // updateTemplate only edits paths and strategy, never identity or name.
+  transfer.updateTemplate("juesheng-2", { id: "custom-x", name: "篡改", scriptPath: "D:\\gen.bat" });
+  assert.deepEqual(
+    transfer.templates.value.map((template) => [template.id, template.name, template.builtIn]),
+    [["juesheng-1", "决胜1", true], ["juesheng-2", "决胜2", true]],
+  );
+  assert.equal(transfer.templates.value[1].scriptPath, "D:\\gen.bat");
+});
+
+test("deleting the active user template selects its neighbour and persists", () => {
+  const storage = createStorage();
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
+  const first = transfer.addTemplate("A").template;
+  const second = transfer.addTemplate("B").template;
+  const third = transfer.addTemplate("C").template;
+
+  transfer.setActiveTemplate(second.id);
+  assert.equal(transfer.deleteTemplate(second.id), true);
+  assert.equal(transfer.activeTemplateId.value, third.id, "the right neighbour takes over");
+
+  assert.equal(transfer.deleteTemplate(third.id), true);
+  assert.equal(transfer.activeTemplateId.value, first.id, "the left neighbour takes over at the end");
+
+  transfer.setActiveTemplate("juesheng-2");
+  assert.equal(transfer.deleteTemplate(first.id), true);
+  assert.equal(transfer.activeTemplateId.value, "juesheng-2", "deleting another template keeps the selection");
+
+  const persisted = JSON.parse(storage.store[TABLE_TRANSFER_TEMPLATES_KEY]);
+  assert.deepEqual(persisted.map((entry) => entry.id), ["juesheng-1", "juesheng-2"]);
+  assert.equal(storage.store[TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY], "juesheng-2");
+
+  const stale = createStorage({ [TABLE_TRANSFER_ACTIVE_TEMPLATE_KEY]: first.id });
+  assert.equal(useTableTransfer({ invokeWorkbench: async () => ({}), storage: stale }).activeTemplateId.value, "juesheng-1");
+});
+
+test("discovery only asks about built-in templates and leaves user templates alone", async () => {
+  const calls = [];
+  const transfer = useTableTransfer({
+    storage: createStorage(),
+    invokeWorkbench: async (command, payload) => {
+      calls.push([command, payload]);
+      return payload.templates.map((item) => ({ ...item, scriptPath: `D:\\found\\${item.id}.bat` }));
+    },
+  });
+  const { template } = transfer.addTemplate("分支");
+
+  await transfer.discoverAndFill();
+  assert.deepEqual(calls[0][1].templates.map((item) => item.id), ["juesheng-1", "juesheng-2"]);
+  assert.equal(transfer.templates.value[0].scriptPath, "D:\\found\\juesheng-1.bat");
+  assert.equal(transfer.templates.value.find((item) => item.id === template.id).scriptPath, "");
+});
+
+test("run sends the active user template's settings", async () => {
+  const calls = [];
+  const transfer = useTableTransfer({
+    storage: createStorage(),
+    invokeWorkbench: async (command, payload) => {
+      calls.push([command, payload]);
+      return { outputDir: "E:\\branch\\out", updatedDirs: [], copiedFiles: 1 };
+    },
+  });
+  const { template } = transfer.addTemplate("分支");
+  assert.equal(transfer.canRun.value, false);
+  transfer.updateTemplate(template.id, {
+    scriptPath: "E:\\branch\\gen.bat",
+    projectRoot: "E:\\branch\\jswz",
+    conflictStrategy: "manual",
+  });
+
+  await transfer.run();
+  const [, payload] = calls.find(([command]) => command === "table_transfer_run");
+  assert.equal(payload.request.scriptPath, "E:\\branch\\gen.bat");
+  assert.equal(payload.request.projectRoot, "E:\\branch\\jswz");
+  assert.equal(payload.request.conflictStrategy, "manual");
+});
+
+test("the template list cannot change while a transfer is running", async () => {
+  const storage = createStorage({
+    [TABLE_TRANSFER_TEMPLATES_KEY]: JSON.stringify([
+      { id: "juesheng-1", scriptPath: "D:\\tool\\gen.bat", projectRoot: "D:\\Versions\\nzg" },
+      { id: "custom-1", name: "分支", scriptPath: "", projectRoot: "" },
+    ]),
+  });
+  const transfer = useTableTransfer({
+    storage,
+    invokeWorkbench: async (command) => (command === "table_transfer_run" ? new Promise(() => {}) : null),
+  });
+  assert.equal(transfer.templates.value.length, 3);
+
+  const running = transfer.run();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(transfer.dialog.status, "running");
+  assert.equal(transfer.addTemplate("新的").status, "busy");
+  assert.equal(transfer.renameTemplate("custom-1", "改名").status, "busy");
+  assert.equal(transfer.deleteTemplate("custom-1"), false);
+  assert.deepEqual(transfer.templates.value.map((template) => template.name), ["决胜1", "决胜2", "分支"]);
+  running.catch(() => {});
 });
 
 test("log lines stay capped so a noisy script cannot freeze the dialog", () => {
