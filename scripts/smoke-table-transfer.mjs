@@ -131,9 +131,21 @@ const expectNameFieldAlone = async (when) => {
   }
 };
 
-if (await templateActions.count()) fail('built-in templates should not offer rename or delete');
+// Built-in templates rename like any other (the fixed id keeps discovery
+// working), but still cannot be deleted.
+if ((await templateActions.locator('button').count()) !== 1) fail('a built-in template should offer rename only');
+if (await templateActions.locator('.is-danger').count()) fail('built-in templates should not offer delete');
 await dialog.locator('.wb-table-transfer-tab', { hasText: '决胜1' }).dblclick();
-if (await nameInput.count()) fail('double-clicking a built-in template should not rename it');
+await nameInput.waitFor({ timeout: 2000 });
+if ((await nameInput.inputValue()) !== '决胜1') fail('renaming a built-in should start from its current name');
+await nameInput.fill('决胜2');
+await nameInput.press('Enter');
+await page.waitForTimeout(100);
+if (!(await nameInput.isVisible())) fail('a clashing built-in name should keep the field open');
+await nameInput.fill('决胜1 主线');
+await nameInput.press('Enter');
+await page.waitForTimeout(150);
+if ((await activeTabName()) !== '决胜1 主线') fail(`built-in rename failed, got: ${await activeTabName()}`);
 
 await dialog.locator('.wb-table-transfer-tab', { hasText: SEEDED_CUSTOM.name }).click();
 await page.waitForTimeout(150);
@@ -159,7 +171,7 @@ const suggestion = await nameInput.evaluate((input) => ({
 if (suggestion.value !== '新模板') fail(`a new template should suggest 新模板, got: ${suggestion.value}`);
 if (!suggestion.focused || !suggestion.selected) fail('the suggested name should be focused and selected');
 await expectNameFieldAlone('a new template is being named');
-for (const [draft, expected] of [['   ', '请输入'], ['决胜1', '同名']]) {
+for (const [draft, expected] of [['   ', '请输入'], ['决胜2', '同名']]) {
   await nameInput.fill(draft);
   await nameInput.press('Enter');
   await page.waitForTimeout(100);
@@ -213,7 +225,7 @@ await entry.click();
 await dialog.waitFor({ timeout: 4000 });
 await page.waitForTimeout(300);
 const reloadedTabs = (await tabNames()).join(' | ');
-if (reloadedTabs !== `决胜1 | 决胜2 | ${SEEDED_CUSTOM.name} | 决胜3 外网`) fail(`templates after reload: ${reloadedTabs}`);
+if (reloadedTabs !== `决胜1 主线 | 决胜2 | ${SEEDED_CUSTOM.name} | 决胜3 外网`) fail(`templates after reload: ${reloadedTabs}`);
 if ((await activeTabName()) !== '决胜3 外网') fail('the selected custom template should survive a reload');
 const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('dbscout_table_transfer_templates') || '[]'));
 if (stored.some((template) => 'builtIn' in template)) fail('builtIn is derived and should not be saved');
@@ -227,7 +239,7 @@ if (!(await confirmDialog.innerText()).includes('决胜3 外网')) fail('the del
 await confirmDialog.locator('.wb-dialog-primary').click();
 await page.waitForTimeout(200);
 const remainingTabs = (await tabNames()).join(' | ');
-if (remainingTabs !== `决胜1 | 决胜2 | ${SEEDED_CUSTOM.name}`) fail(`templates after delete: ${remainingTabs}`);
+if (remainingTabs !== `决胜1 主线 | 决胜2 | ${SEEDED_CUSTOM.name}`) fail(`templates after delete: ${remainingTabs}`);
 if ((await activeTabName()) !== SEEDED_CUSTOM.name) fail('deleting the last template should select its left neighbour');
 if (!(await dialog.isVisible())) fail('confirming the delete should keep the transfer dialog open');
 

@@ -1589,7 +1589,7 @@ export default Object.freeze({
   "tableTransfer.templateName": "模板名稱",
   "tableTransfer.nameRequired": "請輸入模板名稱",
   "tableTransfer.nameDuplicate": "已有同名模板，請換一個名稱",
-  "tableTransfer.builtInTemplateHint": "內建模板，會自動尋找轉表指令碼和遊戲專案",
+  "tableTransfer.builtInTemplateHint": "內建模板，會自動尋找轉表指令碼和遊戲專案（按兩下重新命名）",
   "tableTransfer.customTemplateHint": "{name}（按兩下重新命名）",
   "tableTransfer.deleteTemplateMessage": "確定刪除模板「{name}」？",
   "tableTransfer.deleteTemplateNote": "只會刪除這個模板儲存的指令碼、專案路徑和衝突設定，不會更動磁碟上的檔案。"

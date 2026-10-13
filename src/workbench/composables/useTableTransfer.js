@@ -15,10 +15,11 @@ export const TABLE_TRANSFER_STAGE_LABELS = Object.freeze({
   done: "完成",
 });
 
-// Built-in templates (决胜1/决胜2) keep a fixed id and name and cannot be
-// deleted, because path discovery on dialog open is keyed by these ids. User
-// templates follow them in creation order, carry their own unique name and are
-// never auto-discovered. Every template's fields are edited and saved alike.
+// Built-in templates (决胜1/决胜2) keep a fixed id and cannot be deleted,
+// because path discovery on dialog open is keyed by these ids. Their display
+// name can be renamed like any other template and is stored with the entry.
+// User templates follow them in creation order and are never auto-discovered.
+// Every template's fields are edited and saved alike.
 const PRESET_TEMPLATES = Object.freeze([
   Object.freeze({
     id: "juesheng-1",
@@ -54,7 +55,7 @@ function sanitizeTemplate(entry) {
   const preset = PRESET_TEMPLATES.find((item) => item.id === id) || null;
   return {
     id,
-    name: preset ? preset.name : sanitizeTemplateName(entry?.name),
+    name: preset ? sanitizeTemplateName(entry?.name) || preset.name : sanitizeTemplateName(entry?.name),
     builtIn: Boolean(preset),
     scriptPath: String(entry?.scriptPath || "").trim(),
     projectRoot: String(entry?.projectRoot || preset?.projectRoot || "").trim(),
@@ -247,7 +248,6 @@ export function useTableTransfer({
     if (isRunning.value) return { status: "busy" };
     const target = templates.value.find((template) => template.id === id);
     if (!target) return { status: "missing" };
-    if (target.builtIn) return { status: "builtIn" };
     const value = sanitizeTemplateName(name);
     if (value === target.name) return { status: "unchanged" };
     const problem = validateTemplateName(value, id);

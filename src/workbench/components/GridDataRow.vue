@@ -1,6 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { splitTableMentions } from "../utils/tableMentions.js";
+import { createCellEditorHandlers, vImeValue } from "../utils/imeInput.js";
 defineProps({
   tabId: String,
   row: Object,
@@ -27,8 +28,15 @@ defineProps({
   isSearchMatch: Function,
   cellDomId: Function,
   tableIndex: { type: Object, default: null },
+  canEdit: { type: Boolean, default: true },
 });
 const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextmenu", "row-resize-start", "row-resize-reset", "edit-input", "cell-blur", "finish-edit", "cancel-edit", "tab-edit", "open-table"]);
+const {
+  onCellEditorInput,
+  onCellEditorCompositionStart,
+  onCellEditorCompositionEnd,
+  onCellEditorKeydown,
+} = createCellEditorHandlers(emit);
 </script>
 
 <template>
@@ -101,19 +109,25 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                 }"
               >
                 <input
-                  v-if="editingColumn === columnMeta.name"
-                  :value="editDraft"
+                  v-if="canEdit && (selectedColumn === columnMeta.name || editingColumn === columnMeta.name)"
+                  v-ime-value="editingColumn === columnMeta.name ? editDraft : ''"
+                  data-ime-editor
+                  autocomplete="off"
+                  spellcheck="false"
+                  tabindex="-1"
+                  :class="{ 'wb-cell-ime-hold': editingColumn !== columnMeta.name }"
                   :data-row-index="visualIndex"
                   :data-column-index="columnMeta.columnIndex"
                 :aria-colindex="columnMeta.columnIndex + 2"
-                  @input="emit('edit-input', $event.target.value)"
+                  @input="onCellEditorInput"
+                  @compositionstart="onCellEditorCompositionStart"
+                  @compositionend="onCellEditorCompositionEnd"
                   @blur="emit('cell-blur')"
                   @dblclick.stop
-                  @keydown.enter.prevent.stop="emit('finish-edit')"
-                  @keydown.escape.prevent.stop="emit('cancel-edit')"
-                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
+                  @keydown="onCellEditorKeydown"
                 />
-                <span v-else-if="row[columnMeta.name] == null" class="wb-null-badge" :aria-label="t('m_122f6009c477')">NULL</span>
+                <template v-if="editingColumn !== columnMeta.name">
+                <span v-if="row[columnMeta.name] == null" class="wb-null-badge" :aria-label="t('m_122f6009c477')">NULL</span>
                 <span v-else-if="hasActiveCellSearch" class="wb-cell-text" v-html="highlightHtml(row, columnMeta.name, rowKey)"></span>
                 <span v-else-if="!columnMeta.isNumeric && splitTableMentions(displayText(row, columnMeta.name, rowKey), tableIndex)" class="wb-cell-text">
                   <template v-for="(part, partIndex) in splitTableMentions(displayText(row, columnMeta.name, rowKey), tableIndex)" :key="partIndex">
@@ -129,6 +143,7 @@ const emit = defineEmits(["row-select-start", "toggle-row-select", "row-contextm
                   </template>
                 </span>
                 <span v-else class="wb-cell-text">{{ displayText(row, columnMeta.name, rowKey) }}</span>
+                </template>
               </td>
 </template>
             </tr>

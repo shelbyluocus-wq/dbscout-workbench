@@ -1588,7 +1588,7 @@ export default Object.freeze({
   "tableTransfer.templateName": "Template name",
   "tableTransfer.nameRequired": "Enter a template name.",
   "tableTransfer.nameDuplicate": "A template with this name already exists. Choose another name.",
-  "tableTransfer.builtInTemplateHint": "Built-in template. The script and project are found automatically.",
+  "tableTransfer.builtInTemplateHint": "Built-in template. The script and project are found automatically. Double-click to rename.",
   "tableTransfer.customTemplateHint": "{name} · Double-click to rename",
   "tableTransfer.deleteTemplateMessage": "Delete the template \"{name}\"?",
   "tableTransfer.deleteTemplateNote": "Only the saved script, project folder and conflict setting are removed. Files on disk are not touched."

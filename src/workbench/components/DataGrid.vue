@@ -28,6 +28,7 @@ import {
 import { connectionHasCapability } from "../utils/connectionKinds.js";
 import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
 import GridDataRow from "./GridDataRow.vue";
+import { createCellEditorHandlers, vImeValue } from "../utils/imeInput.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
@@ -258,6 +259,13 @@ const emit = defineEmits([
   'jump-boundary',
   'open-table',
 ]);
+
+const {
+  onCellEditorInput,
+  onCellEditorCompositionStart,
+  onCellEditorCompositionEnd,
+  onCellEditorKeydown,
+} = createCellEditorHandlers(emit);
 
 const tableMentionIndex = computed(() => createTableMentionIndex(props.schema, {
   connectionId: props.tab?.connectionId,
@@ -640,6 +648,21 @@ function insertRowKey(tab, insertRow) {
   return props.getInsertRowKey(tab, insertRow?.id);
 }
 
+function insertCellSelected(insertRow, column) {
+  return props.selectedCell?.tabId === props.tab.id
+    && props.selectedCell?.rowKey === insertRowKey(props.tab, insertRow)
+    && props.selectedCell?.column === column;
+}
+
+function insertCellEditing(insertRow, column) {
+  return props.editingCell?.rowKey === insertRowKey(props.tab, insertRow)
+    && props.editingCell?.column === column;
+}
+
+function insertEditorVisible(insertRow, column) {
+  return !activeTabReadOnly.value && (insertCellSelected(insertRow, column) || insertCellEditing(insertRow, column));
+}
+
 function insertRowCellValueByName(tab, insertRow, name) {
   return props.getInsertDraft(tab, insertRow?.id)[name] || "";
 }
@@ -794,6 +817,7 @@ function rowModel(row, rowKey, originalIndex, visualIndex, rowVersion) {
     inRowRange: isRowInSelectedRange(props.tab, visualIndex),
     rangeClasses: rangeClassesByRow.value.get(rowKey) || null,
     cellState: rowCellStates.value.get(rowKey) || null,
+    canEdit: !activeTabReadOnly.value,
   };
 }
 
@@ -1651,8 +1675,13 @@ function handleTableContextMenu(event) {
                 @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, anchoredInsertVisualIndex(originalIndex, insertRowIndex), columnMeta.columnIndex)"
               >
                 <input
-                  v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name"
-                  :value="editDraft"
+                  v-if="insertEditorVisible(insertRow, columnMeta.name)"
+                  v-ime-value="insertCellEditing(insertRow, columnMeta.name) ? editDraft : ''"
+                  data-ime-editor
+                  autocomplete="off"
+                  spellcheck="false"
+                  tabindex="-1"
+                  :class="{ 'wb-cell-ime-hold': !insertCellEditing(insertRow, columnMeta.name) }"
                   :data-insert-row-id="insertRow.id"
                   :data-insert-column-index="columnMeta.columnIndex"
                   :data-row-index="anchoredInsertVisualIndex(originalIndex, insertRowIndex)"
@@ -1661,16 +1690,16 @@ function handleTableContextMenu(event) {
                   :disabled="isInsertRowSaving(tab, insertRow.id)"
                   :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                   @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
-                  @input="emit('edit-input', $event.target.value)"
+                  @input="onCellEditorInput"
+                  @compositionstart="onCellEditorCompositionStart"
+                  @compositionend="onCellEditorCompositionEnd"
                   @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                   @blur="emit('cell-blur')"
                   @dblclick.stop
-                  @keydown.enter.prevent.stop="emit('finish-edit')"
-                  @keydown.escape.prevent.stop="emit('cancel-edit')"
-                  @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
+                  @keydown="onCellEditorKeydown"
                 />
                 <TableMentionText
-                  v-else
+                  v-if="!insertCellEditing(insertRow, columnMeta.name)"
                   class="wb-cell-text"
                   :text="insertRowCellValueByName(tab, insertRow, columnMeta.name)"
                   :tables="columnMeta.isNumeric ? null : tableMentionIndex"
@@ -1806,8 +1835,13 @@ function handleTableContextMenu(event) {
               @dblclick="emit('cell-dblclick', tab, insertRowObject(insertRow), columnMeta.name, trailingInsertVisualIndex(insertRowIndex), columnMeta.columnIndex)"
             >
               <input
-                v-if="editingCell?.rowKey === insertRowKey(tab, insertRow) && editingCell?.column === columnMeta.name"
-                :value="editDraft"
+                v-if="insertEditorVisible(insertRow, columnMeta.name)"
+                v-ime-value="insertCellEditing(insertRow, columnMeta.name) ? editDraft : ''"
+                data-ime-editor
+                autocomplete="off"
+                spellcheck="false"
+                tabindex="-1"
+                :class="{ 'wb-cell-ime-hold': !insertCellEditing(insertRow, columnMeta.name) }"
                 :data-insert-row-id="insertRow.id"
                 :data-insert-column-index="columnMeta.columnIndex"
                 :data-row-index="trailingInsertVisualIndex(insertRowIndex)"
@@ -1816,16 +1850,16 @@ function handleTableContextMenu(event) {
                 :disabled="isInsertRowSaving(tab, insertRow.id)"
                 :placeholder="isPrimaryKeyColumn(columnMeta.column, columnMeta.name) ? 'auto' : ''"
                 @focus="emit('insert-focus', tab, insertRow.id, columnMeta.columnIndex)"
-                @input="emit('edit-input', $event.target.value)"
+                @input="onCellEditorInput"
+                @compositionstart="onCellEditorCompositionStart"
+                @compositionend="onCellEditorCompositionEnd"
                 @paste="emit('insert-paste', tab, insertRow.id, columnMeta.columnIndex, $event)"
                 @blur="emit('cell-blur')"
                 @dblclick.stop
-                @keydown.enter.prevent.stop="emit('finish-edit')"
-                @keydown.escape.prevent.stop="emit('cancel-edit')"
-                @keydown.tab.prevent.stop="emit('tab-edit', $event.shiftKey)"
+                @keydown="onCellEditorKeydown"
               />
               <TableMentionText
-                  v-else
+                  v-if="!insertCellEditing(insertRow, columnMeta.name)"
                   class="wb-cell-text"
                   :text="insertRowCellValueByName(tab, insertRow, columnMeta.name)"
                   :tables="columnMeta.isNumeric ? null : tableMentionIndex"

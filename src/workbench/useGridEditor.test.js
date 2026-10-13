@@ -73,6 +73,7 @@ function createEditor(options = {}) {
         return options.wrapRect || { top: 0, bottom: 106, left: 0, right: 300 };
       },
       querySelector(selector) {
+        if (String(selector).includes("data-ime-editor")) return options.imeInput || null;
         if (selector === "td.editing input") return input;
         if (selector.includes('data-insert-column-index="')) return insertInput;
         if (selector.includes('data-column-index="')) {
@@ -703,6 +704,118 @@ test("F2 enters edit mode for the selected cell at the end", async () => {
   assert.equal(editor.editingCell.value.column, "name");
   assert.equal(input.focused, true);
   assert.deepEqual(input.selection, [5, 5]);
+});
+
+test("direct typing keeps a pinyin composition instead of committing the first letter", async () => {
+  const imeInput = {
+    value: "stale",
+    focused: false,
+    focus() {
+      this.focused = true;
+      this._composing = true;
+    },
+  };
+  const { editor, tab } = createEditor({ imeInput });
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "n",
+    keyCode: 78,
+    isComposing: false,
+    preventDefault() { prevented = true; },
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(prevented, false);
+  assert.equal(imeInput.focused, true);
+  assert.equal(imeInput.value, "");
+  assert.equal(imeInput._composing, true);
+  assert.equal(editor.editingCell.value.column, "name");
+  assert.equal(editor.editDraft.value, "Alice");
+});
+
+test("direct typing still inserts a plain letter when no composition starts", async () => {
+  const imeInput = {
+    value: "stale",
+    focused: false,
+    focus() { this.focused = true; },
+  };
+  const { editor, tab } = createEditor({ imeInput });
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "x",
+    keyCode: 88,
+    isComposing: false,
+    preventDefault() {},
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(imeInput.value, "x");
+  assert.equal(editor.editDraft.value, "x");
+});
+
+test("a primed cell editor receives the key without clearing an in-progress composition", async () => {
+  const imeInput = {
+    value: "",
+    classList: { contains: (name) => name === "wb-cell-ime-hold" },
+    closest() { return this; },
+    focus() { this.focused = true; },
+  };
+  const { editor, tab } = createEditor({ imeInput });
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "n",
+    keyCode: 78,
+    target: imeInput,
+    preventDefault() { prevented = true; },
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(prevented, false);
+  assert.equal(imeInput.value, "");
+  assert.equal(editor.editingCell.value.column, "name");
+  assert.equal(editor.editDraft.value, "Alice");
+});
+
+test("an IME key does not commit its letter or leave the cell", async () => {
+  const imeInput = {
+    value: "Alice",
+    focused: false,
+    focus() { this.focused = true; },
+  };
+  const { editor, tab } = createEditor({ imeInput });
+  let prevented = false;
+  editor.selectCell(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+  editor.startEditing(tab, tab.rows[0], "name", 0, 0);
+  await nextTick();
+
+  await editor.handleGridKeydown({
+    key: "Enter",
+    keyCode: 229,
+    isComposing: true,
+    preventDefault() { prevented = true; },
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+  });
+
+  assert.equal(prevented, false);
+  assert.equal(editor.editingCell.value.column, "name");
+  assert.equal(editor.editDraft.value, "Alice");
 });
 
 test("typing a printable key starts editing with a single initial character", async () => {

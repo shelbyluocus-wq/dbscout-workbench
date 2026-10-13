@@ -1,4 +1,5 @@
 import { computed, nextTick, ref, toRaw, watch } from "vue";
+import { isImeKeyEvent } from "../utils/imeInput.js";
 import {
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
   GRID_HEADER_HEIGHT,
@@ -2369,7 +2370,7 @@ export function useGridEditor(
         updateInsertDraft(tab, rowId, column, draft);
         recordInsertDraftHistory(tab, beforeRows, { label: "编辑新增行", cellCount: 1 });
       }
-      if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
+      if (!options.skipRefocus) nextTick(() => focusPrimedEditorNow({ force: true }));
       return;
     }
     const row = findRowByKey(tab, rowKey);
@@ -2383,7 +2384,7 @@ export function useGridEditor(
         if (draft !== current) commitResult = commitCellValue(tab, row, column, draft);
       }
     }
-    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => focusPrimedEditorNow({ force: true }));
     return commitResult;
   }
 
@@ -2485,7 +2486,7 @@ export function useGridEditor(
   function cancelEditing(options = {}) {
     editingCell.value = null;
     editDraftDirty.value = false;
-    if (!options.skipRefocus) nextTick(() => gridWrapRef.value?.focus());
+    if (!options.skipRefocus) nextTick(() => focusPrimedEditorNow({ force: true }));
   }
 
   // ── Keyboard navigation ───────────────────────────────────────────────
@@ -4396,6 +4397,14 @@ export function useGridEditor(
       return;
     }
 
+    // A composition key (including the Windows IME keyCode 229 Enter that
+    // confirms a candidate) must not be turned into cell navigation. If this
+    // is the key that starts composition, open the editor without swallowing it.
+    if (isImeKeyEvent(event)) {
+      openEditorForIncomingKey(tab, event);
+      return;
+    }
+
     // Arrow key navigation. Ctrl/⌘ = 跳到数据区边缘；Shift = 扩选。
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
       // While inline-editing, Left/Right must move the text caret inside the
@@ -4515,9 +4524,21 @@ export function useGridEditor(
       return;
     }
 
-    // Typing a printable character starts editing
+    // Typing a printable character starts editing. When the selected cell
+    // already has an editor input, focus it during this keydown and do not
+    // preventDefault: Chinese IME composition must start on that input, and
+    // swallowing the first pinyin letter commits it and breaks the session.
     if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && !isReadOnlyTab(tab)) {
       if (selectedCell.value && !editingCell.value) {
+        const primed = editorFromEvent(event);
+        if (primed) {
+          // The selected cell's input is already focused, so this key — and an
+          // IME composition that starts with it — belongs to that input.
+          adoptPrimedEditor(tab, primed);
+          return;
+        }
+        if (event.target?.closest?.("input, textarea, select")) return;
+        if (beginDirectCellEdit(tab, event.key)) return;
         event.preventDefault();
         const row = rowForSelectedCell(tab, selectedCell.value);
         if (row) {
@@ -4534,6 +4555,95 @@ export function useGridEditor(
       return;
     }
   }
+
+  const DIRECT_EDIT_INPUT = "td.selected input[data-ime-editor], td.insert-selected input[data-ime-editor]";
+
+  function editorFromEvent(event) {
+    const target = event?.target;
+    if (!target || typeof target.closest !== "function") return null;
+    return target.closest("input[data-ime-editor]");
+  }
+
+  function openEditorForIncomingKey(tab, event) {
+    if (!tab || editingCell.value || !selectedCell.value || isReadOnlyTab(tab)) return;
+    const primed = editorFromEvent(event);
+    if (primed) {
+      adoptPrimedEditor(tab, primed);
+      return;
+    }
+    if (event?.target?.closest?.("input, textarea, select")) return;
+    beginDirectCellEdit(tab);
+  }
+
+  function rememberDirectEdit(tab, cell, input) {
+    const row = rowForSelectedCell(tab, cell);
+    if (!row) return false;
+    const current = isInsertRowKey(cell.rowKey)
+      ? insertDraftValue(tab, cell.rowKey, cell.column)
+      : editableCellValue(row, cell.column);
+    input._composing = false;
+    input._imeLive = true;
+    editingCell.value = { ...cell };
+    editDraft.value = current;
+    editDraftDirty.value = false;
+    updateTextDraft(current);
+    return true;
+  }
+
+  // The input was focused before this key, so the browser delivers the
+  // character or composition into it. Do not clear it and do not preventDefault.
+  function adoptPrimedEditor(tab, input) {
+    const cell = selectedCell.value;
+    if (!tab || !cell || !input) return false;
+    return rememberDirectEdit(tab, cell, input);
+  }
+
+  function beginDirectCellEdit(tab, key = "") {
+    const cell = selectedCell.value;
+    if (!tab || !cell || cell.tabId !== tab.id) return false;
+    const input = gridWrapRef.value?.querySelector?.(DIRECT_EDIT_INPUT);
+    if (!input || typeof input.focus !== "function") return false;
+    if (!rememberDirectEdit(tab, cell, input)) return false;
+    input.value = "";
+    input.focus({ preventScroll: true });
+    // If this keydown could not move the character onto the input (and it is
+    // not the start of a composition), put that one character in ourselves.
+    if (key.length === 1) {
+      queueMicrotask(() => {
+        if (input._composing || input.value || input.isConnected === false) return;
+        input._imeLive = false;
+        input.value = key;
+        input.setSelectionRange?.(key.length, key.length);
+        updateEditDraft(key);
+      });
+    }
+    return true;
+  }
+
+  function focusPrimedEditorNow({ force = false } = {}) {
+    const wrap = gridWrapRef.value;
+    if (!wrap || editingCell.value || !selectedCell.value) {
+      if (force && !editingCell.value) wrap?.focus?.({ preventScroll: true });
+      return;
+    }
+    const doc = wrap.ownerDocument;
+    const active = doc?.activeElement;
+    const focusInGrid = !active || active === doc?.body || active === wrap || wrap.contains?.(active);
+    if (!force && !focusInGrid) return;
+    const input = wrap.querySelector?.(DIRECT_EDIT_INPUT);
+    if (input?.classList?.contains?.("wb-cell-ime-hold") && typeof input.focus === "function") {
+      if (active !== input) input.focus({ preventScroll: true });
+      return;
+    }
+    if (force) wrap.focus?.({ preventScroll: true });
+  }
+
+  // Focus the selected cell's standby input after other focus() calls in this
+  // turn, so the next pinyin key is delivered to an editor instead of the grid.
+  watch(selectedCell, () => {
+    if (editingCell.value) return;
+    nextTick(() => nextTick(() => focusPrimedEditorNow()));
+  });
 
   // ── Undo/Redo handlers live in useUndo.js (single source of truth) ─────
 

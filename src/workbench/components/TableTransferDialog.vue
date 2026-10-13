@@ -172,7 +172,7 @@ function startAddTemplate() {
 }
 
 function startRenameTemplate(template) {
-  if (isRunning.value || !template || template.builtIn) return;
+  if (isRunning.value || !template) return;
   props.transfer.setActiveTemplate(template.id);
   nameEdit.mode = "rename";
   nameEdit.templateId = template.id;
@@ -309,7 +309,7 @@ async function deleteActiveTemplate() {
           >
             <Plus :size="14" aria-hidden="true" /> {{ t('tableTransfer.addTemplate') }}
           </button>
-          <div v-if="!nameEdit.mode && !activeTemplate.builtIn" class="wb-table-transfer-template-actions">
+          <div v-if="!nameEdit.mode" class="wb-table-transfer-template-actions">
             <button
               type="button"
               :title="t('m_1bf7e836eb4c')"
@@ -319,6 +319,7 @@ async function deleteActiveTemplate() {
               <Pencil :size="14" aria-hidden="true" /> {{ t('m_0d0cbac2eee5') }}
             </button>
             <button
+              v-if="!activeTemplate.builtIn"
               type="button"
               class="is-danger"
               :title="t('m_f5a3ec56b46f')"

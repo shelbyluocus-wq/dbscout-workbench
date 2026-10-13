@@ -96,9 +96,10 @@ capabilities:
   when the template is Resolve conflicts manually), then merge-copies
   the package into the project `assets` without deleting extras. Templates in
   localStorage remember script path, project root, and conflict strategy: two
-  built-in ones (Game 1/Game 2) keep fixed names and can't be deleted; users add
-  their own with New template, named inline (unique, at most 40 characters),
-  renamed by double-click/F2/Rename and deleted after a confirmation. Opening
+  built-in ones (Game 1/Game 2) keep a fixed id for path discovery and can't be
+  deleted; users add their own with New template, and every template is named
+  inline (unique, at most 40 characters), renamed by double-click/F2/Rename,
+  with user templates deleted after a confirmation. Opening
   the dialog auto-discovers script/project paths for the built-in templates
   only, on non-C drives using the SVN relative layout (`chengxu/client/jswz` +
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common

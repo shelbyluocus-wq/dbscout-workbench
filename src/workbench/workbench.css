@@ -14043,6 +14043,22 @@ label:has(input[type="checkbox"]:disabled) {
   outline: none;
 }
 
+/* Selected-but-not-editing input. It stays in the cell so a pinyin keydown
+   can move focus onto it before the IME starts. Opacity keeps the cell text
+   visible until editing actually begins. */
+.wb-grid td:has(> input.wb-cell-ime-hold) {
+  position: relative;
+}
+
+.wb-grid td > input.wb-cell-ime-hold {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .wb-grid td.pending input {
   background: rgba(250, 204, 21, 0.14);
 }
@@ -17887,12 +17903,12 @@ label:has(input[type="checkbox"]:disabled) {
   outline: none;
 }
 
-.wb-grid-wrap:not(:focus) .wb-grid td.selected:not(.range-selected):not(.editing) {
+.wb-grid-wrap:not(:focus-within) .wb-grid td.selected:not(.range-selected):not(.editing) {
   box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 
-.wb-grid-wrap:not(:focus) .wb-grid td.editing:not(.selected),
-.wb-grid-wrap:not(:focus) .wb-grid td.selected.editing {
+.wb-grid-wrap:not(:focus-within) .wb-grid td.editing:not(.selected),
+.wb-grid-wrap:not(:focus-within) .wb-grid td.selected.editing {
   box-shadow: inset 0 0 0 1px var(--wb-accent);
 }
 

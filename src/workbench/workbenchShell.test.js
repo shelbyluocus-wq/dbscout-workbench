@@ -2538,7 +2538,7 @@ test("grid edit mode keeps text metrics stable with a thin single focus ring", (
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*max-height:\s*var\(--wb-grid-row-height,\s*28px\)/);
   assert.match(styles, /\.wb-grid td\.editing\s*\{[^}]*overflow:\s*hidden/);
   assert.doesNotMatch(styles, /\.wb-grid td\.editing input\s*\{[^}]*height:\s*28px/);
-  assert.match(styles, /\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.editing:not\(\.selected\),\s*\.wb-grid-wrap:not\(:focus\) \.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
+  assert.match(styles, /\.wb-grid-wrap:not\(:focus-within\) \.wb-grid td\.editing:not\(\.selected\),\s*\.wb-grid-wrap:not\(:focus-within\) \.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.match(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--wb-accent\)/);
   assert.doesNotMatch(styles, /\.wb-grid td\.selected\.editing\s*\{[^}]*outline:\s*2px solid var\(--wb-accent-strong\)/);
   assert.match(styles, /\.wb-grid td\.editing\.range-top::before,\s*\.wb-grid td\.editing\.range-bottom::before\s*\{[^}]*height:\s*1px/);
@@ -2603,13 +2603,19 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(dataGrid, /:data-column-index="columnMeta\.columnIndex"/);
   assert.match(dataGrid, /cellRangeClasses\(tab, insertRowKey\(tab, insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex\)/);
   assert.match(dataGrid, /@mousedown\.left="onCellRangeStart\(tab, insertRowObject\(insertRow\), columnMeta\.name, trailingInsertVisualIndex\(insertRowIndex\), columnMeta\.columnIndex, \$event\)"/);
-  assert.match(dataGrid, /v-if="editingCell\?\.rowKey === insertRowKey\(tab, insertRow\) && editingCell\?\.column === columnMeta\.name"/);
+  assert.match(dataGrid, /function insertCellEditing\(insertRow, column\)/);
+  assert.match(dataGrid, /editingCell\?\.rowKey === insertRowKey\(props\.tab, insertRow\)/);
+  assert.match(dataGrid, /insertEditorVisible\(insertRow, columnMeta\.name\)/);
+  assert.match(dataGrid, /data-ime-editor/);
+  assert.match(dataGrid, /onCellEditorKeydown/);
   assert.match(dataGrid, /insertRowCellValueByName\(tab, insertRow, columnMeta\.name\)/);
   assert.match(dataGrid, /is-unsaved/);
   assert.match(dataGrid, /title="新增未保存"/);
   assert.match(dataGrid, /data-insert-row-id/);
-  assert.match(dataGrid, /@keydown\.escape\.prevent\.stop="emit\('cancel-edit'\)"/);
-  assert.match(dataGrid, /@keydown\.tab\.prevent\.stop="emit\('tab-edit', \$event\.shiftKey\)"/);
+  assert.match(dataGrid, /onCellEditorKeydown/);
+  assert.match(read("./utils/imeInput.js"), /isImeKeyEvent\(event\)/);
+  assert.match(read("./utils/imeInput.js"), /event\.key === "Escape"/);
+  assert.match(read("./utils/imeInput.js"), /event\.key === "Tab"/);
   assert.match(dataGrid, /@paste="emit\('paste', \$event\)"/);
   assert.match(pane, /@paste="handleGridPaste"/);
   assert.match(pane, /event\.clipboardData\?\.getData\("text\/plain"\)/);
@@ -2750,8 +2756,9 @@ test("data grid wires Excel-like drag range selection", () => {
   assert.equal((dataGrid.match(/@mousedown\.left="onCellRangeStart\(/g) || []).length, 2);
   assert.equal((dataGrid.match(/@mouseup="endRangeSelection"/g) || []).length, 3);
   assert.doesNotMatch(dataGrid, /@mouseleave="emit\('range-end'\)"/);
-  assert.match(dataGrid, /@keydown\.enter\.prevent\.stop/);
-  assert.match(dataGrid, /@keydown\.tab\.prevent\.stop/);
+  assert.match(dataGrid, /onCellEditorKeydown/);
+  assert.match(read("./utils/imeInput.js"), /event\.key === "Enter"/);
+  assert.match(read("./utils/imeInput.js"), /event\.key === "Tab"/);
   assert.equal((dataGrid.match(/@blur="emit\('cell-blur'\)"\s*\n\s*@dblclick\.stop/g) || []).length, 3);
   assert.match(pane, /@cell-mousedown="startGridRangeSelection"/);
   assert.match(pane, /function\s+startGridRangeSelection/);
@@ -3817,9 +3824,10 @@ test("table transfer dialog lets users add, rename and delete their own template
   // A new template is named in place, where its tab is about to appear.
   assert.match(dialog, /class="wb-table-transfer-add"[\s\S]*?@click="startAddTemplate"/);
   assert.match(dialog, /@dblclick="startRenameTemplate\(item\)"/);
-  // Built-in templates keep their fixed name, so only user templates offer
-  // rename/delete, and nothing else acts on a template while a name is typed.
-  assert.match(dialog, /v-if="!nameEdit\.mode && !activeTemplate\.builtIn" class="wb-table-transfer-template-actions"/);
+  // Every template can be renamed; only user templates offer delete, and
+  // nothing else acts on a template while a name is typed.
+  assert.match(dialog, /v-if="!nameEdit\.mode" class="wb-table-transfer-template-actions"/);
+  assert.match(dialog, /v-if="!activeTemplate\.builtIn"[\s\S]{0,160}?class="is-danger"/);
   // Switching windows (e.g. to copy a name) must not save a half-typed name.
   assert.match(dialog, /function onNameBlur\(\) \{[\s\S]*?if \(!document\.hasFocus\(\)\) return;/);
   // Chinese input methods confirm candidates with Enter; that must not commit the name.

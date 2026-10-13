@@ -52,19 +52,23 @@ test("templates fall back to the two presets when storage is empty or broken", (
   assert.equal(recovered.templates.value.length, 2);
 });
 
-test("stored template fields override presets but names stay fixed", () => {
+test("stored template fields override preset defaults", () => {
   const storage = createStorage({
     [TABLE_TRANSFER_TEMPLATES_KEY]: JSON.stringify([
-      { id: "juesheng-1", name: "被篡改的名字", scriptPath: "D:\\tool\\gen.bat", projectRoot: "D:\\Versions\\nzg", conflictStrategy: "mine" },
+      { id: "juesheng-1", name: "改名后的决胜1", scriptPath: "D:\\tool\\gen.bat", projectRoot: "D:\\Versions\\nzg", conflictStrategy: "mine" },
+      { id: "juesheng-2", name: "   " },
       { id: "unknown", scriptPath: "D:\\x.bat" },
     ]),
   });
   const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
   const first = transfer.templates.value[0];
-  assert.equal(first.name, "决胜1");
+  // A stored name wins (built-ins can be renamed); paths and strategy override too.
+  assert.equal(first.name, "改名后的决胜1");
   assert.equal(first.scriptPath, "D:\\tool\\gen.bat");
   assert.equal(first.conflictStrategy, "mine");
   assert.equal(first.builtIn, true);
+  // A blank stored name falls back to the built-in default.
+  assert.equal(transfer.templates.value[1].name, "决胜2");
   // An unknown entry without a name is not a user template and is ignored.
   assert.equal(transfer.templates.value.length, 2);
 });
@@ -247,18 +251,30 @@ test("suggestTemplateName numbers repeated default names", () => {
   assert.equal(transfer.suggestTemplateName("新模板"), "新模板 3");
 });
 
-test("built-in templates keep their name and cannot be deleted", () => {
-  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage: createStorage() });
-  assert.equal(transfer.renameTemplate("juesheng-1", "我的决胜").status, "builtIn");
+test("built-in templates can be renamed but not deleted", () => {
+  const storage = createStorage();
+  const transfer = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
+  assert.equal(transfer.renameTemplate("juesheng-1", " 我的决胜 ").status, "renamed");
+  assert.equal(transfer.renameTemplate("juesheng-2", "我的决胜").status, "duplicate");
   assert.equal(transfer.renameTemplate("missing", "x").status, "missing");
   assert.equal(transfer.deleteTemplate("juesheng-1"), false);
   assert.equal(transfer.deleteTemplate("missing"), false);
+
+  // The id stays fixed, so path discovery still finds the renamed built-in.
+  const first = transfer.templates.value[0];
+  assert.equal(first.id, "juesheng-1");
+  assert.equal(first.name, "我的决胜");
+  assert.equal(first.builtIn, true);
+
+  // The new name is stored and survives a reload.
+  const reloaded = useTableTransfer({ invokeWorkbench: async () => ({}), storage });
+  assert.equal(reloaded.templates.value[0].name, "我的决胜");
 
   // updateTemplate only edits paths and strategy, never identity or name.
   transfer.updateTemplate("juesheng-2", { id: "custom-x", name: "篡改", scriptPath: "D:\\gen.bat" });
   assert.deepEqual(
     transfer.templates.value.map((template) => [template.id, template.name, template.builtIn]),
-    [["juesheng-1", "决胜1", true], ["juesheng-2", "决胜2", true]],
+    [["juesheng-1", "我的决胜", true], ["juesheng-2", "决胜2", true]],
   );
   assert.equal(transfer.templates.value[1].scriptPath, "D:\\gen.bat");
 });
