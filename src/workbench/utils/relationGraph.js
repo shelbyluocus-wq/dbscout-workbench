@@ -126,6 +126,10 @@ function reachTables(center, bySource, byTarget, options) {
   return { nodes, hidden: hidden.size };
 }
 
+function byRelationId(left, right) {
+  return left.id.localeCompare(right.id);
+}
+
 // Every relation between two shown tables becomes part of one line per table
 // pair; arrows say which way the references go.
 function mergeLinks(edges, nodes) {
@@ -135,7 +139,10 @@ function mergeLinks(edges, nodes) {
     const { sourceTable: source, targetTable: target } = edge;
     if (!nodes.has(source) || !nodes.has(target)) continue;
     if (source === target) {
-      selfLoops.set(source, worseStatus(selfLoops.get(source), edge.status));
+      const loop = selfLoops.get(source) || { status: "", relations: [] };
+      loop.status = worseStatus(loop.status, edge.status);
+      loop.relations.push(edge);
+      selfLoops.set(source, loop);
       continue;
     }
     const [first, second] = source < target ? [source, target] : [target, source];
@@ -150,7 +157,8 @@ function mergeLinks(edges, nodes) {
     link.status = worseStatus(link.status, edge.status);
     link.relations.push(edge);
   }
-  for (const link of links.values()) link.relations.sort((left, right) => left.id.localeCompare(right.id));
+  for (const link of links.values()) link.relations.sort(byRelationId);
+  for (const loop of selfLoops.values()) loop.relations.sort(byRelationId);
   return { links: [...links.values()].sort((left, right) => left.id.localeCompare(right.id)), selfLoops };
 }
 
@@ -166,15 +174,17 @@ export function localRelationGraph(graph, centerTable, options = {}) {
   for (const link of links) {
     for (const end of [link.source, link.target]) issues.set(end, worseStatus(issues.get(end), link.status));
   }
-  for (const [table, status] of selfLoops) issues.set(table, worseStatus(issues.get(table), status));
+  for (const [table, loop] of selfLoops) issues.set(table, worseStatus(issues.get(table), loop.status));
   const shown = [...nodes.values()].map((node) => {
     const referencedBy = counts.get(node.id) || 0;
     const issue = issues.get(node.id);
+    const loop = selfLoops.get(node.id);
     return {
       ...node,
       referencedBy,
       radius: nodeRadius(referencedBy, { center: node.depth === 0 }),
-      selfStatus: selfLoops.get(node.id) || "",
+      selfStatus: loop?.status || "",
+      selfRelations: loop?.relations || [],
       issue: issue === "stale" || issue === "conflict" ? issue : "",
     };
   });
@@ -276,6 +286,32 @@ export function graphNeighbors(local, id) {
     else if (link.target === id) neighbors.add(link.source);
   }
   return neighbors;
+}
+
+function byRelationEnds(left, right) {
+  return left.sourceTable.localeCompare(right.sourceTable) ||
+    left.targetTable.localeCompare(right.targetTable) ||
+    byRelationId(left, right);
+}
+
+// The drawn relations of one table, split into the ones it makes (its column
+// points at another table), the ones made at it, and the ones to itself.
+export function graphNodeRelations(local, id) {
+  const references = [];
+  const referencedBy = [];
+  for (const link of local?.links || []) {
+    if (link.source !== id && link.target !== id) continue;
+    for (const relation of link.relations) {
+      if (relation.sourceTable === id) references.push(relation);
+      else if (relation.targetTable === id) referencedBy.push(relation);
+    }
+  }
+  const node = local?.nodes?.find((candidate) => candidate.id === id);
+  return {
+    references: references.sort(byRelationEnds),
+    referencedBy: referencedBy.sort(byRelationEnds),
+    self: [...(node?.selfRelations || [])],
+  };
 }
 
 // Line endpoints trimmed to the node circles so arrowheads stay visible.

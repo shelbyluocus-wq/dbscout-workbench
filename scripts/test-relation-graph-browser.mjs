@@ -39,6 +39,37 @@ try {
   await neighbour.locator("circle").hover();
   await page.waitForFunction(() => document.querySelector(".wb-relation-graph.is-hovering"));
   assert.equal(await graph.locator(".wb-relation-graph-node.is-hovered").count(), 1);
+  // The corner card names the hovered table and replaces the native tooltip.
+  const hoveredName = (await neighbour.getAttribute("aria-label")).split(" · ")[0];
+  const card = graph.locator(".wb-relation-graph-card");
+  await card.waitFor();
+  assert.equal((await card.locator("strong").textContent()).trim(), hoveredName);
+  assert.match(await card.textContent(), /(它引用了|谁引用了它)（\d+ 条）/);
+  assert.match(await card.locator(".wb-relation-graph-card-key").first().textContent(), /\.\S+\s*→\s*\S+\.\S+/, "rows name both fields");
+  assert.equal(await neighbour.locator("title").count(), 0);
+  await graph.screenshot({ path: join(shots, "blackcat-relation-graph-card.png") });
+
+  // Right-click locks the card so the pointer can travel to it.
+  const centerNode = graph.locator(".wb-relation-graph-node.is-center");
+  await centerNode.locator("circle").click({ button: "right" });
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 1);
+  const lockedCard = graph.locator(".wb-relation-graph-card.is-locked");
+  await lockedCard.waitFor();
+  const cardBox = await lockedCard.boundingBox();
+  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2, { steps: 6 });
+  await lockedCard.waitFor();
+  assert.ok(await lockedCard.locator("button.wb-relation-graph-card-table").count() > 0, "other tables can be opened from the card");
+  await graph.screenshot({ path: join(shots, "blackcat-relation-graph-locked.png") });
+  // Right-clicking another table moves the lock; right-clicking it again releases it.
+  await neighbour.locator("circle").click({ button: "right" });
+  assert.equal((await lockedCard.locator("strong").textContent()).trim(), hoveredName);
+  await neighbour.locator("circle").click({ button: "right" });
+  await page.mouse.move(cardBox.x + 2, cardBox.y - 200);
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
+  // A click on empty space releases a lock as well.
+  await centerNode.locator("circle").click({ button: "right" });
+  await graph.locator(".wb-relation-graph-canvas").click({ position: { x: 8, y: 8 } });
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
 
   const section = page.locator(".wb-relation-graph-section");
   await section.getByRole("button", { name: "2 层", exact: true }).click();

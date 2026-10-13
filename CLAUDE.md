@@ -119,7 +119,11 @@ capabilities:
   clicking a node opens that table. Tables can be dragged (neighbours follow
   on springs and everything swings back to the ring layout on release), the
   wheel zooms around the pointer, the bottom edge resizes the graph (height
-  remembered) and an enlarge button opens it in a large dialog. The tab bar tags tables that
+  remembered) and an enlarge button opens it in a large dialog. A corner card
+  lists the hovered table's drawn relations field by field
+  (`source.column → target.column` plus status); right-clicking a table locks
+  the highlight and card (scrollable, table names open), right-clicking it
+  again or clicking empty space unlocks. The tab bar tags tables that
   take part in relations, and a review dialog (with an activity-rail badge
   counting what needs attention) lets the user confirm or reject candidates.
   Each MySQL server binds to its game client folder (auto-discovered across

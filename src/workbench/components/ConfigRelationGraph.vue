@@ -7,7 +7,7 @@
 // pointer, dragging empty space pans and the bottom edge resizes the graph.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { LocateFixed, Maximize2, ZoomIn, ZoomOut } from "lucide-vue-next";
+import { Lock, LocateFixed, Maximize2, ZoomIn, ZoomOut } from "lucide-vue-next";
 import {
   relationStatusLabel,
   relationTitle,
@@ -18,6 +18,7 @@ import {
   GRAPH_HEIGHT,
   clampGraphHeight,
   graphNeighbors,
+  graphNodeRelations,
   layoutRelationGraph,
   linkSegment,
 } from "../utils/relationGraph.js";
@@ -51,6 +52,7 @@ const ALL_LABELS_NODE_LIMIT = 24;
 const OUTER_LABEL_FADE_START = 0.8;
 const OUTER_LABEL_FULL_SCALE = 1.1;
 const DRAG_THRESHOLD_PX = 4;
+const UNLOCKED_ROWS_PER_SECTION = 5;
 const RESIZE_KEY_STEP = 20;
 // Share of the fitted height kept free below the drawing for the zoom buttons.
 const CONTROLS_RESERVE = 0.14;
@@ -61,7 +63,10 @@ const svgEl = ref(null);
 const hostSize = ref({ width: 0, height: 0 });
 const hoverId = ref("");
 const dragId = ref("");
+// Right-clicked table whose highlight and card stay put while the pointer roams.
+const lockedId = ref("");
 let press = null;
+let emptyPress = null;
 let resizeObserver = null;
 
 const layout = computed(() => layoutRelationGraph(props.graph, (id) => tableDisplayName(props.tables, id)));
@@ -86,7 +91,7 @@ watch(fit, () => {
   fitted = true;
 }, { immediate: true });
 
-const activeId = computed(() => dragId.value || hoverId.value);
+const activeId = computed(() => dragId.value || lockedId.value || hoverId.value);
 const neighbors = computed(() => graphNeighbors(props.graph, activeId.value));
 const radii = computed(() => new Map(props.graph.nodes.map((node) => [node.id, node.radius])));
 const positions = computed(() => {
@@ -122,6 +127,72 @@ const nodeTexts = computed(() => new Map(props.graph.nodes.map((node) => [node.i
   label: layout.value?.positions.get(node.id)?.label || "",
 }])));
 const linkHints = computed(() => new Map(props.graph.links.map((link) => [link.id, linkHint(link)])));
+
+// ── corner card: the active table's drawn relations, field by field ──
+
+function relationRow(relation, locked) {
+  const end = (table, column) => ({
+    table,
+    column,
+    name: tableDisplayName(props.tables, table),
+    // The center table is already open; every other drawn table can be opened.
+    clickable: locked && table !== props.graph.center,
+  });
+  return {
+    id: relation.id,
+    status: relation.status,
+    ends: [end(relation.sourceTable, relation.sourceColumn), end(relation.targetTable, relation.targetColumn)],
+  };
+}
+
+const card = computed(() => {
+  const id = activeId.value;
+  const node = id ? props.graph.nodes.find((candidate) => candidate.id === id) : null;
+  if (!node) return null;
+  const locked = lockedId.value === id;
+  const relations = graphNodeRelations(props.graph, id);
+  const sections = [
+    { key: "references", relations: relations.references },
+    { key: "referencedBy", relations: relations.referencedBy },
+    { key: "self", relations: relations.self },
+  ]
+    .filter((section) => section.relations.length)
+    .map((section) => {
+      // Unlocked, the card cannot scroll, so long lists stop early.
+      const shown = locked ? section.relations : section.relations.slice(0, UNLOCKED_ROWS_PER_SECTION);
+      return {
+        key: section.key,
+        count: section.relations.length,
+        rows: shown.map((relation) => relationRow(relation, locked)),
+        more: section.relations.length - shown.length,
+      };
+    });
+  return {
+    id,
+    locked,
+    name: tableDisplayName(props.tables, id),
+    comment: tableDisplayComment(props.tables, id),
+    center: node.depth === 0,
+    total: node.referencedBy,
+    sections,
+  };
+});
+
+function cardHint(current) {
+  if (current.locked) return t("relations.graph.card.unlockHint");
+  return current.center ? t("relations.graph.card.lockHint") : t("relations.graph.card.openLockHint");
+}
+
+// ── right-click lock ─────────────────────────────────────────
+
+function toggleLock(id) {
+  lockedId.value = lockedId.value === id ? "" : id;
+}
+
+// A lock on a table that is no longer drawn has nothing to show.
+watch(() => props.graph, (graph) => {
+  if (lockedId.value && !graph.nodes.some((node) => node.id === lockedId.value)) lockedId.value = "";
+});
 
 function outerLabelOpacity() {
   if (props.graph.nodes.length <= ALL_LABELS_NODE_LIMIT) return 1;
@@ -214,8 +285,17 @@ function onPointerDown(event) {
     press = { pointerId: event.pointerId, id: nodeEl.dataset.id, clientX: event.clientX, clientY: event.clientY, moved: false };
     return;
   }
+  // A press on empty space that does not turn into a pan releases the lock.
+  emptyPress = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
   viewport.startPan(event);
   capture(event);
+}
+
+function endEmptyPress(event) {
+  if (!emptyPress || event.pointerId !== emptyPress.pointerId) return;
+  const moved = Math.hypot(event.clientX - emptyPress.clientX, event.clientY - emptyPress.clientY) >= DRAG_THRESHOLD_PX;
+  emptyPress = null;
+  if (!moved) lockedId.value = "";
 }
 
 function onPointerMove(event) {
@@ -254,6 +334,7 @@ function onPointerUp(event) {
     finishPress(event);
     return;
   }
+  endEmptyPress(event);
   if (viewport.endPan(event)) releaseCapture(event);
 }
 
@@ -262,6 +343,7 @@ function onPointerCancel(event) {
     finishPress(event, { cancelled: true });
     return;
   }
+  emptyPress = null;
   if (viewport.endPan(event)) releaseCapture(event);
 }
 
@@ -388,6 +470,7 @@ onBeforeUnmount(() => {
             'is-faded': node.faded,
             'is-hovered': node.hovered,
             'is-dragged': node.dragged,
+            'is-locked': lockedId === node.id,
             [`has-${node.issue}`]: Boolean(node.issue),
           }"
           :data-id="node.id"
@@ -401,8 +484,8 @@ onBeforeUnmount(() => {
           @blur="hoverId = ''"
           @keydown.enter.prevent="openNode(node.id)"
           @keydown.space.prevent="openNode(node.id)"
+          @contextmenu.prevent.stop="toggleLock(node.id)"
         >
-          <title>{{ node.hint }}</title>
           <path
             v-if="node.selfStatus"
             class="wb-relation-graph-loop"
@@ -421,6 +504,60 @@ onBeforeUnmount(() => {
         </g>
       </g>
     </svg>
+    <!-- Unlocked, the node's aria-label already speaks for the card; locked,
+         the card holds buttons and becomes a region of its own. -->
+    <Transition name="wb-relation-graph-card">
+      <div
+        v-if="card"
+        class="wb-relation-graph-card"
+        :class="{ 'is-locked': card.locked }"
+        :role="card.locked ? 'region' : undefined"
+        :aria-label="card.locked ? card.name : undefined"
+        :aria-hidden="card.locked ? undefined : 'true'"
+      >
+        <div class="wb-relation-graph-card-head">
+          <strong>{{ card.name }}</strong>
+          <span v-if="card.center" class="wb-relation-graph-card-badge">{{ t('relations.graph.card.center') }}</span>
+          <span v-if="card.locked" class="wb-relation-graph-card-badge is-lock">
+            <Lock :size="10" aria-hidden="true" />{{ t('relations.graph.card.locked') }}
+          </span>
+        </div>
+        <p v-if="card.comment" class="wb-relation-graph-card-comment">{{ card.comment }}</p>
+        <section v-for="section in card.sections" :key="section.key" class="wb-relation-graph-card-section">
+          <h4>{{ t(`relations.graph.card.${section.key}`, { count: section.count }) }}</h4>
+          <ul>
+            <li v-for="row in section.rows" :key="row.id" class="wb-relation-graph-card-row">
+              <span class="wb-relation-graph-card-key">
+                <!-- The arrow rides with the target so a narrow card breaks before it. -->
+                <template v-for="(end, index) in row.ends" :key="index">
+                  <span class="wb-relation-graph-card-end">
+                    <span v-if="index" class="wb-relation-graph-card-arrow" aria-hidden="true">→ </span>
+                    <button
+                      v-if="end.clickable"
+                      type="button"
+                      class="wb-relation-graph-card-table"
+                      :title="t('relations.graph.card.openTable', { name: end.name })"
+                      @click="openNode(end.table)"
+                    >{{ end.name }}</button>
+                    <span v-else class="wb-relation-graph-card-table is-plain">{{ end.name }}</span>.<span class="wb-relation-graph-card-column">{{ end.column }}</span>
+                  </span>
+                </template>
+              </span>
+              <span
+                v-if="row.status !== 'confirmed'"
+                class="wb-relation-graph-card-status"
+                :class="`is-${row.status}`"
+              >{{ relationStatusLabel(row.status, t) }}</span>
+            </li>
+          </ul>
+          <p v-if="section.more" class="wb-relation-graph-card-line is-quiet">
+            {{ t('relations.graph.card.more', { count: section.more }) }}
+          </p>
+        </section>
+        <p class="wb-relation-graph-card-line is-quiet">{{ t('relations.graph.card.total', { count: card.total }) }}</p>
+        <p class="wb-relation-graph-card-line is-hint">{{ cardHint(card) }}</p>
+      </div>
+    </Transition>
     <div class="wb-relation-graph-zoom">
       <button type="button" :title="t('relations.graph.zoomIn')" :aria-label="t('relations.graph.zoomIn')" @click="viewport.zoomBy(ZOOM_STEP)">
         <ZoomIn :size="13" aria-hidden="true" />
@@ -661,6 +798,191 @@ onBeforeUnmount(() => {
   outline-offset: 1px;
 }
 
+/* Hover card: bottom-left, clear of the zoom buttons on the right. */
+.wb-relation-graph-card {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: min(360px, calc(100% - 128px));
+  max-height: calc(100% - 12px);
+  padding: 6px 8px;
+  overflow: hidden;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wb-surface) 94%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  color: var(--wb-text);
+  font-size: 11px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.wb-relation-graph-card p {
+  margin: 0;
+}
+
+.wb-relation-graph-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+}
+
+.wb-relation-graph-card-head strong {
+  font-size: 12px;
+  font-weight: 680;
+  overflow-wrap: anywhere;
+}
+
+.wb-relation-graph-card-badge {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wb-accent) 14%, transparent);
+  color: var(--wb-accent);
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.wb-relation-graph-card-comment {
+  display: -webkit-box;
+  color: var(--wb-secondary-text);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Locked: the card takes the pointer so it can scroll and its table names
+   can be clicked. */
+.wb-relation-graph-card.is-locked {
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
+  background: var(--wb-surface);
+  overflow: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.wb-relation-graph-card-badge.is-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wb-relation-graph-card-section h4 {
+  margin: 2px 0 1px;
+  color: var(--wb-secondary-text);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.wb-relation-graph-card-section ul {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-relation-graph-card-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
+.wb-relation-graph-card-key {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  min-width: 0;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.wb-relation-graph-card-end {
+  min-width: 0;
+}
+
+.wb-relation-graph-card-arrow {
+  color: var(--wb-quiet-text);
+}
+
+.wb-relation-graph-card-table {
+  font: inherit;
+  font-weight: 650;
+  color: var(--wb-text);
+}
+
+button.wb-relation-graph-card-table {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--wb-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--wb-accent) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+button.wb-relation-graph-card-table:hover {
+  background: none;
+  text-decoration-color: currentColor;
+}
+
+button.wb-relation-graph-card-table:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+.wb-relation-graph-card-column {
+  color: var(--wb-secondary-text);
+}
+
+.wb-relation-graph-card-status {
+  font-size: 10px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-relation-graph-card-status.is-stale {
+  color: var(--wb-warning-text);
+}
+
+.wb-relation-graph-card-status.is-conflict {
+  color: var(--wb-danger);
+}
+
+.wb-relation-graph-card-line.is-quiet,
+.wb-relation-graph-card-line.is-hint {
+  color: var(--wb-quiet-text);
+}
+
+.wb-relation-graph-card-line.is-hint {
+  font-size: 10px;
+}
+
+.wb-relation-graph-node.is-locked .wb-relation-graph-dot {
+  stroke: var(--wb-accent);
+  stroke-width: 3;
+}
+
+.wb-relation-graph-card-enter-active,
+.wb-relation-graph-card-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.wb-relation-graph-card-enter-from,
+.wb-relation-graph-card-leave-to {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
 .wb-relation-graph-zoom-divider {
   width: 1px;
   margin: 3px 1px;
@@ -718,6 +1040,11 @@ onBeforeUnmount(() => {
 
   .wb-relation-graph-label {
     animation: none;
+  }
+
+  .wb-relation-graph-card-enter-active,
+  .wb-relation-graph-card-leave-active {
+    transition: none;
   }
 }
 </style>

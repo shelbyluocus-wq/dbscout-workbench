@@ -6,6 +6,7 @@ import {
   GRAPH_OPTIONS_STORAGE_KEY,
   graphLabel,
   graphNeighbors,
+  graphNodeRelations,
   graphStatuses,
   layoutRelationGraph,
   linkSegment,
@@ -153,6 +154,31 @@ test("an incoming-only first ring is centred on the left", () => {
   const layout = layoutRelationGraph(localRelationGraph(GRAPH, "hero", { outgoing: false }));
   const quest = layout.positions.get("quest");
   assert.ok(quest.x < 0 && Math.abs(quest.y) < 1e-9);
+});
+
+test("a table's drawn relations split into made, received and self, with their columns", () => {
+  const local = localRelationGraph({
+    edges: [
+      edge("item", "drop", { column: "drop_id" }),
+      edge("activity", "item", { column: "reward_pool", status: "unconfirmed" }),
+      edge("mail", "item", { column: "item_id" }),
+      edge("mail", "item", { column: "extra_item" }),
+      edge("item", "item", { column: "upgrade_to" }),
+      edge("item", "hidden", { column: "x", status: "rejected" }),
+    ],
+  }, "item");
+  const relations = graphNodeRelations(local, "item");
+  assert.deepEqual(relations.references.map((r) => `${r.sourceColumn}>${r.targetTable}`), ["drop_id>drop"]);
+  assert.deepEqual(
+    relations.referencedBy.map((r) => `${r.sourceTable}.${r.sourceColumn}:${r.status}`),
+    ["activity.reward_pool:unconfirmed", "mail.extra_item:confirmed", "mail.item_id:confirmed"],
+  );
+  assert.deepEqual(relations.self.map((r) => r.sourceColumn), ["upgrade_to"]);
+  // From a neighbour's side only its own lines count.
+  const mail = graphNodeRelations(local, "mail");
+  assert.equal(mail.references.length, 2);
+  assert.equal(mail.referencedBy.length, 0);
+  assert.deepEqual(graphNodeRelations(null, "item"), { references: [], referencedBy: [], self: [] });
 });
 
 test("neighbours, segments, statuses and labels", () => {
