@@ -1,8 +1,9 @@
 // Zoom and pan for an SVG graph whose drawing fits `fit` (graph units). The
 // viewBox is derived from a zoom factor and a center point; the wheel zooms
 // around the pointer, buttons and "fit" glide there, and dragging empty
-// space pans.
-import { computed, onBeforeUnmount, ref } from "vue";
+// space pans. "Fit" never blows a small drawing up past `maxFitScale` screen
+// pixels per unit, and a fitted view stays fitted while the host resizes.
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 export const MIN_ZOOM = 0.4;
 export const MAX_ZOOM = 5;
@@ -22,8 +23,15 @@ function easeOutCubic(progress) {
   return 1 - (1 - progress) ** 3;
 }
 
-export function clampZoom(value) {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+export function clampZoom(value, min = MIN_ZOOM) {
+  return Math.min(MAX_ZOOM, Math.max(min, value));
+}
+
+// The zoom that shows the whole drawing: 1 unless that would scale it past
+// `maxFitScale` (a two-table graph in a large window), then smaller.
+export function fitZoomFor(baseScale, maxFitScale = Infinity) {
+  const scale = Number(baseScale) || 0;
+  return scale > maxFitScale ? maxFitScale / scale : 1;
 }
 
 // The center that keeps `point` fixed on screen while zooming from `from` to `to`.
@@ -40,12 +48,14 @@ export function wheelZoomFactor(event) {
   return Math.exp(-(Number(event.deltaY) || 0) * unit * WHEEL_ZOOM_RATE);
 }
 
-export function useGraphViewport({ fit, hostSize, svgEl }) {
+export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity }) {
   const zoom = ref(1);
   const center = ref({ x: 0, y: 0 });
   const panning = ref(false);
   let pan = null;
   let glide = 0;
+  // True while the view shows the fitted drawing; the user's zoom or pan ends it.
+  let fitted = true;
 
   const viewBox = computed(() => {
     const width = fit.value.width / zoom.value;
@@ -60,6 +70,15 @@ export function useGraphViewport({ fit, hostSize, svgEl }) {
     return Math.min(width / viewBox.value.width, height / viewBox.value.height);
   });
 
+  // Screen pixels per graph unit at zoom 1.
+  const baseScale = computed(() => {
+    const { width, height } = hostSize.value;
+    if (!width || !height) return 0;
+    return Math.min(width / fit.value.width, height / fit.value.height);
+  });
+  const fitZoom = computed(() => fitZoomFor(baseScale.value, maxFitScale));
+  const minZoom = computed(() => Math.min(MIN_ZOOM, fitZoom.value * MIN_ZOOM));
+
   function stopGlide() {
     if (glide) globalThis.cancelAnimationFrame?.(glide);
     glide = 0;
@@ -67,7 +86,7 @@ export function useGraphViewport({ fit, hostSize, svgEl }) {
 
   function moveTo(nextZoom, nextCenter, { animate = true } = {}) {
     stopGlide();
-    const targetZoom = clampZoom(nextZoom);
+    const targetZoom = clampZoom(nextZoom, minZoom.value);
     if (!animate || prefersReducedMotion() || typeof globalThis.requestAnimationFrame !== "function") {
       zoom.value = targetZoom;
       center.value = { ...nextCenter };
@@ -96,13 +115,22 @@ export function useGraphViewport({ fit, hostSize, svgEl }) {
   }
 
   function resetView(options) {
-    moveTo(1, fitCenter(), options);
+    fitted = true;
+    moveTo(fitZoom.value, fitCenter(), options);
   }
 
   function zoomBy(factor, point = center.value, options) {
-    const target = clampZoom(zoom.value * factor);
+    fitted = false;
+    const target = clampZoom(zoom.value * factor, minZoom.value);
     moveTo(target, centerAfterZoom(center.value, point, zoom.value, target), options);
   }
+
+  // The host size arrives after mount and changes with the resize edge or the
+  // window; a fitted view keeps showing the whole drawing. (A new drawing is
+  // refitted by the caller, with a glide.)
+  watch(hostSize, () => {
+    if (fitted) moveTo(fitZoom.value, fitCenter(), { animate: false });
+  });
 
   function graphPoint(event) {
     const matrix = svgEl.value?.getScreenCTM?.();
@@ -124,6 +152,7 @@ export function useGraphViewport({ fit, hostSize, svgEl }) {
 
   function movePan(event) {
     if (!pan || event.pointerId !== pan.pointerId) return false;
+    fitted = false;
     center.value = {
       x: pan.center.x - (event.clientX - pan.clientX) / scale.value,
       y: pan.center.y - (event.clientY - pan.clientY) / scale.value,

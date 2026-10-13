@@ -95,23 +95,41 @@ capabilities:
   which config tables reference each other from three evidence sources:
   database column comments, a static scan of the bound game client's source
   code, and recognisable list formats in the data. A table tab's inspector
-  gains a relation page listing the rows the selected row points to and the
-  rows that point back, each with click-to-jump. Incoming row cards expand on demand into full
-  primary-key lists (50 rows per batch); composite-key jumps match every key.
-  `IncomingRelationRows.vue` renders these cards and `incomingRelationRows.js`
-  owns their paging and stale-request guards. A collapsible local relation
-  graph on the same page draws the current table's neighbours (depth 1–2,
-  outgoing/incoming toggles, at most 60 tables) coloured by relation status;
-  clicking a node opens that table. Tables can be dragged (neighbours follow
-  on springs and everything swings back to the ring layout on release), the
-  wheel zooms around the pointer, the bottom edge resizes the graph (height
-  remembered) and an enlarge button opens it in a large dialog. A corner card
-  lists the hovered table's drawn relations field by field
+  gains a relation page (its Fields/Relations switch shows the table's
+  relation count, amber when some need review) with three collapsible,
+  remembered sections: **Current row** (headed by the row's key and name)
+  lists the rows the selected row points to — each target a jump, several
+  targets openable at once — and the rows that point back. Incoming lines
+  show their count, expand on demand into key + name lists (50 rows per
+  batch), and open every referencing row as one filtered tab; columns that
+  do not reference the row fold into one quiet toggle. Composite-key jumps
+  match every key, and a jump to referenced rows selects the first of them so
+  the chain can be followed. `IncomingRelationRows.vue` renders these lines
+  and `incomingRelationRows.js` owns their paging and stale-request guards.
+  **Relation map** draws the current table's neighbours (depth 1–2, at most
+  60 tables) on a dot-grid canvas, circles tinted by side (tables it
+  references / tables referencing it, whose switches double as the colour
+  key) and lines coloured by relation status; clicking a node opens that
+  table. Tables can be dragged (neighbours follow on springs and everything
+  swings back to the ring layout on release), the wheel zooms around the
+  pointer, fitting never enlarges a small graph past a readable scale, the
+  bottom edge resizes the graph (height remembered), a help button explains
+  the gestures and an enlarge button opens it in a large dialog. A corner
+  card lists the hovered table's drawn relations field by field
   (`source.column → target.column` plus status); right-clicking a table locks
   the highlight and card (scrollable, table names open), right-clicking it
-  again or clicking empty space unlocks. The tab bar tags tables that
-  take part in relations, and a review dialog (with an activity-rail badge
-  counting what needs attention) lets the user confirm or reject candidates.
+  again or clicking empty space unlocks. **Field relations** lists every
+  relation by direction, waiting decisions first; each row opens its
+  evidence (comment text, client code file:line with the line itself, data
+  sample). A slim notice appears only when the client folder needs binding;
+  softer coverage notes and the way into review sit at the bottom. One hue
+  per direction (`--wb-relation-out*` / `--wb-relation-in*`, derived from the
+  hit palette) is shared by the page, the map and the relation chip. The tab
+  bar tags tables that take part in relations, and a review dialog (with an
+  activity-rail badge counting what needs attention; opened from a relation
+  page it reviews that table's database) summarises the totals, shows the
+  bound client folder or candidate folders with their table coverage, and
+  lets the user confirm or reject candidates with their evidence spelled out.
   Each MySQL server binds to its game client folder (auto-discovered across
   drives); client code changes that affect a relation mark it stale or
   conflicting for re-review while unrelated changes stay quiet. Bindings and
@@ -307,7 +325,9 @@ from UI):
   navigation for context menus); `relationFilter.js` (relation-tab filter
   normalization and JSON list-cell key matching mirrored from the backend);
   `configRelations.js` (relation status/reason copy, coverage gaps, table
-  labels, the tab chip and the per-connection capability gate);
+  labels, the tab chip, the per-connection capability gate, the row-name
+  column mirrored from the backend and the switch-badge summary);
+  `relationPanelPrefs.js` (remembered open state of the relation page sections);
   `relationGraph.js` (local relation subgraph by depth/direction, per-pair
   worst-status merge, node sizing, deterministic ring layout and persisted
   graph options); `relationGraphForces.js` (spring simulation anchored to
@@ -323,9 +343,13 @@ from UI):
 `BackupCenterDialog.vue` (shell + history tab, with the
 `BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
 `TableTransferDialog.vue` (one-click table transfer),
-`ConfigRelationsPanel.vue` (inspector relation page) /
+`ConfigRelationsPanel.vue` (inspector relation page, composed of
+`ConfigRelationRowSection.vue` and `ConfigRelationTableSection.vue` under the
+shared `RelationSectionHead.vue`) /
 `ConfigRelationsDialog.vue` (review dialog) / `ConfigRelationCard.vue`
-(shared relation card) / `ConfigRelationGraphSection.vue` +
+(shared relation item: compact list row in the inspector, detailed card in the
+dialog, with `RelationStatusBadge.vue` and `RelationEvidenceList.vue`) /
+`ConfigRelationGraphSection.vue` +
 `ConfigRelationGraph.vue` (local relation graph section and its SVG view,
 with `ConfigRelationGraphControls.vue`, `ConfigRelationGraphLegend.vue` and
 the enlarged `ConfigRelationGraphDialog.vue`),
@@ -347,6 +371,10 @@ Tab reorder animation measures geometry only while dragging.
 
 Grid regressions: `node scripts/test-grid-columns.mjs` and
 `DBSCOUT_GRID_TEST_URL=<preview URL> node scripts/test-grid-insert-drag.mjs`.
+Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
+`node scripts/test-relation-graph-browser.mjs` and
+`node scripts/test-incoming-relations-browser.mjs` against a Vite dev server
+(`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
 The performance sampler is `node scripts/perf/grid-interaction.mjs --base <URL>
 --scenario schema-800x60 --label <name>`; build a production preview first.
 Mock performance fixture rows support conflict-checked updates independently of

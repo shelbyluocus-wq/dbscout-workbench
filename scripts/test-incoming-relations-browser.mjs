@@ -26,7 +26,7 @@ try {
   await page.locator('[role="option"]').filter({ hasText: /^skill\b/ }).dblclick();
   const cells = page.locator('.wb-grid-row td[data-column-index="0"]');
   await cells.first().click();
-  await page.getByRole("tab", { name: "关联", exact: true }).click();
+  await page.getByRole("tab", { name: /^关联/ }).click();
   const panel = page.locator(".wb-relations-panel");
   await page.waitForFunction(() => !document.querySelector(".wb-relations-panel")?.textContent.includes("正在分析客户端代码"));
   const card = panel.locator(".wb-incoming-relation").filter({ hasText: "hero.skill_id" });

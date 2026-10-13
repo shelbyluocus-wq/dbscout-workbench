@@ -22,7 +22,7 @@ try {
   await itemRow.waitFor();
   await itemRow.dblclick();
   await page.locator('.wb-grid-row td[data-column-index="0"]').first().waitFor();
-  await page.getByRole("tab", { name: "关联", exact: true }).click();
+  await page.getByRole("tab", { name: /^关联/ }).click();
   await page.waitForFunction(() => !document.querySelector(".wb-relations-panel")?.textContent.includes("正在分析客户端代码"));
 
   const graph = page.locator(".wb-relation-graph");
@@ -36,7 +36,7 @@ try {
 
   // Hovering a neighbour keeps its own neighbourhood bright.
   const neighbour = graph.locator(".wb-relation-graph-node:not(.is-center)").first();
-  await neighbour.locator("circle").hover();
+  await neighbour.locator(".wb-relation-graph-dot").hover();
   await page.waitForFunction(() => document.querySelector(".wb-relation-graph.is-hovering"));
   assert.equal(await graph.locator(".wb-relation-graph-node.is-hovered").count(), 1);
   // The corner card names the hovered table and replaces the native tooltip.
@@ -51,7 +51,7 @@ try {
 
   // Right-click locks the card so the pointer can travel to it.
   const centerNode = graph.locator(".wb-relation-graph-node.is-center");
-  await centerNode.locator("circle").click({ button: "right" });
+  await centerNode.locator(".wb-relation-graph-dot").click({ button: "right" });
   assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 1);
   const lockedCard = graph.locator(".wb-relation-graph-card.is-locked");
   await lockedCard.waitFor();
@@ -61,13 +61,13 @@ try {
   assert.ok(await lockedCard.locator("button.wb-relation-graph-card-table").count() > 0, "other tables can be opened from the card");
   await graph.screenshot({ path: join(shots, "blackcat-relation-graph-locked.png") });
   // Right-clicking another table moves the lock; right-clicking it again releases it.
-  await neighbour.locator("circle").click({ button: "right" });
+  await neighbour.locator(".wb-relation-graph-dot").click({ button: "right" });
   assert.equal((await lockedCard.locator("strong").textContent()).trim(), hoveredName);
-  await neighbour.locator("circle").click({ button: "right" });
+  await neighbour.locator(".wb-relation-graph-dot").click({ button: "right" });
   await page.mouse.move(cardBox.x + 2, cardBox.y - 200);
   assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
   // A click on empty space releases a lock as well.
-  await centerNode.locator("circle").click({ button: "right" });
+  await centerNode.locator(".wb-relation-graph-dot").click({ button: "right" });
   await graph.locator(".wb-relation-graph-canvas").click({ position: { x: 8, y: 8 } });
   assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
 
@@ -77,15 +77,25 @@ try {
   await page.locator(".wb-relations-panel").screenshot({ path: join(shots, "blackcat-relation-graph-depth2.png") });
 
   const depthTwo = await nodes.count();
-  await section.getByRole("button", { name: "被谁引用", exact: true }).click();
+  await section.getByRole("button", { name: "被引用", exact: true }).click();
   await page.waitForFunction((count) => document.querySelectorAll(".wb-relation-graph-node").length < count, depthTwo);
-  const locked = section.getByRole("button", { name: "引用的表", exact: true });
+  const locked = section.getByRole("button", { name: "引用", exact: true });
   assert.equal(await locked.getAttribute("aria-disabled"), "true", "the last direction cannot be turned off");
-  await section.getByRole("button", { name: "被谁引用", exact: true }).click();
+  await section.getByRole("button", { name: "被引用", exact: true }).click();
 
   // Settings persist across reloads.
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("dbscout_relation_graph_options")));
   assert.deepEqual(saved, { collapsed: false, depth: 2, outgoing: true, incoming: true, height: 260 });
+
+  // The help button explains the gestures without leaving the graph.
+  await graph.locator(".wb-relation-graph-help button").hover();
+  const tip = graph.locator(".wb-relation-graph-help-tip");
+  await page.waitForFunction(() => getComputedStyle(document.querySelector(".wb-relation-graph-help-tip")).opacity === "1");
+  assert.match(await tip.textContent(), /滚轮缩放/);
+  await page.mouse.move(0, 0);
+
+  // Circles take the hue of their side of the current table.
+  assert.ok(await graph.locator(".wb-relation-graph-node.is-side-in, .wb-relation-graph-node.is-side-out, .wb-relation-graph-node.is-side-both").count() > 0);
 
   // The wheel zooms without a modifier; the fit button glides back.
   const canvas = graph.locator(".wb-relation-graph-canvas");
@@ -102,7 +112,7 @@ try {
   const dragged = graph.locator(".wb-relation-graph-node:not(.is-center)").first();
   const rest = await dragged.getAttribute("transform");
   const centerRest = await graph.locator(".wb-relation-graph-node.is-center").getAttribute("transform");
-  const box = await dragged.locator("circle").boundingBox();
+  const box = await dragged.locator(".wb-relation-graph-dot").boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 45, { steps: 8 });
@@ -146,7 +156,7 @@ try {
   // Clicking a neighbour opens that table.
   const target = graph.locator(".wb-relation-graph-node:not(.is-center)").first();
   const label = (await target.getAttribute("aria-label")).split(" · ")[0];
-  await target.locator("circle").click();
+  await target.locator(".wb-relation-graph-dot").click();
   await page.waitForFunction((name) =>
     document.querySelector(".wb-tab.active")?.textContent.includes(name), label);
 
@@ -155,7 +165,8 @@ try {
   await graph.locator(".wb-relation-graph-node").first().waitFor();
   await page.locator(".wb-relation-graph-section").screenshot({ path: join(shots, "blackcat-relation-graph-dark.png") });
 
-  await section.getByRole("button", { name: "收起关系图", exact: true }).click();
+  await section.locator(".wb-relation-section-toggle").click();
+  assert.equal(await section.locator(".wb-relation-section-toggle").getAttribute("aria-expanded"), "false");
   assert.equal(await graph.count(), 0);
   assert.deepEqual(errors, []);
   console.log(`Relation graph: ${depthOne} tables at depth 1, depth/direction toggles, persistence, zoom, open-on-click and collapse passed.`);

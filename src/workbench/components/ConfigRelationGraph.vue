@@ -1,13 +1,14 @@
 <script setup>
 // Draws one local relation graph: tables as circles sized by how many tables
-// reference them, the relations between two tables as one line coloured by
-// its worst status. Hovering, focusing or dragging a table keeps only it and
-// its direct neighbours bright. Tables can be dragged (neighbours follow on
-// springs and everything swings back on release), the wheel zooms around the
-// pointer, dragging empty space pans and the bottom edge resizes the graph.
+// reference them and tinted by which side of the current table they are on,
+// the relations between two tables as one line coloured by its worst status.
+// Hovering, focusing or dragging a table keeps only it and its direct
+// neighbours bright. Tables can be dragged (neighbours follow on springs and
+// everything swings back on release), the wheel zooms around the pointer,
+// dragging empty space pans and the bottom edge resizes the graph.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Lock, LocateFixed, Maximize2, ZoomIn, ZoomOut } from "lucide-vue-next";
+import { ArrowDownLeft, ArrowUpRight, CircleHelp, Lock, LocateFixed, Maximize2, Repeat2, ZoomIn, ZoomOut } from "lucide-vue-next";
 import {
   relationStatusLabel,
   relationTitle,
@@ -44,8 +45,15 @@ const MARKER_STATUSES = Object.freeze(["confirmed", "unconfirmed", "stale", "con
 const ACCENT_STATUSES = new Set(["confirmed", "unconfirmed"]);
 const ZOOM_STEP = 1.25;
 // Labels keep one on-screen size at every zoom level.
-const LABEL_SCREEN_SIZE = 10.5;
-const LABEL_SCREEN_GAP = 3;
+const LABEL_SCREEN_SIZE = 11;
+const LABEL_SCREEN_GAP = 4;
+// "Fit" stops enlarging a small graph here (screen pixels per graph unit).
+const MAX_FIT_SCALE = 1.6;
+// The dot grid behind the graph keeps one on-screen density at every zoom.
+const GRID_SCREEN_STEP = 18;
+const GRID_SCREEN_DOT = 0.9;
+// Halo drawn around the current table, in screen pixels.
+const CENTER_HALO = 5;
 // Past this many tables, outer-ring labels would pile up; they fade in as the
 // user zooms toward OUTER_LABEL_FULL_SCALE and show at once on hover/focus.
 const ALL_LABELS_NODE_LIMIT = 24;
@@ -54,10 +62,13 @@ const OUTER_LABEL_FULL_SCALE = 1.1;
 const DRAG_THRESHOLD_PX = 4;
 const UNLOCKED_ROWS_PER_SECTION = 5;
 const RESIZE_KEY_STEP = 20;
-// Share of the fitted height kept free below the drawing for the zoom buttons.
-const CONTROLS_RESERVE = 0.14;
+// Share of the fitted width kept free right of the drawing for the tool strip.
+const CONTROLS_RESERVE = 0.16;
 
 const markerPrefix = `wb-relation-graph-${Math.random().toString(36).slice(2, 10)}`;
+const helpId = `${markerPrefix}-help`;
+const HELP_LINES = Object.freeze(["navigate", "drag", "open", "lock", "reset", "size"]);
+const CARD_SECTION_ICONS = Object.freeze({ references: ArrowUpRight, referencedBy: ArrowDownLeft, self: Repeat2 });
 const hostEl = ref(null);
 const svgEl = ref(null);
 const hostSize = ref({ width: 0, height: 0 });
@@ -72,10 +83,10 @@ let resizeObserver = null;
 const layout = computed(() => layoutRelationGraph(props.graph, (id) => tableDisplayName(props.tables, id)));
 const fit = computed(() => {
   const bounds = layout.value?.bounds || { x: -100, y: -100, width: 200, height: 200 };
-  return { ...bounds, height: bounds.height * (1 + CONTROLS_RESERVE) };
+  return { ...bounds, width: bounds.width * (1 + CONTROLS_RESERVE) };
 });
 
-const viewport = useGraphViewport({ fit, hostSize, svgEl });
+const viewport = useGraphViewport({ fit, hostSize, svgEl, maxFitScale: MAX_FIT_SCALE });
 const { viewBox, scale, panning } = viewport;
 const forces = useGraphForces();
 
@@ -220,6 +231,7 @@ const drawnNodes = computed(() => {
       labelOpacity,
       labelY: node.radius + gap + fontSize * 0.8,
       fontSize,
+      halo: node.radius + CENTER_HALO / scale.value,
       faded: Boolean(active) && !highlighted,
       hovered: active === node.id,
       dragged: dragId.value === node.id,
@@ -227,6 +239,13 @@ const drawnNodes = computed(() => {
     }];
   });
 });
+
+// Dot grid in graph units, sized so it reads the same at every zoom level.
+const grid = computed(() => {
+  const step = GRID_SCREEN_STEP / scale.value;
+  return { step, dot: GRID_SCREEN_DOT / scale.value, offset: step / 2 };
+});
+const gridId = `${markerPrefix}-grid`;
 
 const drawnLinks = computed(() => {
   const current = positions.value;
@@ -256,6 +275,12 @@ function markerUrl(status) {
 function selfLoopPath(radius) {
   const spread = Math.max(3, radius * 0.45);
   return `M ${-spread} ${-radius + 1} C ${-spread * 2.2} ${-radius - 13}, ${spread * 2.2} ${-radius - 13}, ${spread} ${-radius + 1}`;
+}
+
+// Double-clicking empty space brings the whole graph back into view.
+function onDoubleClick(event) {
+  if (event.target?.closest?.(".wb-relation-graph-node")) return;
+  viewport.resetView();
 }
 
 function openNode(id) {
@@ -428,9 +453,12 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
-      @dblclick.self="viewport.resetView()"
+      @dblclick="onDoubleClick"
     >
       <defs>
+        <pattern :id="gridId" patternUnits="userSpaceOnUse" :width="grid.step" :height="grid.step">
+          <circle class="wb-relation-graph-grid-dot" :cx="grid.offset" :cy="grid.offset" :r="grid.dot" />
+        </pattern>
         <marker
           v-for="status in MARKER_STATUSES"
           :id="`${markerPrefix}-${status}`"
@@ -445,6 +473,14 @@ onBeforeUnmount(() => {
           <path d="M0,0 L10,5 L0,10 z" class="wb-relation-graph-arrow" :class="`is-${status}`" />
         </marker>
       </defs>
+      <rect
+        class="wb-relation-graph-grid"
+        :x="viewBox.x - viewBox.width"
+        :y="viewBox.y - viewBox.height"
+        :width="viewBox.width * 3"
+        :height="viewBox.height * 3"
+        :fill="`url(#${gridId})`"
+      />
       <g class="wb-relation-graph-links">
         <line
           v-for="link in drawnLinks"
@@ -467,6 +503,7 @@ onBeforeUnmount(() => {
           :class="{
             'is-center': node.depth === 0,
             'is-outer': node.depth === 2,
+            [`is-side-${node.side}`]: node.depth > 0,
             'is-faded': node.faded,
             'is-hovered': node.hovered,
             'is-dragged': node.dragged,
@@ -486,6 +523,7 @@ onBeforeUnmount(() => {
           @keydown.space.prevent="openNode(node.id)"
           @contextmenu.prevent.stop="toggleLock(node.id)"
         >
+          <circle v-if="node.depth === 0" class="wb-relation-graph-halo" :r="node.halo" />
           <path
             v-if="node.selfStatus"
             class="wb-relation-graph-loop"
@@ -523,8 +561,11 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <p v-if="card.comment" class="wb-relation-graph-card-comment">{{ card.comment }}</p>
-        <section v-for="section in card.sections" :key="section.key" class="wb-relation-graph-card-section">
-          <h4>{{ t(`relations.graph.card.${section.key}`, { count: section.count }) }}</h4>
+        <section v-for="section in card.sections" :key="section.key" class="wb-relation-graph-card-section" :class="`is-${section.key}`">
+          <h4>
+            <component :is="CARD_SECTION_ICONS[section.key]" :size="11" :stroke-width="2.2" aria-hidden="true" />
+            {{ t(`relations.graph.card.${section.key}`, { count: section.count }) }}
+          </h4>
           <ul>
             <li v-for="row in section.rows" :key="row.id" class="wb-relation-graph-card-row">
               <span class="wb-relation-graph-card-key">
@@ -554,26 +595,35 @@ onBeforeUnmount(() => {
             {{ t('relations.graph.card.more', { count: section.more }) }}
           </p>
         </section>
-        <p class="wb-relation-graph-card-line is-quiet">{{ t('relations.graph.card.total', { count: card.total }) }}</p>
-        <p class="wb-relation-graph-card-line is-hint">{{ cardHint(card) }}</p>
+        <footer class="wb-relation-graph-card-foot">
+          <span>{{ t('relations.graph.card.total', { count: card.total }) }}</span>
+          <span class="wb-relation-graph-card-hint">{{ cardHint(card) }}</span>
+        </footer>
       </div>
     </Transition>
     <div class="wb-relation-graph-zoom">
       <button type="button" :title="t('relations.graph.zoomIn')" :aria-label="t('relations.graph.zoomIn')" @click="viewport.zoomBy(ZOOM_STEP)">
-        <ZoomIn :size="13" aria-hidden="true" />
+        <ZoomIn :size="14" aria-hidden="true" />
       </button>
       <button type="button" :title="t('relations.graph.zoomOut')" :aria-label="t('relations.graph.zoomOut')" @click="viewport.zoomBy(1 / ZOOM_STEP)">
-        <ZoomOut :size="13" aria-hidden="true" />
+        <ZoomOut :size="14" aria-hidden="true" />
       </button>
       <button type="button" :title="t('relations.graph.fit')" :aria-label="t('relations.graph.fit')" @click="viewport.resetView()">
-        <LocateFixed :size="13" aria-hidden="true" />
+        <LocateFixed :size="14" aria-hidden="true" />
       </button>
-      <template v-if="!fill">
-        <span class="wb-relation-graph-zoom-divider" aria-hidden="true" />
-        <button type="button" :title="t('relations.graph.expand')" :aria-label="t('relations.graph.expand')" @click="emit('expand')">
-          <Maximize2 :size="13" aria-hidden="true" />
+      <span class="wb-relation-graph-zoom-divider" aria-hidden="true" />
+      <span class="wb-relation-graph-help">
+        <button type="button" :aria-label="t('relations.graph.help')" :aria-describedby="helpId">
+          <CircleHelp :size="14" aria-hidden="true" />
         </button>
-      </template>
+        <span :id="helpId" role="tooltip" class="wb-relation-graph-help-tip">
+          <strong>{{ t('relations.graph.help') }}</strong>
+          <span v-for="key in HELP_LINES" :key="key">{{ t(`relations.graph.help.${key}`) }}</span>
+        </span>
+      </span>
+      <button v-if="!fill" type="button" :title="t('relations.graph.expand')" :aria-label="t('relations.graph.expand')" @click="emit('expand')">
+        <Maximize2 :size="14" aria-hidden="true" />
+      </button>
     </div>
     <div
       v-if="!fill"
@@ -599,9 +649,9 @@ onBeforeUnmount(() => {
 .wb-relation-graph {
   position: relative;
   height: 260px;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--wb-field-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
   overflow: hidden;
 }
 
@@ -626,10 +676,14 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
+.wb-relation-graph-grid-dot {
+  fill: color-mix(in srgb, var(--wb-text) 13%, transparent);
+}
+
 .wb-relation-graph-link {
-  stroke: color-mix(in srgb, var(--wb-text) 30%, transparent);
-  stroke-width: 1.4;
-  transition: opacity 180ms ease, stroke 180ms ease, stroke-width 180ms ease;
+  stroke: color-mix(in srgb, var(--wb-text) 26%, transparent);
+  stroke-width: 1.3;
+  transition: opacity var(--wb-duration-base) ease, stroke var(--wb-duration-base) ease, stroke-width var(--wb-duration-base) ease;
 }
 
 .wb-relation-graph-link.is-accent {
@@ -657,7 +711,7 @@ onBeforeUnmount(() => {
 }
 
 .wb-relation-graph-arrow {
-  fill: color-mix(in srgb, var(--wb-text) 45%, transparent);
+  fill: color-mix(in srgb, var(--wb-text) 42%, transparent);
 }
 
 .wb-relation-graph-arrow.is-active {
@@ -675,7 +729,7 @@ onBeforeUnmount(() => {
 .wb-relation-graph-node {
   cursor: pointer;
   outline: none;
-  transition: opacity 180ms ease;
+  transition: opacity var(--wb-duration-base) ease;
 }
 
 .wb-relation-graph-node.is-center {
@@ -686,43 +740,80 @@ onBeforeUnmount(() => {
   opacity: 0.18;
 }
 
+/* Neighbours take the hue of their side of the current table: tables this
+   one references, tables that reference it, or both. */
 .wb-relation-graph-dot {
-  fill: color-mix(in srgb, var(--wb-text) 38%, var(--wb-surface));
-  stroke: var(--wb-surface);
+  fill: color-mix(in srgb, var(--wb-text) 10%, var(--wb-surface));
+  stroke: color-mix(in srgb, var(--wb-text) 38%, transparent);
   stroke-width: 1.5;
-  transition: fill 180ms ease;
+  transition: fill var(--wb-duration-base) ease, stroke var(--wb-duration-base) ease;
+}
+
+.wb-relation-graph-node.is-side-out .wb-relation-graph-dot {
+  fill: var(--wb-relation-out-soft);
+  stroke: var(--wb-relation-out);
+}
+
+.wb-relation-graph-node.is-side-in .wb-relation-graph-dot {
+  fill: var(--wb-relation-in-soft);
+  stroke: var(--wb-relation-in);
+}
+
+.wb-relation-graph-node.is-side-both .wb-relation-graph-dot {
+  fill: color-mix(in srgb, var(--wb-relation-out-soft) 50%, var(--wb-relation-in-soft));
+  stroke: color-mix(in srgb, var(--wb-relation-out) 50%, var(--wb-relation-in));
 }
 
 .wb-relation-graph-node.is-outer .wb-relation-graph-dot {
-  fill: color-mix(in srgb, var(--wb-text) 24%, var(--wb-surface));
+  fill-opacity: 0.7;
+  stroke-opacity: 0.6;
+  stroke-dasharray: 2.5 2;
 }
 
 .wb-relation-graph-node.is-center .wb-relation-graph-dot {
-  fill: var(--wb-accent);
+  fill: var(--wb-accent-control);
+  stroke: var(--wb-surface);
+  stroke-width: 2;
+}
+
+.wb-relation-graph-halo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--wb-accent-control) 22%, transparent);
+  stroke-width: 3;
 }
 
 .wb-relation-graph-node.has-stale .wb-relation-graph-dot {
   stroke: var(--wb-warning-border);
   stroke-width: 2.5;
+  stroke-dasharray: none;
 }
 
 .wb-relation-graph-node.has-conflict .wb-relation-graph-dot {
   stroke: var(--wb-danger);
   stroke-width: 2.5;
+  stroke-dasharray: none;
 }
 
-.wb-relation-graph-node.is-hovered .wb-relation-graph-dot,
-.wb-relation-graph-node:focus-visible .wb-relation-graph-dot {
-  fill: var(--wb-accent-strong);
+.wb-relation-graph-node.is-hovered:not(.is-center) .wb-relation-graph-dot,
+.wb-relation-graph-node:not(.is-center):focus-visible .wb-relation-graph-dot {
+  stroke-width: 2.5;
+  stroke-opacity: 1;
+  fill-opacity: 1;
 }
 
 .wb-relation-graph-node.is-dragged .wb-relation-graph-dot {
-  filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--wb-text) 35%, transparent));
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--wb-text) 30%, transparent));
 }
 
 .wb-relation-graph-node:focus-visible .wb-relation-graph-dot {
   stroke: var(--wb-accent);
   stroke-width: 3;
+}
+
+.wb-relation-graph-node.is-locked .wb-relation-graph-dot {
+  stroke: var(--wb-accent);
+  stroke-width: 3;
+  stroke-dasharray: none;
 }
 
 .wb-relation-graph-loop {
@@ -758,62 +849,112 @@ onBeforeUnmount(() => {
 .wb-relation-graph-node.is-center .wb-relation-graph-label,
 .wb-relation-graph-node.is-hovered .wb-relation-graph-label {
   fill: var(--wb-text);
-  font-weight: 650;
+  font-weight: 600;
 }
 
+/* Floating tool strip, stacked on the right edge so the hover card can use
+   the width. */
 .wb-relation-graph-zoom {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  right: 8px;
+  bottom: 10px;
   display: flex;
-  gap: 2px;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
   padding: 2px;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  background: var(--wb-surface);
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  box-shadow: 0 0 0 1px var(--wb-border), 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .wb-relation-graph-zoom button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  min-height: 22px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  cursor: pointer;
 }
 
-.wb-relation-graph-zoom button:hover {
+.wb-relation-graph-zoom button:hover:not(:disabled) {
   background: var(--wb-control-hover);
   color: var(--wb-text);
 }
 
 .wb-relation-graph-zoom button:focus-visible {
   outline: 2px solid var(--wb-accent);
-  outline-offset: 1px;
+  outline-offset: 0;
 }
 
-/* Hover card: bottom-left, clear of the zoom buttons on the right. */
+.wb-relation-graph-zoom-divider {
+  width: 14px;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--wb-border);
+}
+
+.wb-relation-graph-help {
+  position: relative;
+  display: inline-flex;
+}
+
+/* How to use the graph, on hover or keyboard focus of the help button. */
+.wb-relation-graph-help-tip {
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: -2px;
+  z-index: 2;
+  display: grid;
+  gap: 3px;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  translate: 3px 0;
+  transition: opacity var(--wb-duration-fast) ease, translate var(--wb-duration-fast) ease;
+}
+
+.wb-relation-graph-help-tip strong {
+  color: var(--wb-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wb-relation-graph-help:hover .wb-relation-graph-help-tip,
+.wb-relation-graph-help:focus-within .wb-relation-graph-help-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* Hover card: bottom-left, clear of the tool strip on the right. */
 .wb-relation-graph-card {
   position: absolute;
-  bottom: 6px;
-  left: 6px;
+  bottom: 8px;
+  left: 8px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-width: min(360px, calc(100% - 128px));
-  max-height: calc(100% - 12px);
-  padding: 6px 8px;
+  gap: 4px;
+  /* Kept to part of the canvas so tables beside a pinned card stay reachable. */
+  max-width: min(340px, 64%, calc(100% - 56px));
+  max-height: calc(100% - 16px);
+  padding: 8px 10px;
   overflow: hidden;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--wb-surface) 94%, transparent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
   color: var(--wb-text);
   font-size: 11px;
   line-height: 1.45;
@@ -827,23 +968,27 @@ onBeforeUnmount(() => {
 .wb-relation-graph-card-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 2px 6px;
 }
 
 .wb-relation-graph-card-head strong {
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 650;
   overflow-wrap: anywhere;
 }
 
 .wb-relation-graph-card-badge {
-  padding: 0 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--wb-accent) 14%, transparent);
-  color: var(--wb-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
   font-size: 10px;
-  font-weight: 620;
+  font-weight: 600;
+  line-height: 16px;
 }
 
 .wb-relation-graph-card-comment {
@@ -858,24 +1003,34 @@ onBeforeUnmount(() => {
 /* Locked: the card takes the pointer so it can scroll and its table names
    can be clicked. */
 .wb-relation-graph-card.is-locked {
-  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
-  background: var(--wb-surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border)), var(--wb-floating-shadow);
   overflow: auto;
   overscroll-behavior: contain;
   pointer-events: auto;
 }
 
-.wb-relation-graph-card-badge.is-lock {
-  display: inline-flex;
-  align-items: center;
+.wb-relation-graph-card-section {
+  display: grid;
   gap: 2px;
+  padding-top: 2px;
 }
 
 .wb-relation-graph-card-section h4 {
-  margin: 2px 0 1px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
-  font-weight: 650;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.wb-relation-graph-card-section.is-references h4 svg {
+  color: var(--wb-relation-out);
+}
+
+.wb-relation-graph-card-section.is-referencedBy h4 svg {
+  color: var(--wb-relation-in);
 }
 
 .wb-relation-graph-card-section ul {
@@ -883,7 +1038,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 1px;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 15px;
   list-style: none;
 }
 
@@ -900,7 +1055,7 @@ onBeforeUnmount(() => {
   align-items: baseline;
   gap: 0 4px;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
@@ -914,7 +1069,7 @@ onBeforeUnmount(() => {
 
 .wb-relation-graph-card-table {
   font: inherit;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--wb-text);
 }
 
@@ -923,14 +1078,14 @@ button.wb-relation-graph-card-table {
   padding: 0;
   border: none;
   background: none;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--wb-accent) 40%, transparent);
   text-underline-offset: 2px;
 }
 
-button.wb-relation-graph-card-table:hover {
+button.wb-relation-graph-card-table:hover:not(:disabled) {
   background: none;
   text-decoration-color: currentColor;
 }
@@ -947,6 +1102,7 @@ button.wb-relation-graph-card-table:focus-visible {
 
 .wb-relation-graph-card-status {
   font-size: 10px;
+  font-weight: 600;
   color: var(--wb-secondary-text);
 }
 
@@ -958,18 +1114,24 @@ button.wb-relation-graph-card-table:focus-visible {
   color: var(--wb-danger);
 }
 
-.wb-relation-graph-card-line.is-quiet,
-.wb-relation-graph-card-line.is-hint {
+.wb-relation-graph-card-line.is-quiet {
+  padding-left: 15px;
   color: var(--wb-quiet-text);
 }
 
-.wb-relation-graph-card-line.is-hint {
+.wb-relation-graph-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--wb-line);
+  color: var(--wb-quiet-text);
   font-size: 10px;
 }
 
-.wb-relation-graph-node.is-locked .wb-relation-graph-dot {
-  stroke: var(--wb-accent);
-  stroke-width: 3;
+.wb-relation-graph-card-hint {
+  margin-left: auto;
 }
 
 .wb-relation-graph-card-enter-active,
@@ -981,12 +1143,6 @@ button.wb-relation-graph-card-table:focus-visible {
 .wb-relation-graph-card-leave-to {
   opacity: 0;
   transform: translateY(3px);
-}
-
-.wb-relation-graph-zoom-divider {
-  width: 1px;
-  margin: 3px 1px;
-  background: var(--wb-border);
 }
 
 /* Bottom edge: drag to change the graph height. */
@@ -1008,7 +1164,7 @@ button.wb-relation-graph-card-table:focus-visible {
   width: 28px;
   height: 2px;
   border-radius: 1px;
-  background: var(--wb-border);
+  background: var(--wb-border-strong);
   transform: translateX(-50%);
   opacity: 0;
   transition: opacity 150ms ease, background 150ms ease;
@@ -1034,7 +1190,8 @@ button.wb-relation-graph-card-table:focus-visible {
   .wb-relation-graph-link,
   .wb-relation-graph-node,
   .wb-relation-graph-dot,
-  .wb-relation-graph-resize::after {
+  .wb-relation-graph-resize::after,
+  .wb-relation-graph-help-tip {
     transition: none;
   }
 

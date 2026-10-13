@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   Binary,
   Braces,
@@ -19,6 +19,7 @@ import {
 } from "lucide-vue-next";
 import { columnName } from "../utils/normalize.js";
 import { columnTypeKind } from "../utils/columnTypes.js";
+import { relationTableSummary } from "../utils/configRelations.js";
 import { visibleTargetScrollDelta } from "../utils/inspectorScroll.js";
 import { highlightSearchText } from "../utils/searchMatch.js";
 import { createTableMentionIndex } from "../utils/tableMentions.js";
@@ -76,6 +77,53 @@ const mentionTables = computed(() => createTableMentionIndex(props.schema, {
   connectionId: props.activeTab?.connectionId,
   database: props.activeTab?.database,
 }));
+
+// Badge on the relation switch: how many relations this table takes part in,
+// and a mark when some wait for review. Read after a short pause so flipping
+// through tabs does not ask for every table on the way; cached per revision.
+const RELATION_SUMMARY_DELAY_MS = 150;
+const relationScope = computed(() => ({
+  connectionId: String(props.activeTab?.connectionId || ""),
+  database: String(props.activeTab?.database || ""),
+}));
+const relationRevision = computed(() => (showRelationsToggle.value
+  ? Number(props.relations?.entryFor?.(relationScope.value)?.revision) || 0
+  : 0));
+const relationSummary = ref(null);
+let relationSummaryToken = 0;
+let relationSummaryTimer = null;
+
+watch(
+  [showRelationsToggle, () => relationScope.value.connectionId, () => relationScope.value.database, () => props.activeTab?.tableName],
+  () => {
+    relationSummary.value = null;
+  },
+);
+
+watch(
+  [showRelationsToggle, () => relationScope.value.connectionId, () => relationScope.value.database, () => props.activeTab?.tableName, relationRevision],
+  () => {
+    clearTimeout(relationSummaryTimer);
+    const token = ++relationSummaryToken;
+    if (!showRelationsToggle.value) return;
+    const scope = relationScope.value;
+    const tableName = String(props.activeTab?.tableName || "");
+    relationSummaryTimer = setTimeout(async () => {
+      try {
+        const data = await props.relations.tableRelations(scope, tableName);
+        if (token === relationSummaryToken) relationSummary.value = relationTableSummary(data);
+      } catch {
+        if (token === relationSummaryToken) relationSummary.value = null;
+      }
+    }, RELATION_SUMMARY_DELAY_MS);
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  clearTimeout(relationSummaryTimer);
+  relationSummaryToken += 1;
+});
 
 function openMentionedTable(table) {
   if (!table?.name) return;
@@ -302,7 +350,15 @@ watch(
         :aria-selected="effectiveView === 'relations'"
         :class="{ 'is-active': effectiveView === 'relations' }"
         @click="inspectorView = 'relations'"
-      >{{ t('relations.toggle.relations') }}</button>
+      >
+        {{ t('relations.toggle.relations') }}
+        <span
+          v-if="relationSummary?.total"
+          class="wb-inspector-view-count"
+          :class="{ 'needs-review': relationSummary.review }"
+          :title="relationSummary.review ? t('relations.toggle.review', { count: relationSummary.review }) : undefined"
+        >{{ relationSummary.total }}</span>
+      </button>
     </div>
     <ConfigRelationsPanel
       v-if="showRelationsToggle && effectiveView === 'relations'"
@@ -311,7 +367,7 @@ watch(
       :relations="relations"
       :mention-tables="mentionTables"
       @open-relation="emit('open-relation', $event)"
-      @open-review="emit('open-relations-review')"
+      @open-review="emit('open-relations-review', relationScope)"
       @open-table="emit('open-table', $event)"
     />
     <template v-if="effectiveView === 'fields'">

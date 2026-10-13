@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MAX_ZOOM, MIN_ZOOM, centerAfterZoom, clampZoom, wheelZoomFactor } from "./useGraphViewport.js";
+import { MAX_ZOOM, MIN_ZOOM, centerAfterZoom, clampZoom, fitZoomFor, wheelZoomFactor } from "./useGraphViewport.js";
 
 test("zooming keeps the point under the pointer in place", () => {
   const center = { x: 0, y: 0 };
@@ -16,6 +16,14 @@ test("zoom stays within its limits", () => {
   assert.equal(clampZoom(100), MAX_ZOOM);
   assert.equal(clampZoom(0.01), MIN_ZOOM);
   assert.equal(clampZoom(1.5), 1.5);
+  assert.equal(clampZoom(0.1, 0.05), 0.1, "a lowered floor lets a shrunken fit zoom out further");
+});
+
+test("fitting never blows a small drawing up past the readable scale", () => {
+  assert.equal(fitZoomFor(1.2, 1.6), 1, "a drawing that already fits is shown as is");
+  assert.equal(fitZoomFor(4, 1.6), 0.4);
+  assert.equal(fitZoomFor(0, 1.6), 1, "an unmeasured host keeps the default");
+  assert.equal(fitZoomFor(9), 1, "no limit by default");
 });
 
 test("wheel up zooms in, wheel down zooms out, line deltas count like pixels", () => {

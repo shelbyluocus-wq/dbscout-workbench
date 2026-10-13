@@ -5,7 +5,6 @@
 // state. The enlarged view shares the same options.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import { tableDisplayName } from "../utils/configRelations.js";
 import {
   graphStatuses,
@@ -13,6 +12,7 @@ import {
   localRelationGraph,
   saveGraphOptions,
 } from "../utils/relationGraph.js";
+import RelationSectionHead from "./RelationSectionHead.vue";
 import ConfigRelationGraph from "./ConfigRelationGraph.vue";
 import ConfigRelationGraphControls from "./ConfigRelationGraphControls.vue";
 import ConfigRelationGraphDialog from "./ConfigRelationGraphDialog.vue";
@@ -30,6 +30,7 @@ const emit = defineEmits(["open-table"]);
 const options = reactive(loadGraphOptions());
 watch(options, () => saveGraphOptions(options), { deep: true });
 
+const bodyId = `wb-relation-graph-${Math.random().toString(36).slice(2, 10)}`;
 const sectionEl = ref(null);
 const graphData = ref(null);
 const error = ref("");
@@ -74,7 +75,11 @@ const local = computed(() => (graphData.value ? localRelationGraph(graphData.val
 const hasNeighbors = computed(() => (local.value?.nodes.length || 0) > 1);
 const statuses = computed(() => graphStatuses(local.value));
 const tables = computed(() => graphData.value?.tables || {});
+const tableCount = computed(() => (hasNeighbors.value ? local.value.nodes.length - 1 : null));
 const dialogTitle = computed(() => t("relations.graph.expandedTitle", { name: tableDisplayName(tables.value, props.tableName) }));
+const emptyText = computed(() => (options.outgoing && options.incoming
+  ? t("relations.graph.empty")
+  : t("relations.graph.emptyDirection")));
 
 function setDepth(depth) {
   options.depth = depth;
@@ -92,38 +97,27 @@ function openExpanded() {
 </script>
 
 <template>
-  <section ref="sectionEl" class="wb-relation-graph-section">
-    <div class="wb-relation-graph-head">
-      <button
-        type="button"
-        class="wb-relation-graph-collapse"
-        :aria-expanded="!options.collapsed"
-        :aria-label="options.collapsed ? t('relations.graph.show') : t('relations.graph.hide')"
-        @click="options.collapsed = !options.collapsed"
-      >
-        <component :is="options.collapsed ? ChevronRight : ChevronDown" :size="12" aria-hidden="true" />
-        <span>{{ t('relations.graph.title') }}</span>
-      </button>
-      <ConfigRelationGraphControls
-        v-if="!options.collapsed"
-        :depth="options.depth"
-        :outgoing="options.outgoing"
-        :incoming="options.incoming"
-        @set-depth="setDepth"
-        @toggle-direction="toggleDirection"
-      />
-    </div>
+  <section ref="sectionEl" class="wb-relations-block wb-relation-graph-section">
+    <RelationSectionHead
+      :label="t('relations.graph.title')"
+      :count="tableCount"
+      :open="!options.collapsed"
+      :controls="bodyId"
+      @toggle="options.collapsed = !options.collapsed"
+    >
+      <ConfigRelationGraphControls v-if="!options.collapsed" :depth="options.depth" @set-depth="setDepth" />
+    </RelationSectionHead>
 
-    <template v-if="!options.collapsed">
-      <p v-if="error" class="wb-relation-graph-note is-error" role="alert">{{ error }}</p>
+    <div v-if="!options.collapsed" :id="bodyId" class="wb-relation-graph-body">
+      <p v-if="error" class="wb-relations-error" role="alert">{{ error }}</p>
       <div
         v-else-if="!local"
         class="wb-relation-graph-placeholder"
         :style="{ height: `${options.height}px` }"
       >{{ loading ? t('relations.loading') : '' }}</div>
-      <p v-else-if="!hasNeighbors" class="wb-relation-graph-note">{{ t('relations.graph.empty') }}</p>
       <template v-else>
         <ConfigRelationGraph
+          v-if="hasNeighbors"
           :graph="local"
           :tables="tables"
           :height="options.height"
@@ -131,9 +125,17 @@ function openExpanded() {
           @expand="openExpanded"
           @open-table="emit('open-table', $event)"
         />
-        <ConfigRelationGraphLegend :statuses="statuses" :hidden="local.hidden" />
+        <div v-else class="wb-relation-graph-placeholder is-empty">{{ emptyText }}</div>
+        <!-- The switches stay even when one direction leaves nothing to draw. -->
+        <ConfigRelationGraphLegend
+          :statuses="statuses"
+          :hidden="local.hidden"
+          :outgoing="options.outgoing"
+          :incoming="options.incoming"
+          @toggle-direction="toggleDirection"
+        />
       </template>
-    </template>
+    </div>
 
     <ConfigRelationGraphDialog
       :open="expanded && hasNeighbors"
@@ -152,65 +154,26 @@ function openExpanded() {
 </template>
 
 <style scoped>
-.wb-relation-graph-section {
+.wb-relation-graph-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.wb-relation-graph-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 8px;
-  padding-top: 4px;
-}
-
-.wb-relation-graph-collapse {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-height: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--wb-secondary-text);
-  font-size: 11px;
-  font-weight: 620;
-  cursor: pointer;
-}
-
-.wb-relation-graph-collapse:hover,
-.wb-relation-graph-collapse:active {
-  background: none;
-  color: var(--wb-text);
-}
-
-.wb-relation-graph-collapse:focus-visible {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: 1px;
-  border-radius: 3px;
 }
 
 .wb-relation-graph-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed var(--wb-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--wb-field-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: 11px;
 }
 
-.wb-relation-graph-note {
-  margin: 0;
-  color: var(--wb-secondary-text);
-  font-size: 11.5px;
-}
-
-.wb-relation-graph-note.is-error {
-  color: var(--wb-danger);
-  overflow-wrap: anywhere;
+.wb-relation-graph-placeholder.is-empty {
+  min-height: 72px;
+  padding: 12px 16px;
+  text-align: center;
 }
 </style>

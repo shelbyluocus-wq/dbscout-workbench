@@ -1,63 +1,378 @@
 <script setup>
-import { onBeforeUnmount, watch } from "vue";
-import { ChevronRight } from "lucide-vue-next";
+// One "referenced by" line on the relation page: which column of which table
+// points at the selected row and how many rows do. It expands into the
+// referencing rows (key and name, 50 at a time), each a jump, and a button
+// opens all of them as one filtered tab.
+import { computed, onBeforeUnmount, watch } from "vue";
+import { ArrowRight, ChevronRight, LoaderCircle, SquareArrowOutUpRight } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { createIncomingRelationRows, fetchIncomingRelationRows } from "../incomingRelationRows.js";
 
 const props = defineProps({
   context: { type: Object, required: true },
+  // Rows that reference the selected row; null when counting failed.
   count: { type: Number, default: null },
-  title: { type: String, required: true },
+  // The count is still on its way.
+  counting: { type: Boolean, default: false },
+  table: { type: String, required: true },
+  column: { type: String, required: true },
 });
-const emit = defineEmits(["open-row"]);
+const emit = defineEmits(["open-row", "open-all"]);
 const { state, reset, toggle, loadMore } = createIncomingRelationRows(
   (offset) => fetchIncomingRelationRows(props.context, offset),
 );
 watch(() => JSON.stringify(props.context), reset, { flush: "sync" });
 onBeforeUnmount(reset);
+
+const empty = computed(() => !props.counting && props.count === 0);
+const listKind = computed(() => props.context?.relation?.kind === "list");
+const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count > 0
+  ? t("relations.incoming.openAll", { count: props.count })
+  : t("relations.incoming.openAllUnknown")));
 </script>
 
 <template>
-  <article class="wb-incoming-relation">
-    <button class="wb-incoming-toggle" type="button" :aria-expanded="state.expanded" :disabled="count === 0" @click="toggle">
-      <ChevronRight :size="14" :class="{ 'is-expanded': state.expanded }" aria-hidden="true" />
-      <span class="wb-incoming-summary">
-        <span class="wb-incoming-title" :title="title">{{ title }}</span>
-        <span class="wb-incoming-count">{{ count === null ? t('relations.incoming.countFailed') : t('relations.incoming.rows', { count }) }}</span>
-      </span>
-    </button>
+  <article class="wb-incoming-relation" :class="{ 'is-open': state.expanded, 'is-empty': empty }">
+    <div class="wb-incoming-head">
+      <button
+        class="wb-incoming-toggle"
+        type="button"
+        :aria-expanded="state.expanded"
+        :disabled="empty"
+        :title="`${table}.${column}`"
+        @click="toggle"
+      >
+        <ChevronRight :size="12" :stroke-width="2.2" class="wb-incoming-chevron" :class="{ 'is-open': state.expanded }" aria-hidden="true" />
+        <span class="wb-incoming-title">
+          <span class="wb-incoming-table">{{ table }}</span><span class="wb-incoming-column">.{{ column }}</span>
+        </span>
+        <span v-if="listKind" class="wb-incoming-tag">{{ t('relations.kindList') }}</span>
+        <span v-if="counting" class="wb-incoming-count is-pending" role="status">
+          <LoaderCircle :size="11" class="wb-incoming-spin" aria-hidden="true" />
+          <span class="wb-visually-hidden">{{ t('relations.incoming.counting') }}</span>
+        </span>
+        <span v-else-if="count === null" class="wb-incoming-count is-failed">{{ t('relations.incoming.countFailed') }}</span>
+        <span v-else class="wb-incoming-count">{{ t('relations.incoming.rows', { count }) }}</span>
+      </button>
+      <button
+        v-if="!empty"
+        type="button"
+        class="wb-incoming-open"
+        :title="openAllLabel"
+        :aria-label="openAllLabel"
+        @click="emit('open-all')"
+      >
+        <SquareArrowOutUpRight :size="13" aria-hidden="true" />
+      </button>
+    </div>
     <div v-if="state.expanded" class="wb-incoming-details" :aria-busy="state.loading">
-      <template v-for="row in state.rows" :key="`${row.ordinal}:${row.key}`">
-        <button v-if="row.identity" type="button" class="wb-incoming-key" :title="t('relations.incoming.openRow')" @click="emit('open-row', row)">{{ row.label }}</button>
-        <span v-else class="wb-incoming-muted">{{ t('relations.incoming.noKey', { row: row.ordinal }) }}</span>
-      </template>
-      <span v-if="state.loading" class="wb-incoming-muted" role="status">{{ t('relations.loading') }}</span>
-      <template v-else-if="state.error">
-        <span class="wb-incoming-error" role="alert">{{ state.error }}</span>
+      <ul v-if="state.rows.length" class="wb-incoming-list">
+        <li v-for="row in state.rows" :key="`${row.ordinal}:${row.key}`">
+          <button
+            v-if="row.identity"
+            type="button"
+            class="wb-incoming-row"
+            :title="t('relations.incoming.openRow')"
+            @click="emit('open-row', row)"
+          >
+            <span class="wb-incoming-key">{{ row.label }}</span>
+            <span v-if="row.name" class="wb-incoming-name">{{ row.name }}</span>
+            <ArrowRight :size="12" class="wb-incoming-go" aria-hidden="true" />
+          </button>
+          <span v-else class="wb-incoming-note">{{ t('relations.incoming.noKey', { row: row.ordinal }) }}</span>
+        </li>
+      </ul>
+      <p v-if="state.loading" class="wb-incoming-note" role="status">
+        <LoaderCircle :size="12" class="wb-incoming-spin" aria-hidden="true" />{{ t('relations.loading') }}
+      </p>
+      <p v-else-if="state.error" class="wb-incoming-note is-error" role="alert">
+        {{ state.error }}
         <button type="button" class="wb-incoming-more" @click="loadMore">{{ t('relations.incoming.retry') }}</button>
-      </template>
-      <span v-else-if="state.loaded && !state.rows.length" class="wb-incoming-muted">{{ t('relations.incoming.empty') }}</span>
+      </p>
+      <p v-else-if="state.loaded && !state.rows.length" class="wb-incoming-note">{{ t('relations.incoming.empty') }}</p>
       <button v-else-if="state.hasMore" type="button" class="wb-incoming-more" @click="loadMore">{{ t('relations.incoming.more') }}</button>
     </div>
   </article>
 </template>
 
 <style scoped>
-.wb-incoming-relation { border: 1px solid var(--wb-border); border-radius: 6px; background: var(--wb-field-surface); }
-.wb-incoming-toggle { display: flex; align-items: center; gap: 5px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--wb-text); cursor: pointer; }
-.wb-incoming-toggle:disabled { opacity: 1; cursor: default; }
-.wb-incoming-toggle:disabled svg { visibility: hidden; }
-.wb-incoming-toggle svg { flex: none; }
-.wb-incoming-toggle svg.is-expanded { transform: rotate(90deg); }
-.wb-incoming-summary { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.wb-incoming-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
-.wb-incoming-count { color: var(--wb-accent-strong); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.wb-incoming-details { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-height: 260px; overflow: auto; padding: 6px 8px 8px 27px; border-top: 1px solid var(--wb-border); }
-.wb-incoming-details > * { flex: none; }
-.wb-incoming-key, .wb-incoming-more { max-width: 100%; min-height: 0; padding: 2px 5px; border: 1px solid var(--wb-border); border-radius: 4px; background: var(--wb-control); color: var(--wb-text); font-size: 11.5px; text-align: left; overflow-wrap: anywhere; white-space: normal; cursor: pointer; user-select: text; }
-.wb-incoming-key:hover, .wb-incoming-more:hover { border-color: var(--wb-accent); }
-.wb-incoming-more { color: var(--wb-accent-strong); }
-.wb-incoming-muted, .wb-incoming-error { font-size: 11.5px; overflow-wrap: anywhere; }
-.wb-incoming-muted { color: var(--wb-secondary-text); }
-.wb-incoming-error { color: var(--wb-danger); }
+.wb-incoming-relation {
+  border-radius: 6px;
+  transition: background-color var(--wb-duration-fast) ease;
+}
+
+.wb-incoming-relation.is-open {
+  background: var(--wb-list-hover);
+}
+
+.wb-incoming-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  border-radius: 6px;
+}
+
+.wb-incoming-head:hover {
+  background: var(--wb-list-hover);
+}
+
+.wb-incoming-relation.is-open .wb-incoming-head:hover {
+  background: none;
+}
+
+.wb-incoming-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px 0 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.wb-incoming-toggle:hover:not(:disabled),
+.wb-incoming-toggle:active:not(:disabled) {
+  background: transparent;
+}
+
+.wb-incoming-toggle:disabled {
+  opacity: 1;
+  color: var(--wb-secondary-text);
+}
+
+.wb-incoming-toggle:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-incoming-chevron {
+  flex: none;
+  color: var(--wb-quiet-text);
+  transition: transform var(--wb-duration-fast) var(--wb-ease-out);
+}
+
+.wb-incoming-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.wb-incoming-toggle:disabled .wb-incoming-chevron {
+  visibility: hidden;
+}
+
+.wb-incoming-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-incoming-table {
+  color: var(--wb-identifier-text);
+  font-weight: 600;
+}
+
+.wb-incoming-column {
+  color: var(--wb-secondary-text);
+}
+
+.wb-incoming-toggle:disabled .wb-incoming-table {
+  color: var(--wb-secondary-text);
+  font-weight: 500;
+}
+
+.wb-incoming-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.wb-incoming-count {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--wb-relation-in-soft);
+  color: var(--wb-relation-in);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.wb-incoming-relation.is-empty .wb-incoming-count {
+  background: none;
+  color: var(--wb-quiet-text);
+  font-weight: 500;
+}
+
+.wb-incoming-count.is-pending {
+  background: none;
+  color: var(--wb-quiet-text);
+}
+
+.wb-incoming-count.is-failed {
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+}
+
+.wb-incoming-open {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+}
+
+.wb-incoming-open:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-incoming-details {
+  display: grid;
+  gap: 4px;
+  padding: 0 6px 6px 21px;
+}
+
+.wb-incoming-list {
+  display: grid;
+  max-height: 248px;
+  margin: 0;
+  padding: 2px 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+}
+
+.wb-incoming-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: 11px;
+  text-align: left;
+  user-select: text;
+}
+
+.wb-incoming-row:hover:not(:disabled) {
+  background: var(--wb-list-hover);
+}
+
+.wb-incoming-row:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-incoming-key {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--wb-identifier-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-incoming-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-secondary-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-incoming-go {
+  flex: none;
+  margin-left: auto;
+  color: var(--wb-quiet-text);
+  opacity: 0;
+  transition: opacity var(--wb-duration-fast) ease;
+}
+
+.wb-incoming-row:hover .wb-incoming-go,
+.wb-incoming-row:focus-visible .wb-incoming-go {
+  opacity: 1;
+}
+
+.wb-incoming-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 2px 8px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.wb-incoming-note.is-error {
+  color: var(--wb-danger-text);
+}
+
+.wb-incoming-more {
+  justify-self: start;
+  min-height: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--wb-accent-strong);
+  font-size: 11px;
+}
+
+.wb-incoming-spin {
+  flex: none;
+  animation: wb-incoming-rotate 0.9s linear infinite;
+}
+
+@keyframes wb-incoming-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-incoming-relation,
+  .wb-incoming-chevron,
+  .wb-incoming-go {
+    transition: none;
+  }
+
+  .wb-incoming-spin {
+    animation: none;
+  }
+}
 </style>

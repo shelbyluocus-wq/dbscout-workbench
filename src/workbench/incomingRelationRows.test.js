@@ -34,6 +34,20 @@ test("details use the original list relation filter, preserve composite keys, an
   });
 });
 
+test("referencing rows read by name as well as by key", async () => {
+  const page = await fetchIncomingRelationRows(context, 0, async (command) => (command === "open_table_session" ? {
+    sessionId: "named",
+    primaryKeys: ["id"],
+    columns: [
+      { column_name: "id", column_type: "int", is_primary_key: true },
+      { column_name: "name", column_type: "varchar(64)" },
+    ],
+    rows: [{ id: "3", name: "  Seven-day  login " }, { id: "4", name: null }],
+    hasMore: false,
+  } : null));
+  assert.deepEqual(page.rows.map((row) => [row.label, row.name]), [["id=3", "Seven-day login"], ["id=4", ""]]);
+});
+
 test("no-key records are explicitly non-navigable and empty pages cannot keep loading", async () => {
   const invoke = async (command) => command === "open_table_session"
     ? { sessionId: "s", columns: [{ column_name: "name" }], rows: [{ name: "hello" }], hasMore: false }

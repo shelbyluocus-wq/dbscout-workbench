@@ -12264,20 +12264,35 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-text);
 }
 
-/* Relation filter chip: same pill language as the sort chip, distinct hue so
-   the two filters never read as the same thing. */
+/* Config relations: one restrained hue per direction (outgoing references,
+   incoming references), shared by the relation page, the relation graph and
+   the relation chip. Declared on the theme roots so the dark overrides of the
+   hit palette resolve here, including teleported surfaces. */
+.mysql-workbench,
+.wb-floating-themed {
+  --wb-relation-out: var(--wb-hit-table-name-text);
+  --wb-relation-out-soft: var(--wb-hit-table-name-bg);
+  --wb-relation-out-line: var(--wb-hit-table-name-border);
+  --wb-relation-in: var(--wb-hit-column-name-text);
+  --wb-relation-in-soft: var(--wb-hit-column-name-bg);
+  --wb-relation-in-line: var(--wb-hit-column-name-border);
+}
+
+/* Relation filter chip: same pill language as the sort chip, in the hue of
+   the relation it follows so it never reads as a warning. */
 .wb-relation-chip {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   height: 24px;
   padding: 0 4px 0 8px;
-  border: 1px solid var(--wb-warning-border);
+  border: 1px solid var(--wb-relation-out-line);
   border-radius: 12px;
-  background: var(--wb-warning-surface);
-  color: var(--wb-warning-text);
-  font-size: 11.5px;
+  background: var(--wb-relation-out-soft);
+  color: var(--wb-relation-out);
+  font-size: 11px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -12287,41 +12302,351 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-relation-chip .wb-sort-chip-clear {
-  color: var(--wb-warning-text);
+  color: var(--wb-relation-out);
 }
 
 .wb-relation-chip .wb-sort-chip-clear:hover {
-  background: var(--wb-warning-border);
+  background: var(--wb-relation-out-line);
+  color: var(--wb-text);
 }
 
-/* Compact action button shared by the relation cards and the review dialog. */
-.wb-relations-action {
+/* ── Relation page (inspector) ─────────────────────────────────────── */
+
+.wb-relations-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px 10px 12px;
+  overflow: auto;
+}
+
+.wb-relations-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 8px;
+}
+
+.wb-relations-block + .wb-relations-block {
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-relations-block-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-relations-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wb-relations-group-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 6px 3px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-relations-group-label.is-outgoing svg {
+  color: var(--wb-relation-out);
+}
+
+.wb-relations-group-label.is-incoming svg {
+  color: var(--wb-relation-in);
+}
+
+.wb-relations-group-count {
+  color: var(--wb-quiet-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-relations-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.wb-relations-hint svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--wb-quiet-text);
+}
+
+.wb-relations-hint.is-quiet {
+  font-size: 11px;
+}
+
+.wb-relations-note {
+  margin: 0;
+  padding: 2px 6px 4px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Lined up with the text of the group label above it. */
+.wb-relations-note.is-inset {
+  margin-top: -3px;
+  padding-left: 23px;
+}
+
+.wb-relations-error {
+  margin: 0;
+  padding: 2px 6px;
+  color: var(--wb-danger);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wb-relations-attention {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-warning-text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wb-relations-quiet-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
   min-height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 4px;
-  background: var(--wb-pane-header);
+  height: 22px;
+  padding: 0 6px 0 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-relations-quiet-toggle:hover:not(:disabled) {
+  background: var(--wb-list-hover);
   color: var(--wb-text);
-  font-size: 11.5px;
-  cursor: pointer;
 }
 
-.wb-relations-action.is-confirm {
-  border-color: var(--wb-accent);
-  color: var(--wb-accent-strong);
+.wb-relations-quiet-toggle svg {
+  transition: transform var(--wb-duration-fast) var(--wb-ease-out);
 }
 
-.wb-relations-action:hover:not(:disabled) {
-  border-color: var(--wb-accent);
+.wb-relations-quiet-toggle svg.is-open {
+  transform: rotate(90deg);
 }
 
-.wb-relations-action:disabled {
-  opacity: 0.6;
-  cursor: default;
+.wb-relations-quiet-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 6px 4px 26px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  list-style: none;
+}
+
+.wb-relations-quiet-table {
+  color: var(--wb-text);
+}
+
+.wb-relations-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 6px;
+  padding: 7px 8px 7px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.wb-relations-notice.is-warning {
+  background: var(--wb-warning-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-warning-border) 55%, transparent);
+  color: var(--wb-warning-text);
+}
+
+.wb-relations-notice.is-info {
+  padding-block: 4px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-relations-notice-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.wb-relations-notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wb-relations-notice-action {
+  flex: none;
+  min-height: 20px;
+  height: 20px;
+  margin: -1px 0;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--wb-warning-border) 80%, transparent);
+  border-radius: 5px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: 11px;
+}
+
+.wb-relations-spin {
+  animation: wb-relations-rotate 0.9s linear infinite;
+}
+
+@keyframes wb-relations-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wb-relations-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 10px 6px;
+}
+
+.wb-relations-skeleton-line {
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--wb-list-hover), var(--wb-list-selected), var(--wb-list-hover)) 0 0 / 200% 100%;
+  animation: wb-relations-shimmer 1.2s ease-in-out infinite;
+}
+
+.wb-relations-skeleton-line:nth-child(2n) {
+  width: 72%;
+}
+
+.wb-relations-skeleton-line:nth-child(3n) {
+  width: 46%;
+}
+
+@keyframes wb-relations-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.wb-relations-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 16px 20px;
+  color: var(--wb-secondary-text);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.wb-relations-empty strong {
+  color: var(--wb-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-relations-empty-icon {
+  margin-bottom: 2px;
+  color: var(--wb-quiet-text);
+  opacity: 0.75;
+}
+
+.wb-relations-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-relations-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 6px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.wb-relations-footnote svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.wb-relations-manage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  text-align: left;
+}
+
+.wb-relations-manage:hover:not(:disabled) {
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
+.wb-relations-manage > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-relations-manage-badge {
+  flex: none;
+  white-space: nowrap;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--wb-warning-surface);
+  color: var(--wb-warning-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-relations-quiet-toggle svg {
+    transition: none;
+  }
+
+  .wb-relations-spin,
+  .wb-relations-skeleton-line {
+    animation: none;
+  }
 }
 
 /* Review-count badge on activity-rail entries. */
@@ -12361,6 +12686,10 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-inspector-view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 24px;
   min-height: 24px;
   padding: 0 8px;
@@ -12369,8 +12698,27 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-secondary-text);
   font-size: 12px;
-  font-weight: 620;
+  font-weight: 600;
   cursor: pointer;
+}
+
+/* Relation count on the relation switch; amber when some wait for review. */
+.wb-inspector-view-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.wb-inspector-view-count.needs-review {
+  background: var(--wb-warning-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-warning-border) 60%, transparent);
+  color: var(--wb-warning-text);
 }
 
 .wb-inspector-view-toggle button.is-active {

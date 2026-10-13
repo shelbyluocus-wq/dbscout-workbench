@@ -142,20 +142,30 @@ export function useConfigRelations({
   }
 
   // Table relations are cached per index revision; a backend rebuild bumps the
-  // revision and naturally invalidates older entries.
+  // revision and naturally invalidates older entries. The inspector's tab
+  // badge and its relation page ask for the same table at once, so concurrent
+  // callers share one request.
   async function tableRelations(scope, table) {
     const entry = entryFor(scope);
     const tableName = String(table || "").trim();
     if (!entry || !tableName) return null;
     const cacheKey = `${entry.key}\u001f${tableName.toLowerCase()}`;
     const cached = tableCache.get(cacheKey);
-    if (cached && cached.revision === entry.revision) return cached.data;
-    const data = await invoke("config_relations_table", scopeRequest(entry, { table: tableName }));
-    const revision = Number(data?.revision) || 0;
-    if (revision > entry.revision) entry.revision = revision;
-    if (tableCache.size >= TABLE_CACHE_LIMIT) tableCache.clear();
-    tableCache.set(cacheKey, { revision, data });
-    return data;
+    if (cached?.data && cached.revision === entry.revision) return cached.data;
+    if (cached?.pending && cached.requestedAt === entry.revision) return cached.pending;
+    const requestedAt = entry.revision;
+    const pending = invoke("config_relations_table", scopeRequest(entry, { table: tableName })).then((data) => {
+      const revision = Number(data?.revision) || 0;
+      if (revision > entry.revision) entry.revision = revision;
+      if (tableCache.size >= TABLE_CACHE_LIMIT) tableCache.clear();
+      tableCache.set(cacheKey, { revision, data });
+      return data;
+    }, (error) => {
+      if (tableCache.get(cacheKey)?.pending === pending) tableCache.delete(cacheKey);
+      throw error;
+    });
+    tableCache.set(cacheKey, { pending, requestedAt });
+    return pending;
   }
 
   // The whole database's relations, without evidence. Cached like table

@@ -12,15 +12,21 @@ import {
   isEmptyReferenceValue,
   referenceValuesFromCell,
   relationChipLabel,
+  relationDirection,
   relationEvidenceKey,
   relationEvidenceTitle,
   relationIsActionable,
+  relationLabelColumn,
   relationNeedsReview,
   relationReasonLabel,
   relationRelevantColumns,
+  relationRowName,
   relationStatusLabel,
+  relationTableSummary,
   relationTitle,
   rowCellValue,
+  shortCodePath,
+  splitRejectedRelations,
   tableDisplayComment,
   tableDisplayName,
 } from "./configRelations.js";
@@ -155,4 +161,52 @@ test("every backend status, reason and coverage code has copy in each language",
       assert.ok(Object.hasOwn(catalog, key), `${locale} is missing ${key}`);
     }
   }
+});
+
+test("a row is named by the same column the backend labels targets with", () => {
+  const column = (name, type, extra = {}) => ({ column_name: name, column_type: type, ...extra });
+  assert.equal(relationLabelColumn([
+    column("ID", "int", { is_primary_key: true }),
+    column("Icon", "varchar(64)"),
+    column("ItemName", "varchar(64)"),
+  ], ["ID"]), "ItemName");
+  assert.equal(relationLabelColumn([column("id", "int"), column("Title", "varchar(32)"), column("name", "varchar(32)")], ["id"]), "name");
+  assert.equal(relationLabelColumn([column("ID", "int"), column("Txt", "varchar(16)", { column_comment: "名稱" })], ["ID"]), "Txt");
+  assert.equal(relationLabelColumn([{ columnName: "Desc", columnType: "text" }], []), "Desc");
+  // Primary keys and non-text columns never name a row.
+  assert.equal(relationLabelColumn([column("name", "varchar(8)", { is_primary_key: true }), column("Val", "int")], []), "");
+  assert.equal(relationLabelColumn([column("Name", "int")], []), "");
+  assert.equal(relationLabelColumn(null), "");
+
+  assert.equal(relationRowName({ Name: "  Fire \n ball " }, "name"), "Fire ball");
+  assert.equal(relationRowName({ Name: "x".repeat(60) }, "Name"), `${"x".repeat(39)}…`);
+  assert.equal(relationRowName({ Name: null }, "Name"), "");
+  assert.equal(relationRowName({ Name: "Potion" }, ""), "");
+  assert.equal(relationRowName(null, "Name"), "");
+});
+
+test("relation lists split by side and status, and summarize for the switch badge", () => {
+  const relation = (id, sourceTable, targetTable, status = "confirmed") => ({ id, sourceTable, targetTable, status });
+  assert.equal(relationDirection(relation("a", "hero", "skill"), "Hero"), "outgoing");
+  assert.equal(relationDirection(relation("a", "hero", "skill"), "skill"), "incoming");
+
+  const rejected = relation("r", "hero", "skill", "rejected");
+  const split = splitRejectedRelations([relation("a", "hero", "skill"), rejected, null]);
+  assert.deepEqual(split.rejected, [rejected]);
+  assert.equal(split.active.length, 2);
+
+  const self = relation("quest.pre>quest.id", "quest", "quest", "stale");
+  assert.deepEqual(relationTableSummary({
+    outgoing: [self, relation("quest.item>item.id", "quest", "item"), relation("x", "quest", "item", "rejected")],
+    incoming: [self, relation("mail.q>quest.id", "mail", "quest", "conflict")],
+  }), { total: 3, review: 2 });
+  assert.deepEqual(relationTableSummary({ outgoing: [], incoming: [] }), { total: 0, review: 0 });
+  assert.equal(relationTableSummary(null), null);
+});
+
+test("code locations keep their last folders", () => {
+  assert.equal(shortCodePath("assets/scripts/battle/DropPreview.ts"), "…/scripts/battle/DropPreview.ts");
+  assert.equal(shortCodePath("D:\\client\\jswz\\a\\b.ts", 1), "…/a/b.ts");
+  assert.equal(shortCodePath("battle/DropPreview.ts"), "battle/DropPreview.ts");
+  assert.equal(shortCodePath(""), "");
 });

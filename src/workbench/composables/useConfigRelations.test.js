@@ -139,6 +139,35 @@ test("table relations are cached until the index revision moves", async () => {
   assert.equal(await relations.tableRelations(SCOPE, " "), null);
 });
 
+test("the inspector badge and the relation page share one table request", async () => {
+  const backend = fakeBackend();
+  const relations = useConfigRelations({ invoke: backend.invoke, listen: null, debounceMs: 0 });
+  await relations.loadOverview(SCOPE);
+
+  const [badge, page] = await Promise.all([
+    relations.tableRelations(SCOPE, "HeroProp"),
+    relations.tableRelations(SCOPE, "heroprop"),
+  ]);
+  assert.equal(badge, page);
+  assert.equal(backend.count("config_relations_table"), 1);
+
+  // A failed request is not cached; the next caller asks again.
+  const failing = useConfigRelations({
+    invoke: async (command, payload) => {
+      if (command === "config_relations_table") {
+        backend.calls.push({ command, request: payload.request });
+        throw new Error("table offline");
+      }
+      return backend.invoke(command, payload);
+    },
+    listen: null,
+    debounceMs: 0,
+  });
+  await assert.rejects(failing.tableRelations(SCOPE, "HeroProp"), /table offline/);
+  await assert.rejects(failing.tableRelations(SCOPE, "HeroProp"), /table offline/);
+  assert.equal(backend.count("config_relations_table"), 3);
+});
+
 test("the relation graph is shared by concurrent callers and cached per revision", async () => {
   const backend = fakeBackend();
   const relations = useConfigRelations({ invoke: backend.invoke, listen: null, debounceMs: 0 });

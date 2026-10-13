@@ -936,16 +936,23 @@ function configRelationsAvailable(connectionId) {
 }
 
 const configRelationsDialogOpen = ref(false);
+// Opened from a table's relation page, the dialog reviews that table's
+// database; from the activity rail, the one selected in the sidebar.
+const configRelationsDialogRequest = ref(null);
 const configRelationsSupported = computed(() => configRelationsAvailable(selectedConnectionId.value));
 const configRelationsEntry = computed(() =>
   configRelations.entryFor({ connectionId: selectedConnectionId.value, database: selectedDatabase.value }));
 const configRelationsBadge = computed(() =>
   configRelationsSupported.value ? Number(configRelationsEntry.value?.overview?.reviewCount) || 0 : 0);
+const configRelationsDialogScope = computed(() =>
+  configRelationsDialogRequest.value || { connectionId: selectedConnectionId.value, database: selectedDatabase.value });
+const configRelationsDialogSupported = computed(() =>
+  configRelationsAvailable(configRelationsDialogScope.value.connectionId));
 const configRelationsScopeLabel = computed(() => {
-  const connectionId = selectedConnectionId.value;
+  const { connectionId, database } = configRelationsDialogScope.value;
   const connection = connections.value.find((item) => item.id === connectionId);
   const name = connectionLabel(connectionId, connection?.label || connectionId);
-  return `${name} · ${databaseLabel(connectionId, selectedDatabase.value)}`;
+  return `${name} · ${databaseLabel(connectionId, database)}`;
 });
 
 watch(
@@ -958,7 +965,10 @@ watch(
   { immediate: true },
 );
 
-function openConfigRelationsReview() {
+function openConfigRelationsReview(scope = null) {
+  const connectionId = String(scope?.connectionId || "");
+  const database = String(scope?.database || "");
+  configRelationsDialogRequest.value = connectionId && database ? { connectionId, database } : null;
   configRelationsDialogOpen.value = true;
 }
 
@@ -977,7 +987,12 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
       },
     },
   );
-  if (!rowIdentity || !tab || tab.loadError || token !== relationJumpToken) return;
+  if (!tab || tab.loadError || token !== relationJumpToken) return;
+  if (!rowIdentity) {
+    await nextTick();
+    selectFirstRelationRow(tab, filter, token);
+    return;
+  }
   await nextTick();
   // Match all composite-key fields, continuing through the first-key filter
   // when the requested record is not in its initially loaded page.
@@ -994,6 +1009,17 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
   } else {
     setStatus(t("relations.incoming.rowMissing"), { tone: "warning" });
   }
+}
+
+// A jump to referenced rows lands on the first of them, so the relation page
+// can follow the chain right away. A selection already made in a reused tab
+// stays where the user put it.
+function selectFirstRelationRow(tab, filter, token) {
+  if (token !== relationJumpToken || tab.id !== focusedPaneState.activeDataTab?.id) return;
+  if (focusedSelectedCell.value?.tabId === tab.id) return;
+  const wanted = String(filter?.column || "").toLowerCase();
+  const columnIndex = (tab.columns || []).findIndex((column) => columnName(column).toLowerCase() === wanted);
+  focusedPaneState.selectCellAt?.(tab, 0, Math.max(0, columnIndex));
 }
 
 function openConfigRelationTable({ connectionId, database, tableName, tableComment = "" }) {
@@ -5390,9 +5416,9 @@ onBeforeUnmount(() => {
     <ConfigRelationsDialog
       v-if="configRelationsDialogOpen"
       :relations="configRelations"
-      :scope="{ connectionId: selectedConnectionId, database: selectedDatabase }"
+      :scope="configRelationsDialogScope"
       :scope-label="configRelationsScopeLabel"
-      :supported="configRelationsSupported"
+      :supported="configRelationsDialogSupported"
       :schema="workspace.schema"
       @close="configRelationsDialogOpen = false"
       @open-table="openConfigRelationTable"

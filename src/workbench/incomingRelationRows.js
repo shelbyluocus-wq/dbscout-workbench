@@ -1,7 +1,7 @@
 import { reactive } from "vue";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
 import { buildRowIdentity, buildRowKey } from "./utils/rowIdentity.js";
-import { rowCellValue } from "./utils/configRelations.js";
+import { relationLabelColumn, relationRowName, rowCellValue } from "./utils/configRelations.js";
 
 export const INCOMING_PAGE_SIZE = 50;
 
@@ -26,6 +26,8 @@ export async function fetchIncomingRelationRows(context, offset = 0, invoke = in
   });
   try {
     const primaryKeys = page.primaryKeys || [];
+    // Rows are recognised by name, the way the outgoing targets read.
+    const nameColumn = relationLabelColumn(page.columns, primaryKeys);
     const rows = (page.rows || []).map((row, index) => {
       const identity = buildRowIdentity({ primaryKeys, columns: page.columns || [] }, row);
       const label = primaryKeys.map((key) => `${key}=${rowCellValue(row, key) ?? "NULL"}`).join(" + ");
@@ -33,6 +35,7 @@ export async function fetchIncomingRelationRows(context, offset = 0, invoke = in
         key: buildRowKey({ primaryKeys, columns: page.columns || [] }, row),
         identity: primaryKeys.length ? identity : null,
         label,
+        name: relationRowName(row, nameColumn),
         ordinal: offset + index + 1,
       };
     });

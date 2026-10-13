@@ -1,23 +1,59 @@
 <script setup>
-// What the line styles and circle sizes in the relation graph mean, plus a
-// note when some tables did not fit.
+// Below the relation graph: the two directions as switches that double as the
+// colour key for the circles, the line styles of the statuses actually drawn,
+// and a note when some tables did not fit. At least one direction stays on.
 import { t } from "../i18n/index.js";
+import { computed } from "vue";
 import { relationStatusLabel } from "../utils/configRelations.js";
 
-defineProps({
+const props = defineProps({
   statuses: { type: Array, default: () => [] },
   hidden: { type: Number, default: 0 },
+  outgoing: { type: Boolean, default: true },
+  incoming: { type: Boolean, default: true },
 });
+
+const emit = defineEmits(["toggle-direction"]);
+
+const DIRECTIONS = Object.freeze(["outgoing", "incoming"]);
+
+// Plain confirmed lines need no key unless something else is drawn beside them.
+const statusItems = computed(() => (props.statuses.some((status) => status !== "confirmed") ? props.statuses : []));
+
+function directionLocked(key) {
+  const other = key === "outgoing" ? "incoming" : "outgoing";
+  return props[key] && !props[other];
+}
+
+function toggle(key) {
+  if (!directionLocked(key)) emit("toggle-direction", key);
+}
 </script>
 
 <template>
   <div class="wb-relation-graph-legend">
-    <span v-for="status in statuses" :key="status" class="wb-relation-graph-legend-item">
-      <span class="wb-relation-graph-swatch" :class="`is-${status}`" aria-hidden="true" />
-      {{ relationStatusLabel(status, t) }}
+    <div class="wb-relation-graph-directions" role="group" :aria-label="t('relations.graph.direction')">
+      <button
+        v-for="key in DIRECTIONS"
+        :key="key"
+        type="button"
+        class="wb-relation-graph-direction"
+        :class="[`is-${key}`, { 'is-on': props[key], 'is-locked': directionLocked(key) }]"
+        :aria-pressed="props[key]"
+        :aria-disabled="directionLocked(key)"
+        :title="t(`relations.graph.${key}Hint`)"
+        @click="toggle(key)"
+      >
+        <span class="wb-relation-graph-direction-dot" aria-hidden="true" />
+        {{ t(`relations.graph.${key}`) }}
+      </button>
+    </div>
+    <span v-if="statusItems.length" class="wb-relation-graph-statuses">
+      <span v-for="status in statusItems" :key="status" class="wb-relation-graph-status">
+        <span class="wb-relation-graph-swatch" :class="`is-${status}`" aria-hidden="true" />
+        {{ relationStatusLabel(status, t) }}
+      </span>
     </span>
-    <span class="wb-relation-graph-legend-item is-hint">{{ t('relations.graph.sizeHint') }}</span>
-    <span class="wb-relation-graph-legend-item is-hint">{{ t('relations.graph.dragHint') }}</span>
   </div>
   <p v-if="hidden" class="wb-relation-graph-hidden">{{ t('relations.graph.hidden', { count: hidden }) }}</p>
 </template>
@@ -26,25 +62,99 @@ defineProps({
 .wb-relation-graph-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 10px;
-  color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
 }
 
-.wb-relation-graph-legend-item {
+.wb-relation-graph-directions {
   display: inline-flex;
-  align-items: center;
   gap: 4px;
 }
 
-.wb-relation-graph-legend-item.is-hint {
+.wb-relation-graph-direction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
   color: var(--wb-quiet-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-relation-graph-direction:hover:not(:disabled) {
+  border-color: var(--wb-border);
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
+.wb-relation-graph-direction.is-on {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-text);
+}
+
+.wb-relation-graph-direction.is-locked {
+  cursor: default;
+}
+
+.wb-relation-graph-direction:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 0;
+}
+
+.wb-relation-graph-direction-dot {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.wb-relation-graph-direction.is-outgoing .wb-relation-graph-direction-dot {
+  border-color: var(--wb-relation-out);
+}
+
+.wb-relation-graph-direction.is-incoming .wb-relation-graph-direction-dot {
+  border-color: var(--wb-relation-in);
+}
+
+.wb-relation-graph-direction.is-outgoing.is-on .wb-relation-graph-direction-dot {
+  background: var(--wb-relation-out-soft);
+}
+
+.wb-relation-graph-direction.is-incoming.is-on .wb-relation-graph-direction-dot {
+  background: var(--wb-relation-in-soft);
+}
+
+.wb-relation-graph-direction:not(.is-on) .wb-relation-graph-direction-dot {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.wb-relation-graph-statuses {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+}
+
+.wb-relation-graph-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .wb-relation-graph-swatch {
   width: 14px;
   height: 0;
-  border-top: 2px solid color-mix(in srgb, var(--wb-text) 30%, transparent);
+  border-top: 2px solid color-mix(in srgb, var(--wb-text) 32%, transparent);
 }
 
 .wb-relation-graph-swatch.is-unconfirmed {
@@ -61,7 +171,8 @@ defineProps({
 
 .wb-relation-graph-hidden {
   margin: 0;
-  color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.5;
 }
 </style>

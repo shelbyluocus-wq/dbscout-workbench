@@ -4,6 +4,7 @@
 // function, so components stay declarative and tests stay cheap.
 
 import { connectionHasCapability } from "./connectionKinds.js";
+import { columnName } from "./normalize.js";
 import { listItemValues, normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
 
 export const RELATION_STATUSES = Object.freeze(["confirmed", "unconfirmed", "stale", "conflict", "rejected"]);
@@ -106,6 +107,78 @@ export function rowCellValue(row, column) {
     if (key.toLowerCase() === lower) return row[key];
   }
   return undefined;
+}
+
+const LABEL_COLUMN_NAMES = Object.freeze(["name", "title", "desc", "des", "describe", "remark"]);
+const ROW_NAME_MAX_LENGTH = 40;
+
+function columnTypeText(column) {
+  return String(column?.column_type || column?.columnType || column?.data_type || column?.dataType || "");
+}
+
+function columnCommentText(column) {
+  return String(column?.column_comment || column?.columnComment || "");
+}
+
+// The column whose value names a row ("Name", "Title", ...). Mirrors the
+// backend's TableMeta::label_column so a referencing row reads the same way
+// as a referenced one. Empty when the table has no such text column.
+export function relationLabelColumn(columns, primaryKeys = []) {
+  const keys = new Set((primaryKeys || []).map((key) => String(key).toLowerCase()));
+  const textColumns = (columns || []).filter((column) => {
+    const name = columnName(column);
+    return name &&
+      /char|text/i.test(columnTypeText(column)) &&
+      !keys.has(name.toLowerCase()) &&
+      !column.is_primary_key && !column.isPrimaryKey;
+  });
+  const named = (wanted) => textColumns.find((column) => columnName(column).toLowerCase() === wanted);
+  const found = LABEL_COLUMN_NAMES.map(named).find(Boolean) ||
+    textColumns.find((column) => columnName(column).toLowerCase().includes("name")) ||
+    textColumns.find((column) => /名称|名字|名稱/.test(columnCommentText(column)));
+  return found ? columnName(found) : "";
+}
+
+// One-line display name of a row from its label column, shortened for chips.
+export function relationRowName(row, labelColumn) {
+  if (!row || !labelColumn) return "";
+  const value = rowCellValue(row, labelColumn);
+  const text = value == null ? "" : String(value).replace(/\s+/g, " ").trim();
+  return text.length > ROW_NAME_MAX_LENGTH ? `${text.slice(0, ROW_NAME_MAX_LENGTH - 1)}…` : text;
+}
+
+// Which side of `table` a relation sits on: "outgoing" when the table's own
+// column points elsewhere, "incoming" when another table points at it.
+export function relationDirection(relation, table) {
+  return String(relation?.sourceTable || "") === String(table || "").toLowerCase() ? "outgoing" : "incoming";
+}
+
+// How many relations a table takes part in and how many wait for a decision,
+// for the badge on the inspector's relation switch. A self reference is one
+// relation even though it is listed on both sides.
+export function relationTableSummary(data) {
+  if (!data) return null;
+  const active = new Map();
+  for (const relation of [...(data.outgoing || []), ...(data.incoming || [])]) {
+    if (relation?.id && relation.status !== "rejected") active.set(relation.id, relation);
+  }
+  const relations = [...active.values()];
+  return { total: relations.length, review: relations.filter(relationNeedsReview).length };
+}
+
+// Active relations split from the rejected ones, each list in display order.
+export function splitRejectedRelations(relations) {
+  const active = [];
+  const rejected = [];
+  for (const relation of relations || []) (relation?.status === "rejected" ? rejected : active).push(relation);
+  return { active, rejected };
+}
+
+// Code locations keep only their last folders so the file reads at a glance;
+// the full path stays available as a tooltip.
+export function shortCodePath(file, keep = 2) {
+  const parts = String(file || "").split(/[\\/]+/).filter(Boolean);
+  return parts.length > keep + 1 ? `…/${parts.slice(-(keep + 1)).join("/")}` : parts.join("/");
 }
 
 const EMPTY_REFERENCE_MARKERS = new Set(["", "0", "-1", "null", "NULL", "[]"]);
