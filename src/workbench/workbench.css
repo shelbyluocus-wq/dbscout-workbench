@@ -21439,7 +21439,8 @@ button.wb-table-mention {
   font-weight: inherit;
   line-height: inherit;
   cursor: pointer;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 button.wb-table-mention:hover,
