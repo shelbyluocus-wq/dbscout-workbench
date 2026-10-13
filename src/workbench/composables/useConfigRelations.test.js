@@ -20,6 +20,9 @@ function fakeBackend() {
         return { revision: state.revision, reviewCount: state.reviewCount };
       case "config_relations_table":
         return { revision: state.revision, outgoing: [], incoming: [], table: payload.request.table };
+      case "config_relations_graph":
+        if (state.failGraph) throw new Error("graph offline");
+        return { revision: state.revision, edges: [], tables: {} };
       case "config_relations_review":
         state.revision += 1;
         state.reviewCount -= payload.request.relationIds.length;
@@ -134,6 +137,31 @@ test("table relations are cached until the index revision moves", async () => {
   await relations.tableRelations(SCOPE, "HeroProp");
   assert.equal(backend.count("config_relations_table"), 2);
   assert.equal(await relations.tableRelations(SCOPE, " "), null);
+});
+
+test("the relation graph is shared by concurrent callers and cached per revision", async () => {
+  const backend = fakeBackend();
+  const relations = useConfigRelations({ invoke: backend.invoke, listen: null, debounceMs: 0 });
+  await relations.loadOverview(SCOPE);
+
+  const [first, second] = await Promise.all([relations.relationGraph(SCOPE), relations.relationGraph(SCOPE)]);
+  assert.equal(first, second);
+  assert.equal(backend.count("config_relations_graph"), 1);
+  await relations.relationGraph({ connectionId: "c1", database: "game_config" });
+  assert.equal(backend.count("config_relations_graph"), 1);
+
+  await relations.submitReview(SCOPE, ["a>b"], "confirmed");
+  await relations.relationGraph(SCOPE);
+  assert.equal(backend.count("config_relations_graph"), 2);
+
+  backend.state.revision += 1;
+  await relations.loadOverview(SCOPE, { force: true });
+  backend.state.failGraph = true;
+  await assert.rejects(relations.relationGraph(SCOPE), /graph offline/);
+  backend.state.failGraph = false;
+  await relations.relationGraph(SCOPE);
+  assert.equal(backend.count("config_relations_graph"), 4, "a failed request is not cached");
+  assert.equal(await relations.relationGraph({ connectionId: "", database: "x" }), null);
 });
 
 test("refresh, review lists and client changes keep the overview current", async () => {

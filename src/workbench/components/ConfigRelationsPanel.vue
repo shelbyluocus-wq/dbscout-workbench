@@ -17,6 +17,7 @@ import {
 import ConfigRelationCard from "./ConfigRelationCard.vue";
 import TableMentionText from "./TableMentionText.vue";
 import IncomingRelationRows from "./IncomingRelationRows.vue";
+import ConfigRelationGraphSection from "./ConfigRelationGraphSection.vue";
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -362,6 +363,15 @@ const rejectedRelations = computed(() => [...outgoingGroups.value.rejected, ...i
         <p v-if="rowError" class="wb-relations-error" role="alert">{{ rowError }}</p>
       </section>
       <p v-else-if="hasRelations" class="wb-relations-muted wb-relations-select-prompt">{{ t('relations.row.selectPrompt') }}</p>
+
+      <ConfigRelationGraphSection
+        v-if="hasRelations"
+        :scope="scope"
+        :table-name="tableName"
+        :relations="relations"
+        :revision="revision"
+        @open-table="openNamedTable"
+      />
 
       <section v-if="hasRelations" class="wb-relations-section">
         <div class="wb-relations-section-label">{{ t('relations.table.outgoing') }}</div>

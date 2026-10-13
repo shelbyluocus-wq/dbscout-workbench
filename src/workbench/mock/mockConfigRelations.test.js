@@ -165,6 +165,20 @@ test("row lookups label found targets, flag missing ones and count references", 
   assert.deepEqual((await call("config_relations_row_references", { table: "item", row: { id: "0" } })).incoming, []);
 });
 
+test("the graph lists every relation of the database without evidence", async () => {
+  const { call } = setup();
+  const graph = await call("config_relations_graph");
+  const table = await call("config_relations_table", { table: "hero" });
+  assert.equal(graph.revision, table.revision);
+  const passive = byId(graph.edges, "hero.passive_id>skill.id");
+  assert.deepEqual(Object.keys(passive).sort(), ["id", "kind", "sourceColumn", "sourceTable", "status", "targetColumn", "targetTable"]);
+  assert.equal(passive.status, "confirmed");
+  for (const relation of [...table.outgoing, ...table.incoming]) {
+    assert.equal(byId(graph.edges, relation.id)?.status, relation.status);
+  }
+  assert.deepEqual(graph.tables.skill, { name: "skill", comment: "技能配置表" });
+});
+
 test("list relations carry their data format as evidence", async () => {
   const { call, rows } = setup();
   const activity = await call("config_relations_table", { table: "activity" });

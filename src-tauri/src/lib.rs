@@ -197,6 +197,7 @@ pub fn run() {
             commands::table_transfer_cancel,
             config_relations::commands::config_relations_overview,
             config_relations::commands::config_relations_table,
+            config_relations::commands::config_relations_graph,
             config_relations::commands::config_relations_row_targets,
             config_relations::commands::config_relations_row_references,
             config_relations::commands::config_relations_review_list,

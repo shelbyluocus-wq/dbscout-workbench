@@ -99,7 +99,13 @@ capabilities:
   rows that point back, each with click-to-jump. Incoming row cards expand on demand into full
   primary-key lists (50 rows per batch); composite-key jumps match every key.
   `IncomingRelationRows.vue` renders these cards and `incomingRelationRows.js`
-  owns their paging and stale-request guards. The tab bar tags tables that
+  owns their paging and stale-request guards. A collapsible local relation
+  graph on the same page draws the current table's neighbours (depth 1–2,
+  outgoing/incoming toggles, at most 60 tables) coloured by relation status;
+  clicking a node opens that table. Tables can be dragged (neighbours follow
+  on springs and everything swings back to the ring layout on release), the
+  wheel zooms around the pointer, the bottom edge resizes the graph (height
+  remembered) and an enlarge button opens it in a large dialog. The tab bar tags tables that
   take part in relations, and a review dialog (with an activity-rail badge
   counting what needs attention) lets the user confirm or reject candidates.
   Each MySQL server binds to its game client folder (auto-discovered across
@@ -251,7 +257,10 @@ from UI):
   (localStorage), run/cancel state, `table-transfer-progress` event log
 - Config relations: `useConfigRelations.js` — mirrors each scope's relation
   overview, refreshes on `config-relations-updated`, and serves the
-  table/row lookups; `configRelationContext.js` — provided scope so grid
+  table/row lookups plus the per-revision cached scope graph;
+  `useGraphViewport.js` / `useGraphForces.js` — relation-graph zoom/pan with
+  glide animation, and the frame-driven spring simulation;
+  `configRelationContext.js` — provided scope so grid
   chips can clear a relation filter without prop chains
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useActivityRail.js`
   (activity-rail entries, order, and live shortcut labels), `useContextMenu.js`,
@@ -294,7 +303,11 @@ from UI):
   navigation for context menus); `relationFilter.js` (relation-tab filter
   normalization and JSON list-cell key matching mirrored from the backend);
   `configRelations.js` (relation status/reason copy, coverage gaps, table
-  labels, the tab chip and the per-connection capability gate)
+  labels, the tab chip and the per-connection capability gate);
+  `relationGraph.js` (local relation subgraph by depth/direction, per-pair
+  worst-status merge, node sizing, deterministic ring layout and persisted
+  graph options); `relationGraphForces.js` (spring simulation anchored to
+  the ring layout: link springs, collision, pin/unpin while dragging)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -308,7 +321,10 @@ from UI):
 `TableTransferDialog.vue` (one-click table transfer),
 `ConfigRelationsPanel.vue` (inspector relation page) /
 `ConfigRelationsDialog.vue` (review dialog) / `ConfigRelationCard.vue`
-(shared relation card),
+(shared relation card) / `ConfigRelationGraphSection.vue` +
+`ConfigRelationGraph.vue` (local relation graph section and its SVG view,
+with `ConfigRelationGraphControls.vue`, `ConfigRelationGraphLegend.vue` and
+the enlarged `ConfigRelationGraphDialog.vue`),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the
@@ -417,6 +433,7 @@ The Rust backend is split by concern:
   relation-filter WHERE clause shared by page/count/search (MySQL and demo
   only — other engines refuse relation filters). Commands:
   `config_relations_overview`, `config_relations_table`,
+  `config_relations_graph` (scope-wide relation keys + statuses, no evidence),
   `config_relations_row_targets`, `config_relations_row_references`,
   `config_relations_review_list`, `config_relations_review`,
   `config_relations_refresh`, `config_relations_discover_clients`,

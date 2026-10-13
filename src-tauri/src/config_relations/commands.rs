@@ -12,7 +12,7 @@ use crate::work_scheduler::WorkClass;
 use super::catalog::DbSnapshot;
 use super::discovery::ClientCandidate;
 use super::engine::{self, Overview};
-use super::model::{RelationView, TableCoverage};
+use super::model::{RelationKey, RelationStatus, RelationView, TableCoverage};
 use super::rows::{self, RowIncoming, RowOutgoing};
 use super::store::Verdict;
 
@@ -80,6 +80,36 @@ pub struct TableRelations {
     pub outgoing: Vec<RelationView>,
     pub incoming: Vec<RelationView>,
     pub coverage: TableCoverage,
+    /// Lowercase table name -> label, for every table named above.
+    pub tables: BTreeMap<String, TableLabel>,
+    pub revision: u64,
+}
+
+/// One relation without its evidence; enough to draw it on the relation graph.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphEdge {
+    pub id: String,
+    #[serde(flatten)]
+    pub key: RelationKey,
+    pub status: RelationStatus,
+}
+
+impl From<&RelationView> for GraphEdge {
+    fn from(view: &RelationView) -> Self {
+        Self {
+            id: view.id.clone(),
+            key: view.key.clone(),
+            status: view.status,
+        }
+    }
+}
+
+/// Every relation of one database, for the relation graph.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationGraph {
+    pub edges: Vec<GraphEdge>,
     /// Lowercase table name -> label, for every table named above.
     pub tables: BTreeMap<String, TableLabel>,
     pub revision: u64,
@@ -170,6 +200,18 @@ pub async fn config_relations_table(app: AppHandle, request: TableRequest) -> Re
         outgoing,
         incoming,
         tables,
+        revision: engine::revision(&context),
+    })
+}
+
+#[tauri::command]
+pub async fn config_relations_graph(app: AppHandle, request: ScopeRequest) -> Result<RelationGraph, String> {
+    let context = engine::resolve(&app, &request.connection_id, &request.database).await?;
+    let (snapshot, index) = engine::index(&app, &context).await?;
+    let views = index.all();
+    Ok(RelationGraph {
+        edges: views.iter().map(GraphEdge::from).collect(),
+        tables: table_labels(&snapshot, views.iter()),
         revision: engine::revision(&context),
     })
 }
@@ -300,6 +342,42 @@ mod tests {
         assert_eq!(text.get("Name").map(String::as_str), Some("铁剑"));
         assert_eq!(text.get("Flag").map(String::as_str), Some("true"));
         assert!(!text.contains_key("Items"));
+    }
+
+    #[test]
+    fn graph_edges_carry_the_key_and_status_but_no_evidence() {
+        use super::super::model::{Evidence, RelationKind, StatusReason};
+        let key = RelationKey {
+            source_table: "hero".into(),
+            source_column: "Skill_ID".into(),
+            target_table: "skill".into(),
+            target_column: "ID".into(),
+            kind: RelationKind::List,
+        };
+        let view = RelationView {
+            id: key.id(),
+            key,
+            status: RelationStatus::Stale,
+            reason: StatusReason::CodeChanged,
+            is_new: false,
+            evidence: vec![Evidence::Comment { text: "技能".into() }],
+            code_target: None,
+            decided_at: None,
+            disagreeing_code: Default::default(),
+        };
+        let json = serde_json::to_value(GraphEdge::from(&view)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": "hero.skill_id[]>skill.id",
+                "sourceTable": "hero",
+                "sourceColumn": "Skill_ID",
+                "targetTable": "skill",
+                "targetColumn": "ID",
+                "kind": "list",
+                "status": "stale",
+            })
+        );
     }
 
     #[test]

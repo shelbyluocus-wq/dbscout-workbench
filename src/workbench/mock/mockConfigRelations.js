@@ -651,6 +651,13 @@ export function createMockConfigRelations({
     };
   }
 
+  function relationGraph(context) {
+    const built = buildIndex(context);
+    const edges = built.views.map(({ id, sourceTable, sourceColumn, targetTable, targetColumn, kind, status }) =>
+      ({ id, sourceTable, sourceColumn, targetTable, targetColumn, kind, status }));
+    return { edges, tables: tableLabels(built.tables, built.views), revision: context.revision };
+  }
+
   function activeViews(views) {
     return views.filter((view) => view.status !== "rejected");
   }
@@ -733,6 +740,8 @@ export function createMockConfigRelations({
         return overview(context);
       case "config_relations_table":
         return tableRelations(context, request.table);
+      case "config_relations_graph":
+        return relationGraph(context);
       case "config_relations_row_targets":
         return rowTargets(context, request.table, request.row || {});
       case "config_relations_row_references":

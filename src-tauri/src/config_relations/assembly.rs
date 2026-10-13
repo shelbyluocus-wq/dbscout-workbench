@@ -476,6 +476,10 @@ impl RelationIndex {
         self.collect(self.by_target.get(&table.to_lowercase()))
     }
 
+    pub fn all(&self) -> &[RelationView] {
+        &self.relations
+    }
+
     pub fn find(&self, id: &str) -> Option<&RelationView> {
         self.relations.iter().find(|view| view.id == id)
     }

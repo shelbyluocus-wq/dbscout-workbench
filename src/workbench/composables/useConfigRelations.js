@@ -22,6 +22,7 @@ export function useConfigRelations({
 } = {}) {
   const entries = new Map();
   const tableCache = new Map();
+  const graphCache = new Map();
   const pendingOverviewTimers = new Map();
   // One automatic bind at a time per connection. A manual choice bumps the
   // generation so a recommendation still being looked up cannot overwrite it.
@@ -157,6 +158,28 @@ export function useConfigRelations({
     return data;
   }
 
+  // The whole database's relations, without evidence. Cached like table
+  // relations; concurrent callers share one request.
+  async function relationGraph(scope) {
+    const entry = entryFor(scope);
+    if (!entry) return null;
+    const cached = graphCache.get(entry.key);
+    if (cached?.data && cached.revision === entry.revision) return cached.data;
+    if (cached?.pending && cached.requestedAt === entry.revision) return cached.pending;
+    const requestedAt = entry.revision;
+    const pending = invoke("config_relations_graph", scopeRequest(entry)).then((data) => {
+      const revision = Number(data?.revision) || 0;
+      if (revision > entry.revision) entry.revision = revision;
+      graphCache.set(entry.key, { revision, data });
+      return data;
+    }, (error) => {
+      if (graphCache.get(entry.key)?.pending === pending) graphCache.delete(entry.key);
+      throw error;
+    });
+    graphCache.set(entry.key, { pending, requestedAt });
+    return pending;
+  }
+
   function rowTargets(scope, table, row, channel = "inspector") {
     const entry = entryFor(scope);
     if (!entry) return Promise.resolve(null);
@@ -271,6 +294,7 @@ export function useConfigRelations({
     entryFor,
     loadOverview,
     tableRelations,
+    relationGraph,
     rowTargets,
     rowReferences,
     reviewList,
