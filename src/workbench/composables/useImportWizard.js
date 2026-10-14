@@ -307,7 +307,7 @@ export function useImportWizard(invokeWorkbench, activeTab, { fetchPage, reopenT
       importWizard.progress.unchanged = Number(result?.unchanged || 0);
       importWizard.progress.deleted = Number(result?.deleted || 0);
       importWizard.progress.done = rows.length;
-      await fetchPage(tab, tab.page);
+      await fetchPage(tab, tab.page, { inPlace: true });
       const skippedText = importWizard.progress.skipped ? `，跳过 ${importWizard.progress.skipped}` : "";
       const backupText = result?.backupPath ? `；原表已备份至 ${result.backupPath}` : "";
       statusText.value = `导入完成：新增 ${importWizard.progress.inserted}，覆盖 ${importWizard.progress.updated}，删除 ${importWizard.progress.deleted}，未变化 ${importWizard.progress.unchanged}${skippedText}${backupText}`;

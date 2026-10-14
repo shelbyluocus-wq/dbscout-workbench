@@ -341,10 +341,10 @@ watch(() => {
 }, { immediate: true });
 
 
-async function refreshTabPage(tab, page) {
+async function refreshTabPage(tab, page, options = {}) {
   const ready = await prepareInsertDraftsForRefresh(tab);
   if (!ready) return { ok: false, cancelled: true };
-  const result = await props.fetchPage(tab, page, { skipInsertDraftCheck: true });
+  const result = await props.fetchPage(tab, page, { ...options, skipInsertDraftCheck: true });
   if (result?.ok) {
     clearInsertDraftsAfterRefresh(tab);
     emit("page-refreshed", tab);
@@ -356,7 +356,7 @@ async function refreshTabPage(tab, page) {
 // 不可能有未保存草稿需要保留），让用户能从错误态恢复。
 async function retryGridLoad(tab) {
   if (!tab?.sessionId) return;
-  await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true });
+  await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true, inPlace: true });
 }
 
 async function jumpGridBoundary(boundary) {
@@ -822,7 +822,7 @@ function insertDraftSnapshotOf(tab, rowId) {
 // 不再停在末尾的幻影位置。skipInsertDraftCheck：其余未保存草稿原样保留、不弹提示。
 async function refreshAfterInsertSave(tab, draftSnapshot = null, { reselect = true } = {}) {
   if (!tab?.id) return;
-  const result = await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true });
+  const result = await props.fetchPage(tab, tab.page || 1, { skipInsertDraftCheck: true, inPlace: true });
   if (!result?.ok) return;
   emit("page-refreshed", tab);
   if (!reselect) return;
@@ -964,7 +964,7 @@ async function handleGridKeydownWithRows(event) {
   }
   const result = await handleGridKeydown(event);
   if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
-    await refreshTabPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1, { inPlace: true });
   }
 }
 
@@ -983,7 +983,7 @@ async function handleGridPaste(event) {
   try {
     const result = await pasteGridText(text);
     if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
-      await refreshTabPage(tab, tab.page || 1);
+      await refreshTabPage(tab, tab.page || 1, { inPlace: true });
     }
   } catch {
     statusText.value = "粘贴失败，请重试";
@@ -1055,7 +1055,7 @@ async function commitInsertRowsAndRefresh(tab) {
   const result = await commitInsertRows(tab);
   if (result?.failedRowId) return;
   if (result?.insertedRows > 0) {
-    await refreshTabPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1, { inPlace: true });
     clearInsertDraftsAfterRefresh(tab);
   }
   const lastDraft = drafts[Math.max(0, result.insertedRows - 1)]?.draft;

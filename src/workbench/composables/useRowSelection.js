@@ -11,6 +11,12 @@ import { t } from "../i18n/index.js";
 
 const ROW_SELECTION_INDEX_ATTRIBUTE = "data-row-selection-index";
 
+// How many rows a delete removed: the backend's count when it gives one.
+function removedRowCount(result, requested) {
+  const affected = Number(result?.affected);
+  return Number.isInteger(affected) && affected >= 0 ? affected : requested;
+}
+
 export function useRowSelection(
   invokeWorkbench,
   { statusText },
@@ -280,10 +286,13 @@ export function useRowSelection(
 
   // 删除成功后必须重拉当前页。拉取失败时自动重试一次；仍失败则保留现有数据
   // 并明确提示（历史上曾出现删除后整页空白、只能重开表的问题）。
-  async function refetchAfterDelete(tab, page) {
+  // The rows already loaded are fetched again where they are, so a table
+  // scrolled far down keeps showing the same place (rows after the deleted
+  // ones move up) instead of the first page under an empty viewport.
+  async function refetchAfterDelete(tab, { anchor = null, removedRows = null } = {}) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const result = await fetchPage(tab, page);
+        const result = await fetchPage(tab, 1, { inPlace: true, anchor, removedRows });
         if (result?.ok || result?.cancelled) return result;
       } catch {
         // fetchPage 内部已兜底；这里防御直接抛错的情况。
@@ -345,8 +354,9 @@ export function useRowSelection(
     try {
       if (!(await prepareForDelete(tab, { excludeInsertRowIds: insertRowIds }))) return;
       const identities = dataEntries.map((entry) => buildRowIdentity(tab, entry.row));
+      const anchor = Math.min(...dataEntries.map((entry) => entry.dataIndex).filter(Number.isInteger));
       statusText.value = `正在删除 ${count} 行，请稍候…`;
-      await invokeWorkbench("delete_rows", {
+      const deleted = await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,
           rowIdentities: identities,
@@ -358,7 +368,10 @@ export function useRowSelection(
       tab.selectedRowKeys = new Set();
       rowSelectionAnchor = null;
       rowSelectionFocus = null;
-      const refreshed = await refetchAfterDelete(tab, 1);
+      const refreshed = await refetchAfterDelete(tab, {
+        anchor: Number.isFinite(anchor) ? anchor : null,
+        removedRows: removedRowCount(deleted, count),
+      });
       if (!refreshed) {
         statusText.value = insertRowIds.length > 0
           ? `已删除 ${count} 行，并移除 ${insertRowIds.length} 条未保存新增行；但列表刷新失败，请点击「重试」或重新打开表`
@@ -396,15 +409,18 @@ export function useRowSelection(
     if (!confirmed) return;
     try {
       if (!(await prepareForDelete(tab))) return;
+      const anchor = allRowEntries(tab).find((entry) => entry.row === row)?.dataIndex;
       statusText.value = "正在删除 1 行，请稍候…";
-      await invokeWorkbench("delete_rows", {
+      const deleted = await invokeWorkbench("delete_rows", {
         request: {
           sessionId: tab.sessionId,
           rowIdentities: [buildRowIdentity(tab, row)],
         },
       });
-      const page = tabRowCount(tab) <= 1 && tab.page > 1 ? tab.page - 1 : tab.page;
-      const refreshed = await refetchAfterDelete(tab, page);
+      const refreshed = await refetchAfterDelete(tab, {
+        anchor: Number.isInteger(anchor) ? anchor : null,
+        removedRows: removedRowCount(deleted, 1),
+      });
       if (!refreshed) {
         statusText.value = "已删除 1 行，但列表刷新失败，请点击「重试」或重新打开表";
         return;

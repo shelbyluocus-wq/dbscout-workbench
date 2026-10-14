@@ -39,8 +39,8 @@ function createHarness(options = {}) {
     },
     { statusText },
     {
-      fetchPage: options.fetchPage || (async (targetTab, page) => {
-        fetched.push({ tab: targetTab, page });
+      fetchPage: options.fetchPage || (async (targetTab, page, fetchOptions = {}) => {
+        fetched.push({ tab: targetTab, page, options: fetchOptions });
         return { ok: true };
       }),
       prepareForDelete: options.prepareForDelete,
@@ -667,4 +667,31 @@ test("deleteRow reports a refresh failure when the post-delete refetch keeps fai
   assert.equal(calls.filter((call) => call.command === "delete_rows").length, 1);
   assert.equal(attempts, 2);
   assert.equal(statusText.value, "已删除 1 行，但列表刷新失败，请点击「重试」或重新打开表");
+});
+
+test("deleting selected rows fetches the loaded rows again in place, from the first deleted row", async () => {
+  const { tab, fetched, selection } = createHarness({
+    invokeWorkbench: async (command) => (command === "delete_rows" ? { affected: 2 } : {}),
+  });
+  const { close } = useConfirm();
+  selection.toggleRowSelect(tab, tab.rows[1], {});
+  selection.toggleRowSelect(tab, tab.rows[3], { ctrlKey: true });
+  const deletePromise = selection.deleteSelectedRows(tab);
+  close(true);
+  await deletePromise;
+
+  assert.deepEqual(fetched.at(-1).options, { inPlace: true, anchor: 1, removedRows: 2 });
+});
+
+test("deleting one row fetches the loaded rows again in place, at that row", async () => {
+  const { tab, fetched, selection } = createHarness({
+    invokeWorkbench: async (command) => (command === "delete_rows" ? { affected: 0 } : {}),
+  });
+  const { close } = useConfirm();
+  const deletePromise = selection.deleteRow(tab, tab.rows[2]);
+  close(true);
+  await deletePromise;
+
+  // Already gone on the server: nothing to take off the total.
+  assert.deepEqual(fetched.at(-1).options, { inPlace: true, anchor: 2, removedRows: 0 });
 });

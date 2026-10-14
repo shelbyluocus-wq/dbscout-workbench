@@ -1586,7 +1586,9 @@ test("workbench clears stale cell validation errors on refresh and tab close", (
   assert.match(orchestrator, /function\s+tabErrorScopeKey\(tab\)/);
   assert.match(orchestrator, /function\s+clearTabCellErrors\(tab\)/);
   assert.match(orchestrator, /async\s+function\s+refreshTabPage\(tab,\s*page,\s*options\s*=\s*\{\}\)/);
-  assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page,\s*\{\s*refreshSchema:\s*options\.refreshSchema === true\s*\}\)/);
+  assert.match(orchestrator, /const\s+result\s*=\s*await\s+fetchPage\(tab,\s*page,\s*\{\s*refreshSchema:\s*options\.refreshSchema === true,/);
+  // Refreshes of rows changed in place keep the loaded window (see fetchPage).
+  assert.match(orchestrator, /inPlace:\s*options\.inPlace === true/);
   assert.match(orchestrator, /focusedPaneState\.prepareInsertDraftsForRefresh\?\.\(tab\)/);
   assert.match(orchestrator, /if\s*\(ready === false\)\s*return\s*\{\s*ok:\s*false,\s*cancelled:\s*true\s*\}/);
   assert.match(orchestrator, /if\s*\(result\?\.ok\)\s*\{[\s\S]*clearTabCellErrors\(tab\)[\s\S]*focusedPaneState\.clearInsertDraftsAfterRefresh\?\.\(tab\)[\s\S]*clearInsertDraft\(tab\)[\s\S]*clearSelection\(\{ clearInsertDrafts: true \}\)/);
@@ -2704,7 +2706,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@save-text-panel="handleSaveTextPanel"/);
   assert.match(pane, /@commit-detail-draft="handleCommitDetailDraft"/);
   assert.match(pane, /async function refreshAfterInsertSave\(tab, draftSnapshot = null, \{ reselect = true \} = \{\}\)/);
-  assert.match(pane, /props\.fetchPage\(tab, tab\.page \|\| 1, \{ skipInsertDraftCheck: true \}\)/);
+  assert.match(pane, /props\.fetchPage\(tab, tab\.page \|\| 1, \{ skipInsertDraftCheck: true, inPlace: true \}\)/);
   assert.match(pane, /async function saveInsertDraftRow\(tab, rowId\) \{[\s\S]*?insertDraftSnapshotOf\(tab, rowId\)/);
   assert.match(orchestrator, /commitInsertRowsAndRefresh\(tab\)/);
   assert.match(pane, /clearSelection\(\)/);
@@ -2712,7 +2714,7 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /const result = await handleGridKeydown\(event\)/);
   assert.match(pane, /result\?\.insertedRows > 0 && !result\?\.failedRowId/);
   assert.match(orchestrator, /result\?\.insertedRows > 0 && !result\?\.failedRowId/);
-  assert.match(pane, /refreshTabPage\(tab, tab\.page \|\| 1\)/);
+  assert.match(pane, /refreshTabPage\(tab, tab\.page \|\| 1, \{ inPlace: true \}\)/);
   assert.match(pane, /async\s+function\s+prepareInsertDraftsForRefresh\(tab,\s*\{ excludeInsertRowIds = \[\] \} = \{\}\)/);
   assert.match(pane, /const confirmed = await confirmDialog\(\{[\s\S]*?insertDraftRefreshPrompt\(drafts\.length\)/);
   assert.match(pane, /新增行保存失败：\$\{result\.failedReason \|\| statusText\.value \|\| "请检查新增行输入"\}/);

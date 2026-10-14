@@ -1,6 +1,7 @@
 import { markRaw, ref, watch } from "vue";
 import { DEFAULT_PAGE_SIZE, REQUEST_PAGE_SIZE } from "../constants.js";
 import { DenseRowStore, ensureTabRowStore, tabRowCount, tabRows } from "../rowStore.js";
+import { tableWindowOffset } from "../utils/tableScrollWindow.js";
 import {
   normalizeTableName,
   normalizeTableComment,
@@ -58,6 +59,8 @@ export function useTableSession(
   let totalRequestSequence = 0;
   let activationIntentSequence = 0;
   const closingSessionRequests = new Map();
+  // Refetching the loaded rows in place never asks for more than this.
+  const IN_PLACE_MAX_ROWS = REQUEST_PAGE_SIZE * 5;
   let disposed = false;
   const stopNavigationWatch = watch(
     () => [
@@ -785,7 +788,41 @@ export function useTableSession(
     return request;
   }
 
-  async function fetchPage(tab, page, { refreshSchema = false } = {}) {
+  // The rows the grid has loaded, to fetch again where they are. A very long
+  // window is cut down to the part around `anchor` (a loaded row index, such
+  // as the first deleted row) so the request stays small and still covers
+  // what the user is looking at.
+  function loadedRowWindow(tab, anchor = null) {
+    const offset = tableWindowOffset(tab);
+    const loaded = tabRowCount(tab);
+    if (loaded <= IN_PLACE_MAX_ROWS) return { offset, size: Math.max(REQUEST_PAGE_SIZE, loaded) };
+    const center = offset + Math.min(loaded, Math.max(0, Number.isInteger(anchor) ? anchor : 0));
+    return { offset: Math.max(0, center - Math.floor(IN_PLACE_MAX_ROWS / 2)), size: IN_PLACE_MAX_ROWS };
+  }
+
+  // Totals after fetching the loaded rows again in place. The page itself only
+  // estimates them, so a known exact total stays exact (less the rows just
+  // removed) or, when the change is unknown, stays as a provisional figure
+  // that is counted again in the background.
+  function inPlaceTotals(tab, payload, offset, removedRows) {
+    const reached = offset + (Array.isArray(payload?.rows) ? payload.rows.length : 0);
+    if ((payload?.hasMore ?? payload?.has_more) === false) return { totalRows: reached, totalRowsExact: true };
+    if (tab.totalRowsExact !== true) return {};
+    const previous = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
+    if (Number.isInteger(removedRows) && removedRows >= 0) {
+      return { totalRows: Math.max(reached, previous - removedRows), totalRowsExact: true };
+    }
+    return { totalRows: Math.max(reached, previous), totalRowsExact: false };
+  }
+
+  /**
+   * Replaces the tab's rows with one page from the backend. `page` is placed
+   * where it belongs in the table. With `inPlace` the rows already loaded are
+   * fetched again from the same position instead (after rows were deleted,
+   * inserted or replaced), so the grid keeps its scroll position and rows
+   * after a deleted one move up; `removedRows` keeps a known total exact.
+   */
+  async function fetchPage(tab, page, { refreshSchema = false, inPlace = false, anchor = null, removedRows = null } = {}) {
     if (refreshSchema && tab) {
       const refreshToken = beginTabRequest(tab.id);
       cancelExactTotalRefresh(tab);
@@ -821,22 +858,49 @@ export function useTableSession(
       return { ok: false, error: new Error("missing table session") };
     }
     const requestToken = beginTabRequest(tab.id);
+    const inPlaceWindow = inPlace ? loadedRowWindow(tab, anchor) : null;
     cancelExactTotalRefresh(tab);
     tab.loading = true;
     tab.loadingMore = false;
     tab.loadError = null;
     try {
-      const payload = await measureAsync(
-        "table.fetch.invoke",
-        () => invokeWorkbench("fetch_table_page", {
-            sessionId: tab.sessionId,
-            request: buildPageRequest(tab, page, { includeFilter: usesBackendFilter(tab) }),
-          }),
-        { tableName: tab.tableName, page },
-      );
+      let windowOffset = (Math.max(1, Math.floor(Number(page) || 1)) - 1) * REQUEST_PAGE_SIZE;
+      let payload;
+      if (inPlaceWindow) {
+        // Rows at the end may be gone: step back a window, then to the top.
+        const starts = [...new Set([inPlaceWindow.offset, Math.max(0, inPlaceWindow.offset - inPlaceWindow.size), 0])];
+        for (const start of starts) {
+          payload = await measureAsync(
+            "table.fetch.invoke",
+            () => invokeWorkbench("fetch_table_page", {
+              sessionId: tab.sessionId,
+              request: buildPageRequest(tab, Math.floor(start / REQUEST_PAGE_SIZE) + 1, {
+                includeFilter: usesBackendFilter(tab),
+                pageSize: inPlaceWindow.size,
+                offset: start,
+              }),
+            }),
+            { tableName: tab.tableName, page: Math.floor(start / REQUEST_PAGE_SIZE) + 1, offset: start },
+          );
+          if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+          windowOffset = start;
+          if (Array.isArray(payload?.rows) && payload.rows.length > 0) break;
+        }
+      } else {
+        payload = await measureAsync(
+          "table.fetch.invoke",
+          () => invokeWorkbench("fetch_table_page", {
+              sessionId: tab.sessionId,
+              request: buildPageRequest(tab, page, { includeFilter: usesBackendFilter(tab) }),
+            }),
+          { tableName: tab.tableName, page },
+        );
+      }
       if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
       markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
-      replaceTabPage(workspace, tab.id, { ...payload, rowWindowOffset: 0 });
+      const totals = inPlaceWindow ? inPlaceTotals(tab, payload, windowOffset, removedRows) : {};
+      replaceTabPage(workspace, tab.id, { ...payload, ...totals, rowWindowOffset: windowOffset });
+      if (totals.totalRowsExact === false) scheduleExactTotalRefresh(tab);
       markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
       tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];

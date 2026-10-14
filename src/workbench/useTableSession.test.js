@@ -1861,7 +1861,8 @@ test("a stale rejected page request reports stale instead of a real error", asyn
 
   const staleRequest = session.fetchPage(tab, 2);
   const currentRequest = session.fetchPage(tab, 3);
-  pages.get(3).resolve({ sessionId: "hero-session", columns: [{ column_name: "id" }], rows: [{ id: 3 }], totalRows: 3, page: 3, pageSize: 1000 });
+  // Page 3 starts at row 2001; the page itself only estimates the total.
+  pages.get(3).resolve({ sessionId: "hero-session", columns: [{ column_name: "id" }], rows: [{ id: 2001 }], totalRows: 2001, totalRowsExact: false, page: 3, pageSize: 1000 });
   const currentResult = await currentRequest;
   pages.get(2).reject(new Error("old session closed"));
   const staleResult = await staleRequest;
@@ -1869,8 +1870,9 @@ test("a stale rejected page request reports stale instead of a real error", asyn
   assert.deepEqual(currentResult, { ok: true, tab });
   assert.deepEqual(staleResult, { ok: false, stale: true });
   assert.equal(tab.page, 3);
-  assert.deepEqual(tab.rows, [{ id: 3 }]);
-  assert.equal(statusText.value, "game.hero：3 行");
+  assert.deepEqual(tab.rows, [{ id: 2001 }]);
+  assert.equal(tab.rowWindowOffset, 2000, "a requested page sits where it belongs in the table");
+  assert.equal(statusText.value, "game.hero：第 2001–2001 行+");
 });
 
 test("fetchPage reports success and backend failure to callers", async () => {
@@ -3050,4 +3052,115 @@ test("clearing the relation filter shows the whole table and keeps a typed searc
   assert.equal(pageCall.payload.request.filter, null);
   assert.deepEqual(await session.clearRelationFilter(tab), { ok: false });
   await session.dispose();
+});
+
+// A tab scrolled far into a big table: `loaded` rows from `offset`, exact total known.
+function windowedTab({ offset = 0, loaded = 2000, totalRows = 20000 } = {}) {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-1",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "item",
+    sessionId: "item-session",
+    page: 2,
+    pageSize: 1000,
+    rows: Array.from({ length: loaded }, (_, index) => ({ id: offset + index + 1 })),
+    columns: [{ column_name: "id" }],
+    totalRows,
+    totalRowsExact: true,
+    rowWindowOffset: offset,
+    filter: "",
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  return workspace;
+}
+
+// The backend after `deleted` row ids are gone from a table of `total` rows.
+function remainingTable(total, deleted = []) {
+  const gone = new Set(deleted);
+  const ids = [];
+  for (let id = 1; id <= total; id += 1) if (!gone.has(id)) ids.push(id);
+  const requests = [];
+  const invoke = async (command, payload) => {
+    if (command !== "fetch_table_page") throw new Error(`unexpected command ${command}`);
+    const { request } = payload;
+    requests.push(request);
+    const offset = request.offset ?? (request.page - 1) * request.pageSize;
+    const rows = ids.slice(offset, offset + request.pageSize).map((id) => ({ id }));
+    return {
+      sessionId: "item-session",
+      columns: [{ column_name: "id" }],
+      rows,
+      totalRows: offset + rows.length,
+      totalRowsExact: false,
+      hasMore: rows.length >= request.pageSize,
+      page: request.page,
+      pageSize: request.pageSize,
+    };
+  };
+  return { invoke, requests };
+}
+
+test("after a delete the loaded rows are fetched again where they are, not as the first page", async () => {
+  const workspace = windowedTab({ offset: 0, loaded: 2000, totalRows: 20000 });
+  const { invoke, requests } = remainingTable(20000, [1990]);
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const result = await session.fetchPage(tab, 1, { inPlace: true, anchor: 1989, removedRows: 1 });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(requests.at(-1), { page: 1, pageSize: 2000, includeTotal: false, filter: null, sort: null, offset: 0 });
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.equal(tab.rows.length, 2000, "the same window, still covering the view");
+  assert.equal(tab.rows[1988].id, 1989);
+  assert.equal(tab.rows[1989].id, 1991, "rows after the deleted one move up");
+  assert.equal(tab.totalRows, 19999, "the known total stays exact, less the deleted row");
+  assert.equal(tab.totalRowsExact, true);
+});
+
+test("a very long loaded window is fetched again around the deleted rows", async () => {
+  const workspace = windowedTab({ offset: 0, loaded: 9000, totalRows: 20000 });
+  const { invoke, requests } = remainingTable(20000, [8501]);
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.fetchPage(tab, 1, { inPlace: true, anchor: 8500, removedRows: 1 });
+
+  const request = requests.at(-1);
+  assert.equal(request.pageSize, REQUEST_PAGE_SIZE * 5);
+  assert.ok(request.offset <= 8500 && request.offset + request.pageSize > 8500, "the deleted row's place is covered");
+  assert.equal(tab.rowWindowOffset, request.offset);
+  assert.equal(tab.rows[8500 - request.offset].id, 8502);
+});
+
+test("when the rows at the end are gone, the in-place fetch steps back a window", async () => {
+  const deleted = Array.from({ length: 1000 }, (_, index) => 19001 + index);
+  const workspace = windowedTab({ offset: 19000, loaded: 1000, totalRows: 20000 });
+  const { invoke, requests } = remainingTable(20000, deleted);
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.fetchPage(tab, 1, { inPlace: true, anchor: 0, removedRows: 1000 });
+
+  assert.deepEqual(requests.map((request) => request.offset), [19000, 18000]);
+  assert.equal(tab.rowWindowOffset, 18000);
+  assert.equal(tab.rows.at(-1).id, 19000);
+  assert.equal(tab.totalRows, 19000);
+});
+
+test("an in-place fetch without a known change keeps a provisional total", async () => {
+  const workspace = windowedTab({ offset: 0, loaded: 1000, totalRows: 20000 });
+  const { invoke } = remainingTable(20003);
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.fetchPage(tab, 1, { inPlace: true });
+
+  assert.equal(tab.rowWindowOffset, 0);
+  assert.equal(tab.totalRows, 20000, "the scrollbar keeps its length until the table is counted again");
+  assert.equal(tab.totalRowsExact, false);
 });

@@ -418,8 +418,14 @@ content versions from identity versions; no-key tables use all columns for
 identity. `rowIndex.js` resolves current row objects through the store.
 Tab reorder animation measures geometry only while dragging.
 
-Grid regressions: `node scripts/test-grid-columns.mjs` and
-`DBSCOUT_GRID_TEST_URL=<preview URL> node scripts/test-grid-insert-drag.mjs`.
+Grid regressions: `node scripts/test-grid-columns.mjs`,
+`DBSCOUT_GRID_TEST_URL=<preview URL> node scripts/test-grid-insert-drag.mjs`
+and `node scripts/test-grid-delete-browser.mjs` (against a Vite dev server,
+`DBSCOUT_GRID_DELETE_TEST_URL`). Refreshes after rows change in place
+(delete, insert, paste, replace, import) fetch the loaded row window again
+from where it is (`fetchPage(..., { inPlace: true })`), so a grid scrolled far
+down keeps its place; an explicitly requested page is drawn at its own
+position in the table.
 Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
 `node scripts/test-relation-graph-browser.mjs`,
 `node scripts/test-relation-graph-large-browser.mjs` (the generated relation

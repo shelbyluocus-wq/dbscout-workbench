@@ -910,7 +910,7 @@ const backupCenter = useBackupCenter({
     );
     // Refresh the visible tab first; other open copies refresh independently.
     tabs.sort((a, b) => Number(b.id === activeDataTab.value?.id) - Number(a.id === activeDataTab.value?.id));
-    for (const tab of tabs) void refreshTabPage(tab, tab.page || 1);
+    for (const tab of tabs) void refreshTabPage(tab, tab.page || 1, { inPlace: true });
   },
 });
 
@@ -2307,7 +2307,13 @@ async function refreshTabPage(tab, page, options = {}) {
     const ready = await focusedPaneState.prepareInsertDraftsForRefresh?.(tab);
     if (ready === false) return { ok: false, cancelled: true };
   }
-  const result = await fetchPage(tab, page, { refreshSchema: options.refreshSchema === true });
+  const result = await fetchPage(tab, page, {
+    refreshSchema: options.refreshSchema === true,
+    // Rows changed in place: fetch the loaded rows again where they are.
+    inPlace: options.inPlace === true,
+    anchor: options.anchor ?? null,
+    removedRows: options.removedRows ?? null,
+  });
   if (result?.ok) {
     clearTabCellErrors(tab);
     if (tab?.id === activeDataTab.value?.id) {
@@ -4258,7 +4264,7 @@ async function handleReplacedAll(payload) {
       patches: payload.patches,
     });
   }
-  await refreshTabPage(tab, tab.page || 1);
+  await refreshTabPage(tab, tab.page || 1, { inPlace: true });
   focusedPaneState.refreshCurrentSearchMatches?.();
 }
 
@@ -4467,7 +4473,7 @@ async function handleGridKeydownWithRows(event) {
   }
   const result = await handleGridKeydown(event);
   if (result?.insertedRows > 0 && !result?.failedRowId && tab) {
-    await refreshTabPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1, { inPlace: true });
   }
 }
 
@@ -4499,7 +4505,7 @@ async function commitInsertRowsAndRefresh(tab) {
   const drafts = nonEmptyInsertDrafts(tab);
   const result = await commitInsertRows(tab);
   if (result?.insertedRows > 0) {
-    await refreshTabPage(tab, tab.page || 1);
+    await refreshTabPage(tab, tab.page || 1, { inPlace: true });
     clearInsertDraft(tab);
     clearSelection({ clearInsertDrafts: true });
   }
