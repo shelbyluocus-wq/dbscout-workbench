@@ -8,8 +8,8 @@ import {
   graphNeighbors,
   graphNodeRelations,
   graphStatuses,
+  groupByOtherTable,
   layoutRelationGraph,
-  linkSegment,
   loadGraphOptions,
   localRelationGraph,
   nodeRadius,
@@ -130,7 +130,7 @@ test("an unknown center still shows itself alone", () => {
 test("the layout puts referenced tables on the right and referencing ones on the left", () => {
   const local = localRelationGraph(GRAPH, "hero");
   const layout = layoutRelationGraph(local);
-  assert.deepEqual(layout.positions.get("hero"), { x: 0, y: 0, label: "hero", labelY: node(local, "hero").radius + 12 });
+  assert.deepEqual(layout.positions.get("hero"), { x: 0, y: 0, label: "hero" });
   const outgoing = ["item", "skill"].map((id) => layout.positions.get(id).x);
   assert.ok(outgoing.every((x) => x > 0), "outgoing tables sit right of the center");
   assert.ok(layout.positions.get("quest").x < 0, "incoming tables sit left of the center");
@@ -181,15 +181,39 @@ test("a table's drawn relations split into made, received and self, with their c
   assert.deepEqual(graphNodeRelations(null, "item"), { references: [], referencedBy: [], self: [] });
 });
 
-test("neighbours, segments, statuses and labels", () => {
+test("a large view stretches the rings but not the center", () => {
+  const local = localRelationGraph(GRAPH, "hero", { depth: 2 });
+  const compact = layoutRelationGraph(local);
+  const stretched = layoutRelationGraph(local, undefined, { spread: { x: 2.5, y: 1.5 } });
+  assert.deepEqual(stretched.positions.get("hero"), compact.positions.get("hero"));
+  for (const id of ["skill", "buff", "quest"]) {
+    assert.ok(Math.abs(stretched.positions.get(id).x - compact.positions.get(id).x * 2.5) < 1e-9);
+    assert.ok(Math.abs(stretched.positions.get(id).y - compact.positions.get(id).y * 1.5) < 1e-9);
+  }
+  assert.ok(stretched.bounds.width > compact.bounds.width);
+  assert.deepEqual(stretched.extent, compact.extent, "the extent describes the compact rings");
+  assert.ok(compact.extent.width > 0 && compact.extent.height > 0);
+});
+
+test("the info card lists each other table once with its fields", () => {
+  const relations = [
+    edge("hero", "skill", { column: "skill_id" }),
+    edge("hero", "skill", { column: "passive_id", status: "stale" }),
+    edge("hero", "item", { column: "cost_id" }),
+  ];
+  const groups = groupByOtherTable(relations, "hero");
+  assert.deepEqual(groups.map((group) => group.table), ["item", "skill"]);
+  assert.equal(groups[1].relations.length, 2);
+  assert.equal(groups[1].status, "stale");
+  const incoming = groupByOtherTable([edge("quest", "hero", { column: "hero_id" })], "hero");
+  assert.deepEqual(incoming.map((group) => group.table), ["quest"]);
+  assert.deepEqual(groupByOtherTable(null, "hero"), []);
+});
+
+test("neighbours, statuses and labels", () => {
   const local = localRelationGraph(GRAPH, "hero");
   assert.deepEqual([...graphNeighbors(local, "skill")].sort(), ["hero", "skill"]);
   assert.equal(graphNeighbors(local, "").size, 0);
-
-  const positions = new Map([["a", { x: 0, y: 0 }], ["b", { x: 100, y: 0 }]]);
-  const radii = new Map([["a", 8], ["b", 10]]);
-  assert.deepEqual(linkSegment({ source: "a", target: "b" }, positions, radii), { x1: 10, y1: 0, x2: 88, y2: 0 });
-  assert.equal(linkSegment({ source: "a", target: "z" }, positions, radii), null);
 
   assert.deepEqual(graphStatuses(local), ["confirmed", "unconfirmed", "stale"]);
   assert.equal(worseStatus("confirmed", "conflict"), "conflict");
@@ -221,4 +245,31 @@ test("view options persist and bad saved values fall back to defaults", () => {
   storage.data.set(GRAPH_OPTIONS_STORAGE_KEY, JSON.stringify({ height: 20 }));
   assert.equal(loadGraphOptions(storage).height, 180);
   assert.deepEqual(loadGraphOptions(null), DEFAULT_GRAPH_OPTIONS);
+});
+
+test("second-ring tables gather beside the table that brought them in", () => {
+  // item has four referencing tables beyond it; activity sees item alone in its first ring.
+  const graph = {
+    edges: [
+      edge("activity", "item", { column: "reward" }),
+      edge("drop", "item", { column: "item_id" }),
+      edge("mail", "item", { column: "item_id" }),
+      edge("quest", "item", { column: "item_id" }),
+      edge("shop", "item", { column: "item_id" }),
+    ],
+  };
+  const local = localRelationGraph(graph, "activity", { depth: 2 });
+  const layout = layoutRelationGraph(local);
+  const item = layout.positions.get("item");
+  assert.ok(item.x > 0, "item sits right of activity");
+  for (const id of ["drop", "mail", "quest", "shop"]) {
+    const point = layout.positions.get(id);
+    assert.ok(point.x > 0, `${id} stays on item's side`);
+    assert.ok(Math.hypot(point.x - item.x, point.y - item.y) < Math.hypot(point.x, point.y), `${id} is nearer item than the center`);
+  }
+  // Neighbours on the ring keep their spacing.
+  const ring = ["drop", "mail", "quest", "shop"].map((id) => layout.positions.get(id)).sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+  for (let index = 1; index < ring.length; index += 1) {
+    assert.ok(Math.hypot(ring[index].x - ring[index - 1].x, ring[index].y - ring[index - 1].y) >= 40, "no two tables touch");
+  }
 });

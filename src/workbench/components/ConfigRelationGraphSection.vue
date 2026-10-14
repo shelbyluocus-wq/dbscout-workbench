@@ -5,7 +5,6 @@
 // state. The enlarged view shares the same options.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { tableDisplayName } from "../utils/configRelations.js";
 import {
   graphStatuses,
   loadGraphOptions,
@@ -76,7 +75,7 @@ const hasNeighbors = computed(() => (local.value?.nodes.length || 0) > 1);
 const statuses = computed(() => graphStatuses(local.value));
 const tables = computed(() => graphData.value?.tables || {});
 const tableCount = computed(() => (hasNeighbors.value ? local.value.nodes.length - 1 : null));
-const dialogTitle = computed(() => t("relations.graph.expandedTitle", { name: tableDisplayName(tables.value, props.tableName) }));
+const currentTable = computed(() => String(props.tableName || "").toLowerCase());
 const emptyText = computed(() => (options.outgoing && options.incoming
   ? t("relations.graph.empty")
   : t("relations.graph.emptyDirection")));
@@ -121,6 +120,8 @@ function openExpanded() {
           :graph="local"
           :tables="tables"
           :height="options.height"
+          :layout-key="`${scopeKey}\u001f${currentTable}`"
+          :current-table="currentTable"
           @update:height="options.height = $event"
           @expand="openExpanded"
           @open-table="emit('open-table', $event)"
@@ -140,11 +141,10 @@ function openExpanded() {
     <ConfigRelationGraphDialog
       :open="expanded && hasNeighbors"
       :theme="theme"
-      :title="dialogTitle"
-      :graph="local"
-      :tables="tables"
-      :statuses="statuses"
+      :graph-data="graphData"
+      :table-name="tableName"
       :options="options"
+      :scope-key="scopeKey"
       @close="expanded = false"
       @set-depth="setDepth"
       @toggle-direction="toggleDirection"

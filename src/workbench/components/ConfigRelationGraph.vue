@@ -2,13 +2,15 @@
 // Draws one local relation graph: tables as circles sized by how many tables
 // reference them and tinted by which side of the current table they are on,
 // the relations between two tables as one line coloured by its worst status.
-// Hovering, focusing or dragging a table keeps only it and its direct
-// neighbours bright. Tables can be dragged (neighbours follow on springs and
-// everything swings back on release), the wheel zooms around the pointer,
-// dragging empty space pans and the bottom edge resizes the graph.
+// Lines bow around tables in their way and every name takes the side of its
+// table that keeps lines and arrowheads clear. Hovering, focusing or dragging
+// a table keeps only it and its direct neighbours bright. Tables can be
+// dragged anywhere and stay there; the wheel zooms around the pointer,
+// dragging empty space pans, the bottom edge resizes the inline graph, and a
+// large view stretches the rings to use its room.
 import { t } from "../i18n/index.js";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownLeft, ArrowUpRight, CircleHelp, Lock, LocateFixed, Maximize2, Repeat2, ZoomIn, ZoomOut } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { CircleHelp, LocateFixed, Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-vue-next";
 import {
   relationStatusLabel,
   relationTitle,
@@ -20,11 +22,22 @@ import {
   clampGraphHeight,
   graphNeighbors,
   graphNodeRelations,
+  groupByOtherTable,
   layoutRelationGraph,
-  linkSegment,
 } from "../utils/relationGraph.js";
+import {
+  arrowZones,
+  cardPlacement,
+  layoutSpread,
+  linkGeometry,
+  linkPieces,
+  placeLabels,
+  screenPoint,
+  textWidth,
+} from "../utils/relationGraphGeometry.js";
 import { useGraphViewport } from "../composables/useGraphViewport.js";
-import { useGraphForces } from "../composables/useGraphForces.js";
+import { useGraphArrangement } from "../composables/useGraphArrangement.js";
+import ConfigRelationGraphCard from "./ConfigRelationGraphCard.vue";
 
 const props = defineProps({
   // Result of localRelationGraph().
@@ -32,83 +45,174 @@ const props = defineProps({
   // Backend lowercase-name -> { name, comment } map.
   tables: { type: Object, default: () => ({}) },
   height: { type: Number, default: GRAPH_HEIGHT.default },
-  // Fill the parent instead of using `height`; hides the resize edge and the
-  // expand button (used by the enlarged view).
+  // Full-screen view: fills its parent, hides the resize edge and the
+  // full-screen button, and shows comments under names.
   fill: { type: Boolean, default: false },
+  // Names the graph so dragged tables keep their place for the session.
+  layoutKey: { type: String, default: "" },
+  // Lowercase name of the table open in the tab; it is not offered for opening.
+  currentTable: { type: String, default: "" },
+  // Offer "center on this table" in the pinned card (full-screen view).
+  explore: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["open-table", "expand", "update:height"]);
+const emit = defineEmits(["open-table", "expand", "update:height", "focus-table"]);
 
 const MARKER_STATUSES = Object.freeze(["confirmed", "unconfirmed", "stale", "conflict", "active"]);
 // Highlighted lines of these statuses switch to the accent colour; stale and
 // conflict keep their warning colours so the problem stays visible.
 const ACCENT_STATUSES = new Set(["confirmed", "unconfirmed"]);
 const ZOOM_STEP = 1.25;
-// Labels keep one on-screen size at every zoom level.
+// Names keep one on-screen size at every zoom level.
 const LABEL_SCREEN_SIZE = 11;
-const LABEL_SCREEN_GAP = 4;
+const FILL_LABEL_SCREEN_SIZE = 13;
+const COMMENT_SCREEN_SIZE = 11;
+const LABEL_SCREEN_GAP = 5;
+const LINE_HEIGHT = 1.3;
+const COMMENT_MAX_CHARS = 16;
+const FIELD_LABEL_SCREEN_SIZE = 10.5;
+const FIELD_LABEL_MAX = 2;
 // "Fit" stops enlarging a small graph here (screen pixels per graph unit).
 const MAX_FIT_SCALE = 1.6;
+// A large view stretches the rings to fill itself at about this scale.
+const SPREAD_SCALE = 1.15;
 // The dot grid behind the graph keeps one on-screen density at every zoom.
 const GRID_SCREEN_STEP = 18;
 const GRID_SCREEN_DOT = 0.9;
 // Halo drawn around the current table, in screen pixels.
 const CENTER_HALO = 5;
-// Past this many tables, outer-ring labels would pile up; they fade in as the
+// Past this many tables, outer-ring names would pile up; they fade in as the
 // user zooms toward OUTER_LABEL_FULL_SCALE and show at once on hover/focus.
 const ALL_LABELS_NODE_LIMIT = 24;
 const OUTER_LABEL_FADE_START = 0.8;
 const OUTER_LABEL_FULL_SCALE = 1.1;
 const DRAG_THRESHOLD_PX = 4;
-const UNLOCKED_ROWS_PER_SECTION = 5;
+const UNPINNED_TABLES_PER_SECTION = 4;
 const RESIZE_KEY_STEP = 20;
-// Share of the fitted width kept free right of the drawing for the tool strip.
-const CONTROLS_RESERVE = 0.16;
+const NUDGE_STEP_PX = 12;
+// Screen room kept free right of the drawing for the tool strip.
+const CONTROLS_RESERVE_PX = 48;
 
 const markerPrefix = `wb-relation-graph-${Math.random().toString(36).slice(2, 10)}`;
 const helpId = `${markerPrefix}-help`;
-const HELP_LINES = Object.freeze(["navigate", "drag", "open", "lock", "reset", "size"]);
-const CARD_SECTION_ICONS = Object.freeze({ references: ArrowUpRight, referencedBy: ArrowDownLeft, self: Repeat2 });
+const HELP_LINES = Object.freeze(["navigate", "drag", "open", "pin", "reset", "size"]);
+// The floating card keeps this much room from the table it describes (pixels).
+const CARD_CLEARANCE = 14;
+const CARD_MIN_HEIGHT = 96;
+// Narrower graphs dock a pinned card under the canvas instead of over it.
+const DOCK_BELOW_WIDTH = 560;
 const hostEl = ref(null);
 const svgEl = ref(null);
 const hostSize = ref({ width: 0, height: 0 });
 const hoverId = ref("");
 const dragId = ref("");
 // Right-clicked table whose highlight and card stay put while the pointer roams.
-const lockedId = ref("");
+const pinnedId = ref("");
 let press = null;
 let emptyPress = null;
 let resizeObserver = null;
 
-const layout = computed(() => layoutRelationGraph(props.graph, (id) => tableDisplayName(props.tables, id)));
-const fit = computed(() => {
-  const bounds = layout.value?.bounds || { x: -100, y: -100, width: 200, height: 200 };
-  return { ...bounds, width: bounds.width * (1 + CONTROLS_RESERVE) };
+const currentTable = computed(() => String(props.currentTable || props.graph.center || "").toLowerCase());
+const labelSize = computed(() => (props.fill ? FILL_LABEL_SCREEN_SIZE : LABEL_SCREEN_SIZE));
+
+function labelFor(id) {
+  return tableDisplayName(props.tables, id);
+}
+
+// ── layout: rings stretched to the view, dragged tables kept ─────
+
+const baseLayout = computed(() => layoutRelationGraph(props.graph, labelFor));
+// A string so a resize that keeps the same stretch does not relayout.
+const spreadKey = computed(() => {
+  const spread = layoutSpread(hostSize.value, baseLayout.value?.extent, { scale: SPREAD_SCALE });
+  return `${spread.x}:${spread.y}`;
 });
+const spread = computed(() => {
+  const [x, y] = spreadKey.value.split(":").map(Number);
+  return { x, y };
+});
+const layout = computed(() => (spreadKey.value === "1:1"
+  ? baseLayout.value
+  : layoutRelationGraph(props.graph, labelFor, { spread: spread.value })));
 
-const viewport = useGraphViewport({ fit, hostSize, svgEl, maxFitScale: MAX_FIT_SCALE });
-const { viewBox, scale, panning } = viewport;
-const forces = useGraphForces();
-
-watch(layout, (next) => {
-  if (!next) return;
-  const homes = new Map([...next.positions].map(([id, position]) => [id, { x: position.x, y: position.y }]));
-  forces.rebuild(props.graph.nodes, props.graph.links, homes);
-}, { immediate: true });
-
-let fitted = false;
-watch(fit, () => {
-  viewport.resetView({ animate: fitted });
-  fitted = true;
-}, { immediate: true });
-
-const activeId = computed(() => dragId.value || lockedId.value || hoverId.value);
-const neighbors = computed(() => graphNeighbors(props.graph, activeId.value));
-const radii = computed(() => new Map(props.graph.nodes.map((node) => [node.id, node.radius])));
+const arrangement = useGraphArrangement();
 const positions = computed(() => {
-  const current = forces.positions.value;
+  const current = arrangement.positions.value;
   return current.size ? current : layout.value?.positions || new Map();
 });
+const radii = computed(() => new Map(props.graph.nodes.map((node) => [node.id, node.radius])));
+
+// What "fit" shows: set for a new picture and when the user asks; the room for
+// the tool strip follows the measured width.
+const contentBox = shallowRef({ x: -100, y: -100, width: 200, height: 200 });
+const fitBox = computed(() => withControlsReserve(contentBox.value));
+const viewport = useGraphViewport({ fit: fitBox, hostSize, svgEl, maxFitScale: MAX_FIT_SCALE });
+const { viewBox, scale, panning } = viewport;
+
+function withControlsReserve(box) {
+  const width = hostSize.value.width;
+  const share = width > 0 ? Math.min(0.16, Math.max(0.02, CONTROLS_RESERVE_PX / width)) : 0.16;
+  return { ...box, width: box.width * (1 + share) };
+}
+
+function unionBox(boxes) {
+  const list = boxes.filter(Boolean);
+  if (!list.length) return null;
+  const minX = Math.min(...list.map((box) => box.x));
+  const minY = Math.min(...list.map((box) => box.y));
+  const maxX = Math.max(...list.map((box) => box.x + box.width));
+  const maxY = Math.max(...list.map((box) => box.y + box.height));
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+// Everything drawn right now: circles and the names beside them.
+function drawingBox() {
+  const pad = 10 / Math.max(scale.value, 0.2);
+  const boxes = props.graph.nodes.flatMap((node) => {
+    const point = positions.value.get(node.id);
+    if (!point) return [];
+    const label = placement.value?.get(node.id);
+    const reach = node.radius + pad;
+    const circle = { x: point.x - reach, y: point.y - reach, width: reach * 2, height: reach * 2 };
+    return label ? [circle, { x: label.x0 - pad, y: label.y0 - pad, width: label.x1 - label.x0 + pad * 2, height: label.y1 - label.y0 + pad * 2 }] : [circle];
+  });
+  return unionBox(boxes);
+}
+
+// Where tables are headed, with room for a name on any side; used to fit a
+// new picture before it has finished gliding into place.
+function arrivalBox(pointMap) {
+  const fontSize = labelSize.value / Math.max(scale.value, 0.2);
+  const boxes = props.graph.nodes.flatMap((node) => {
+    const point = pointMap.get(node.id);
+    if (!point) return [];
+    const reachX = node.radius + textWidth(nodeTexts.value.get(node.id)?.label, fontSize) + fontSize;
+    const reachY = node.radius + fontSize * 2.6;
+    return [{ x: point.x - reachX, y: point.y - reachY, width: reachX * 2, height: reachY * 2 }];
+  });
+  return unionBox(boxes);
+}
+
+
+
+// Without dragged tables, "fit" is the view the graph opened with; with them,
+// it takes in wherever they were left.
+function fitToDrawing() {
+  const box = arrangement.arranged.value ? drawingBox() : layout.value?.bounds;
+  if (box) contentBox.value = box;
+  viewport.resetView();
+}
+
+function resetArrangement() {
+  arrangement.reset();
+  if (layout.value) contentBox.value = layout.value.bounds;
+  viewport.resetView();
+}
+
+// ── highlight ─────────────────────────────────────────────────
+
+const activeId = computed(() => dragId.value || pinnedId.value || hoverId.value);
+const neighbors = computed(() => graphNeighbors(props.graph, activeId.value));
 
 function displayName(id) {
   const name = tableDisplayName(props.tables, id);
@@ -132,78 +236,28 @@ function linkHint(link) {
     .join("\n");
 }
 
+// The source fields of a line, for its label while one of its tables is active.
+function fieldLabel(link) {
+  const columns = [...new Set(link.relations.map((relation) => relation.sourceColumn))];
+  const shown = columns.slice(0, FIELD_LABEL_MAX).join(", ");
+  return columns.length > FIELD_LABEL_MAX ? `${shown} +${columns.length - FIELD_LABEL_MAX}` : shown;
+}
+
 // Text that does not change while tables move, kept out of the per-frame work.
-const nodeTexts = computed(() => new Map(props.graph.nodes.map((node) => [node.id, {
-  hint: nodeHint(node),
-  label: layout.value?.positions.get(node.id)?.label || "",
-}])));
-const linkHints = computed(() => new Map(props.graph.links.map((link) => [link.id, linkHint(link)])));
-
-// ── corner card: the active table's drawn relations, field by field ──
-
-function relationRow(relation, locked) {
-  const end = (table, column) => ({
-    table,
-    column,
-    name: tableDisplayName(props.tables, table),
-    // The center table is already open; every other drawn table can be opened.
-    clickable: locked && table !== props.graph.center,
-  });
-  return {
-    id: relation.id,
-    status: relation.status,
-    ends: [end(relation.sourceTable, relation.sourceColumn), end(relation.targetTable, relation.targetColumn)],
-  };
+function shortComment(text) {
+  const value = String(text || "").trim();
+  return value.length > COMMENT_MAX_CHARS ? `${value.slice(0, COMMENT_MAX_CHARS - 1)}…` : value;
 }
 
-const card = computed(() => {
-  const id = activeId.value;
-  const node = id ? props.graph.nodes.find((candidate) => candidate.id === id) : null;
-  if (!node) return null;
-  const locked = lockedId.value === id;
-  const relations = graphNodeRelations(props.graph, id);
-  const sections = [
-    { key: "references", relations: relations.references },
-    { key: "referencedBy", relations: relations.referencedBy },
-    { key: "self", relations: relations.self },
-  ]
-    .filter((section) => section.relations.length)
-    .map((section) => {
-      // Unlocked, the card cannot scroll, so long lists stop early.
-      const shown = locked ? section.relations : section.relations.slice(0, UNLOCKED_ROWS_PER_SECTION);
-      return {
-        key: section.key,
-        count: section.relations.length,
-        rows: shown.map((relation) => relationRow(relation, locked)),
-        more: section.relations.length - shown.length,
-      };
-    });
-  return {
-    id,
-    locked,
-    name: tableDisplayName(props.tables, id),
-    comment: tableDisplayComment(props.tables, id),
-    center: node.depth === 0,
-    total: node.referencedBy,
-    sections,
-  };
-});
-
-function cardHint(current) {
-  if (current.locked) return t("relations.graph.card.unlockHint");
-  return current.center ? t("relations.graph.card.lockHint") : t("relations.graph.card.openLockHint");
-}
-
-// ── right-click lock ─────────────────────────────────────────
-
-function toggleLock(id) {
-  lockedId.value = lockedId.value === id ? "" : id;
-}
-
-// A lock on a table that is no longer drawn has nothing to show.
-watch(() => props.graph, (graph) => {
-  if (lockedId.value && !graph.nodes.some((node) => node.id === lockedId.value)) lockedId.value = "";
-});
+const nodeTexts = computed(() => new Map(props.graph.nodes.map((node) => {
+  const comment = props.fill ? shortComment(tableDisplayComment(props.tables, node.id)) : "";
+  return [node.id, {
+    hint: nodeHint(node),
+    label: layout.value?.positions.get(node.id)?.label || "",
+    comment,
+  }];
+})));
+const linkTexts = computed(() => new Map(props.graph.links.map((link) => [link.id, { hint: linkHint(link), fields: fieldLabel(link) }])));
 
 function outerLabelOpacity() {
   if (props.graph.nodes.length <= ALL_LABELS_NODE_LIMIT) return 1;
@@ -211,26 +265,102 @@ function outerLabelOpacity() {
   return Math.min(1, Math.max(0, progress));
 }
 
+// ── lines: routed around tables in the way ───────────────────
+
+const geometries = computed(() => {
+  const current = positions.value;
+  const obstacles = props.graph.nodes.flatMap((node) => {
+    const point = current.get(node.id);
+    return point ? [{ id: node.id, x: point.x, y: point.y, radius: node.radius }] : [];
+  });
+  return new Map(props.graph.links.map((link) => [link.id, linkGeometry(link, current, radii.value, obstacles)]));
+});
+
+// ── names: each on the side of its table that keeps lines clear ──
+
+let previousSides = new Map();
+const placement = computed(() => {
+  const current = positions.value;
+  const unitScale = scale.value;
+  const fontSize = labelSize.value / unitScale;
+  const commentSize = COMMENT_SCREEN_SIZE / unitScale;
+  const outerOpacity = outerLabelOpacity();
+  const active = activeId.value;
+  const named = [];
+  const unnamed = [];
+  for (const node of props.graph.nodes) {
+    const point = current.get(node.id);
+    if (!point) continue;
+    const texts = nodeTexts.value.get(node.id);
+    const shown = node.depth < 2 || (Boolean(active) && neighbors.value.has(node.id)) || outerOpacity > 0;
+    if (!shown || !texts?.label) {
+      unnamed.push({ id: node.id, x: point.x, y: point.y, radius: node.radius });
+      continue;
+    }
+    const width = Math.max(textWidth(texts.label, fontSize), texts.comment ? textWidth(texts.comment, commentSize) : 0);
+    const height = fontSize * LINE_HEIGHT + (texts.comment ? commentSize * LINE_HEIGHT : 0);
+    named.push({ id: node.id, x: point.x, y: point.y, radius: node.radius, width, height });
+  }
+  const lines = props.graph.links.flatMap((link) => {
+    const geometry = geometries.value.get(link.id);
+    if (!geometry) return [];
+    return [{
+      source: link.source,
+      target: link.target,
+      pieces: linkPieces(geometry),
+      arrows: arrowZones(geometry, { start: link.backward, end: link.forward }),
+    }];
+  });
+  const result = placeLabels(named, lines, {
+    center: props.graph.center,
+    gap: LABEL_SCREEN_GAP / unitScale,
+    previous: previousSides,
+    obstacles: unnamed,
+  });
+  previousSides = new Map([...result].map(([id, side]) => [id, side.direction]));
+  return result;
+});
+
+// A new picture (or a new graph): glide there and fit it. Declared after the
+// values it reads, since it runs once during setup.
+let pictured = false;
+watch([layout, () => props.layoutKey], ([next]) => {
+  if (!next) return;
+  arrangement.setLayout({ layoutKey: props.layoutKey, nodes: props.graph.nodes, homes: next.positions, spread: spread.value, animate: pictured });
+  // Fit the ring layout plus wherever the user has dragged tables to.
+  const dragged = arrangement.arranged.value ? arrivalBox(arrangement.targets()) : null;
+  contentBox.value = unionBox([next.bounds, dragged]) || next.bounds;
+  viewport.resetView({ animate: pictured });
+  pictured = true;
+}, { immediate: true });
+
 const drawnNodes = computed(() => {
   const current = positions.value;
   const active = activeId.value;
   const outerOpacity = outerLabelOpacity();
-  const fontSize = LABEL_SCREEN_SIZE / scale.value;
-  const gap = LABEL_SCREEN_GAP / scale.value;
+  const fontSize = labelSize.value / scale.value;
+  const commentSize = COMMENT_SCREEN_SIZE / scale.value;
   return props.graph.nodes.flatMap((node) => {
     const position = current.get(node.id);
     if (!position) return [];
     const highlighted = Boolean(active) && neighbors.value.has(node.id);
     const labelOpacity = node.depth < 2 || highlighted ? 1 : outerOpacity;
     const texts = nodeTexts.value.get(node.id);
+    const side = placement.value.get(node.id);
     return [{
       ...node,
       x: position.x,
       y: position.y,
       label: texts?.label || "",
-      labelOpacity,
-      labelY: node.radius + gap + fontSize * 0.8,
+      comment: texts?.comment || "",
+      labelOpacity: side ? labelOpacity : 0,
+      // Name position relative to the table, from its chosen side.
+      labelX: side ? side.x - position.x : 0,
+      labelY: side ? side.y0 - position.y + fontSize * 0.82 : 0,
+      commentY: side ? side.y0 - position.y + fontSize * LINE_HEIGHT + commentSize * 0.82 : 0,
+      anchor: side?.anchor || "middle",
       fontSize,
+      commentSize,
       halo: node.radius + CENTER_HALO / scale.value,
       faded: Boolean(active) && !highlighted,
       hovered: active === node.id,
@@ -248,21 +378,25 @@ const grid = computed(() => {
 const gridId = `${markerPrefix}-grid`;
 
 const drawnLinks = computed(() => {
-  const current = positions.value;
   const active = activeId.value;
+  const fieldSize = FIELD_LABEL_SCREEN_SIZE / scale.value;
   return props.graph.links.flatMap((link) => {
-    const segment = linkSegment(link, current, radii.value);
-    if (!segment) return [];
+    const geometry = geometries.value.get(link.id);
+    if (!geometry) return [];
     const touches = Boolean(active) && (link.source === active || link.target === active);
     const accent = touches && ACCENT_STATUSES.has(link.status);
+    const texts = linkTexts.value.get(link.id);
     return [{
       ...link,
-      ...segment,
+      ...geometry,
       faded: Boolean(active) && !touches,
       highlighted: touches,
       accent,
       marker: markerUrl(accent ? "active" : link.status),
-      hint: linkHints.value.get(link.id) || "",
+      hint: texts?.hint || "",
+      // The full-screen view names the fields of the active table's lines.
+      fields: props.fill && touches && !dragId.value ? texts?.fields || "" : "",
+      fieldSize,
     }];
   });
 });
@@ -273,26 +407,156 @@ function markerUrl(status) {
 
 // A small loop on top of the circle for a table that references itself.
 function selfLoopPath(radius) {
-  const spread = Math.max(3, radius * 0.45);
-  return `M ${-spread} ${-radius + 1} C ${-spread * 2.2} ${-radius - 13}, ${spread * 2.2} ${-radius - 13}, ${spread} ${-radius + 1}`;
+  const spreadOut = Math.max(3, radius * 0.45);
+  return `M ${-spreadOut} ${-radius + 1} C ${-spreadOut * 2.2} ${-radius - 13}, ${spreadOut * 2.2} ${-radius - 13}, ${spreadOut} ${-radius + 1}`;
 }
 
-// Double-clicking empty space brings the whole graph back into view.
-function onDoubleClick(event) {
-  if (event.target?.closest?.(".wb-relation-graph-node")) return;
-  viewport.resetView();
+// ── info card: the active table's drawn relations, by table ─────
+
+function cardSection(key, relations, id, pinned) {
+  const groups = groupByOtherTable(relations, id);
+  // Unpinned, the card cannot scroll, so long lists stop early.
+  const shown = pinned ? groups : groups.slice(0, UNPINNED_TABLES_PER_SECTION);
+  return {
+    key,
+    tableCount: groups.length,
+    fieldCount: relations.length,
+    groups: shown.map((group) => ({
+      table: group.table,
+      name: tableDisplayName(props.tables, group.table),
+      comment: tableDisplayComment(props.tables, group.table),
+      openable: group.table !== currentTable.value,
+      status: group.status,
+      fields: group.relations.map((relation) => ({
+        id: relation.id,
+        from: relation.sourceColumn,
+        to: relation.targetColumn,
+        status: relation.status,
+      })),
+    })),
+    more: groups.length - shown.length,
+  };
 }
+
+const card = computed(() => {
+  // The card stays out of the way while a table is being dragged.
+  const id = dragId.value ? "" : pinnedId.value || hoverId.value;
+  const node = id ? props.graph.nodes.find((candidate) => candidate.id === id) : null;
+  if (!node) return null;
+  const pinned = pinnedId.value === id;
+  const relations = graphNodeRelations(props.graph, id);
+  const sections = [
+    cardSection("references", relations.references, id, pinned),
+    cardSection("referencedBy", relations.referencedBy, id, pinned),
+    cardSection("self", relations.self, id, pinned),
+  ].filter((section) => section.fieldCount);
+  return {
+    id,
+    pinned,
+    side: node.depth ? node.side : "center",
+    name: tableDisplayName(props.tables, id),
+    comment: tableDisplayComment(props.tables, id),
+    center: node.depth === 0,
+    openable: id !== currentTable.value,
+    focusable: props.explore && node.depth > 0,
+    total: node.referencedBy,
+    sections,
+  };
+});
+
+// Pinned in a narrow graph, the card docks under the canvas so it covers nothing.
+const docked = computed(() => Boolean(card.value?.pinned) && !props.fill && hostSize.value.width < DOCK_BELOW_WIDTH);
+
+// Floating, the card takes the half (in wide views the corner) away from its
+// table and may grow until it would reach it.
+const cardFrame = computed(() => {
+  if (!card.value || docked.value) return null;
+  const { height } = hostSize.value;
+  const node = props.graph.nodes.find((candidate) => candidate.id === card.value.id);
+  const point = screenPoint(positions.value.get(card.value.id), viewBox.value, hostSize.value);
+  const placement = cardPlacement(point, hostSize.value);
+  const reach = (node?.radius || 0) * scale.value + CARD_CLEARANCE;
+  const room = !point
+    ? height / 2
+    : placement.span
+      ? (placement.vertical === "top" ? point.y - reach : height - point.y - reach) - 8
+      : height - 16;
+  return {
+    class: [`is-${placement.vertical}`, `is-${placement.horizontal}`, { "is-span": placement.span }],
+    style: { maxHeight: `${Math.round(Math.max(CARD_MIN_HEIGHT, Math.min(height - 16, room)))}px` },
+  };
+});
+
+// ── pin: right-click a table; right-click it again to let go ─────
+
+function togglePin(id) {
+  pinnedId.value = pinnedId.value === id ? "" : id;
+}
+
+// A pin on a table that is no longer drawn has nothing to show.
+watch(() => props.graph, (graph) => {
+  if (pinnedId.value && !graph.nodes.some((node) => node.id === pinnedId.value)) pinnedId.value = "";
+});
+
+// Every right-click inside the graph is ours: on a table it pins or unpins
+// it, anywhere else (the card included) it lets go. No menu of the app, the
+// WebView or the system may open here.
+function onContextMenu(event) {
+  const nodeEl = event.target?.closest?.(".wb-relation-graph-node");
+  if (nodeEl?.dataset.id) {
+    togglePin(nodeEl.dataset.id);
+    return;
+  }
+  pinnedId.value = "";
+}
+
+// ── opening and centring ──────────────────────────────────────
 
 function openNode(id) {
-  const node = props.graph.nodes.find((candidate) => candidate.id === id);
-  if (!node?.depth) return;
+  if (!id || id === currentTable.value) return;
   emit("open-table", {
-    name: tableDisplayName(props.tables, node.id),
-    comment: tableDisplayComment(props.tables, node.id),
+    name: tableDisplayName(props.tables, id),
+    comment: tableDisplayComment(props.tables, id),
   });
 }
 
+function focusNode(id) {
+  if (!id) return;
+  pinnedId.value = "";
+  hoverId.value = "";
+  emit("focus-table", { id, name: tableDisplayName(props.tables, id) });
+}
+
+// Double-clicking empty space brings the whole drawing back into view.
+function onDoubleClick(event) {
+  if (event.target?.closest?.(".wb-relation-graph-node")) return;
+  fitToDrawing();
+}
+
 // ── pointer: drag a table, pan empty space, click to open ─────
+
+let pendingMove = null;
+let moveFrame = 0;
+
+function flushMove() {
+  if (moveFrame) globalThis.cancelAnimationFrame?.(moveFrame);
+  moveFrame = 0;
+  if (pendingMove) arrangement.move(pendingMove.id, pendingMove.point);
+  pendingMove = null;
+}
+
+// Pointer events can outpace the screen; move the table once per frame.
+function scheduleMove(id, point) {
+  pendingMove = { id, point };
+  if (moveFrame || typeof globalThis.requestAnimationFrame !== "function") {
+    if (!moveFrame) flushMove();
+    return;
+  }
+  moveFrame = globalThis.requestAnimationFrame(() => {
+    moveFrame = 0;
+    flushMove();
+  });
+}
 
 function capture(event) {
   svgEl.value?.setPointerCapture?.(event.pointerId);
@@ -307,10 +571,21 @@ function onPointerDown(event) {
   const nodeEl = event.target?.closest?.(".wb-relation-graph-node");
   if (nodeEl) {
     // A press only becomes a drag once it moves; until then it may be a click.
-    press = { pointerId: event.pointerId, id: nodeEl.dataset.id, clientX: event.clientX, clientY: event.clientY, moved: false };
+    const id = nodeEl.dataset.id;
+    const point = viewport.graphPoint(event);
+    const at = positions.value.get(id) || point;
+    press = {
+      pointerId: event.pointerId,
+      id,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      // Where on the table it was grabbed, so it does not jump under the pointer.
+      offset: { x: at.x - point.x, y: at.y - point.y },
+      moved: false,
+    };
     return;
   }
-  // A press on empty space that does not turn into a pan releases the lock.
+  // A press on empty space that does not turn into a pan lets go of a pin.
   emptyPress = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
   viewport.startPan(event);
   capture(event);
@@ -320,7 +595,7 @@ function endEmptyPress(event) {
   if (!emptyPress || event.pointerId !== emptyPress.pointerId) return;
   const moved = Math.hypot(event.clientX - emptyPress.clientX, event.clientY - emptyPress.clientY) >= DRAG_THRESHOLD_PX;
   emptyPress = null;
-  if (!moved) lockedId.value = "";
+  if (!moved) pinnedId.value = "";
 }
 
 function onPointerMove(event) {
@@ -336,7 +611,8 @@ function onPointerMove(event) {
       dragId.value = press.id;
       capture(event);
     }
-    forces.pin(press.id, viewport.graphPoint(event));
+    const point = viewport.graphPoint(event);
+    scheduleMove(press.id, { x: point.x + press.offset.x, y: point.y + press.offset.y });
     return;
   }
   viewport.movePan(event);
@@ -347,7 +623,7 @@ function finishPress(event, { cancelled = false } = {}) {
   press = null;
   releaseCapture(event);
   if (moved) {
-    forces.release(id);
+    flushMove();
     dragId.value = "";
   } else if (!cancelled) {
     openNode(id);
@@ -370,6 +646,33 @@ function onPointerCancel(event) {
   }
   emptyPress = null;
   if (viewport.endPan(event)) releaseCapture(event);
+}
+
+// ── keyboard on a focused table ───────────────────────────────
+
+const NUDGE_KEYS = Object.freeze({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] });
+
+function onNodeKeydown(event, node) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    openNode(node.id);
+    return;
+  }
+  if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePin(node.id);
+    return;
+  }
+  const nudge = NUDGE_KEYS[event.key];
+  if (!nudge) return;
+  // Arrow keys move the focused table, Shift for bigger steps.
+  event.preventDefault();
+  event.stopPropagation();
+  const at = positions.value.get(node.id);
+  if (!at) return;
+  const step = (NUDGE_STEP_PX * (event.shiftKey ? 4 : 1)) / scale.value;
+  arrangement.move(node.id, { x: at.x + nudge[0] * step, y: at.y + nudge[1] * step });
 }
 
 // ── height: drag the bottom edge or use the arrow keys ───────
@@ -426,10 +729,13 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
+  if (moveFrame) globalThis.cancelAnimationFrame?.(moveFrame);
 });
 </script>
 
 <template>
+  <!-- Every right-click in the graph, the docked card included, is handled here. -->
+  <div class="wb-relation-graph-frame" :class="{ 'is-fill': fill }" @contextmenu.prevent.stop="onContextMenu">
   <div
     ref="hostEl"
     class="wb-relation-graph"
@@ -466,8 +772,8 @@ onBeforeUnmount(() => {
           viewBox="0 0 10 10"
           refX="9"
           refY="5"
-          markerWidth="6"
-          markerHeight="6"
+          markerWidth="6.5"
+          markerHeight="6.5"
           orient="auto-start-reverse"
         >
           <path d="M0,0 L10,5 L0,10 z" class="wb-relation-graph-arrow" :class="`is-${status}`" />
@@ -482,18 +788,27 @@ onBeforeUnmount(() => {
         :fill="`url(#${gridId})`"
       />
       <g class="wb-relation-graph-links">
-        <line
+        <path
           v-for="link in drawnLinks"
           :key="link.id"
           class="wb-relation-graph-link"
           :class="[`is-${link.status}`, { 'is-faded': link.faded, 'is-highlighted': link.highlighted, 'is-accent': link.accent }]"
-          :x1="link.x1"
-          :y1="link.y1"
-          :x2="link.x2"
-          :y2="link.y2"
+          :d="link.d"
           :marker-end="link.forward ? link.marker : undefined"
           :marker-start="link.backward ? link.marker : undefined"
-        ><title>{{ link.hint }}</title></line>
+        ><title>{{ link.hint }}</title></path>
+      </g>
+      <g class="wb-relation-graph-field-labels" aria-hidden="true">
+        <template v-for="link in drawnLinks" :key="link.id">
+          <text
+            v-if="link.fields"
+            class="wb-relation-graph-field-label"
+            text-anchor="middle"
+            :x="link.mx"
+            :y="link.my + link.fieldSize * 0.35"
+            :font-size="link.fieldSize"
+          >{{ link.fields }}</text>
+        </template>
       </g>
       <g class="wb-relation-graph-nodes">
         <g
@@ -507,21 +822,20 @@ onBeforeUnmount(() => {
             'is-faded': node.faded,
             'is-hovered': node.hovered,
             'is-dragged': node.dragged,
-            'is-locked': lockedId === node.id,
+            'is-pinned': pinnedId === node.id,
             [`has-${node.issue}`]: Boolean(node.issue),
           }"
           :data-id="node.id"
           :transform="`translate(${node.x} ${node.y})`"
-          :role="node.depth ? 'button' : 'img'"
-          :tabindex="node.depth ? 0 : undefined"
+          role="button"
+          tabindex="0"
           :aria-label="node.hint"
+          :aria-pressed="pinnedId === node.id"
           @pointerenter="hoverId = node.id"
           @pointerleave="hoverId = ''"
           @focus="hoverId = node.id"
           @blur="hoverId = ''"
-          @keydown.enter.prevent="openNode(node.id)"
-          @keydown.space.prevent="openNode(node.id)"
-          @contextmenu.prevent.stop="toggleLock(node.id)"
+          @keydown="onNodeKeydown($event, node)"
         >
           <circle v-if="node.depth === 0" class="wb-relation-graph-halo" :r="node.halo" />
           <path
@@ -534,72 +848,35 @@ onBeforeUnmount(() => {
           <text
             v-if="node.labelOpacity > 0"
             class="wb-relation-graph-label"
-            text-anchor="middle"
+            :text-anchor="node.anchor"
+            :x="node.labelX"
             :y="node.labelY"
             :font-size="node.fontSize"
             :opacity="node.labelOpacity < 1 ? node.labelOpacity : undefined"
           >{{ node.label }}</text>
+          <text
+            v-if="node.comment && node.labelOpacity > 0"
+            class="wb-relation-graph-comment"
+            :text-anchor="node.anchor"
+            :x="node.labelX"
+            :y="node.commentY"
+            :font-size="node.commentSize"
+            :opacity="node.labelOpacity < 1 ? node.labelOpacity : undefined"
+          >{{ node.comment }}</text>
         </g>
       </g>
     </svg>
-    <!-- Unlocked, the node's aria-label already speaks for the card; locked,
-         the card holds buttons and becomes a region of its own. -->
     <Transition name="wb-relation-graph-card">
-      <div
-        v-if="card"
-        class="wb-relation-graph-card"
-        :class="{ 'is-locked': card.locked }"
-        :role="card.locked ? 'region' : undefined"
-        :aria-label="card.locked ? card.name : undefined"
-        :aria-hidden="card.locked ? undefined : 'true'"
-      >
-        <div class="wb-relation-graph-card-head">
-          <strong>{{ card.name }}</strong>
-          <span v-if="card.center" class="wb-relation-graph-card-badge">{{ t('relations.graph.card.center') }}</span>
-          <span v-if="card.locked" class="wb-relation-graph-card-badge is-lock">
-            <Lock :size="10" aria-hidden="true" />{{ t('relations.graph.card.locked') }}
-          </span>
-        </div>
-        <p v-if="card.comment" class="wb-relation-graph-card-comment">{{ card.comment }}</p>
-        <section v-for="section in card.sections" :key="section.key" class="wb-relation-graph-card-section" :class="`is-${section.key}`">
-          <h4>
-            <component :is="CARD_SECTION_ICONS[section.key]" :size="11" :stroke-width="2.2" aria-hidden="true" />
-            {{ t(`relations.graph.card.${section.key}`, { count: section.count }) }}
-          </h4>
-          <ul>
-            <li v-for="row in section.rows" :key="row.id" class="wb-relation-graph-card-row">
-              <span class="wb-relation-graph-card-key">
-                <!-- The arrow rides with the target so a narrow card breaks before it. -->
-                <template v-for="(end, index) in row.ends" :key="index">
-                  <span class="wb-relation-graph-card-end">
-                    <span v-if="index" class="wb-relation-graph-card-arrow" aria-hidden="true">→ </span>
-                    <button
-                      v-if="end.clickable"
-                      type="button"
-                      class="wb-relation-graph-card-table"
-                      :title="t('relations.graph.card.openTable', { name: end.name })"
-                      @click="openNode(end.table)"
-                    >{{ end.name }}</button>
-                    <span v-else class="wb-relation-graph-card-table is-plain">{{ end.name }}</span>.<span class="wb-relation-graph-card-column">{{ end.column }}</span>
-                  </span>
-                </template>
-              </span>
-              <span
-                v-if="row.status !== 'confirmed'"
-                class="wb-relation-graph-card-status"
-                :class="`is-${row.status}`"
-              >{{ relationStatusLabel(row.status, t) }}</span>
-            </li>
-          </ul>
-          <p v-if="section.more" class="wb-relation-graph-card-line is-quiet">
-            {{ t('relations.graph.card.more', { count: section.more }) }}
-          </p>
-        </section>
-        <footer class="wb-relation-graph-card-foot">
-          <span>{{ t('relations.graph.card.total', { count: card.total }) }}</span>
-          <span class="wb-relation-graph-card-hint">{{ cardHint(card) }}</span>
-        </footer>
-      </div>
+      <ConfigRelationGraphCard
+        v-if="card && cardFrame"
+        class="wb-relation-graph-card-float"
+        :class="cardFrame.class"
+        :style="cardFrame.style"
+        :card="card"
+        @open="openNode"
+        @focus="focusNode"
+        @unpin="pinnedId = ''"
+      />
     </Transition>
     <div class="wb-relation-graph-zoom">
       <button type="button" :title="t('relations.graph.zoomIn')" :aria-label="t('relations.graph.zoomIn')" @click="viewport.zoomBy(ZOOM_STEP)">
@@ -608,8 +885,18 @@ onBeforeUnmount(() => {
       <button type="button" :title="t('relations.graph.zoomOut')" :aria-label="t('relations.graph.zoomOut')" @click="viewport.zoomBy(1 / ZOOM_STEP)">
         <ZoomOut :size="14" aria-hidden="true" />
       </button>
-      <button type="button" :title="t('relations.graph.fit')" :aria-label="t('relations.graph.fit')" @click="viewport.resetView()">
+      <button type="button" :title="t('relations.graph.fit')" :aria-label="t('relations.graph.fit')" @click="fitToDrawing">
         <LocateFixed :size="14" aria-hidden="true" />
+      </button>
+      <button
+        v-if="arrangement.arranged.value"
+        type="button"
+        class="wb-relation-graph-reset"
+        :title="t('relations.graph.resetLayout')"
+        :aria-label="t('relations.graph.resetLayout')"
+        @click="resetArrangement"
+      >
+        <RotateCcw :size="14" aria-hidden="true" />
       </button>
       <span class="wb-relation-graph-zoom-divider" aria-hidden="true" />
       <span class="wb-relation-graph-help">
@@ -642,6 +929,18 @@ onBeforeUnmount(() => {
       @pointercancel="onResizeEnd"
       @keydown="onResizeKey"
     />
+  </div>
+  <Transition name="wb-relation-graph-dock">
+    <ConfigRelationGraphCard
+      v-if="card && docked"
+      class="wb-relation-graph-card-dock"
+      :card="card"
+      docked
+      @open="openNode"
+      @focus="focusNode"
+      @unpin="pinnedId = ''"
+    />
+  </Transition>
   </div>
 </template>
 
@@ -681,9 +980,16 @@ onBeforeUnmount(() => {
 }
 
 .wb-relation-graph-link {
-  stroke: color-mix(in srgb, var(--wb-text) 26%, transparent);
+  fill: none;
+  stroke: color-mix(in srgb, var(--wb-text) 28%, transparent);
   stroke-width: 1.3;
+  stroke-linecap: round;
   transition: opacity var(--wb-duration-base) ease, stroke var(--wb-duration-base) ease, stroke-width var(--wb-duration-base) ease;
+}
+
+.wb-relation-graph.is-dragging .wb-relation-graph-link,
+.wb-relation-graph.is-dragging .wb-relation-graph-node {
+  transition: none;
 }
 
 .wb-relation-graph-link.is-accent {
@@ -711,7 +1017,7 @@ onBeforeUnmount(() => {
 }
 
 .wb-relation-graph-arrow {
-  fill: color-mix(in srgb, var(--wb-text) 42%, transparent);
+  fill: color-mix(in srgb, var(--wb-text) 46%, transparent);
 }
 
 .wb-relation-graph-arrow.is-active {
@@ -726,14 +1032,26 @@ onBeforeUnmount(() => {
   fill: var(--wb-danger);
 }
 
+/* Field names riding on the active table's lines (full-screen view). */
+.wb-relation-graph-field-label {
+  fill: var(--wb-text);
+  font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+  paint-order: stroke;
+  stroke: var(--wb-surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  animation: wb-relation-graph-label-in 160ms ease;
+}
+
 .wb-relation-graph-node {
   cursor: pointer;
   outline: none;
   transition: opacity var(--wb-duration-base) ease;
 }
 
-.wb-relation-graph-node.is-center {
-  cursor: grab;
+.wb-relation-graph-node.is-dragged {
+  cursor: grabbing;
 }
 
 .wb-relation-graph-node.is-faded {
@@ -802,7 +1120,7 @@ onBeforeUnmount(() => {
 }
 
 .wb-relation-graph-node.is-dragged .wb-relation-graph-dot {
-  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--wb-text) 30%, transparent));
+  filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--wb-text) 32%, transparent));
 }
 
 .wb-relation-graph-node:focus-visible .wb-relation-graph-dot {
@@ -810,7 +1128,7 @@ onBeforeUnmount(() => {
   stroke-width: 3;
 }
 
-.wb-relation-graph-node.is-locked .wb-relation-graph-dot {
+.wb-relation-graph-node.is-pinned .wb-relation-graph-dot {
   stroke: var(--wb-accent);
   stroke-width: 3;
   stroke-dasharray: none;
@@ -830,14 +1148,22 @@ onBeforeUnmount(() => {
   stroke: var(--wb-danger);
 }
 
-.wb-relation-graph-label {
-  fill: var(--wb-secondary-text);
+.wb-relation-graph-label,
+.wb-relation-graph-comment {
   paint-order: stroke;
   stroke: var(--wb-surface);
   stroke-width: 3px;
   stroke-linejoin: round;
   pointer-events: none;
   animation: wb-relation-graph-label-in 160ms ease;
+}
+
+.wb-relation-graph-label {
+  fill: var(--wb-secondary-text);
+}
+
+.wb-relation-graph-comment {
+  fill: var(--wb-quiet-text);
 }
 
 @keyframes wb-relation-graph-label-in {
@@ -847,12 +1173,13 @@ onBeforeUnmount(() => {
 }
 
 .wb-relation-graph-node.is-center .wb-relation-graph-label,
-.wb-relation-graph-node.is-hovered .wb-relation-graph-label {
+.wb-relation-graph-node.is-hovered .wb-relation-graph-label,
+.wb-relation-graph-node.is-pinned .wb-relation-graph-label {
   fill: var(--wb-text);
   font-weight: 600;
 }
 
-/* Floating tool strip, stacked on the right edge so the hover card can use
+/* Floating tool strip, stacked on the right edge so the info card can use
    the width. */
 .wb-relation-graph-zoom {
   position: absolute;
@@ -892,6 +1219,10 @@ onBeforeUnmount(() => {
   outline-offset: 0;
 }
 
+.wb-relation-graph-zoom .wb-relation-graph-reset {
+  color: var(--wb-accent-strong);
+}
+
 .wb-relation-graph-zoom-divider {
   width: 14px;
   height: 1px;
@@ -909,11 +1240,11 @@ onBeforeUnmount(() => {
   position: absolute;
   right: calc(100% + 8px);
   bottom: -2px;
-  z-index: 2;
+  z-index: 3;
   display: grid;
   gap: 3px;
   width: max-content;
-  max-width: 240px;
+  max-width: 260px;
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--wb-menu-surface);
@@ -939,199 +1270,64 @@ onBeforeUnmount(() => {
   translate: 0 0;
 }
 
-/* Hover card: bottom-left, clear of the tool strip on the right. */
-.wb-relation-graph-card {
+.wb-relation-graph-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-relation-graph-frame.is-fill {
+  height: 100%;
+}
+
+/* Floating card: in the half (or corner) away from the table it describes. */
+.wb-relation-graph-card-float {
   position: absolute;
+  z-index: 2;
+  width: max-content;
+  min-width: 200px;
+  max-width: min(360px, calc(100% - 64px));
+}
+
+.wb-relation-graph-card-float.is-top {
+  top: 8px;
+}
+
+.wb-relation-graph-card-float.is-bottom {
   bottom: 8px;
+}
+
+.wb-relation-graph-card-float.is-left {
   left: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  /* Kept to part of the canvas so tables beside a pinned card stay reachable. */
-  max-width: min(340px, 64%, calc(100% - 56px));
-  max-height: calc(100% - 16px);
-  padding: 8px 10px;
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--wb-menu-surface);
-  box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
-  color: var(--wb-text);
-  font-size: 11px;
-  line-height: 1.45;
-  pointer-events: none;
 }
 
-.wb-relation-graph-card p {
-  margin: 0;
+.wb-relation-graph-card-float.is-right {
+  right: 48px;
 }
 
-.wb-relation-graph-card-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 6px;
-}
-
-.wb-relation-graph-card-head strong {
-  font-size: 12px;
-  font-weight: 650;
-  overflow-wrap: anywhere;
-}
-
-.wb-relation-graph-card-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--wb-accent-soft);
-  color: var(--wb-accent-strong);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-}
-
-.wb-relation-graph-card-comment {
-  display: -webkit-box;
-  color: var(--wb-secondary-text);
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-/* Locked: the card takes the pointer so it can scroll and its table names
-   can be clicked. */
-.wb-relation-graph-card.is-locked {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border)), var(--wb-floating-shadow);
-  overflow: auto;
-  overscroll-behavior: contain;
-  pointer-events: auto;
-}
-
-.wb-relation-graph-card-section {
-  display: grid;
-  gap: 2px;
-  padding-top: 2px;
-}
-
-.wb-relation-graph-card-section h4 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 2px 0 0;
-  color: var(--wb-secondary-text);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.wb-relation-graph-card-section.is-references h4 svg {
-  color: var(--wb-relation-out);
-}
-
-.wb-relation-graph-card-section.is-referencedBy h4 svg {
-  color: var(--wb-relation-in);
-}
-
-.wb-relation-graph-card-section ul {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 0;
-  padding: 0 0 0 15px;
-  list-style: none;
-}
-
-.wb-relation-graph-card-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 6px;
-}
-
-.wb-relation-graph-card-key {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 4px;
+/* A narrow graph gives the card its whole width, clear of the tool strip. */
+.wb-relation-graph-card-float.is-span {
+  right: 44px;
+  left: 8px;
+  width: auto;
   min-width: 0;
-  font-size: 11px;
-  overflow-wrap: anywhere;
+  max-width: none;
 }
 
-.wb-relation-graph-card-end {
-  min-width: 0;
+.wb-relation-graph.is-fill .wb-relation-graph-card-float {
+  max-width: min(400px, calc(100% - 64px));
 }
 
-.wb-relation-graph-card-arrow {
-  color: var(--wb-quiet-text);
+.wb-relation-graph-dock-enter-active,
+.wb-relation-graph-dock-leave-active {
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.wb-relation-graph-card-table {
-  font: inherit;
-  font-weight: 600;
-  color: var(--wb-text);
-}
-
-button.wb-relation-graph-card-table {
-  min-height: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--wb-accent-strong);
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--wb-accent) 40%, transparent);
-  text-underline-offset: 2px;
-}
-
-button.wb-relation-graph-card-table:hover:not(:disabled) {
-  background: none;
-  text-decoration-color: currentColor;
-}
-
-button.wb-relation-graph-card-table:focus-visible {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: 1px;
-  border-radius: 2px;
-}
-
-.wb-relation-graph-card-column {
-  color: var(--wb-secondary-text);
-}
-
-.wb-relation-graph-card-status {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--wb-secondary-text);
-}
-
-.wb-relation-graph-card-status.is-stale {
-  color: var(--wb-warning-text);
-}
-
-.wb-relation-graph-card-status.is-conflict {
-  color: var(--wb-danger);
-}
-
-.wb-relation-graph-card-line.is-quiet {
-  padding-left: 15px;
-  color: var(--wb-quiet-text);
-}
-
-.wb-relation-graph-card-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 8px;
-  margin-top: 2px;
-  padding-top: 5px;
-  border-top: 1px solid var(--wb-line);
-  color: var(--wb-quiet-text);
-  font-size: 10px;
-}
-
-.wb-relation-graph-card-hint {
-  margin-left: auto;
+.wb-relation-graph-dock-enter-from,
+.wb-relation-graph-dock-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .wb-relation-graph-card-enter-active,
@@ -1195,12 +1391,16 @@ button.wb-relation-graph-card-table:focus-visible {
     transition: none;
   }
 
-  .wb-relation-graph-label {
+  .wb-relation-graph-label,
+  .wb-relation-graph-comment,
+  .wb-relation-graph-field-label {
     animation: none;
   }
 
   .wb-relation-graph-card-enter-active,
-  .wb-relation-graph-card-leave-active {
+  .wb-relation-graph-card-leave-active,
+  .wb-relation-graph-dock-enter-active,
+  .wb-relation-graph-dock-leave-active {
     transition: none;
   }
 }

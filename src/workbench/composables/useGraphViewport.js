@@ -23,6 +23,30 @@ function easeOutCubic(progress) {
   return 1 - (1 - progress) ** 3;
 }
 
+/**
+ * Runs `onFrame(eased)` on animation frames for `duration` ms, eased out, and
+ * returns a function that stops it. Without animation frames (or with
+ * reduced motion) it jumps to the end at once.
+ */
+export function glideFrames(duration, onFrame) {
+  if (prefersReducedMotion() || typeof globalThis.requestAnimationFrame !== "function") {
+    onFrame(1);
+    return () => {};
+  }
+  const started = globalThis.performance?.now?.() ?? Date.now();
+  let frame = 0;
+  const step = (now) => {
+    const progress = Math.min(1, (now - started) / duration);
+    onFrame(easeOutCubic(progress));
+    frame = progress < 1 ? globalThis.requestAnimationFrame(step) : 0;
+  };
+  frame = globalThis.requestAnimationFrame(step);
+  return () => {
+    if (frame) globalThis.cancelAnimationFrame?.(frame);
+    frame = 0;
+  };
+}
+
 export function clampZoom(value, min = MIN_ZOOM) {
   return Math.min(MAX_ZOOM, Math.max(min, value));
 }
@@ -53,7 +77,7 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
   const center = ref({ x: 0, y: 0 });
   const panning = ref(false);
   let pan = null;
-  let glide = 0;
+  let stopGlide = () => {};
   // True while the view shows the fitted drawing; the user's zoom or pan ends it.
   let fitted = true;
 
@@ -79,34 +103,24 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
   const fitZoom = computed(() => fitZoomFor(baseScale.value, maxFitScale));
   const minZoom = computed(() => Math.min(MIN_ZOOM, fitZoom.value * MIN_ZOOM));
 
-  function stopGlide() {
-    if (glide) globalThis.cancelAnimationFrame?.(glide);
-    glide = 0;
-  }
-
   function moveTo(nextZoom, nextCenter, { animate = true } = {}) {
     stopGlide();
     const targetZoom = clampZoom(nextZoom, minZoom.value);
-    if (!animate || prefersReducedMotion() || typeof globalThis.requestAnimationFrame !== "function") {
+    if (!animate) {
       zoom.value = targetZoom;
       center.value = { ...nextCenter };
       return;
     }
     const fromZoom = zoom.value;
     const fromCenter = { ...center.value };
-    const started = globalThis.performance?.now?.() ?? Date.now();
-    const step = (now) => {
-      const progress = Math.min(1, (now - started) / GLIDE_MS);
-      const eased = easeOutCubic(progress);
+    stopGlide = glideFrames(GLIDE_MS, (eased) => {
       // Interpolating zoom in log space keeps the glide even in both directions.
       zoom.value = fromZoom * (targetZoom / fromZoom) ** eased;
       center.value = {
         x: fromCenter.x + (nextCenter.x - fromCenter.x) * eased,
         y: fromCenter.y + (nextCenter.y - fromCenter.y) * eased,
       };
-      glide = progress < 1 ? globalThis.requestAnimationFrame(step) : 0;
-    };
-    glide = globalThis.requestAnimationFrame(step);
+    });
   }
 
   function fitCenter() {
@@ -167,7 +181,7 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
     return true;
   }
 
-  onBeforeUnmount(stopGlide);
+  onBeforeUnmount(() => stopGlide());
 
   return { zoom, center, panning, viewBox, scale, resetView, zoomBy, graphPoint, onWheel, startPan, movePan, endPan };
 }

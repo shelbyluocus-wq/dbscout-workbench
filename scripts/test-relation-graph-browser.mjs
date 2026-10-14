@@ -9,6 +9,13 @@ const shots = process.env.DBSCOUT_RELATIONS_SCREENSHOTS || tmpdir();
 const channel = process.env.DBSCOUT_PLAYWRIGHT_CHANNEL || undefined;
 const browser = await chromium.launch({ headless: true, channel });
 const errors = [];
+
+const translation = (transform) => transform.match(/-?[\d.]+/g).map(Number);
+// A card fading out and the next fading in overlap for a moment.
+const settledCards = (page) => page.waitForFunction(() =>
+  document.querySelectorAll(".wb-relation-graph-section .wb-relation-graph-card").length <= 1);
+const distance = (left, right) => Math.hypot(left[0] - right[0], left[1] - right[1]);
+
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   page.setDefaultTimeout(15_000);
@@ -16,6 +23,7 @@ try {
   await page.addInitScript(() => {
     localStorage.setItem("dbscout_language", "zh-CN");
     localStorage.removeItem("dbscout_relation_graph_options");
+    localStorage.removeItem("dbscout_relation_panel_sections");
   });
   await page.goto(base, { waitUntil: "domcontentloaded", timeout: 60_000 });
   const itemRow = page.locator('[role="option"]').filter({ hasText: /^item\b/ });
@@ -25,13 +33,30 @@ try {
   await page.getByRole("tab", { name: /^关联/ }).click();
   await page.waitForFunction(() => !document.querySelector(".wb-relations-panel")?.textContent.includes("正在分析客户端代码"));
 
-  const graph = page.locator(".wb-relation-graph");
+  const section = page.locator(".wb-relation-graph-section");
+  const graph = section.locator(".wb-relation-graph");
   const nodes = graph.locator(".wb-relation-graph-node");
   await nodes.first().waitFor();
   const depthOne = await nodes.count();
   assert.ok(depthOne > 1, "the current table and its neighbours are drawn");
   assert.equal(await graph.locator(".wb-relation-graph-node.is-center").count(), 1);
   assert.ok(await graph.locator(".wb-relation-graph-link").count() >= depthOne - 1);
+  // Names keep clear of every arrowhead.
+  await page.waitForTimeout(400);
+  const covered = await page.evaluate(() => {
+    const svg = document.querySelector(".wb-relations-panel .wb-relation-graph-canvas");
+    const labels = [...svg.querySelectorAll(".wb-relation-graph-label")].map((label) => label.getBoundingClientRect());
+    const ends = [...svg.querySelectorAll(".wb-relation-graph-link")].flatMap((link) => {
+      const length = link.getTotalLength();
+      const points = [];
+      if (link.getAttribute("marker-end")) points.push(link.getPointAtLength(length));
+      if (link.getAttribute("marker-start")) points.push(link.getPointAtLength(0));
+      const matrix = link.getScreenCTM();
+      return points.map((point) => new DOMPoint(point.x, point.y).matrixTransform(matrix));
+    });
+    return ends.filter((point) => labels.some((box) => point.x > box.left + 1 && point.x < box.right - 1 && point.y > box.top + 1 && point.y < box.bottom - 1)).length;
+  });
+  assert.equal(covered, 0, "no arrowhead sits under a table name");
   await graph.screenshot({ path: join(shots, "blackcat-relation-graph-depth1.png") });
 
   // Hovering a neighbour keeps its own neighbourhood bright.
@@ -39,49 +64,75 @@ try {
   await neighbour.locator(".wb-relation-graph-dot").hover();
   await page.waitForFunction(() => document.querySelector(".wb-relation-graph.is-hovering"));
   assert.equal(await graph.locator(".wb-relation-graph-node.is-hovered").count(), 1);
-  // The corner card names the hovered table and replaces the native tooltip.
+  // The info card names the hovered table and groups its relations by table.
   const hoveredName = (await neighbour.getAttribute("aria-label")).split(" · ")[0];
-  const card = graph.locator(".wb-relation-graph-card");
+  const card = section.locator(".wb-relation-graph-card");
   await card.waitFor();
   assert.equal((await card.locator("strong").textContent()).trim(), hoveredName);
-  assert.match(await card.textContent(), /(它引用了|谁引用了它)（\d+ 条）/);
-  assert.match(await card.locator(".wb-relation-graph-card-key").first().textContent(), /\.\S+\s*→\s*\S+\.\S+/, "rows name both fields");
+  assert.match(await card.textContent(), /(引用 \d+ 张表|被 \d+ 张表引用)/);
+  assert.ok(await card.locator(".wb-relation-graph-card-fields code").count() >= 2, "fields name both ends");
   assert.equal(await neighbour.locator("title").count(), 0);
   await graph.screenshot({ path: join(shots, "blackcat-relation-graph-card.png") });
 
-  // Right-click locks the card so the pointer can travel to it.
+  // Right-click pins the card (docked under the narrow graph); every
+  // right-click in the graph is handled without any context menu.
   const centerNode = graph.locator(".wb-relation-graph-node.is-center");
   await centerNode.locator(".wb-relation-graph-dot").click({ button: "right" });
-  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 1);
-  const lockedCard = graph.locator(".wb-relation-graph-card.is-locked");
-  await lockedCard.waitFor();
-  const cardBox = await lockedCard.boundingBox();
-  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2, { steps: 6 });
-  await lockedCard.waitFor();
-  assert.ok(await lockedCard.locator("button.wb-relation-graph-card-table").count() > 0, "other tables can be opened from the card");
-  await graph.screenshot({ path: join(shots, "blackcat-relation-graph-locked.png") });
-  // Right-clicking another table moves the lock; right-clicking it again releases it.
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 1);
+  const pinnedCard = section.locator(".wb-relation-graph-card.is-pinned");
+  await pinnedCard.waitFor();
+  assert.equal(await section.locator(".wb-relation-graph-card.is-docked").count(), 1, "a narrow graph docks the pinned card");
+  assert.ok(await pinnedCard.locator("button.wb-relation-graph-card-table").count() > 0, "other tables can be opened from the card");
+  assert.equal(await page.locator(".wb-context-menu").count(), 0, "no menu opens");
+  await section.screenshot({ path: join(shots, "blackcat-relation-graph-pinned.png") });
+  // Right-clicking another table moves the pin; right-clicking it again lets go.
   await neighbour.locator(".wb-relation-graph-dot").click({ button: "right" });
-  assert.equal((await lockedCard.locator("strong").textContent()).trim(), hoveredName);
+  await settledCards(page);
+  assert.equal((await pinnedCard.locator("strong").textContent()).trim(), hoveredName);
   await neighbour.locator(".wb-relation-graph-dot").click({ button: "right" });
-  await page.mouse.move(cardBox.x + 2, cardBox.y - 200);
-  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
-  // A click on empty space releases a lock as well.
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 0);
+  // A right-click in the card lets go too, and a click on empty space as well.
+  await centerNode.locator(".wb-relation-graph-dot").click({ button: "right" });
+  await settledCards(page);
+  await pinnedCard.click({ button: "right", position: { x: 12, y: 12 } });
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 0);
   await centerNode.locator(".wb-relation-graph-dot").click({ button: "right" });
   await graph.locator(".wb-relation-graph-canvas").click({ position: { x: 8, y: 8 } });
-  assert.equal(await graph.locator(".wb-relation-graph-node.is-locked").count(), 0);
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 0);
+  const prevented = await page.evaluate(() => {
+    const canvas = document.querySelector(".wb-relations-panel .wb-relation-graph-canvas");
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 });
+    canvas.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(prevented, true, "the WebView menu is suppressed");
+  assert.equal(await page.locator(".wb-context-menu").count(), 0);
 
-  const section = page.locator(".wb-relation-graph-section");
+  // Keyboard: the context-menu key pins a focused table and lets it go again.
+  await centerNode.focus();
+  await page.keyboard.press("Shift+F10");
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 1);
+  await page.keyboard.press("Shift+F10");
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-pinned").count(), 0);
+  // Arrow keys move the focused table; "restore layout" brings it back.
+  const centerStart = translation(await centerNode.getAttribute("transform"));
+  await page.keyboard.press("Shift+ArrowRight");
+  assert.ok(translation(await centerNode.getAttribute("transform"))[0] > centerStart[0] + 5, "the table moved right");
+  await graph.getByRole("button", { name: "还原自动排列", exact: true }).click();
+  await page.waitForTimeout(450);
+  assert.ok(distance(translation(await centerNode.getAttribute("transform")), centerStart) < 1);
+
   await section.getByRole("button", { name: "2 层", exact: true }).click();
-  await page.waitForFunction((count) => document.querySelectorAll(".wb-relation-graph-node").length > count, depthOne);
+  await page.waitForFunction((count) => document.querySelectorAll(".wb-relations-panel .wb-relation-graph-node").length > count, depthOne);
   await page.locator(".wb-relations-panel").screenshot({ path: join(shots, "blackcat-relation-graph-depth2.png") });
 
   const depthTwo = await nodes.count();
   await section.getByRole("button", { name: "被引用", exact: true }).click();
-  await page.waitForFunction((count) => document.querySelectorAll(".wb-relation-graph-node").length < count, depthTwo);
+  await page.waitForFunction((count) => document.querySelectorAll(".wb-relations-panel .wb-relation-graph-node").length < count, depthTwo);
   const locked = section.getByRole("button", { name: "引用", exact: true });
   assert.equal(await locked.getAttribute("aria-disabled"), "true", "the last direction cannot be turned off");
   await section.getByRole("button", { name: "被引用", exact: true }).click();
+  await page.waitForFunction((count) => document.querySelectorAll(".wb-relations-panel .wb-relation-graph-node").length === count, depthTwo);
 
   // Settings persist across reloads.
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("dbscout_relation_graph_options")));
@@ -99,36 +150,40 @@ try {
 
   // The wheel zooms without a modifier; the fit button glides back.
   const canvas = graph.locator(".wb-relation-graph-canvas");
+  await page.waitForTimeout(400);
   const before = await canvas.getAttribute("viewBox");
   await canvas.hover({ position: { x: 40, y: 40 } });
   await page.mouse.wheel(0, -300);
-  await page.waitForFunction((box) => document.querySelector(".wb-relation-graph-canvas")?.getAttribute("viewBox") !== box, before);
+  await page.waitForFunction((box) => document.querySelector(".wb-relations-panel .wb-relation-graph-canvas")?.getAttribute("viewBox") !== box, before);
   await graph.getByRole("button", { name: "适应大小", exact: true }).click();
-  await page.waitForFunction((box) => document.querySelector(".wb-relation-graph-canvas")?.getAttribute("viewBox") === box, before);
+  await page.waitForFunction((box) => document.querySelector(".wb-relations-panel .wb-relation-graph-canvas")?.getAttribute("viewBox") === box, before);
 
-  // Dragging a table moves it, drags its neighbours along, and it swings back
-  // after release without opening the table.
+  // A dragged table goes where it is dropped and stays; its neighbours stay
+  // put, and a drag does not open the table.
   const activeTab = await page.locator(".wb-tab.active").textContent();
   const dragged = graph.locator(".wb-relation-graph-node:not(.is-center)").first();
-  const rest = await dragged.getAttribute("transform");
+  const rest = translation(await dragged.getAttribute("transform"));
   const centerRest = await graph.locator(".wb-relation-graph-node.is-center").getAttribute("transform");
   const box = await dragged.locator(".wb-relation-graph-dot").boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 45, { steps: 8 });
-  await page.waitForTimeout(300);
-  assert.notEqual(await dragged.getAttribute("transform"), rest, "the dragged table follows the pointer");
+  await page.waitForTimeout(100);
   assert.equal(await graph.locator(".wb-relation-graph.is-dragging, .wb-relation-graph-node.is-dragged").count() > 0, true);
-  assert.notEqual(await graph.locator(".wb-relation-graph-node.is-center").getAttribute("transform"), centerRest, "neighbours are pulled along");
+  assert.ok(distance(translation(await dragged.getAttribute("transform")), rest) > 10, "the dragged table follows the pointer");
   await page.locator(".wb-relations-panel").screenshot({ path: join(shots, "blackcat-relation-graph-drag.png") });
   await page.mouse.up();
-  await page.waitForFunction((value) =>
-    document.querySelector(".wb-relation-graph-node:not(.is-center)")?.getAttribute("transform") === value, rest, { timeout: 5_000 })
-    .catch(() => {});
-  const settled = (await dragged.getAttribute("transform")).match(/-?[\d.]+/g).map(Number);
-  const home = rest.match(/-?[\d.]+/g).map(Number);
-  assert.ok(Math.hypot(settled[0] - home[0], settled[1] - home[1]) < 2, "the table swings back to its place");
+  await page.waitForTimeout(500);
+  const dropped = translation(await dragged.getAttribute("transform"));
+  assert.ok(distance(dropped, rest) > 10, "the table stays where it was dropped");
+  assert.equal(await graph.locator(".wb-relation-graph-node.is-center").getAttribute("transform"), centerRest, "neighbours are not pulled along");
   assert.equal(await page.locator(".wb-tab.active").textContent(), activeTab, "a drag does not open the table");
+  // "Restore layout" puts it back on the ring.
+  const restore = graph.getByRole("button", { name: "还原自动排列", exact: true });
+  await restore.click();
+  await page.waitForTimeout(500);
+  assert.ok(distance(translation(await dragged.getAttribute("transform")), rest) < 1, "the ring layout is back");
+  assert.equal(await restore.count(), 0, "nothing left to restore");
 
   // The bottom edge resizes the graph and the height is remembered.
   const resizeHandle = graph.locator(".wb-relation-graph-resize");
@@ -143,13 +198,29 @@ try {
   const resized = await page.evaluate(() => JSON.parse(localStorage.getItem("dbscout_relation_graph_options")));
   assert.ok(resized.height >= 340, `height ${resized.height} is stored`);
 
-  // The enlarged view shows the same graph and closes with Esc.
+  // Full screen covers the whole window and shows the same tables.
   const inlineCount = await nodes.count();
-  await graph.getByRole("button", { name: "放大查看", exact: true }).click();
+  await graph.getByRole("button", { name: "全屏查看", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.locator(".wb-relation-graph-node").first().waitFor();
-  assert.equal(await dialog.locator(".wb-relation-graph-node").count(), inlineCount);
-  await page.screenshot({ path: join(shots, "blackcat-relation-graph-expanded.png") });
+  const fullGraph = page.locator(".wb-relation-graph-fullscreen .wb-relation-graph");
+  await fullGraph.locator(".wb-relation-graph-node").first().waitFor();
+  assert.equal(await fullGraph.locator(".wb-relation-graph-node").count(), inlineCount);
+  await page.evaluate(() => Promise.all(document.querySelector(".wb-relation-graph-fullscreen").getAnimations().map((animation) => animation.finished)));
+  const frame = await page.locator(".wb-relation-graph-fullscreen").boundingBox();
+  assert.deepEqual([frame.x, frame.y, frame.width, frame.height], [0, 0, 1280, 860], "it fills the window");
+  assert.ok(await fullGraph.locator(".wb-relation-graph-comment").count() > 0, "comments show under names");
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(shots, "blackcat-relation-graph-fullscreen.png") });
+  // Pin a neighbour and make it the center; one button leads back.
+  const fullNeighbour = fullGraph.locator(".wb-relation-graph-node.is-side-in, .wb-relation-graph-node.is-side-out").first();
+  const fullName = (await fullNeighbour.getAttribute("aria-label")).split(" · ")[0];
+  await fullNeighbour.locator(".wb-relation-graph-dot").click({ button: "right" });
+  await fullGraph.locator(".wb-relation-graph-card").getByRole("button", { name: "以此表为中心", exact: true }).click();
+  await page.waitForFunction((name) => document.querySelector("#wb-relation-graph-fullscreen-title")?.textContent.includes(name), fullName);
+  const back = dialog.getByRole("button", { name: /^回到 item/ });
+  await back.click();
+  await page.waitForFunction(() => document.querySelector("#wb-relation-graph-fullscreen-title")?.textContent.includes("item"));
+  assert.equal(await back.count(), 0);
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "detached" });
 
@@ -169,7 +240,7 @@ try {
   assert.equal(await section.locator(".wb-relation-section-toggle").getAttribute("aria-expanded"), "false");
   assert.equal(await graph.count(), 0);
   assert.deepEqual(errors, []);
-  console.log(`Relation graph: ${depthOne} tables at depth 1, depth/direction toggles, persistence, zoom, open-on-click and collapse passed.`);
+  console.log(`Relation graph: ${depthOne} tables at depth 1, clear arrowheads, pin/unpin without menus, free drag and restore, full screen with re-centering, persistence and collapse passed.`);
 } finally {
   await browser.close();
 }

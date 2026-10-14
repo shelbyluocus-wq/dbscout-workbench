@@ -109,16 +109,28 @@ capabilities:
   **Relation map** draws the current table's neighbours (depth 1–2, at most
   60 tables) on a dot-grid canvas, circles tinted by side (tables it
   references / tables referencing it, whose switches double as the colour
-  key) and lines coloured by relation status; clicking a node opens that
-  table. Tables can be dragged (neighbours follow on springs and everything
-  swings back to the ring layout on release), the wheel zooms around the
-  pointer, fitting never enlarges a small graph past a readable scale, the
-  bottom edge resizes the graph (height remembered), a help button explains
-  the gestures and an enlarge button opens it in a large dialog. A corner
-  card lists the hovered table's drawn relations field by field
-  (`source.column → target.column` plus status); right-clicking a table locks
-  the highlight and card (scrollable, table names open), right-clicking it
-  again or clicking empty space unlocks. **Field relations** lists every
+  key) and lines coloured by relation status; second-ring tables gather
+  beside the table that brought them in. Lines bow around tables in their
+  way and every name takes the side of its table that keeps lines and
+  arrowheads clear (busy tables choose first, a side is kept unless another
+  is clearly better). Clicking a node opens that table. Tables can be
+  dragged anywhere and stay where they are dropped (one table moves, per
+  frame, keeping the grab offset; arrow keys nudge a focused table) for the
+  session, in the inline and full-screen views alike, until "restore layout";
+  the wheel zooms around the pointer, fitting never enlarges a small graph
+  past a readable scale and takes in dragged tables, the bottom edge resizes
+  the graph (height remembered) and a help button explains the gestures.
+  Full screen covers the whole window, stretches the rings to the room
+  instead of enlarging circles and names, shows comments under names and the
+  fields of the active table's lines, and lets a pinned table become the new
+  center (one button leads back). The info card lists the hovered table's
+  drawn relations grouped by the other table (fields beneath, status per
+  field) in the half or corner away from that table; right-clicking a table
+  (or Shift+F10) pins it with actions (open, center on it in full screen,
+  unpin), and in a narrow graph the pinned card docks under the canvas.
+  Right-clicking the pinned table, the card or empty space unpins; every
+  right-click in the graph is consumed, so neither the app's, the WebView's
+  nor the system's menu opens there. **Field relations** lists every
   relation by direction, waiting decisions first; each row opens its
   evidence (comment text, client code file:line with the line itself, data
   sample). A slim notice appears only when the client folder needs binding;
@@ -280,8 +292,10 @@ from UI):
 - Config relations: `useConfigRelations.js` — mirrors each scope's relation
   overview, refreshes on `config-relations-updated`, and serves the
   table/row lookups plus the per-revision cached scope graph;
-  `useGraphViewport.js` / `useGraphForces.js` — relation-graph zoom/pan with
-  glide animation, and the frame-driven spring simulation;
+  `useGraphViewport.js` / `useGraphArrangement.js` — relation-graph zoom/pan
+  with glide animation and a measured-width fit, and where tables are drawn
+  (ring layout plus session-remembered dragged tables, gliding between
+  pictures);
   `configRelationContext.js` — provided scope so grid
   chips can clear a relation filter without prop chains
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useActivityRail.js`
@@ -329,9 +343,11 @@ from UI):
   column mirrored from the backend and the switch-badge summary);
   `relationPanelPrefs.js` (remembered open state of the relation page sections);
   `relationGraph.js` (local relation subgraph by depth/direction, per-pair
-  worst-status merge, node sizing, deterministic ring layout and persisted
-  graph options); `relationGraphForces.js` (spring simulation anchored to
-  the ring layout: link springs, collision, pin/unpin while dragging)
+  worst-status merge, node sizing, deterministic ring layout with an
+  optional stretch, parent-grouped second ring, card grouping and persisted
+  graph options); `relationGraphGeometry.js` (layout stretch for large views,
+  line routing around tables, name-side placement clear of lines and
+  arrowheads, info-card placement and glide starts)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -351,8 +367,9 @@ shared `RelationSectionHead.vue`) /
 dialog, with `RelationStatusBadge.vue` and `RelationEvidenceList.vue`) /
 `ConfigRelationGraphSection.vue` +
 `ConfigRelationGraph.vue` (local relation graph section and its SVG view,
-with `ConfigRelationGraphControls.vue`, `ConfigRelationGraphLegend.vue` and
-the enlarged `ConfigRelationGraphDialog.vue`),
+with `ConfigRelationGraphControls.vue`, `ConfigRelationGraphLegend.vue`, the
+`ConfigRelationGraphCard.vue` info card and the full-screen
+`ConfigRelationGraphDialog.vue`),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
 `SqlResultGrid.vue` / `SqlHistoryDialog.vue` query surfaces, the

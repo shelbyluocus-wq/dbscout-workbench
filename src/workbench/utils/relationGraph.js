@@ -15,9 +15,12 @@ const CENTER_RADIUS_MIN = 11;
 const FIRST_RING_MIN = 92;
 const RING_GAP = 84;
 const NODE_SPACING = 40;
+// Second-ring neighbours keep a little more room than the ring's average.
+const SECOND_RING_SPACING = 1.25;
 const LABEL_MAX_CHARS = 18;
 const LABEL_CHAR_WIDTH = 6.2;
-const LABEL_OFFSET = 12;
+const LABEL_OFFSET = 6;
+const LABEL_LINE_HEIGHT = 14;
 const BOUNDS_PADDING = 18;
 
 function lower(name) {
@@ -216,17 +219,49 @@ function normalizeAngle(angle) {
   return ((angle % turn) + turn) % turn;
 }
 
-// Second-ring tables follow their parents around the circle.
-function secondRingAngles(nodes, parentAngles) {
-  if (!nodes.length) return new Map();
-  const ordered = [...nodes].sort((left, right) =>
-    normalizeAngle(parentAngles.get(left.parent) ?? 0) - normalizeAngle(parentAngles.get(right.parent) ?? 0) ||
-    byName(left.id, right.id));
+// Evenly around the whole circle, in parent order: the fallback when the
+// second ring is too crowded to gather tables by parent.
+function evenSecondRing(ordered, parentAngles) {
   const step = (2 * Math.PI) / ordered.length;
   const firstParent = ordered[0].parent;
   const firstGroup = ordered.filter((node) => node.parent === firstParent).length;
   const start = (parentAngles.get(firstParent) ?? 0) - ((firstGroup - 1) / 2) * step;
   return new Map(ordered.map((node, index) => [node.id, start + index * step]));
+}
+
+// Second-ring tables gather beside the table that brought them in, spaced
+// just far enough apart; neighbouring groups push each other aside instead
+// of overlapping. Short lines that do not cross the picture keep the
+// direction of each relation easy to follow.
+function secondRingAngles(nodes, parentAngles, radius) {
+  if (!nodes.length) return new Map();
+  const ordered = [...nodes].sort((left, right) =>
+    normalizeAngle(parentAngles.get(left.parent) ?? 0) - normalizeAngle(parentAngles.get(right.parent) ?? 0) ||
+    byName(left.id, right.id));
+  const turn = 2 * Math.PI;
+  const step = Math.min(turn / ordered.length, (NODE_SPACING * SECOND_RING_SPACING) / Math.max(radius, 1));
+  // Where each table would like to be: centred on its parent, in name order.
+  const wanted = [];
+  for (let index = 0; index < ordered.length;) {
+    const parent = ordered[index].parent;
+    let end = index;
+    while (end < ordered.length && ordered[end].parent === parent) end += 1;
+    const size = end - index;
+    const center = normalizeAngle(parentAngles.get(parent) ?? 0);
+    for (let offset = 0; offset < size; offset += 1) wanted.push(center + (offset - (size - 1) / 2) * step);
+    index = end;
+  }
+  // Keep at least one step between neighbours: push forward, pull back,
+  // meet in the middle, then settle forward once more.
+  const forward = [...wanted];
+  for (let index = 1; index < forward.length; index += 1) forward[index] = Math.max(forward[index], forward[index - 1] + step);
+  const backward = [...wanted];
+  for (let index = backward.length - 2; index >= 0; index -= 1) backward[index] = Math.min(backward[index], backward[index + 1] - step);
+  const angles = forward.map((value, index) => (value + backward[index]) / 2);
+  for (let index = 1; index < angles.length; index += 1) angles[index] = Math.max(angles[index], angles[index - 1] + step);
+  // The ring closes on itself: the last table must stay a step short of the first.
+  if (angles.at(-1) - angles[0] > turn - step + 1e-9) return evenSecondRing(ordered, parentAngles);
+  return new Map(ordered.map((node, index) => [node.id, angles[index]]));
 }
 
 export function graphLabel(text) {
@@ -235,18 +270,22 @@ export function graphLabel(text) {
 }
 
 // Fixed rings: the picture at rest is the same every time a table opens, so
-// users can learn it. Dragging only disturbs it temporarily (see
-// relationGraphForces.js).
-export function layoutRelationGraph(local, labelFor = (id) => id) {
+// users can learn it. A large view stretches the rings (`spread`, see
+// layoutSpread) instead of enlarging circles and names; tables the user drags
+// stay where they are dropped (see useGraphArrangement.js).
+export function layoutRelationGraph(local, labelFor = (id) => id, { spread = null } = {}) {
   if (!local) return null;
+  const stretchX = Number(spread?.x) || 1;
+  const stretchY = Number(spread?.y) || 1;
   const first = local.nodes.filter((node) => node.depth === 1);
   const second = local.nodes.filter((node) => node.depth === 2);
   const firstRadius = ringRadius(first.length, FIRST_RING_MIN);
   const secondRadius = ringRadius(second.length, firstRadius + RING_GAP);
   const angles = firstRingAngles(first);
-  const outerAngles = secondRingAngles(second, angles);
+  const outerAngles = secondRingAngles(second, angles, secondRadius);
   const positions = new Map();
   let bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  let extent = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   for (const node of local.nodes) {
     let x = 0;
     let y = 0;
@@ -257,14 +296,24 @@ export function layoutRelationGraph(local, labelFor = (id) => id) {
       x = secondRadius * Math.cos(outerAngles.get(node.id));
       y = secondRadius * Math.sin(outerAngles.get(node.id));
     }
+    extent = {
+      minX: Math.min(extent.minX, x),
+      maxX: Math.max(extent.maxX, x),
+      minY: Math.min(extent.minY, y),
+      maxY: Math.max(extent.maxY, y),
+    };
+    x *= stretchX;
+    y *= stretchY;
     const label = graphLabel(labelFor(node.id));
-    const halfLabel = (label.length * LABEL_CHAR_WIDTH) / 2;
-    positions.set(node.id, { x, y, label, labelY: y + node.radius + LABEL_OFFSET });
+    // A name can sit on any side of its table; allow most of its width either way.
+    const reachX = node.radius + LABEL_OFFSET + label.length * LABEL_CHAR_WIDTH * 0.75;
+    const reachY = node.radius + LABEL_OFFSET + LABEL_LINE_HEIGHT;
+    positions.set(node.id, { x, y, label });
     bounds = {
-      minX: Math.min(bounds.minX, x - Math.max(node.radius, halfLabel)),
-      maxX: Math.max(bounds.maxX, x + Math.max(node.radius, halfLabel)),
-      minY: Math.min(bounds.minY, y - node.radius),
-      maxY: Math.max(bounds.maxY, y + node.radius + LABEL_OFFSET + 4),
+      minX: Math.min(bounds.minX, x - reachX),
+      maxX: Math.max(bounds.maxX, x + reachX),
+      minY: Math.min(bounds.minY, y - reachY),
+      maxY: Math.max(bounds.maxY, y + reachY),
     };
   }
   const box = {
@@ -273,7 +322,12 @@ export function layoutRelationGraph(local, labelFor = (id) => id) {
     width: bounds.maxX - bounds.minX + BOUNDS_PADDING * 2,
     height: bounds.maxY - bounds.minY + BOUNDS_PADDING * 2,
   };
-  return { positions, bounds: box };
+  return {
+    positions,
+    bounds: box,
+    // Box around the table centers before stretching.
+    extent: { width: extent.maxX - extent.minX, height: extent.maxY - extent.minY },
+  };
 }
 
 // Tables directly linked to `id` among the shown ones, plus `id` itself.
@@ -314,24 +368,18 @@ export function graphNodeRelations(local, id) {
   };
 }
 
-// Line endpoints trimmed to the node circles so arrowheads stay visible.
-export function linkSegment(link, positions, radii) {
-  const from = positions.get(link.source);
-  const to = positions.get(link.target);
-  if (!from || !to) return null;
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const ux = dx / length;
-  const uy = dy / length;
-  const startGap = (radii.get(link.source) || 0) + 2;
-  const endGap = (radii.get(link.target) || 0) + 2;
-  return {
-    x1: from.x + ux * startGap,
-    y1: from.y + uy * startGap,
-    x2: to.x - ux * endGap,
-    y2: to.y - uy * endGap,
-  };
+// The info card names each other table once, with its fields under it and
+// the worst status among them; tables come in name order.
+export function groupByOtherTable(relations, id) {
+  const groups = new Map();
+  for (const relation of relations || []) {
+    const other = relation.sourceTable === id ? relation.targetTable : relation.sourceTable;
+    const group = groups.get(other) || { table: other, status: "", relations: [] };
+    group.status = worseStatus(group.status, relation.status);
+    group.relations.push(relation);
+    groups.set(other, group);
+  }
+  return [...groups.values()].sort((left, right) => left.table.localeCompare(right.table));
 }
 
 export function graphStatuses(local) {
