@@ -86,7 +86,7 @@ function sectionTitle(section) {
           </li>
         </ul>
         <p v-if="section.more" class="wb-relation-graph-card-more">
-          {{ t('relations.graph.card.moreTables', { count: section.more }) }}
+          {{ t(card.pinned ? 'relations.graph.card.moreTablesPinned' : 'relations.graph.card.moreTables', { count: section.more }) }}
         </p>
       </section>
     </div>

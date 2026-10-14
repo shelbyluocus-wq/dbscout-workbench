@@ -1,10 +1,15 @@
-// The relation graph around one config table: which tables to show for a
-// depth and direction, how their relations merge into lines, how large each
-// node is, and where it sits. Pure functions over the backend graph payload
-// (`{ edges, tables }`), so the component only draws.
+// The relation graph around one config table, or of the whole database:
+// which tables to show for a depth and direction, how their relations merge
+// into lines, how large each node is, and (for small graphs) where it sits.
+// Pure functions over the backend graph payload (`{ edges, tables }`), so the
+// components only draw.
 
-export const GRAPH_MAX_NODES = 60;
+// A safety limit far above real config databases; past it the busiest tables win.
+export const GRAPH_MAX_NODES = 6000;
 export const GRAPH_MAX_DEPTH = 2;
+// Up to this many tables a graph is drawn as rings with routed lines and
+// placed names; larger ones are laid out by forces and drawn on a canvas.
+export const RING_GRAPH_MAX_NODES = 60;
 
 const STATUS_RANK = Object.freeze({ confirmed: 0, unconfirmed: 1, stale: 2, conflict: 3 });
 const PAIR_SEPARATOR = "\u001f";
@@ -86,8 +91,10 @@ function normalizeOptions(options = {}) {
   return { depth, outgoing, incoming, maxNodes };
 }
 
+// Code-point order: deterministic, and quick enough for thousands of tables.
 function byName(left, right) {
-  return left.localeCompare(right);
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
 }
 
 // Tables reached from `center` within `depth` steps along the enabled
@@ -130,7 +137,7 @@ function reachTables(center, bySource, byTarget, options) {
 }
 
 function byRelationId(left, right) {
-  return left.id.localeCompare(right.id);
+  return byName(left.id, right.id);
 }
 
 // Every relation between two shown tables becomes part of one line per table
@@ -162,17 +169,13 @@ function mergeLinks(edges, nodes) {
   }
   for (const link of links.values()) link.relations.sort(byRelationId);
   for (const loop of selfLoops.values()) loop.relations.sort(byRelationId);
-  return { links: [...links.values()].sort((left, right) => left.id.localeCompare(right.id)), selfLoops };
+  return { links: [...links.values()].sort(byRelationId), selfLoops };
 }
 
-export function localRelationGraph(graph, centerTable, options = {}) {
-  const center = lower(centerTable);
-  if (!center) return null;
-  const settings = normalizeOptions(options);
-  const edges = activeEdges(graph);
-  const { nodes, hidden } = reachTables(center, groupBy(edges, "sourceTable"), groupBy(edges, "targetTable"), settings);
+// Nodes with their sizes, self references and worst problem, and the lines
+// between them: the shape every graph view draws.
+function assembleGraph({ scope, center, nodes, hidden, options }, edges, counts = referenceCounts(edges)) {
   const { links, selfLoops } = mergeLinks(edges, nodes);
-  const counts = referenceCounts(edges);
   const issues = new Map();
   for (const link of links) {
     for (const end of [link.source, link.target]) issues.set(end, worseStatus(issues.get(end), link.status));
@@ -183,7 +186,10 @@ export function localRelationGraph(graph, centerTable, options = {}) {
     const issue = issues.get(node.id);
     const loop = selfLoops.get(node.id);
     return {
-      ...node,
+      id: node.id,
+      depth: node.depth,
+      side: node.side,
+      parent: node.parent,
       referencedBy,
       radius: nodeRadius(referencedBy, { center: node.depth === 0 }),
       selfStatus: loop?.status || "",
@@ -191,7 +197,54 @@ export function localRelationGraph(graph, centerTable, options = {}) {
       issue: issue === "stale" || issue === "conflict" ? issue : "",
     };
   });
-  return { center, nodes: shown, links, hidden, options: settings };
+  return { scope, center, nodes: shown, links, hidden, options };
+}
+
+export function localRelationGraph(graph, centerTable, options = {}) {
+  const center = lower(centerTable);
+  if (!center) return null;
+  const settings = normalizeOptions(options);
+  const edges = activeEdges(graph);
+  const { nodes, hidden } = reachTables(center, groupBy(edges, "sourceTable"), groupBy(edges, "targetTable"), settings);
+  return assembleGraph({ scope: "local", center, nodes, hidden, options: settings }, edges);
+}
+
+// Every table that takes part in a relation. Tables reachable from the
+// current one carry their distance and side like a local graph (depth -1 and
+// side "none" for the rest), so the views can still single it out.
+export function databaseRelationGraph(graph, centerTable, { maxNodes = GRAPH_MAX_NODES } = {}) {
+  const center = lower(centerTable);
+  const edges = activeEdges(graph);
+  const tables = new Set();
+  for (const edge of edges) {
+    tables.add(edge.sourceTable);
+    tables.add(edge.targetTable);
+  }
+  const limit = Math.max(1, Number(maxNodes) || GRAPH_MAX_NODES);
+  const nodes = center && tables.has(center)
+    ? reachTables(center, groupBy(edges, "sourceTable"), groupBy(edges, "targetTable"), {
+      depth: Infinity,
+      outgoing: true,
+      incoming: true,
+      maxNodes: limit,
+    }).nodes
+    : new Map();
+  const counts = referenceCounts(edges);
+  // Tables out of the current one's reach, busiest first, while room remains.
+  const rest = [...tables]
+    .filter((table) => !nodes.has(table))
+    .sort((left, right) => (counts.get(right) || 0) - (counts.get(left) || 0) || byName(left, right));
+  for (const table of rest) {
+    if (nodes.size >= limit) break;
+    nodes.set(table, { id: table, depth: -1, side: "none", parent: null });
+  }
+  return assembleGraph({
+    scope: "database",
+    center,
+    nodes,
+    hidden: Math.max(0, tables.size - nodes.size),
+    options: { maxNodes: limit },
+  }, edges, counts);
 }
 
 const SIDE_ORDER = Object.freeze({ out: 0, both: 1, in: 2 });
@@ -380,6 +433,15 @@ export function groupByOtherTable(relations, id) {
     groups.set(other, group);
   }
   return [...groups.values()].sort((left, right) => left.table.localeCompare(right.table));
+}
+
+// What a depth switch changed, in a short line for the graph to show, so the
+// switch never looks as if nothing happened. Counts include the current table.
+export function depthChangeNotice({ depth, previousDepth, before, after }, t) {
+  const total = Math.max(0, after - 1);
+  if (after > before) return t("relations.graph.depthGrew", { depth, count: after - before, total });
+  if (after === before && depth > previousDepth) return t("relations.graph.depthSame", { depth });
+  return t("relations.graph.depthShrank", { depth, total });
 }
 
 export function graphStatuses(local) {

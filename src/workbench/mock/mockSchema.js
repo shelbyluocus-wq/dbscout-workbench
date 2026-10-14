@@ -1,3 +1,5 @@
+import { RELATION_LAB_DATABASE, relationLabSchema } from "./mockRelationLab.js";
+
 const cm = (name, type, comment, pk = false, nullable = false) =>
   ({ column_name: name, column_type: type, column_comment: comment, is_primary_key: pk, is_nullable: nullable });
 
@@ -473,6 +475,7 @@ function createMongoFallbackTableDef(name) {
 
 export function resolveMockSchema(connectionId, database, { tableCount = readRequestedMockTableCount() } = {}) {
   const key = `${connectionId || "demo"}/${database || "game_db"}`;
+  if (key === `demo/${RELATION_LAB_DATABASE}` && !mockDatabaseSchemas[key]) return relationLabSchema();
   if (isMockMongoConnectionId(connectionId)) {
     const tableNames = mockDatabaseSchemas[key] || ["players", "loot"];
     return tableNames.map((name) => mockMongoTableDefs[name] || createMongoFallbackTableDef(name));

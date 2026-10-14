@@ -2,6 +2,8 @@
 // Below the relation graph: the two directions as switches that double as the
 // colour key for the circles, the line styles of the statuses actually drawn,
 // and a note when some tables did not fit. At least one direction stays on.
+// The whole-database view has no directions to choose, so there the two
+// colours are only a key.
 import { t } from "../i18n/index.js";
 import { computed } from "vue";
 import { relationStatusLabel } from "../utils/configRelations.js";
@@ -11,6 +13,9 @@ const props = defineProps({
   hidden: { type: Number, default: 0 },
   outgoing: { type: Boolean, default: true },
   incoming: { type: Boolean, default: true },
+  // False: the directions are a colour key, not switches.
+  switchable: { type: Boolean, default: true },
+  hiddenKey: { type: String, default: "relations.graph.hidden" },
 });
 
 const emit = defineEmits(["toggle-direction"]);
@@ -32,7 +37,13 @@ function toggle(key) {
 
 <template>
   <div class="wb-relation-graph-legend">
-    <div class="wb-relation-graph-directions" role="group" :aria-label="t('relations.graph.direction')">
+    <div v-if="!switchable" class="wb-relation-graph-directions">
+      <span v-for="key in DIRECTIONS" :key="key" class="wb-relation-graph-direction is-key is-on" :class="`is-${key}`">
+        <span class="wb-relation-graph-direction-dot" aria-hidden="true" />
+        {{ t(`relations.graph.${key}`) }}
+      </span>
+    </div>
+    <div v-else class="wb-relation-graph-directions" role="group" :aria-label="t('relations.graph.direction')">
       <button
         v-for="key in DIRECTIONS"
         :key="key"
@@ -55,7 +66,7 @@ function toggle(key) {
       </span>
     </span>
   </div>
-  <p v-if="hidden" class="wb-relation-graph-hidden">{{ t('relations.graph.hidden', { count: hidden }) }}</p>
+  <p v-if="hidden" class="wb-relation-graph-hidden">{{ t(hiddenKey, { count: hidden }) }}</p>
 </template>
 
 <style scoped>
@@ -101,6 +112,13 @@ function toggle(key) {
 
 .wb-relation-graph-direction.is-locked {
   cursor: default;
+}
+
+/* A colour key only: no border or fill of a switch. */
+.wb-relation-graph-direction.is-key {
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
 }
 
 .wb-relation-graph-direction:focus-visible {

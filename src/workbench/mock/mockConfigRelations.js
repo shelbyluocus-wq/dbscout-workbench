@@ -8,6 +8,7 @@ import { emitMockEvent } from "./mockEventBus.js";
 import { columnName } from "../utils/normalize.js";
 import { listItemValues, normalizeRelationFilter } from "../utils/relationFilter.js";
 import { isEmptyReferenceValue, referenceValuesFromCell, rowCellValue } from "../utils/configRelations.js";
+import { RELATION_LAB_DATABASE, isRelationLabTable, relationLabRelations } from "./mockRelationLab.js";
 
 const UPDATED_EVENT = "config-relations-updated";
 const COMMAND_PREFIX = "config_relations_";
@@ -116,10 +117,20 @@ export function mockRelationId(key) {
   return `${key.sourceTable}.${key.sourceColumn.toLowerCase()}${suffix}>${key.targetTable}.${key.targetColumn.toLowerCase()}`;
 }
 
-const RELATION_DEFS = MOCK_RELATIONS.map((def) => {
-  const key = relationKeyOf(def);
-  return { ...def, key, id: mockRelationId(key) };
-});
+function catalogOf(defs) {
+  return defs.map((def) => {
+    const key = relationKeyOf(def);
+    return { ...def, key, id: mockRelationId(key) };
+  });
+}
+
+const RELATION_DEFS = catalogOf(MOCK_RELATIONS);
+// The generated relation lab (`?relationLab=<tables>`), read by any bound client.
+const LAB_DEFS = catalogOf(relationLabRelations());
+
+function catalogFor(database) {
+  return String(database || "").toLowerCase() === RELATION_LAB_DATABASE ? LAB_DEFS : RELATION_DEFS;
+}
 
 function codeFingerprint(id, revision = 1) {
   return `${id}#${revision}`;
@@ -194,8 +205,13 @@ export function createMockConfigRelations({
     if (!seed) return state;
     state.client = { ...seed.client };
     state.baseline = new Set(RELATION_DEFS.map((def) => def.id).filter((id) => !seed.newSinceBinding.includes(id)));
-    for (const decision of seed.decisions) {
-      const def = RELATION_DEFS.find((item) => item.id === decision.id);
+    // Lab lookups that changed after they were confirmed.
+    const labDecisions = LAB_DEFS
+      .filter((def) => def.stale)
+      .map((def) => ({ id: def.id, verdict: "confirmed", codeRevision: 1, decidedAt: seed.client.confirmedAt }));
+    const known = new Map([...RELATION_DEFS, ...LAB_DEFS].map((def) => [def.id, def]));
+    for (const decision of [...seed.decisions, ...labDecisions]) {
+      const def = known.get(decision.id);
       state.decisions.set(decision.id, {
         verdict: decision.verdict,
         auto: false,
@@ -267,7 +283,7 @@ export function createMockConfigRelations({
 
   function candidatesOf(context, tables, client) {
     const candidates = new Map();
-    for (const def of RELATION_DEFS) {
+    for (const def of catalogFor(context.database)) {
       const { key } = def;
       const source = tables.get(key.sourceTable);
       const target = tables.get(key.targetTable);
@@ -277,7 +293,9 @@ export function createMockConfigRelations({
       if (def.comment && String(sourceColumn.column_comment || "").trim()) {
         evidence.push({ type: "comment", text: String(sourceColumn.column_comment).trim() });
       }
-      const readsBoth = client?.tables.includes(key.sourceTable) && client.tables.includes(key.targetTable);
+      const readsBoth = def.lab
+        ? Boolean(client)
+        : client?.tables.includes(key.sourceTable) && client.tables.includes(key.targetTable);
       if (def.code && readsBoth) {
         const [file, line, snippet] = def.code;
         evidence.push({
@@ -624,7 +642,8 @@ export function createMockConfigRelations({
     else if (context.code === "clientMissing") gaps.push({ code: "clientMissing" });
     else if (context.code === "pending") gaps.push({ code: "analyzing" });
     if (built.client) {
-      if (!built.client.tables.includes(table)) gaps.push({ code: "notUsedByClient" });
+      const labTable = catalogFor(context.database) === LAB_DEFS && isRelationLabTable(table);
+      if (!built.client.tables.includes(table) && !labTable) gaps.push({ code: "notUsedByClient" });
       const untraced = built.client.untraced[table] || [];
       if (untraced.length) {
         gaps.push({

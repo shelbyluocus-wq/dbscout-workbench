@@ -1,17 +1,19 @@
 <script setup>
 // The relation graph in full screen: it covers the whole window, stretches
 // its rings to use the room, names the fields of the active table's lines and
-// shows comments under table names. A pinned table can become the new center
-// to explore further without leaving; the way back is one button. Esc or the
-// exit button closes it; opening a table closes it too.
+// shows comments under table names. It can widen from the table's
+// neighbourhood to the whole database; a pinned table can become the new
+// center to explore further without leaving, and the way back is one button.
+// Esc or the exit button closes it; opening a table closes it too.
 import { t } from "../i18n/index.js";
 import { computed, ref, watch } from "vue";
 import { ArrowLeft, Minimize2, Network } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
+import { useGraphDepthNotice } from "../composables/useGraphDepthNotice.js";
 import { tableDisplayComment, tableDisplayName } from "../utils/configRelations.js";
-import { graphStatuses, localRelationGraph } from "../utils/relationGraph.js";
-import ConfigRelationGraph from "./ConfigRelationGraph.vue";
-import ConfigRelationGraphControls from "./ConfigRelationGraphControls.vue";
+import { GRAPH_MAX_DEPTH, databaseRelationGraph, graphStatuses, localRelationGraph } from "../utils/relationGraph.js";
+import ConfigRelationGraphView from "./ConfigRelationGraphView.vue";
+import ConfigRelationGraphSegment from "./ConfigRelationGraphSegment.vue";
 import ConfigRelationGraphLegend from "./ConfigRelationGraphLegend.vue";
 
 const props = defineProps({
@@ -34,26 +36,54 @@ useEscClose(() => props.open, () => emit("close"), null, { dialogRef });
 
 const home = computed(() => String(props.tableName || "").toLowerCase());
 const centerId = ref(home.value);
+// "local": the center's neighbourhood; "database": every table with relations.
+const scope = ref("local");
 
 // Every opening starts from the tab's table.
 watch(() => [props.open, home.value], ([open]) => {
-  if (open) centerId.value = home.value;
+  if (!open) return;
+  centerId.value = home.value;
+  scope.value = "local";
 }, { immediate: true });
 
 const tables = computed(() => props.graphData?.tables || {});
-const local = computed(() => (props.graphData && centerId.value ? localRelationGraph(props.graphData, centerId.value, props.options) : null));
+const wholeDatabase = computed(() => scope.value === "database");
+const local = computed(() => {
+  if (!props.graphData) return null;
+  if (wholeDatabase.value) return databaseRelationGraph(props.graphData, home.value);
+  return centerId.value ? localRelationGraph(props.graphData, centerId.value, props.options) : null;
+});
+const notice = useGraphDepthNotice(local);
 const statuses = computed(() => graphStatuses(local.value));
 const centerName = computed(() => tableDisplayName(tables.value, centerId.value));
 const centerComment = computed(() => tableDisplayComment(tables.value, centerId.value));
-const explored = computed(() => centerId.value !== home.value);
+const explored = computed(() => !wholeDatabase.value && centerId.value !== home.value);
+const layoutKey = computed(() => (wholeDatabase.value
+  ? `${props.scopeKey}\u001f\u001fdatabase`
+  : `${props.scopeKey}\u001f${centerId.value}`));
+const scopeOptions = computed(() => [
+  { value: "local", label: t("relations.graph.scopeLocal") },
+  { value: "database", label: t("relations.graph.scopeDatabase") },
+]);
+const depthOptions = computed(() => Array.from({ length: GRAPH_MAX_DEPTH }, (_, index) => ({
+  value: index + 1,
+  label: t(`relations.graph.depth${index + 1}`),
+})));
 
 function openTable(target) {
   emit("open-table", target);
   emit("close");
 }
 
+// "Center on this table": its neighbourhood, from either scope.
 function focusTable({ id }) {
-  if (id) centerId.value = id;
+  if (!id) return;
+  centerId.value = id;
+  scope.value = "local";
+}
+
+function goHome() {
+  centerId.value = home.value;
 }
 </script>
 
@@ -76,13 +106,18 @@ function focusTable({ id }) {
         <header class="wb-relation-graph-fullscreen-head">
           <div class="wb-relation-graph-fullscreen-title">
             <Network :size="16" :stroke-width="1.8" aria-hidden="true" />
-            <strong id="wb-relation-graph-fullscreen-title">{{ t('relations.graph.expandedTitle', { name: centerName }) }}</strong>
-            <span v-if="centerComment" class="wb-relation-graph-fullscreen-comment">{{ centerComment }}</span>
+            <strong id="wb-relation-graph-fullscreen-title">{{
+              wholeDatabase ? t('relations.graph.databaseTitle') : t('relations.graph.expandedTitle', { name: centerName })
+            }}</strong>
+            <span v-if="wholeDatabase" class="wb-relation-graph-fullscreen-comment">{{
+              t('relations.graph.databaseSummary', { tables: local.nodes.length, links: local.links.length })
+            }}</span>
+            <span v-else-if="centerComment" class="wb-relation-graph-fullscreen-comment">{{ centerComment }}</span>
             <button
               v-if="explored"
               type="button"
               class="wb-relation-graph-fullscreen-back"
-              @click="centerId = home"
+              @click="goHome"
             >
               <ArrowLeft :size="13" aria-hidden="true" />{{ t('relations.graph.backTo', { name: tableDisplayName(tables, home) }) }}
             </button>
@@ -93,9 +128,23 @@ function focusTable({ id }) {
               :hidden="local.hidden"
               :outgoing="options.outgoing"
               :incoming="options.incoming"
+              :switchable="!wholeDatabase"
+              :hidden-key="wholeDatabase ? 'relations.graph.hiddenDatabase' : 'relations.graph.hidden'"
               @toggle-direction="emit('toggle-direction', $event)"
             />
-            <ConfigRelationGraphControls :depth="options.depth" @set-depth="emit('set-depth', $event)" />
+            <ConfigRelationGraphSegment
+              v-if="!wholeDatabase"
+              :options="depthOptions"
+              :value="options.depth"
+              :label="t('relations.graph.depth')"
+              @select="emit('set-depth', $event)"
+            />
+            <ConfigRelationGraphSegment
+              :options="scopeOptions"
+              :value="scope"
+              :label="t('relations.graph.scope')"
+              @select="scope = $event"
+            />
             <button
               type="button"
               class="wb-relation-graph-fullscreen-exit"
@@ -108,14 +157,15 @@ function focusTable({ id }) {
         </header>
         <div class="wb-relation-graph-fullscreen-body">
           <p v-if="local.nodes.length < 2" class="wb-relation-graph-fullscreen-empty">{{ t('relations.graph.emptyDirection') }}</p>
-          <ConfigRelationGraph
+          <ConfigRelationGraphView
             v-else
             :graph="local"
             :tables="tables"
             fill
             explore
-            :layout-key="`${scopeKey}\u001f${centerId}`"
+            :layout-key="layoutKey"
             :current-table="home"
+            :notice="notice"
             @open-table="openTable"
             @focus-table="focusTable"
           />

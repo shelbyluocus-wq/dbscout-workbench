@@ -2,18 +2,21 @@
 // The relation page's map of tables around the current one. It loads the
 // database's relation list only while expanded, keeps the last picture while
 // a newer index loads, and remembers depth, directions, height and collapse
-// state. The enlarged view shares the same options.
+// state. A depth switch always says what it changed. The full-screen view
+// shares the same options and can widen to the whole database.
 import { t } from "../i18n/index.js";
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
 import {
+  GRAPH_MAX_DEPTH,
   graphStatuses,
   loadGraphOptions,
   localRelationGraph,
   saveGraphOptions,
 } from "../utils/relationGraph.js";
+import { useGraphDepthNotice } from "../composables/useGraphDepthNotice.js";
 import RelationSectionHead from "./RelationSectionHead.vue";
-import ConfigRelationGraph from "./ConfigRelationGraph.vue";
-import ConfigRelationGraphControls from "./ConfigRelationGraphControls.vue";
+import ConfigRelationGraphView from "./ConfigRelationGraphView.vue";
+import ConfigRelationGraphSegment from "./ConfigRelationGraphSegment.vue";
 import ConfigRelationGraphDialog from "./ConfigRelationGraphDialog.vue";
 import ConfigRelationGraphLegend from "./ConfigRelationGraphLegend.vue";
 
@@ -31,7 +34,9 @@ watch(options, () => saveGraphOptions(options), { deep: true });
 
 const bodyId = `wb-relation-graph-${Math.random().toString(36).slice(2, 10)}`;
 const sectionEl = ref(null);
-const graphData = ref(null);
+// The database's whole relation list: thousands of plain records, kept out
+// of deep reactivity.
+const graphData = shallowRef(null);
 const error = ref("");
 const loading = ref(false);
 const expanded = ref(false);
@@ -71,6 +76,11 @@ onBeforeUnmount(() => {
 });
 
 const local = computed(() => (graphData.value ? localRelationGraph(graphData.value, props.tableName, options) : null));
+const notice = useGraphDepthNotice(local);
+const depthOptions = computed(() => Array.from({ length: GRAPH_MAX_DEPTH }, (_, index) => ({
+  value: index + 1,
+  label: t(`relations.graph.depth${index + 1}`),
+})));
 const hasNeighbors = computed(() => (local.value?.nodes.length || 0) > 1);
 const statuses = computed(() => graphStatuses(local.value));
 const tables = computed(() => graphData.value?.tables || {});
@@ -104,7 +114,13 @@ function openExpanded() {
       :controls="bodyId"
       @toggle="options.collapsed = !options.collapsed"
     >
-      <ConfigRelationGraphControls v-if="!options.collapsed" :depth="options.depth" @set-depth="setDepth" />
+      <ConfigRelationGraphSegment
+        v-if="!options.collapsed"
+        :options="depthOptions"
+        :value="options.depth"
+        :label="t('relations.graph.depth')"
+        @select="setDepth"
+      />
     </RelationSectionHead>
 
     <div v-if="!options.collapsed" :id="bodyId" class="wb-relation-graph-body">
@@ -115,13 +131,14 @@ function openExpanded() {
         :style="{ height: `${options.height}px` }"
       >{{ loading ? t('relations.loading') : '' }}</div>
       <template v-else>
-        <ConfigRelationGraph
+        <ConfigRelationGraphView
           v-if="hasNeighbors"
           :graph="local"
           :tables="tables"
           :height="options.height"
           :layout-key="`${scopeKey}\u001f${currentTable}`"
           :current-table="currentTable"
+          :notice="notice"
           @update:height="options.height = $event"
           @expand="openExpanded"
           @open-table="emit('open-table', $event)"

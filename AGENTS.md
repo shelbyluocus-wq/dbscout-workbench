@@ -106,29 +106,47 @@ capabilities:
   match every key, and a jump to referenced rows selects the first of them so
   the chain can be followed. `IncomingRelationRows.vue` renders these lines
   and `incomingRelationRows.js` owns their paging and stale-request guards.
-  **Relation map** draws the current table's neighbours (depth 1–2, at most
-  60 tables) on a dot-grid canvas, circles tinted by side (tables it
-  references / tables referencing it, whose switches double as the colour
-  key) and lines coloured by relation status; second-ring tables gather
-  beside the table that brought them in. Lines bow around tables in their
-  way and every name takes the side of its table that keeps lines and
-  arrowheads clear (busy tables choose first, a side is kept unless another
-  is clearly better). Clicking a node opens that table. Tables can be
-  dragged anywhere and stay where they are dropped (one table moves, per
-  frame, keeping the grab offset; arrow keys nudge a focused table) for the
-  session, in the inline and full-screen views alike, until "restore layout";
-  the wheel zooms around the pointer, fitting never enlarges a small graph
-  past a readable scale and takes in dragged tables, the bottom edge resizes
-  the graph (height remembered) and a help button explains the gestures.
-  Full screen covers the whole window, stretches the rings to the room
-  instead of enlarging circles and names, shows comments under names and the
-  fields of the active table's lines, and lets a pinned table become the new
-  center (one button leads back). The info card lists the hovered table's
-  drawn relations grouped by the other table (fields beneath, status per
-  field) in the half or corner away from that table; right-clicking a table
-  (or Shift+F10) pins it with actions (open, center on it in full screen,
-  unpin), and in a narrow graph the pinned card docks under the canvas.
-  Right-clicking the pinned table, the card or empty space unpins; every
+  **Relation map** draws the current table's neighbours (depth 1–2) on a
+  dot-grid canvas, circles tinted by side (tables it references / tables
+  referencing it, whose switches double as the colour key) and lines
+  coloured by relation status. Up to 60 tables it is a ring view (SVG):
+  second-ring tables gather beside the table that brought them in, lines
+  bow around tables in their way and every name takes the side of its table
+  that keeps lines and arrowheads clear (busy tables choose first, a side is
+  kept unless another is clearly better). Past that (a hub's neighbourhood,
+  up to thousands of tables) it is a large-graph view after Obsidian's graph
+  view: a force layout (d3-force with typed-array many-body and collision
+  forces) runs in a worker and streams positions, and one canvas draws only
+  what is on screen, lines batched by colour, circles that shrink slower
+  than the zoom, names that fade in with the zoom (busier tables first,
+  never piled up) and arrowheads once they can be seen; drawing stops when
+  nothing moves. A fresh picture starts in rings by distance and grows from
+  the middle, a picture seen before in the session comes back at rest, and a
+  changed graph only adjusts (new tables start beside their neighbours).
+  When painting a frame costs more than a frame (no graphics acceleration),
+  camera moves reuse the last sharp picture and highlights switch at once.
+  A depth switch always announces what it changed (how many tables depth 2
+  adds, or that it adds none) and a quiet note shows while a large layout
+  settles. Clicking a node opens that table. Tables can be dragged anywhere
+  and stay where they are dropped (one table per frame keeping the grab
+  offset; in the large view its neighbours make room; arrow keys nudge a
+  focused table in the ring view) for the session, in the inline and
+  full-screen views alike, until "restore layout"; the wheel zooms around
+  the pointer (eased, about 1.5× per notch in the large view, where a
+  released pan coasts), fitting never enlarges a small graph past a
+  readable scale and takes in dragged tables, a find box brings a table into
+  view and pins it, the bottom edge resizes the graph (height remembered)
+  and a help button explains the gestures. Full screen covers the whole
+  window, stretches the rings to the room instead of enlarging circles and
+  names, shows comments under names and the fields of the active table's
+  lines, widens from the table to the whole database on request, and lets a
+  pinned table become the new center (one button leads back). The info card
+  lists the hovered table's drawn relations grouped by the other table
+  (fields beneath, status per field) in the half or corner away from that
+  table; right-clicking a table (or Shift+F10) pins it with actions (open,
+  center on it in full screen, unpin), and in a narrow graph the pinned card
+  docks under the canvas. Right-clicking the pinned table, the card or empty
+  space unpins (Esc lets go of a pin before it closes full screen); every
   right-click in the graph is consumed, so neither the app's, the WebView's
   nor the system's menu opens there. **Field relations** lists every
   relation by direction, waiting decisions first; each row opens its
@@ -292,10 +310,11 @@ from UI):
 - Config relations: `useConfigRelations.js` — mirrors each scope's relation
   overview, refreshes on `config-relations-updated`, and serves the
   table/row lookups plus the per-revision cached scope graph;
-  `useGraphViewport.js` / `useGraphArrangement.js` — relation-graph zoom/pan
+  `useGraphViewport.js` / `useGraphArrangement.js` — ring-view zoom/pan
   with glide animation and a measured-width fit, and where tables are drawn
   (ring layout plus session-remembered dragged tables, gliding between
-  pictures);
+  pictures); `useGraphDepthNotice.js` — the line announcing what a depth
+  switch changed;
   `configRelationContext.js` — provided scope so grid
   chips can clear a relation filter without prop chains
 - Shell/UX: `usePaneResize.js`, `useInspectorResize.js`, `useActivityRail.js`
@@ -342,12 +361,21 @@ from UI):
   labels, the tab chip, the per-connection capability gate, the row-name
   column mirrored from the backend and the switch-badge summary);
   `relationPanelPrefs.js` (remembered open state of the relation page sections);
-  `relationGraph.js` (local relation subgraph by depth/direction, per-pair
-  worst-status merge, node sizing, deterministic ring layout with an
-  optional stretch, parent-grouped second ring, card grouping and persisted
-  graph options); `relationGraphGeometry.js` (layout stretch for large views,
+  `relationGraph.js` (local relation subgraph by depth/direction and the
+  whole-database graph, per-pair worst-status merge, node sizing,
+  deterministic ring layout with an optional stretch, parent-grouped second
+  ring, card grouping, depth notices and persisted graph options);
+  `relationGraphGeometry.js` (ring view: layout stretch for large views,
   line routing around tables, name-side placement clear of lines and
-  arrowheads, info-card placement and glide starts)
+  arrowheads, info-card placement and glide starts); `relationGraphCard.js`
+  (the info card's content); for the large-graph view
+  `relationGraphModel.js` (typed-array graph and starting positions),
+  `forceLayout.js` + `fastForces.js` + `forceLayoutAlpha.js` (the force
+  layout, run by `workers/relationGraphLayout.worker.js` or a main-thread
+  fallback), `relationGraphLayout.js` (that runner and the session memory of
+  laid-out graphs), `relationGraphCanvas.js` (frame drawing, zoom-dependent
+  detail, hit testing) and `graphCamera.js` (eased wheel zoom, coasting pan,
+  fit)
 
 **Components** (`components/`) render panes and dialogs: `WorkbenchActivityRail.vue`,
 `WorkbenchSidebar.vue`,
@@ -366,9 +394,13 @@ shared `RelationSectionHead.vue`) /
 (shared relation item: compact list row in the inspector, detailed card in the
 dialog, with `RelationStatusBadge.vue` and `RelationEvidenceList.vue`) /
 `ConfigRelationGraphSection.vue` +
-`ConfigRelationGraph.vue` (local relation graph section and its SVG view,
-with `ConfigRelationGraphControls.vue`, `ConfigRelationGraphLegend.vue`, the
-`ConfigRelationGraphCard.vue` info card and the full-screen
+`ConfigRelationGraphView.vue` (local relation graph section; the view picks
+the ring view `ConfigRelationGraph.vue` (SVG) or the large-graph
+`ConfigRelationGraphCanvas.vue`, both inside the shared
+`ConfigRelationGraphFrame.vue` with its tool strip, the
+`ConfigRelationGraphFind.vue` find box and the `ConfigRelationGraphCard.vue`
+info card; `ConfigRelationGraphSegment.vue` switches depth and scope, with
+`ConfigRelationGraphLegend.vue` and the full-screen
 `ConfigRelationGraphDialog.vue`),
 `UpdateDialog.vue`, `ShortcutSettingsDialog.vue`,
 `PaneDivider.vue`, the `SqlQueryWorkspace.vue` / `SqlCodeEditor.vue` /
@@ -389,11 +421,16 @@ Tab reorder animation measures geometry only while dragging.
 Grid regressions: `node scripts/test-grid-columns.mjs` and
 `DBSCOUT_GRID_TEST_URL=<preview URL> node scripts/test-grid-insert-drag.mjs`.
 Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
-`node scripts/test-relation-graph-browser.mjs` and
+`node scripts/test-relation-graph-browser.mjs`,
+`node scripts/test-relation-graph-large-browser.mjs` (the generated relation
+lab, `DBSCOUT_RELATION_LAB_SIZE`, default 2000) and
 `node scripts/test-incoming-relations-browser.mjs` against a Vite dev server
 (`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
 The performance sampler is `node scripts/perf/grid-interaction.mjs --base <URL>
 --scenario schema-800x60 --label <name>`; build a production preview first.
+Large relation graphs: `node scripts/perf/relation-graph.mjs --base <URL>
+--sizes 500,2000,5000 --label <name>` (first open, reopen, zoom, pan, hover
+and drag frame times on the relation lab).
 Mock performance fixture rows support conflict-checked updates independently of
 the ordinary demo data. MySQL default page/search ordering follows primary-index
 column order (backend-only `TableMeta.primary_key_order`); explicit sorting keeps
@@ -406,6 +443,9 @@ natural order. Audit durability remains FULL.
 - `mockEventBus.js` — Emulates Tauri window events for mock mode
 - `mockConfigRelations.js` — Demo-mode config-relations index and review
   storage so the feature works in the browser without the Rust backend
+- `mockRelationLab.js` — the generated relation lab: `?relationLab=<tables>`
+  (50–5000) adds a deterministic `relation_lab` database to the demo server,
+  with hub tables, modules, list cells, conflicts and stale relations
 
 ### Backend (`src-tauri/src/`)
 

@@ -3,6 +3,7 @@ import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
 import { createMockConfigRelations, relationRowMatches } from "./mockConfigRelations.js";
+import { RELATION_LAB_DATABASE, requestedRelationLabSize } from "./mockRelationLab.js";
 import {
   activePerfFixture,
   createPerfFixtureSchema,
@@ -51,7 +52,8 @@ const mockConnections = [
 ];
 
 const mockConnectionDatabases = {
-  demo: ["game_db", "game_config"],
+  // `?relationLab=<tables>` adds a generated config database for the relation graph.
+  demo: ["game_db", "game_config", ...(requestedRelationLabSize() ? [RELATION_LAB_DATABASE] : [])],
   "demo-staging": ["game_db", "analytics_db"],
   "demo-test": ["game_db", "game_db_archive"],
   "demo-mongo": ["game_db"],

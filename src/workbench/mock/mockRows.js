@@ -1,4 +1,5 @@
 import { mockSchema } from "./mockSchema.js";
+import { RELATION_LAB_DATABASE, relationLabRows } from "./mockRelationLab.js";
 
 function generateMockRows() {
   const rows = {};
@@ -584,7 +585,8 @@ export function getOrInitRows(connectionId, database, tableName) {
   const key = `${connectionId || "demo"}/${database || "game_db"}/${tableName}`;
   let cached = rowCache.get(key);
   if (!cached) {
-    const source = mockRows[tableName] || [];
+    const source = mockRows[tableName] ||
+      (database === RELATION_LAB_DATABASE ? relationLabRows(tableName) : []);
     cached = source.map((row) => ({ ...row }));
     rowCache.set(key, cached);
   }

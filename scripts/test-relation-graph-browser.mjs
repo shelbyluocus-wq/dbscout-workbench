@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const base = process.env.DBSCOUT_RELATIONS_TEST_URL || "http://127.0.0.1:1431";
-const shots = process.env.DBSCOUT_RELATIONS_SCREENSHOTS || tmpdir();
-// e.g. "msedge" or "chrome" to use an installed browser instead of Playwright's.
-const channel = process.env.DBSCOUT_PLAYWRIGHT_CHANNEL || undefined;
-const browser = await chromium.launch({ headless: true, channel });
+import { base, launchBrowser, shots } from "./relation-browser-env.mjs";
+
+const browser = await launchBrowser();
 const errors = [];
 
 const translation = (transform) => transform.match(/-?[\d.]+/g).map(Number);

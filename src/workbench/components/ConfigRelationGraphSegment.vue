@@ -1,27 +1,27 @@
 <script setup>
-// Depth switch for the relation graph: the tables right next to this one, or
-// also the ones next to those.
-import { t } from "../i18n/index.js";
-
+// A small segmented switch for the relation graph: its depth (the tables
+// next to this one, or also the ones next to those) or, in full screen, its
+// scope (this table or the whole database).
 defineProps({
-  depth: { type: Number, required: true },
+  // [{ value, label }]
+  options: { type: Array, required: true },
+  value: { type: [Number, String], required: true },
+  label: { type: String, required: true },
 });
 
-const emit = defineEmits(["set-depth"]);
-
-const DEPTHS = Object.freeze([1, 2]);
+const emit = defineEmits(["select"]);
 </script>
 
 <template>
-  <div class="wb-relation-graph-segment" role="group" :aria-label="t('relations.graph.depth')">
+  <div class="wb-relation-graph-segment" role="group" :aria-label="label">
     <button
-      v-for="value in DEPTHS"
-      :key="value"
+      v-for="option in options"
+      :key="option.value"
       type="button"
-      :aria-pressed="depth === value"
-      :class="{ 'is-active': depth === value }"
-      @click="emit('set-depth', value)"
-    >{{ t(`relations.graph.depth${value}`) }}</button>
+      :aria-pressed="value === option.value"
+      :class="{ 'is-active': value === option.value }"
+      @click="emit('select', option.value)"
+    >{{ option.label }}</button>
   </div>
 </template>
 

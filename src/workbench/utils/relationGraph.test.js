@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_GRAPH_OPTIONS,
+  GRAPH_MAX_NODES,
   GRAPH_OPTIONS_STORAGE_KEY,
+  RING_GRAPH_MAX_NODES,
+  databaseRelationGraph,
+  depthChangeNotice,
   graphLabel,
   graphNeighbors,
   graphNodeRelations,
@@ -83,7 +87,7 @@ test("direction toggles choose which neighbours are reached", () => {
   assert.deepEqual(ids(localRelationGraph(GRAPH, "hero", { incoming: false })), ["hero", "item", "skill"]);
   assert.deepEqual(ids(localRelationGraph(GRAPH, "hero", { outgoing: false })), ["hero", "quest"]);
   const both = localRelationGraph(GRAPH, "hero", { outgoing: false, incoming: false });
-  assert.deepEqual(both.options, { depth: 1, outgoing: true, incoming: true, maxNodes: 60 }, "turning both off falls back to both on");
+  assert.deepEqual(both.options, { depth: 1, outgoing: true, incoming: true, maxNodes: GRAPH_MAX_NODES }, "turning both off falls back to both on");
 });
 
 test("depth 2 reaches neighbours of neighbours and keeps their parent's side", () => {
@@ -272,4 +276,49 @@ test("second-ring tables gather beside the table that brought them in", () => {
   for (let index = 1; index < ring.length; index += 1) {
     assert.ok(Math.hypot(ring[index].x - ring[index - 1].x, ring[index].y - ring[index - 1].y) >= 40, "no two tables touch");
   }
+});
+
+test("a hub's neighbourhood is no longer cut at sixty tables, so both depths differ", () => {
+  const edges = [];
+  for (let index = 0; index < 150; index += 1) {
+    edges.push(edge(`user_${index}`, "hub", { column: "hub_id" }));
+    edges.push(edge(`detail_${index}`, `user_${index}`, { column: "user_id" }));
+  }
+  const data = { edges, tables: {} };
+  const one = localRelationGraph(data, "hub", { depth: 1 });
+  const two = localRelationGraph(data, "hub", { depth: 2 });
+  assert.equal(one.nodes.length, 151);
+  assert.equal(two.nodes.length, 301);
+  assert.equal(one.hidden, 0);
+  assert.ok(one.nodes.length > RING_GRAPH_MAX_NODES, "drawn by the large-graph view");
+  assert.equal(one.scope, "local");
+});
+
+test("the whole database: every related table, the current one's reach marked", () => {
+  const whole = databaseRelationGraph(GRAPH, "skill");
+  assert.equal(whole.scope, "database");
+  assert.deepEqual(ids(whole), ["buff", "equip", "hero", "item", "quest", "shop", "skill"], "rejected relations bring no table");
+  const byId = new Map(whole.nodes.map((node) => [node.id, node]));
+  assert.equal(byId.get("skill").depth, 0);
+  assert.equal(byId.get("buff").side, "out");
+  assert.equal(byId.get("hero").side, "in");
+  assert.equal(byId.get("shop").depth, 3, "reached through hero and item");
+  assert.equal(whole.links.length, 6, "one line per pair of tables");
+  // A table without relations is no center; every table is still drawn.
+  const nowhere = databaseRelationGraph(GRAPH, "mail");
+  assert.equal(nowhere.nodes.length, 7);
+  assert.ok(nowhere.nodes.every((node) => node.depth === -1 && node.side === "none"));
+  // Past the limit the busiest tables stay.
+  const limited = databaseRelationGraph(GRAPH, "", { maxNodes: 2 });
+  assert.equal(limited.nodes.length, 2);
+  assert.equal(limited.hidden, 5);
+  assert.ok(limited.nodes.some((node) => node.id === "item"), "item is referenced most");
+});
+
+test("a depth switch always says what changed", () => {
+  const say = (key, values) => `${key}:${JSON.stringify(values)}`;
+  assert.equal(depthChangeNotice({ depth: 2, previousDepth: 1, before: 5, after: 9 }, say), 'relations.graph.depthGrew:{"depth":2,"count":4,"total":8}');
+  assert.equal(depthChangeNotice({ depth: 2, previousDepth: 1, before: 5, after: 5 }, say), 'relations.graph.depthSame:{"depth":2}');
+  assert.equal(depthChangeNotice({ depth: 1, previousDepth: 2, before: 9, after: 5 }, say), 'relations.graph.depthShrank:{"depth":1,"total":4}');
+  assert.equal(depthChangeNotice({ depth: 1, previousDepth: 2, before: 5, after: 5 }, say), 'relations.graph.depthShrank:{"depth":1,"total":4}');
 });
