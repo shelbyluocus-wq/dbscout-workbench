@@ -4,6 +4,10 @@
 // overlap. The same engine runs in the layout worker or, where workers are
 // unavailable, on the main thread in small slices. Tables the user dragged
 // stay where they were dropped until the layout is restored.
+//
+// Dragging moves one table and the small tables hanging on it; every other
+// table is held where it is for the drag and the moment after, so the
+// picture never turns or shivers around the pointer.
 import { forceLink, forceSimulation, forceX, forceY } from "d3-force";
 import { forceCollideFast, forceManyBodyFast } from "./fastForces.js";
 import { LAYOUT_ALPHA } from "./forceLayoutAlpha.js";
@@ -19,6 +23,11 @@ const CHARGE_THETA = 0.9;
 const CHARGE_RANGE = 800;
 const COLLIDE_PADDING = 7;
 const CENTER_STRENGTH = 0.05;
+// Neighbours with at most this many relations follow a dragged table.
+const FOLLOW_MAX_LINKS = 3;
+const VELOCITY_DECAY = 0.4;
+// Followers glide behind the pointer rather than swing past it.
+const DRAG_VELOCITY_DECAY = 0.6;
 
 // Larger graphs settle in fewer, slightly coarser steps: the picture they
 // reach is as readable, in about half the time (d3's default is 300 steps).
@@ -43,9 +52,14 @@ function seededSource(seed = 1) {
 export function createForceLayout() {
   let nodes = [];
   let byId = new Map();
+  let pairs = [];
+  // Tables held in place for the current drag, and whether it is still going on.
+  let held = [];
+  let dragging = false;
   const simulation = forceSimulation([])
     .stop()
     .randomSource(seededSource())
+    .velocityDecay(VELOCITY_DECAY)
     .alphaMin(LAYOUT_ALPHA.rest)
     .force("charge", forceManyBodyFast({ strength: CHARGE, theta: CHARGE_THETA, distanceMax: CHARGE_RANGE }))
     .force("link", forceLink([]).distance((link) => LINK_DISTANCE + link.source.r + link.target.r))
@@ -61,6 +75,9 @@ export function createForceLayout() {
    * [index, x, y] triples for tables the user put somewhere.
    */
   function setGraph({ ids, seeds, radius, links, fixed, alpha = LAYOUT_ALPHA.update, reset = false }) {
+    releaseHeld();
+    dragging = false;
+    simulation.alphaTarget(0);
     if (reset) byId = new Map();
     const next = new Array(ids.length);
     const nextById = new Map();
@@ -86,8 +103,13 @@ export function createForceLayout() {
     simulation.alphaDecay(1 - LAYOUT_ALPHA.rest ** (1 / settleSteps(nodes.length)));
     simulation.force("charge").setTheta(chargeTheta(nodes.length));
     simulation.nodes(nodes);
-    const pairs = [];
-    for (let cursor = 0; cursor + 1 < links.length; cursor += 2) pairs.push({ source: links[cursor], target: links[cursor + 1] });
+    pairs = [];
+    for (const node of nodes) node.degree = 0;
+    for (let cursor = 0; cursor + 1 < links.length; cursor += 2) {
+      pairs.push({ source: links[cursor], target: links[cursor + 1] });
+      if (nodes[links[cursor]]) nodes[links[cursor]].degree += 1;
+      if (nodes[links[cursor + 1]]) nodes[links[cursor + 1]].degree += 1;
+    }
     simulation.force("link").links(pairs);
     simulation.alpha(Math.max(simulation.alpha(), alpha));
   }
@@ -106,13 +128,71 @@ export function createForceLayout() {
     node.fy = null;
   }
 
-  // "Restore layout": every table may move again.
-  function releaseAll(alpha = LAYOUT_ALPHA.update) {
+  // Every table but `movers` and the small tables hanging on them (a few
+  // relations at most) stays exactly where it is, with no speed left over.
+  function holdAllBut(movers) {
+    const moving = new Set(movers);
+    const follows = new Set(movers);
+    // Direct neighbours only, whatever order the relations come in.
+    for (const link of pairs) {
+      if (moving.has(link.source) && link.target.degree <= FOLLOW_MAX_LINKS) follows.add(link.target);
+      if (moving.has(link.target) && link.source.degree <= FOLLOW_MAX_LINKS) follows.add(link.source);
+    }
     for (const node of nodes) {
+      node.vx = 0;
+      node.vy = 0;
+      if (follows.has(node) || node.fx != null || node.fy != null) continue;
+      node.fx = node.x;
+      node.fy = node.y;
+      held.push(node);
+    }
+  }
+
+  // "Restore layout": the tables the user put somewhere may move again. A
+  // picture at rest lets just them (and their small tables) find their way
+  // back; one still settling simply carries on.
+  function releaseAll(alpha = LAYOUT_ALPHA.update) {
+    releaseHeld();
+    dragging = false;
+    simulation.alphaTarget(0);
+    const pinned = nodes.filter((node) => node.fx != null || node.fy != null);
+    for (const node of pinned) {
       node.fx = null;
       node.fy = null;
     }
+    if (!pinned.length) return;
+    if (!running()) holdAllBut(pinned);
     reheat(alpha);
+  }
+
+  // A drag starts: the dragged table moves, and so do the small tables that
+  // hang on it; everything else holds still.
+  function beginDrag(index) {
+    const dragged = nodes[index];
+    if (!dragged) return;
+    releaseHeld();
+    dragging = true;
+    holdAllBut([dragged]);
+    simulation.velocityDecay(DRAG_VELOCITY_DECAY);
+    simulation.alphaTarget(LAYOUT_ALPHA.drag);
+    reheat(LAYOUT_ALPHA.drag);
+  }
+
+  // The drag ends: its followers come to rest while the others stay held;
+  // once all is still the hold is let go without moving anything.
+  function endDrag() {
+    dragging = false;
+    simulation.alphaTarget(0);
+    simulation.alpha(Math.min(simulation.alpha(), LAYOUT_ALPHA.dragSettle));
+  }
+
+  function releaseHeld() {
+    for (const node of held) {
+      node.fx = null;
+      node.fy = null;
+    }
+    held = [];
+    simulation.velocityDecay(VELOCITY_DECAY);
   }
 
   function reheat(alpha) {
@@ -132,7 +212,9 @@ export function createForceLayout() {
   function step() {
     if (!running() || !nodes.length) return false;
     simulation.tick();
-    return running();
+    const active = running();
+    if (!active && !dragging && held.length) releaseHeld();
+    return active;
   }
 
   function positions(into = new Float32Array(nodes.length * 2)) {
@@ -150,6 +232,9 @@ export function createForceLayout() {
     releaseAll,
     reheat,
     setAlphaTarget,
+    beginDrag,
+    endDrag,
+    held: () => held.length,
     running,
     step,
     positions,
@@ -206,7 +291,8 @@ export function createLayoutHost(post, { now = () => globalThis.performance?.now
         wake();
         break;
       case "drag":
-        layout.setAlphaTarget(message.active ? LAYOUT_ALPHA.drag : 0);
+        if (message.active) layout.beginDrag(message.index);
+        else layout.endDrag();
         wake();
         break;
       case "release":

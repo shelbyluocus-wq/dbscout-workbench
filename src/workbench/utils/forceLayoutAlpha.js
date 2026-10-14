@@ -5,8 +5,10 @@ export const LAYOUT_ALPHA = Object.freeze({
   fresh: 1,
   // Tables added or removed, or the layout restored: the rest only adjusts.
   update: 0.3,
-  // Kept up while a table is dragged so its neighbours make room.
-  drag: 0.3,
+  // Kept up while a table is dragged, for the few tables that follow it.
+  drag: 0.2,
+  // After a drag those tables come to rest; the rest of the picture never moved.
+  dragSettle: 0.06,
   // Below this the layout is at rest and stops working.
   rest: 0.001,
 });

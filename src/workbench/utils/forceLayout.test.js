@@ -73,19 +73,56 @@ test("a table put somewhere stays there; restoring lets it go", () => {
   assert.ok(distance(xy, 0, 1) < Math.hypot(300 - xy[0], -200 - xy[1]), "pulled back toward its neighbour");
 });
 
-test("dragging keeps the layout awake until released", () => {
+test("dragging moves the table and the small tables on it; the rest of the picture holds still", () => {
   const layout = createForceLayout();
-  layout.setGraph({ ...graph(), alpha: 0 });
-  assert.equal(layout.running(), false);
-  layout.setAlphaTarget(LAYOUT_ALPHA.drag);
-  layout.pin(2, 50, 50);
-  for (let step = 0; step < 500; step += 1) layout.step();
-  assert.equal(layout.running(), true, "still awake while the pointer holds a table");
-  const xy = layout.positions();
-  assert.deepEqual([xy[4], xy[5]], [50, 50]);
-  layout.setAlphaTarget(0);
+  layout.setGraph(graph());
+  settle(layout);
+  const before = layout.positions();
+  // Table a (index 0) carries four leaves; the pair f–g is elsewhere.
+  layout.beginDrag(0);
+  assert.equal(layout.held(), 2, "only the unrelated pair is held");
+  layout.pin(0, before[0] + 120, before[1] + 60);
+  for (let step = 0; step < 400; step += 1) layout.step();
+  assert.equal(layout.running(), true, "awake while the pointer holds the table");
+  let xy = layout.positions();
+  assert.deepEqual([xy[0], xy[1]], [before[0] + 120, before[1] + 60]);
+  for (let at = 1; at <= 4; at += 1) assert.ok(distance(xy, 0, at) < 120, `leaf ${at} follows`);
+  for (let at = 5; at <= 6; at += 1) {
+    assert.deepEqual([xy[at * 2], xy[at * 2 + 1]], [before[at * 2], before[at * 2 + 1]], `table ${at} does not move`);
+  }
+  layout.endDrag();
   settle(layout);
   assert.equal(layout.running(), false);
+  assert.equal(layout.held(), 0, "the hold is let go once everything is still");
+  xy = layout.positions();
+  for (let at = 5; at <= 6; at += 1) {
+    assert.deepEqual([xy[at * 2], xy[at * 2 + 1]], [before[at * 2], before[at * 2 + 1]], `table ${at} still where it was`);
+  }
+  assert.equal(layout.step(), false, "letting go moves nothing");
+});
+
+test("a busy neighbour stays where it is when a table next to it is dragged", () => {
+  // Hub h (index 0) has five relations; table t (index 1) hangs on it.
+  const ids = ["h", "t", "a", "b", "c", "d"];
+  const layout = createForceLayout();
+  layout.setGraph({
+    ids,
+    seeds: new Float32Array(ids.flatMap((_, at) => [at * 30, (at % 3) * 20])),
+    radius: new Float32Array(ids.length).fill(6),
+    links: new Uint32Array([0, 1, 0, 2, 0, 3, 0, 4, 0, 5]),
+    fixed: new Float32Array(0),
+    alpha: LAYOUT_ALPHA.fresh,
+    reset: true,
+  });
+  settle(layout);
+  const before = layout.positions();
+  layout.beginDrag(1);
+  layout.pin(1, before[2] + 80, before[3]);
+  for (let step = 0; step < 200; step += 1) layout.step();
+  const xy = layout.positions();
+  assert.deepEqual([xy[0], xy[1]], [before[0], before[1]], "the hub holds still");
+  layout.endDrag();
+  settle(layout);
 });
 
 test("large graphs settle in fewer, coarser steps", () => {
@@ -118,7 +155,7 @@ test("the host answers a graph at once and streams positions until rest", () => 
   assert.equal(posted.at(-1).running, false);
   host.receive({ type: "pin", index: 3, x: 99, y: 98 });
   assert.equal(tasks.length, 0, "a pin alone does not wake a resting layout");
-  host.receive({ type: "drag", active: true });
+  host.receive({ type: "drag", active: true, index: 3 });
   assert.equal(tasks.length, 1);
   tasks.shift()();
   assert.deepEqual([posted.at(-1).buffer[6], posted.at(-1).buffer[7]], [99, 98]);
@@ -152,4 +189,27 @@ test("the fast collision force separates overlapping circles like d3's", () => {
   forceSimulation(reference).stop().force("collide", forceCollide((node) => node.r)).tick(300);
   const spread = (nodes) => Math.max(...nodes.map((node) => Math.hypot(node.x, node.y)));
   assert.ok(Math.abs(spread(fast) - spread(reference)) / spread(reference) < 0.25, "about as spread out as d3's");
+});
+
+test("restoring the layout moves only the tables the user put somewhere", () => {
+  const layout = createForceLayout();
+  layout.setGraph(graph());
+  settle(layout);
+  const rest = layout.positions();
+  // Table e (index 4) was dropped far away.
+  const fixed = graph();
+  fixed.seeds = rest;
+  fixed.fixed = new Float32Array([4, rest[8] + 300, rest[9] - 200]);
+  fixed.alpha = 0;
+  fixed.reset = false;
+  layout.setGraph(fixed);
+  layout.releaseAll(LAYOUT_ALPHA.update);
+  assert.ok(layout.held() > 0, "the others are held while it finds its way back");
+  settle(layout);
+  const xy = layout.positions();
+  assert.ok(distance(xy, 0, 4) < 120, "the released table returns beside its neighbour");
+  for (const at of [0, 1, 2, 3, 5, 6]) {
+    assert.deepEqual([xy[at * 2], xy[at * 2 + 1]], [rest[at * 2], rest[at * 2 + 1]], `table ${at} does not move`);
+  }
+  assert.equal(layout.held(), 0);
 });

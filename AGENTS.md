@@ -129,9 +129,11 @@ capabilities:
   adds, or that it adds none) and a quiet note shows while a large layout
   settles. Clicking a node opens that table. Tables can be dragged anywhere
   and stay where they are dropped (one table per frame keeping the grab
-  offset; in the large view its neighbours make room; arrow keys nudge a
-  focused table in the ring view) for the session, in the inline and
-  full-screen views alike, until "restore layout"; the wheel zooms around
+  offset; in the large view only the small tables hanging on it follow
+  while every other table holds still, so the picture never turns or
+  shivers; arrow keys nudge a focused table in the ring view) for the
+  session, in the inline and full-screen views alike, until "restore layout"
+  (which moves just the released tables back); the wheel zooms around
   the pointer (eased, about 1.5× per notch in the large view, where a
   released pan coasts), fitting never enlarges a small graph past a
   readable scale and takes in dragged tables, a find box brings a table into

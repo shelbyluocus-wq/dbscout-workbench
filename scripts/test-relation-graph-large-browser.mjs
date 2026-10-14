@@ -89,15 +89,27 @@ try {
   assert.equal(await page.evaluate(() => window.__unhandledMenus), 0, "no menu of the app, the WebView or the system");
   assert.equal(await page.locator(".wb-context-menu").count(), 0);
 
-  // A dragged table stays where it is dropped; "restore layout" lets it go.
-  point = await probe(surface, "point", neighbour);
+  // A dragged table stays where it is dropped, and only the small tables
+  // hanging on it move with it: the rest of the picture neither turns nor
+  // shivers. "Restore layout" lets it go.
+  const placed = () => surface.evaluate((element) => Object.fromEntries(
+    element.__relationGraph.ids().map((id) => [id, element.__relationGraph.point(id)]),
+  ));
+  const beforeDrag = await placed();
+  point = beforeDrag[neighbour];
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
   await page.mouse.move(point.x + 36, point.y + 24, { steps: 10 });
+  const duringDrag = await placed();
   await page.mouse.up();
   await resting(page, ".wb-relation-graph-section");
-  const dropped = await probe(surface, "point", neighbour);
+  const afterDrag = await placed();
+  const dropped = afterDrag[neighbour];
   assert.ok(Math.abs(dropped.x - point.x - 36) < 1.5 && Math.abs(dropped.y - point.y - 24) < 1.5, "the table stays under the pointer's drop");
+  const movedTables = (sample) => Object.keys(beforeDrag).filter((id) => id !== neighbour
+    && Math.hypot(sample[id].x - beforeDrag[id].x, sample[id].y - beforeDrag[id].y) > 1);
+  assert.ok(movedTables(duringDrag).length <= 5, `only a few tables follow the drag (${movedTables(duringDrag).length})`);
+  assert.ok(movedTables(afterDrag).length <= 5, `nothing else moves after the drop (${movedTables(afterDrag).length})`);
   const restore = section.locator(".wb-relation-graph-reset");
   await restore.click();
   await restore.waitFor({ state: "detached" });

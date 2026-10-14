@@ -207,7 +207,10 @@ export function forceManyBodyFast({ strength = -30, theta = 0.9, distanceMin = 1
     if (count < 2) return;
     build();
     const scale = strength * alpha;
-    for (let at = 0; at < count; at += 1) apply(at, scale);
+    // A fixed table ends the step where it is held, whatever pushes it.
+    for (let at = 0; at < count; at += 1) {
+      if (nodes[at].fx == null || nodes[at].fy == null) apply(at, scale);
+    }
   }
 
   force.initialize = (list) => {
@@ -283,6 +286,7 @@ export function forceCollideFast({ radius = (node) => node.r || 1, strength = 1 
 
     for (let at = 0; at < count; at += 1) {
       const node = nodes[at];
+      const atFixed = node.fx != null && node.fy != null;
       const ri = radii[at];
       const ri2 = ri * ri;
       const column = cellOf[at] % columns;
@@ -297,6 +301,8 @@ export function forceCollideFast({ radius = (node) => node.r || 1, strength = 1 
           for (let cursor = starts[cell]; cursor < starts[cell + 1]; cursor += 1) {
             const other = order[cursor];
             if (other <= at) continue;
+            // Two held tables cannot push each other anywhere.
+            if (atFixed && nodes[other].fx != null && nodes[other].fy != null) continue;
             const rj = radii[other];
             const reach = ri + rj;
             let x = px[at] - px[other];

@@ -5,7 +5,8 @@
 // drawing stops whenever nothing moves. Tables keep the ring view's colours,
 // card, pin and open gestures: hover lights a table's neighbourhood and dims
 // the rest, a click opens the table, a right-click pins its card. Dragging a
-// table lets its neighbours make room and leaves it where it is dropped; the
+// table brings the small tables hanging on it along while the rest of the
+// picture holds still, and leaves it where it is dropped; the
 // wheel zooms smoothly around the pointer, a released pan coasts, and names
 // fade in as the user zooms, busier tables first. A picture opened before in
 // this session comes back at once, and a changed graph only adjusts.
@@ -734,7 +735,7 @@ function onPointerMove(event) {
       fitted = false;
       dragId.value = drawnModel.ids[press.index];
       drag = { index: press.index, x: xy[press.index * 2], y: xy[press.index * 2 + 1] };
-      runner?.drag(true);
+      runner?.drag(true, press.index);
       setStatus(false);
     }
     const at = camera.toGraph(point.x, point.y);

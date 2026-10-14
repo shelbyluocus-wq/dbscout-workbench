@@ -77,7 +77,8 @@ export function createLayoutRunner({ onPositions, onRestart = () => {}, createWo
     setGraph: (graph) => post({ type: "graph", ...graph }),
     pin: (index, x, y) => post({ type: "pin", index, x, y }),
     unpin: (index) => post({ type: "unpin", index }),
-    drag: (active) => post({ type: "drag", active }),
+    // `index`: the table that starts moving; everything else holds still.
+    drag: (active, index = -1) => post({ type: "drag", active, index }),
     release: (alpha) => post({ type: "release", alpha }),
     stop: () => post({ type: "stop" }),
     usesWorker: () => Boolean(worker),
