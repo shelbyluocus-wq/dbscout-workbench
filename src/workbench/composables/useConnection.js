@@ -40,7 +40,7 @@ export {
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
-const EAGER_SCHEMA_LOAD_TABLE_LIMIT = 80;
+const SCHEMA_LOAD_BATCH_SIZE = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
 // Status writes kept until the notice watcher drains them after each task.
 const STATUS_JOURNAL_LIMIT = 20;
@@ -209,6 +209,12 @@ function formatConnectionTestError(error) {
 
 
 export function useConnection(workspace, invokeWorkbench, { schemaMetadata: providedSchemaMetadata = null } = {}) {
+  // A forced read follows a schema edit. Older background/jump reads must
+  // neither publish their old comments nor return them to their callers.
+  const schemaRefreshes = new Map();
+  let disposed = false;
+  const schemaKey = (connectionId, database, tableName) =>
+    [connectionId, database, tableName].map((value) => String(value || "").toLowerCase()).join("\u001f");
   const schemaMetadata = providedSchemaMetadata || useSchemaMetadata(invokeWorkbench);
   const connections = ref([]);
   const visibleConnections = computed(() => filterVisibleConnections(connections.value));
@@ -776,15 +782,22 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       table?.schemaLoaded !== true
       && !(Array.isArray(table?.columns) && table.columns.length > 0)
     ));
-    const eagerTables = unloadedTables.length > EAGER_SCHEMA_LOAD_TABLE_LIMIT
-      ? unloadedTables.slice(0, EAGER_SCHEMA_LOAD_TABLE_LIMIT)
-      : unloadedTables;
+    // Publish every batch as it arrives, and continue until the whole database
+    // is searchable. Foreground table opens remain independent of this work.
+    for (let offset = 0; offset < unloadedTables.length; offset += SCHEMA_LOAD_BATCH_SIZE) {
+      if (disposed || !isCurrentTableLoad(token, connectionId, database)) return;
+      await loadSchemaBatch(unloadedTables.slice(offset, offset + SCHEMA_LOAD_BATCH_SIZE), { connectionId, database, token });
+    }
+  }
+
+  async function loadSchemaBatch(tables, { connectionId, database, token }) {
     const loadedSchemas = new Map();
-    const requests = eagerTables
+    const requests = tables
       .map((table) => normalizeTableName(table))
       .filter(Boolean)
       .map((tableName) => ({
         tableName,
+        refresh: schemaRefreshes.get(schemaKey(connectionId, database, tableName)),
         promise: schemaMetadata.request({
           connectionId,
           database,
@@ -797,6 +810,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const result = results[index];
       if (result.status !== "fulfilled") continue;
       const tableName = requests[index].tableName;
+      if (requests[index].refresh !== schemaRefreshes.get(schemaKey(connectionId, database, tableName))) continue;
       loadedSchemas.set(
         tableName,
         sourcedSchema(
@@ -809,7 +823,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         ),
       );
     }
-    if (!loadedSchemas.size || !isCurrentTableLoad(token, connectionId, database)) return;
+    if (disposed || !loadedSchemas.size || !isCurrentTableLoad(token, connectionId, database)) return;
     workspace.schema = workspace.schema.map((table) => loadedSchemas.get(normalizeTableName(table)) || table);
   }
 
@@ -822,14 +836,19 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       priority = "visible",
     } = {},
   ) {
-    const schema = await schemaMetadata.request({
+    const key = schemaKey(connectionId, database, tableName);
+    const request = schemaMetadata.request({
       connectionId,
       database,
       tableName,
       force,
       priority,
     });
-    if (sameSource(workspace.connectionId, workspace.database, connectionId, database)) {
+    if (force) schemaRefreshes.set(key, request);
+    const refresh = schemaRefreshes.get(key);
+    const schema = await request;
+    if (refresh !== schemaRefreshes.get(key)) return schemaRefreshes.get(key);
+    if (!disposed && sameSource(workspace.connectionId, workspace.database, connectionId, database)) {
       const index = workspace.schema.findIndex(
         (item) => normalizeTableName(item) === tableName,
       );
@@ -847,6 +866,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   function dispose() {
+    disposed = true;
     schemaMetadata.dispose();
   }
 

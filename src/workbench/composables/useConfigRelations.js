@@ -55,6 +55,7 @@ export function useConfigRelations({
 
   function applyOverview(entry, overview) {
     if (!entry || !overview) return;
+    if ((Number(overview.revision) || 0) < entry.revision) return;
     entry.overview = overview;
     entry.revision = Number(overview.revision) || 0;
     entry.error = "";
@@ -156,6 +157,10 @@ export function useConfigRelations({
     const requestedAt = entry.revision;
     const pending = invoke("config_relations_table", scopeRequest(entry, { table: tableName })).then((data) => {
       const revision = Number(data?.revision) || 0;
+      if (revision < entry.revision) {
+        if (tableCache.get(cacheKey)?.pending === pending) tableCache.delete(cacheKey);
+        return tableRelations(scope, tableName);
+      }
       if (revision > entry.revision) entry.revision = revision;
       if (tableCache.size >= TABLE_CACHE_LIMIT) tableCache.clear();
       tableCache.set(cacheKey, { revision, data });
@@ -179,6 +184,10 @@ export function useConfigRelations({
     const requestedAt = entry.revision;
     const pending = invoke("config_relations_graph", scopeRequest(entry)).then((data) => {
       const revision = Number(data?.revision) || 0;
+      if (revision < entry.revision) {
+        if (graphCache.get(entry.key)?.pending === pending) graphCache.delete(entry.key);
+        return relationGraph(scope);
+      }
       if (revision > entry.revision) entry.revision = revision;
       graphCache.set(entry.key, { revision, data });
       return data;

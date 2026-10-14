@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { reactive, watch } from "vue";
-import { createWorkspaceState, openDatabaseHomeTab } from "./workspaceState.js";
+import { createWorkspaceState, openDatabaseHomeTab, buildSchemaSearchResults } from "./workspaceState.js";
 import { useConnection } from "./composables/useConnection.js";
 
 function installLocalStorage(initial = {}) {
@@ -42,6 +42,94 @@ async function flushUntil(predicate, maxTurns = 200) {
 function tableNames(list) {
   return list.map((table) => table.table_name || table.tableName);
 }
+
+test("schema search covers all 280 tables while a cold foreground open bypasses background loading", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const pending = deferred();
+  const batches = [];
+  const tables = Array.from({ length: 280 }, (_, i) => ({ table_name: `table_${i}` }));
+  const schema = (name) => ({ table_name: name, columns: [{ column_name: "OpenCond", column_comment: "conditionplatprop" }] });
+  const conn = useConnection(workspace, async (command, payload = {}) => {
+    if (command === "select_database") return { tables };
+    if (command === "get_table_schemas") {
+      batches.push(payload.tableNames);
+      if (batches.length === 1) await pending.promise;
+      return payload.tableNames.map(schema);
+    }
+    return {};
+  });
+  try {
+    await conn.selectDatabase({ connectionId: "mysql-5", database: "newsg_4cfg" });
+    assert.equal(conn.busy.value, false);
+    await conn.ensureTableSchema("table_279");
+    assert.equal(workspace.schema[279].columns[0].column_comment, "conditionplatprop");
+    pending.resolve();
+    await flushUntil(() => workspace.schema.every((table) => table.schemaLoaded));
+    assert.equal(buildSchemaSearchResults(workspace.schema, "conditionplatprop", { includedKinds: ["columnComment"] }).length, 280);
+    assert.ok(batches.every((batch) => batch.length <= 80));
+  } finally {
+    pending.resolve();
+    conn.dispose();
+  }
+});
+
+test("late background and ordinary schema responses cannot restore a comment saved by a forced refresh", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const pending = deferred();
+  const schema = (comment) => ({ table_name: "shopprop", columns: [{ column_name: "OpenCond", column_comment: comment }] });
+  const conn = useConnection(workspace, async (command, payload = {}) => {
+    if (command === "select_database") return { tables: [{ table_name: "shopprop" }] };
+    if (command === "get_table_schemas") return payload.force ? [schema("conditionopencondprop")] : pending.promise;
+    return {};
+  });
+  try {
+    await conn.selectDatabase({ connectionId: "mysql-5", database: "newsg_4cfg" });
+    const ordinary = conn.ensureTableSchema("shopprop");
+    await flushAsync();
+    await conn.ensureTableSchema("shopprop", { force: true });
+    pending.resolve([schema("conditionplatprop")]);
+    const late = await ordinary;
+    await flushAsync();
+    assert.equal(workspace.schema[0].columns[0].column_comment, "conditionopencondprop");
+    assert.equal(late.columns[0].column_comment, "conditionopencondprop");
+  } finally {
+    pending.resolve([]);
+    conn.dispose();
+  }
+});
+
+test("switching databases stops the remaining background schema batches", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const oldBatch = deferred();
+  const calls = [];
+  const conn = useConnection(workspace, async (command, payload = {}) => {
+    if (command === "select_database") return {
+      tables: Array.from({ length: payload.database === "old" ? 280 : 1 }, (_, i) => ({ table_name: `table_${i}` })),
+    };
+    if (command === "get_table_schemas") {
+      calls.push(payload);
+      if (payload.database === "old") return oldBatch.promise;
+      return payload.tableNames.map((table_name) => ({ table_name, columns: [{ column_name: "fresh" }] }));
+    }
+    return {};
+  });
+  try {
+    await conn.selectDatabase({ connectionId: "mysql-5", database: "old" });
+    await flushAsync();
+    await conn.selectDatabase({ connectionId: "mysql-5", database: "new" });
+    oldBatch.resolve(calls[0].tableNames.map((table_name) => ({ table_name, columns: [{ column_name: "old" }] })));
+    await flushUntil(() => workspace.schema[0]?.schemaLoaded);
+    assert.equal(calls.filter((call) => call.database === "old").length, 1);
+    assert.equal(workspace.schema.length, 1);
+    assert.equal(workspace.schema[0].columns[0].column_name, "fresh");
+  } finally {
+    oldBatch.resolve([]);
+    conn.dispose();
+  }
+});
 
 test("restores saved MySQL connections after restart", async () => {
   installLocalStorage({
@@ -997,7 +1085,7 @@ test("selecting a large database does not republish the visible schema for every
   );
 });
 
-test("selecting a very large database caps eager background schema hydration", async () => {
+test("selecting a very large database loads all schemas in bounded batches", async () => {
   installLocalStorage();
   const workspace = reactive(createWorkspaceState());
   const tableCount = 240;
@@ -1006,10 +1094,12 @@ test("selecting a very large database caps eager background schema hydration", a
     table_comment: `Wide table ${index + 1}`,
   }));
   const schemaCalls = [];
+  const batchSizes = [];
   const invoke = async (command, payload = {}) => {
     if (command === "select_database") return {};
     if (command === "list_tables") return tables;
     if (command === "get_table_schemas") {
+      batchSizes.push(payload.tableNames.length);
       schemaCalls.push(...payload.tableNames);
       return payload.tableNames.map((tableName) => ({
         table_name: tableName,
@@ -1022,17 +1112,12 @@ test("selecting a very large database caps eager background schema hydration", a
   const conn = useConnection(workspace, invoke);
 
   await conn.selectDatabase({ connectionId: "mysql-main", database: "very_large_app" });
-  await flushAsync();
+  await flushUntil(() => workspace.schema.every((table) => table.schemaLoaded));
 
   assert.equal(workspace.schema.length, tableCount);
-  assert.ok(
-    schemaCalls.length > 0 && schemaCalls.length <= 80,
-    `expected capped eager schema hydration, got ${schemaCalls.length} requests`,
-  );
-  assert.ok(
-    workspace.schema.slice(schemaCalls.length).every((table) => (table.columns || []).length === 0),
-    "tables beyond the eager cap should remain lightweight placeholders",
-  );
+  assert.equal(new Set(schemaCalls).size, tableCount);
+  assert.deepEqual(batchSizes, [80, 80, 80]);
+  conn.dispose();
 });
 
 test("ignores stale table loads when databases are switched quickly", async () => {

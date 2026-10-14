@@ -89,7 +89,7 @@ try {
   assert.ok(itemIds.length > 1 && itemIds.every((value) => value.trim() === "1"), "the tab lists only rows referencing item 1");
 
   // Following the drop's reference lands on the referenced item row.
-  const target = panel.locator(".wb-relation-target").first();
+  const target = panel.locator("button.wb-relation-target").first();
   await target.waitFor();
   await target.click();
   await page.waitForFunction(() => {
@@ -110,8 +110,30 @@ try {
   assert.equal(await reloaded.getAttribute("aria-expanded"), "false");
   await reloaded.click();
 
+  // A right-click comment edit refreshes already-cached evidence. Following a
+  // table mention and returning must retain the saved field comment.
+  await openTable(page, "mail");
+  await page.locator(".wb-relation-card").first().waitFor();
+  await page.getByRole("tab", { name: /^字段/ }).click();
+  const field = page.locator(".wb-schema-list article").filter({
+    has: page.locator(".wb-schema-field-name").filter({ hasText: /^reward_item_id$/ }),
+  });
+  await field.click({ button: "right" });
+  await page.locator(".wb-context-menu").getByText("编辑备注", { exact: true }).click();
+  const commentDialog = page.locator(".wb-comment-edit-dialog");
+  await commentDialog.locator("textarea").fill("引用 item.id；备注保存刷新验证");
+  await commentDialog.locator('button[type="submit"]').click();
+  await commentDialog.waitFor({ state: "hidden" });
+  await page.getByRole("tab", { name: /^关联/ }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".wb-relation-card-evidence-icon")]
+    .some((element) => element.title.includes("备注保存刷新验证")));
+  await page.getByRole("tab", { name: /^字段/ }).click();
+  await field.getByRole("button", { name: "item", exact: true }).click();
+  await page.locator(".wb-tab").filter({ hasText: /mail/ }).first().click();
+  assert.match(await field.innerText(), /备注保存刷新验证/);
+
   assert.deepEqual(errors, []);
-  console.log("Relation page: switch badge, row identity, quiet columns, evidence, open-all with first-row landing, reference jump and remembered sections passed.");
+  console.log("Relation page: badges, row references, evidence, remembered sections, comment save and reference jump passed.");
 } finally {
   await browser.close();
 }

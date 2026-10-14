@@ -85,7 +85,8 @@ export function useSchemaMetadata(invokeWorkbench, { batchSize = DEFAULT_BATCH_S
         cleanup(entry);
         entry.state = "settled";
         const schema = byTable.get(normalized(entry.tableName));
-        if (schema) entry.resolve(schema);
+        if (entry.replacement) entry.resolve(entry.replacement);
+        else if (schema) entry.resolve(schema);
         else entry.reject(new Error(`schema response omitted requested table: ${entry.tableName}`));
       }
     } catch (error) {
@@ -95,7 +96,8 @@ export function useSchemaMetadata(invokeWorkbench, { batchSize = DEFAULT_BATCH_S
         else {
           cleanup(entry);
           entry.state = "settled";
-          entry.reject(error);
+          if (entry.replacement) entry.resolve(entry.replacement);
+          else entry.reject(error);
         }
       }
     }
@@ -138,7 +140,7 @@ export function useSchemaMetadata(invokeWorkbench, { batchSize = DEFAULT_BATCH_S
     const source = sourceKey(connectionId, database);
     const generation = generationFor(source);
     const key = requestKey(source, generation, resolvedTableName, force);
-    const existing = requests.get(key);
+    const existing = (!force && requests.get(requestKey(source, generation, resolvedTableName, true))) || requests.get(key);
     if (existing) {
       existing.priority = Math.min(existing.priority, priorityRank(priority));
       return existing.promise;
@@ -165,6 +167,12 @@ export function useSchemaMetadata(invokeWorkbench, { batchSize = DEFAULT_BATCH_S
       resolve,
       reject,
     };
+    // A forced read follows a schema edit. Readers still waiting for the old
+    // batch, including new callers joining it, must receive the fresh schema.
+    if (force) {
+      const ordinary = requests.get(requestKey(source, generation, resolvedTableName, false));
+      if (ordinary) ordinary.replacement = promise;
+    }
     requests.set(key, entry);
     scheduleFlush();
     return promise;

@@ -3565,6 +3565,13 @@ async function handleTableDesignApplied(event = {}, options = {}) {
     statusText.value = savedStatus;
     return false;
   }
+  // Comment edits use this same path. Rebuild the relation index even if the
+  // data-tab reload fails, without holding the saved comment open for analysis.
+  if (configRelationsAvailable(connectionId)) {
+    void configRelations.refresh(source).catch((error) => {
+      setStatus(t("relations.error", { message: String(error?.message || error) }), { tone: "warning" });
+    });
+  }
   const appliedSchema = event.schema || event.result?.schema || event.result || null;
   const affectedTabs = findTableDataTabs(workspace, source);
   try {

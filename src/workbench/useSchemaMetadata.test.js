@@ -163,3 +163,22 @@ test("force requests do not upgrade unrelated queued reads", async () => {
   assert.equal(calls.length, 2);
   assert.deepEqual(calls.map((call) => call.payload.force).sort(), [false, true]);
 });
+
+test("readers joining an old batch during or after a forced read receive the saved comment", async () => {
+  const old = deferred();
+  const fresh = deferred();
+  const metadata = module.useSchemaMetadata(async (_, payload) => payload.force ? fresh.promise : old.promise);
+  const source = { connectionId: "mysql-5", database: "newsg_4cfg", tableName: "shopprop" };
+  const beforeSave = metadata.request(source);
+  await flushBatch();
+  const saved = metadata.request({ ...source, force: true });
+  const duringSave = metadata.request(source);
+  fresh.resolve([{ table_name: "shopprop", table_comment: "conditionopencondprop" }]);
+  await saved;
+  const afterSave = metadata.request(source);
+  old.resolve([{ table_name: "shopprop", table_comment: "conditionplatprop" }]);
+  for (const result of await Promise.all([beforeSave, duringSave, afterSave])) {
+    assert.equal(result.table_comment, "conditionopencondprop");
+  }
+  metadata.dispose();
+});

@@ -509,7 +509,7 @@ export function createMockConfigRelations({
   function refresh(context) {
     if (context.timer) return;
     runLater(context, () => {
-      if (context.code === "ready" || context.code === "noClient") notify(context);
+      if (context.code === "ready" || context.code === "noClient") rebuild(context);
       else finishAnalysis(context);
     });
   }

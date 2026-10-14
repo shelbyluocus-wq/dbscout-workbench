@@ -7,6 +7,31 @@ const SCOPE = { connectionId: "c1", database: "Game_Config" };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+test("a late relation response cannot restore an older graph or field link after a refresh", async () => {
+  for (const [method, command] of [["tableRelations", "config_relations_table"], ["relationGraph", "config_relations_graph"]]) {
+    let resolveOld;
+    let revision = 1;
+    let reads = 0;
+    const relations = useConfigRelations({ listen: null, invoke: async (name) => {
+      if (name === "config_relations_overview") return { revision };
+      if (name === command) {
+        if (++reads === 1) return new Promise((resolve) => { resolveOld = resolve; });
+        return { revision, target: "conditionopencondprop" };
+      }
+    } });
+    await relations.loadOverview(SCOPE);
+    const old = relations[method](SCOPE, "shopprop");
+    revision = 2;
+    await relations.loadOverview(SCOPE);
+    const fresh = await relations[method](SCOPE, "shopprop");
+    resolveOld({ revision: 1, target: "conditionplatprop" });
+    assert.equal((await old).target, fresh.target);
+    assert.equal((await relations[method](SCOPE, "shopprop")).target, fresh.target);
+    assert.equal(reads, 2);
+    relations.dispose();
+  }
+});
+
 function fakeBackend() {
   const state = { revision: 1, reviewCount: 2, failOverview: false };
   const calls = [];

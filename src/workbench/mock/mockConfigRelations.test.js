@@ -280,10 +280,12 @@ test("code analysis and refreshes run in the background", async () => {
     assert.equal(ready.codeStatus, "ready");
     assert.equal(ready.reviewCount, 2);
 
+    const beforeRefresh = (await call("config_relations_overview")).revision;
     assert.equal(await call("config_relations_refresh"), null);
     assert.equal((await call("config_relations_overview")).refreshing, true);
     await sleep(40);
     assert.equal((await call("config_relations_overview")).refreshing, false);
+    assert.ok((await call("config_relations_overview")).revision > beforeRefresh);
   } finally {
     relations.reset();
   }
