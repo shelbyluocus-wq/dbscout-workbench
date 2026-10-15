@@ -53,6 +53,28 @@ function createUndoHarness(
   return { tab, editState, calls, statusText, undo };
 }
 
+test("undo and redo after paste belong to the grid while its IME input is primed", async () => {
+  const harness = createUndoHarness({ id: "1", note: "pasted" }, {
+    tableName: "player", rowKey: "id=1",
+    beforeRowKey: "id=1", afterRowKey: "id=1",
+    beforeIdentity: { id: "1" }, afterIdentity: { id: "1" },
+    columnName: "note", oldValue: "original", newValue: "pasted",
+  });
+  const input = { tagName: "INPUT", matches: (selector) => selector === "input.wb-cell-ime-hold" };
+  const event = {
+    key: "z", ctrlKey: true, target: input,
+    composedPath: () => [input, { tagName: "TD" }],
+    preventDefault() {},
+  };
+  assert.equal(harness.undo.handleUndoKeydown(event), true);
+  await waitForTestCondition(() => harness.editState.redoStack.length === 1, "paste undo should finish");
+  assert.equal(harness.tab.rows[0].note, "original");
+  assert.equal(harness.undo.handleRedoKeydown({ ...event, key: "y" }), true);
+  await waitForTestCondition(() => harness.editState.undoStack.length === 1, "paste redo should finish");
+  assert.equal(harness.tab.rows[0].note, "pasted");
+  assert.equal(harness.calls.length, 2);
+});
+
 test("undo preserves SQL NULL instead of converting it to an empty string", async () => {
   const row = { id: "1", note: "saved" };
   const rowKey = buildRowKey({ primaryKeys: ["id"], columns: [] }, row);

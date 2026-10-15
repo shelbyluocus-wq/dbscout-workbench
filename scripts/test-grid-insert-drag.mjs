@@ -141,7 +141,7 @@ async function writeClipboard(page, text) {
 async function cellValues(row, columnIndexes) {
   return await row.locator("td[data-column-index]").evaluateAll((cells, indexes) => indexes.map((index) => {
     const cell = cells.find((candidate) => Number(candidate.dataset.columnIndex) === index);
-    return cell?.querySelector("input")?.value ?? cell?.textContent?.trim() ?? "";
+    return cell?.querySelector("input:not(.wb-cell-ime-hold)")?.value ?? cell?.textContent?.trim() ?? "";
   }), columnIndexes);
 }
 
@@ -255,6 +255,37 @@ try {
   page.on("pageerror", (error) => consoleErrors.push(String(error)));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   let grid = await openPlayerGrid(page);
+
+  // Selecting a cell focuses its hidden IME input. Clipboard events from that
+  // input must paste into the grid, not disappear into the empty input.
+  const copySource = page.locator('tr[data-row-selection-index="0"] td[data-column-index="1"]');
+  const pasteRow = page.locator('tr[data-row-selection-index="1"]');
+  const pasteTarget = pasteRow.locator('td[data-column-index="1"]');
+  const pasteBefore = await cellValues(pasteRow, [1]);
+  const copiedValue = (await copySource.textContent()).trim();
+  assert.notEqual(copiedValue, pasteBefore[0]);
+  await copySource.click();
+  await page.keyboard.press(shortcut("C"));
+  await page.waitForFunction((text) => navigator.clipboard.readText().then((value) => value === text), copiedValue);
+  await pasteTarget.click();
+  await page.waitForFunction(() => document.activeElement?.matches("input.wb-cell-ime-hold"));
+  await page.keyboard.press(shortcut("V"));
+  await waitForValues(pasteRow, [1], [copiedValue]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(pasteRow, [1], pasteBefore);
+  await page.keyboard.press(redoShortcut);
+  await waitForValues(pasteRow, [1], [copiedValue]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(pasteRow, [1], pasteBefore);
+  await copySource.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "复制", exact: true }).click();
+  await pasteTarget.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "粘贴", exact: true }).click();
+  await waitForValues(pasteRow, [1], [copiedValue]);
+  await grid.focus();
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(pasteRow, [1], pasteBefore);
+  console.log("Selected cell keyboard/menu copy/paste, undo and redo passed.");
 
   const excelFirstRow = page.locator('tr[data-row-selection-index="0"]');
   const excelSecondRow = page.locator('tr[data-row-selection-index="1"]');

@@ -970,7 +970,9 @@ async function handleGridKeydownWithRows(event) {
 
 async function handleGridPaste(event) {
   const editableTarget = event.target?.closest?.("input, textarea, [contenteditable='true']");
-  if (editableTarget) {
+  // A selected cell focuses a hidden IME input before editing begins. Its
+  // clipboard events still belong to the grid, not to native text editing.
+  if (editableTarget && !editableTarget.matches?.("input.wb-cell-ime-hold")) {
     if (editableTarget.matches?.("td.editing input")) await pasteIntoEditingInput(event);
     return;
   }

@@ -567,6 +567,8 @@ export function useUndo(
       : [event?.target];
     return path.some((target) => {
       if (!target) return false;
+      // The hidden IME input holds grid focus without an active text edit.
+      if (target.matches?.("input.wb-cell-ime-hold")) return false;
       const tagName = String(target.tagName || "").toLowerCase();
       if (tagName === "input" || tagName === "textarea" || tagName === "select") return true;
       if (target.isContentEditable) return true;
