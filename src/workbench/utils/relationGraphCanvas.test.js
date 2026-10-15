@@ -125,11 +125,17 @@ test("a frame draws what is on screen: lines, circles, arrowheads and names", ()
   assert.equal(stats.arrows, 5, "zoomed in, every visible line points");
   assert.equal(stats.labels, 5);
   assert.ok(count("stroke") >= 2);
-  // Zoomed far out: no arrowheads, circles turn into dots.
+  // Table a sits 260px from the left of a 400px view: its name would be under the tool strip.
+  assert.equal(drawGraphFrame({ ...scene().frame, reserveRight: 150 }).labels, 4, "names keep clear of the tool strip");
+  // Zoomed out: small circles turn into round dots, and the tiniest into squares.
+  const out = scene({ view: { scale: 0.3, x: 0, y: 0 } });
+  assert.equal(drawGraphFrame(out.frame).nodes, 5);
+  assert.equal(out.count("fillRect"), 0, "small circles are round dots");
+  assert.ok(out.count("arc") >= 4);
   const far = scene({ view: { scale: 0.05, x: 0, y: 0 } });
   const zoomedOut = drawGraphFrame(far.frame);
   assert.equal(zoomedOut.arrows, 0);
-  assert.ok(far.count("fillRect") >= 4, "tiny circles are dots");
+  assert.ok(far.count("fillRect") >= 4, "tiny circles are square dots");
 });
 
 test("while a table is active, its neighbourhood is lit and other names step back", () => {
@@ -139,6 +145,24 @@ test("while a table is active, its neighbourhood is lit and other names step bac
   const stats = drawGraphFrame(lit.frame);
   assert.equal(stats.labels, 2, "only the active table and its neighbour keep their names");
   assert.ok(lit.calls.some((call) => call[0] === "set:globalAlpha" && call[1] < 0.2), "the rest is faded");
+});
+
+test("a small view names fewer tables; the current one always", () => {
+  // Six tables in a row, far enough apart for every name.
+  const row = (width, height) => {
+    const { frame, model } = scene({ width, height });
+    const xy = new Float32Array(model.count * 2);
+    model.ids.forEach((id, at) => {
+      xy[at * 2] = (at - 2.5) * 32;
+    });
+    const named = [];
+    const stats = drawGraphFrame({ ...frame, xy, labelText: (at) => named.push(model.ids[at]) && model.ids[at] });
+    return { labels: stats.labels, first: named[0] };
+  };
+  assert.equal(row(400, 300).labels, 6, "room for every name");
+  const small = row(200, 120);
+  assert.equal(small.labels, 3, "the current table and two more in a 200×120 view");
+  assert.equal(small.first, "hub");
 });
 
 test("names never pile up: an overlapping name is skipped", () => {

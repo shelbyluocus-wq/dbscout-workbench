@@ -161,11 +161,18 @@ try {
   await full.getByRole("button", { name: /^回到 item/u }).click();
   await full.locator("#wb-relation-graph-fullscreen-title").filter({ hasText: "item" }).waitFor();
 
-  // Reopening the whole database shows it at once, as it was left.
+  // Reopening the whole database shows it at once, as it was left (once the
+  // camera has glided back from the previous view).
   await full.getByRole("button", { name: "整个数据库" }).click();
   await page.waitForTimeout(150);
   assert.equal((await probe(fullSurface, "state")).running, false, "no new settling for a picture seen before");
-  const again = await probe(fullSurface, "point", "reward");
+  let again = null;
+  for (let tries = 0; tries < 40; tries += 1) {
+    const point = await probe(fullSurface, "point", "reward");
+    if (again && Math.hypot(point.x - again.x, point.y - again.y) < 0.1) break;
+    again = point;
+    await page.waitForTimeout(100);
+  }
   assert.ok(Math.hypot(again.x - before.x, again.y - before.y) < 2, "same place as before");
 
   // Esc lets go of a pin first, then closes.

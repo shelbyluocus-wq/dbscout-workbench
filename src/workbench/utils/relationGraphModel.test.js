@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 
 import { databaseRelationGraph, localRelationGraph } from "./relationGraph.js";
 import {
+  LAYOUT_ASPECT_MAX,
   SEED_CELL,
   SIDE,
   STATUS,
   buildGraphModel,
   canvasNodeRadius,
+  layoutAspect,
   neighborMask,
   positionsBox,
   seedPositions,
@@ -78,6 +80,21 @@ test("a fresh picture starts in rings around the current table, the same every t
   assert.ok(distance("hero") < distance("reward"), "the second ring lies outside the first");
   // Tables the current one references start on the right.
   assert.ok(point(first, model.index.get("attr")).x > 0);
+});
+
+test("a fresh picture starts stretched to the shape of its view, within limits", () => {
+  assert.equal(layoutAspect(472, 272, 36), 2, "the room inside the padding is twice as wide as tall");
+  assert.equal(layoutAspect(272, 472, 36), 0.5);
+  assert.equal(layoutAspect(9000, 100), LAYOUT_ASPECT_MAX, "never a flat band");
+  assert.equal(layoutAspect(100, 9000), 1 / LAYOUT_ASPECT_MAX);
+  assert.equal(layoutAspect(0, 0), 1, "a view without a size yet");
+  assert.equal(layoutAspect(60, 60, 36), 1, "a view smaller than its padding");
+  const model = buildGraphModel(localRelationGraph(DATA, "item", { depth: 2 }));
+  const round = positionsBox(seedPositions(model), model.count);
+  const wide = positionsBox(seedPositions(model, null, { aspect: 2 }), model.count);
+  const ratio = (box) => box.width / box.height;
+  assert.ok(Math.abs(ratio(wide) / ratio(round) - 2) < 1e-3, "twice as wide for its height");
+  assert.ok(Math.abs(wide.width * wide.height - round.width * round.height) / (round.width * round.height) < 1e-3, "the same area");
 });
 
 test("known tables keep their place and new ones grow out of their neighbours", () => {

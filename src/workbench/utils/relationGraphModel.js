@@ -3,7 +3,7 @@
 // who is next to whom. Built once per graph so per-frame work only touches
 // numbers. Also where tables start before the layout settles: where they
 // already were, else beside the tables they are linked to, else in rings by
-// distance from the current table.
+// distance from the current table, stretched to the shape of the view.
 
 export const SIDE = Object.freeze({ center: 0, out: 1, in: 2, both: 3, none: 4 });
 export const STATUS = Object.freeze({ confirmed: 0, unconfirmed: 1, stale: 2, conflict: 3 });
@@ -16,15 +16,30 @@ const RADIUS_MIN = 4;
 const RADIUS_MAX = 30;
 const RADIUS_PER_LOG = 3.4;
 const CENTER_RADIUS_MIN = 10;
-// Room each table gets when it starts in a ring (about the 60×60 rule of thumb).
-export const SEED_CELL = 56;
-const RING_GAP = 40;
+// Room each table gets when it starts in a ring, about what the layout
+// leaves around it at rest.
+export const SEED_CELL = 90;
+const RING_GAP = 64;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+// The picture follows the view's shape only so far: past this it would
+// become a band.
+export const LAYOUT_ASPECT_MAX = 2;
 
 export function canvasNodeRadius(referencedBy, { center = false } = {}) {
   const count = Math.max(0, Number(referencedBy) || 0);
   const radius = Math.min(RADIUS_MAX, RADIUS_MIN + RADIUS_PER_LOG * Math.log1p(count));
   return center ? Math.max(CENTER_RADIUS_MIN, radius) : radius;
+}
+
+/**
+ * The width-to-height ratio the picture should take in a `width`×`height`
+ * view with `padding` pixels kept free on every side; 1 while the view has
+ * no size yet.
+ */
+export function layoutAspect(width, height, padding = 0) {
+  const room = [width - padding * 2, height - padding * 2];
+  if (!(room[0] > 0) || !(room[1] > 0)) return 1;
+  return Math.min(LAYOUT_ASPECT_MAX, Math.max(1 / LAYOUT_ASPECT_MAX, room[0] / room[1]));
 }
 
 function statusCode(status) {
@@ -195,8 +210,9 @@ function angleOf(xy, at) {
 // rest in rings by distance from it. Direct neighbours keep the ring layout's
 // sides (tables it references to the right), farther tables gather in the
 // direction of the table that brought them in, and tables out of reach
-// circle outside.
-function radialSeeds(model, xy) {
+// circle outside. The rings are then stretched to the view's shape, keeping
+// their area, so the layout does not have to.
+function radialSeeds(model, xy, aspect) {
   const root = model.centerIndex >= 0
     ? model.centerIndex
     : model.degree.reduce((best, value, at) => (value > model.degree[best] ? at : best), 0);
@@ -225,6 +241,11 @@ function radialSeeds(model, xy) {
   });
   unreached.sort((left, right) => model.degree[right] - model.degree[left] || model.ids[left].localeCompare(model.ids[right]));
   placeRing(xy, unreached, radius, 0);
+  const stretch = Math.sqrt(aspect);
+  for (let at = 0; at < model.count; at += 1) {
+    xy[at * 2] *= stretch;
+    xy[at * 2 + 1] /= stretch;
+  }
 }
 
 // Tables not placed yet that are linked to placed ones go to the middle of
@@ -265,7 +286,8 @@ function growFromPlaced(model, xy, placed) {
 }
 
 // Islands with nothing placed: one busiest table each on a spiral outside
-// the drawing, the rest of the island grown around it.
+// the drawing (as wide and tall as the drawing is), the rest of the island
+// grown around it.
 function placeIslands(model, xy, placed) {
   let centerX = 0;
   let centerY = 0;
@@ -278,9 +300,12 @@ function placeIslands(model, xy, placed) {
   }
   centerX /= Math.max(1, count);
   centerY /= Math.max(1, count);
-  let reach = 0;
+  let reachX = 0;
+  let reachY = 0;
   for (let at = 0; at < model.count; at += 1) {
-    if (placed[at]) reach = Math.max(reach, Math.hypot(xy[at * 2] - centerX, xy[at * 2 + 1] - centerY));
+    if (!placed[at]) continue;
+    reachX = Math.max(reachX, Math.abs(xy[at * 2] - centerX));
+    reachY = Math.max(reachY, Math.abs(xy[at * 2 + 1] - centerY));
   }
   const rest = [];
   for (let at = 0; at < model.count; at += 1) if (!placed[at]) rest.push(at);
@@ -289,9 +314,9 @@ function placeIslands(model, xy, placed) {
   for (const at of rest) {
     if (placed[at]) continue;
     const angle = slot * GOLDEN_ANGLE;
-    const radius = reach + SEED_CELL * (1.5 + 1.2 * Math.sqrt(slot));
-    xy[at * 2] = centerX + Math.cos(angle) * radius;
-    xy[at * 2 + 1] = centerY + Math.sin(angle) * radius;
+    const beyond = SEED_CELL * (1.5 + 1.2 * Math.sqrt(slot));
+    xy[at * 2] = centerX + Math.cos(angle) * (reachX + beyond);
+    xy[at * 2 + 1] = centerY + Math.sin(angle) * (reachY + beyond);
     placed[at] = 1;
     slot += 1;
     growFromPlaced(model, xy, placed);
@@ -301,9 +326,10 @@ function placeIslands(model, xy, placed) {
 /**
  * Starting positions as [x0, y0, x1, y1, …]. `known` maps table ids to
  * [x, y] where they were last drawn; those stay put and new tables grow out
- * of them. Without any, the picture starts in rings around the current table.
+ * of them. Without any, the picture starts in rings around the current
+ * table, stretched to `aspect` (see layoutAspect).
  */
-export function seedPositions(model, known = null) {
+export function seedPositions(model, known = null, { aspect = 1 } = {}) {
   const xy = new Float32Array(model.count * 2);
   const placed = new Uint8Array(model.count);
   let placedCount = 0;
@@ -318,7 +344,7 @@ export function seedPositions(model, known = null) {
     }
   }
   if (!placedCount) {
-    radialSeeds(model, xy);
+    radialSeeds(model, xy, aspect);
     return xy;
   }
   growFromPlaced(model, xy, placed);

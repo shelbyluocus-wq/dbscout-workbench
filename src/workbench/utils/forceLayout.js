@@ -5,24 +5,38 @@
 // unavailable, on the main thread in small slices. Tables the user dragged
 // stay where they were dropped until the layout is restored.
 //
+// Tables keep generous room around them, so the whole picture reads calmly
+// and zooming in brings the detail. The picture takes the shape of the view
+// it is drawn in: a wide view gets a wide picture rather than a ball with
+// empty sides.
+//
 // Dragging moves one table and the small tables hanging on it; every other
 // table is held where it is for the drag and the moment after, so the
 // picture never turns or shivers around the pointer.
-import { forceLink, forceSimulation, forceX, forceY } from "d3-force";
-import { forceCollideFast, forceManyBodyFast } from "./fastForces.js";
+import { forceLink, forceSimulation } from "d3-force";
+import { forceCollideFast, forceManyBodyFast, forcePull } from "./fastForces.js";
 import { LAYOUT_ALPHA } from "./forceLayoutAlpha.js";
 
 export { LAYOUT_ALPHA };
 
 // Tuned for circles of 4–30 units (see canvasNodeRadius).
-const LINK_DISTANCE = 34;
-const CHARGE = -230;
+const LINK_DISTANCE = 54;
+const CHARGE = -590;
 const CHARGE_THETA = 0.9;
 // Tables farther apart than this ignore each other, so small islands settle
 // beside the main picture instead of being pushed far out by all of it.
-const CHARGE_RANGE = 800;
-const COLLIDE_PADDING = 7;
+const CHARGE_RANGE = 1280;
+// Room kept around every circle: no two tables come closer than twice this.
+const COLLIDE_PADDING = 20;
 const CENTER_STRENGTH = 0.05;
+// The picture's shape: while the layout runs, the pull toward the middle is
+// rebalanced between across and up-down until the tables spread about as
+// wide, for their height, as the view. How the graph is linked decides how
+// much rebalancing that takes, so it is measured, not assumed; a single
+// busy table with its fan stays rounder (the limit).
+const SHAPE_GAIN = 0.15;
+const SHAPE_LIMIT = Math.log(6);
+const SHAPE_MIN_TABLES = 12;
 // Neighbours with at most this many relations follow a dragged table.
 const FOLLOW_MAX_LINKS = 3;
 const VELOCITY_DECAY = 0.4;
@@ -56,6 +70,10 @@ export function createForceLayout() {
   // Tables held in place for the current drag, and whether it is still going on.
   let held = [];
   let dragging = false;
+  // The view's width-to-height ratio, and half the log of how much harder
+  // the pull toward the middle is up-down than across.
+  let aspect = 1;
+  let squeeze = 0;
   const simulation = forceSimulation([])
     .stop()
     .randomSource(seededSource())
@@ -64,20 +82,64 @@ export function createForceLayout() {
     .force("charge", forceManyBodyFast({ strength: CHARGE, theta: CHARGE_THETA, distanceMax: CHARGE_RANGE }))
     .force("link", forceLink([]).distance((link) => LINK_DISTANCE + link.source.r + link.target.r))
     .force("collide", forceCollideFast({ radius: (node) => node.r + COLLIDE_PADDING }))
-    .force("x", forceX(0).strength(CENTER_STRENGTH))
-    .force("y", forceY(0).strength(CENTER_STRENGTH));
+    .force("pull", forcePull({ x: CENTER_STRENGTH, y: CENTER_STRENGTH }));
   simulation.alpha(0);
+
+  function applySqueeze() {
+    simulation.force("pull").setStrength(CENTER_STRENGTH / Math.exp(squeeze), CENTER_STRENGTH * Math.exp(squeeze));
+  }
+
+  // A new picture, or a view of another shape, starts from the balance that
+  // suits loosely linked tables; a changed graph in the same view keeps
+  // what the layout has found so far.
+  function setShape(next, restart) {
+    const value = Number.isFinite(next) && next > 0 ? next : 1;
+    if (restart || value !== aspect) squeeze = Math.log(value) / 2;
+    aspect = value;
+    applySqueeze();
+  }
+
+  // Measures how wide the tables spread for their height and moves the
+  // balance toward the view's shape: most while the layout is half settled,
+  // nothing while the picture first unfolds or once it rests, and nothing
+  // while tables are held for a drag.
+  function steerShape() {
+    if (held.length || dragging || nodes.length < SHAPE_MIN_TABLES) return;
+    const alpha = simulation.alpha();
+    const weight = 4 * alpha * (1 - alpha);
+    if (!(weight > 0)) return;
+    let sumX = 0;
+    let sumY = 0;
+    for (const node of nodes) {
+      sumX += node.x;
+      sumY += node.y;
+    }
+    const meanX = sumX / nodes.length;
+    const meanY = sumY / nodes.length;
+    let spreadX = 0;
+    let spreadY = 0;
+    for (const node of nodes) {
+      spreadX += (node.x - meanX) ** 2;
+      spreadY += (node.y - meanY) ** 2;
+    }
+    if (!(spreadX > 0) || !(spreadY > 0)) return;
+    const error = Math.log(aspect) - Math.log(spreadX / spreadY) / 2;
+    squeeze = Math.min(SHAPE_LIMIT, Math.max(-SHAPE_LIMIT, squeeze + SHAPE_GAIN * weight * error));
+    applySqueeze();
+  }
 
   /**
    * Replaces the graph. `ids` names the tables in order; `seeds` holds
    * [x, y] pairs where new tables start (tables already known keep their
    * place and speed unless `reset`); `links` holds index pairs; `fixed` holds
-   * [index, x, y] triples for tables the user put somewhere.
+   * [index, x, y] triples for tables the user put somewhere; `aspect` is the
+   * width-to-height ratio of the view the picture should fill.
    */
-  function setGraph({ ids, seeds, radius, links, fixed, alpha = LAYOUT_ALPHA.update, reset = false }) {
+  function setGraph({ ids, seeds, radius, links, fixed, alpha = LAYOUT_ALPHA.update, reset = false, aspect: viewAspect = 1 }) {
     releaseHeld();
     dragging = false;
     simulation.alphaTarget(0);
+    setShape(viewAspect, reset);
     if (reset) byId = new Map();
     const next = new Array(ids.length);
     const nextById = new Map();
@@ -111,7 +173,10 @@ export function createForceLayout() {
       if (nodes[links[cursor + 1]]) nodes[links[cursor + 1]].degree += 1;
     }
     simulation.force("link").links(pairs);
-    simulation.alpha(Math.max(simulation.alpha(), alpha));
+    // A changed graph carries on settling; a new picture moves only as much
+    // as it asks, so one remembered at rest stays at rest even when the
+    // previous picture had not settled yet.
+    simulation.alpha(reset ? alpha : Math.max(simulation.alpha(), alpha));
   }
 
   function pin(index, x, y) {
@@ -212,6 +277,7 @@ export function createForceLayout() {
   function step() {
     if (!running() || !nodes.length) return false;
     simulation.tick();
+    steerShape();
     const active = running();
     if (!active && !dragging && held.length) releaseHeld();
     return active;

@@ -1,10 +1,11 @@
 // Drawing a large relation graph on a 2D canvas, after Obsidian's graph
 // view: only what is on screen, lines batched by colour into a handful of
 // paths, circles that shrink slower than the zoom so a zoomed-out graph does
-// not turn to dust, names that fade in as the user zooms (busy tables first)
-// and never pile on top of each other, arrowheads once they can be seen, and
-// everything outside the active table's neighbourhood faded. Pure functions
-// over a frame description, so they can be checked with a recording context.
+// not turn to dust, names that fade in as the user zooms (busy tables first),
+// never pile on top of each other and never crowd the screen, arrowheads
+// once they can be seen, and everything outside the active table's
+// neighbourhood faded. Pure functions over a frame description, so they can
+// be checked with a recording context.
 import { SIDE, STATUS } from "./relationGraphModel.js";
 
 const TAU = Math.PI * 2;
@@ -12,19 +13,26 @@ const TAU = Math.PI * 2;
 const NODE_SCREEN_MIN = 1.6;
 // Names appear on the smallest circles from this zoom, on the largest from
 // LABEL_SCALE_LARGEST, and fade in over half an octave below that.
-const LABEL_SCALE_SMALLEST = 0.7;
-const LABEL_SCALE_LARGEST = 0.06;
+const LABEL_SCALE_SMALLEST = 0.56;
+const LABEL_SCALE_LARGEST = 0.048;
 const LABEL_FADE_OCTAVES = 0.5;
 const LABEL_RADIUS_RANGE = [4, 30];
 const LABEL_GAP_PX = 3;
 const LABEL_MAX_CHARS = 24;
 const LABEL_BUDGET = 320;
+// Besides the names that always show, at most one name per this much screen
+// area (busier tables first), so a whole picture stays calm at any view size.
+const LABEL_AREA_PX = 10000;
 const LABEL_GRID_PX = 8;
 const LABEL_PAD_PX = 2;
 // Arrowheads fade in between these zoom levels.
 const ARROW_FADE = [0.28, 0.45];
-// Circles smaller than this (screen radius) are drawn as plain dots.
+// Circles smaller than this (screen radius) are drawn as plain round dots,
+// and the very smallest as squares, which look the same at that size and
+// cost far less. Past ROUND_DOTS_MAX tables in view every dot is a square.
 const DOT_RADIUS_PX = 2.6;
+const SQUARE_DOT_RADIUS_PX = 1.8;
+const ROUND_DOTS_MAX = 1500;
 // Dashes are costly to draw; past this many lines in a style, or zoomed out,
 // unconfirmed lines go solid and lighter instead.
 const DASHED_LINES_MAX = 400;
@@ -232,7 +240,8 @@ function lineStyle(palette, status, emphasis) {
  *   bright, or -1) with its neighbour `mask`, fade (0..1, how far the rest
  *   has dimmed), pinned, dragged, revealed (Uint8Array or null), labelOrder
  *   (indices, busiest first), labelText(index), labelWidth(index, size,
- *   bold), fieldText(link) (or null), selfLoops (bool).
+ *   bold), fieldText(link) (or null), selfLoops (bool), reserveRight
+ *   (pixels along the right edge that names keep clear of, for the tool strip).
  * Returns what was drawn, for tests and measurements.
  */
 export function drawGraphFrame(frame) {
@@ -277,7 +286,9 @@ export function drawGraphFrame(frame) {
       const base = emphasis === 2 ? (busyFocus ? 0.55 : 1) : lineAlpha(scale, { issue });
       return {
         color: lineStyle(palette, status, emphasis),
-        width: emphasis === 2 ? (busyFocus ? 1.1 : 1.8) : 1,
+        // One pixel lines take the fast path: a busy fan spanning the
+        // window costs a fraction of a wider one.
+        width: emphasis === 2 ? (busyFocus ? 1 : 1.8) : 1,
         alpha: emphasis === 0 ? base * fadedAlpha : base,
         dashed,
         emphasis,
@@ -367,20 +378,37 @@ export function drawGraphFrame(frame) {
     })).items.push(at);
   }
   const circleGroups = [...circles.values()].sort((left, right) => Number(left.lit) - Number(right.lit));
+  const inView = circleGroups.reduce((sum, group) => sum + group.items.length, 0);
+  const squareBelow = inView > ROUND_DOTS_MAX ? DOT_RADIUS_PX : SQUARE_DOT_RADIUS_PX;
   for (const group of circleGroups) {
-    // Tiny circles are dots in their outline colour: squares that small look
-    // the same and cost a fraction of a ringed circle.
+    // Tiny circles are dots in their outline colour, filled once per colour.
     ctx.globalAlpha = group.alpha;
     ctx.fillStyle = group.stroke;
     let rings = 0;
+    let dots = 0;
     for (const at of group.items) {
       const radius = radiusOf(at);
       if (radius >= DOT_RADIUS_PX) {
         rings += 1;
-        continue;
+      } else if (radius < squareBelow) {
+        ctx.fillRect(sx(at) - radius, sy(at) - radius, radius * 2, radius * 2);
+        stats.nodes += 1;
+      } else {
+        dots += 1;
       }
-      ctx.fillRect(sx(at) - radius, sy(at) - radius, radius * 2, radius * 2);
-      stats.nodes += 1;
+    }
+    if (dots) {
+      ctx.beginPath();
+      for (const at of group.items) {
+        const radius = radiusOf(at);
+        if (radius < squareBelow || radius >= DOT_RADIUS_PX) continue;
+        const x = sx(at);
+        const y = sy(at);
+        ctx.moveTo(x + radius, y);
+        ctx.arc(x, y, radius, 0, TAU);
+      }
+      ctx.fill();
+      stats.nodes += dots;
     }
     if (!rings) continue;
     ctx.beginPath();
@@ -515,8 +543,12 @@ function drawLabels(frame, { rect, mask, fade, radiusOf, sx, sy, shown }) {
   const size = frame.font?.size || 11;
   const family = frame.font?.family || "system-ui, sans-serif";
   const grid = labelGrid(width, height);
+  if (frame.reserveRight > 0) grid.claim(width - frame.reserveRight, 0, width, height);
   const strong = new Set([model.centerIndex, frame.pinned ?? -1, frame.focus ?? -1, frame.dragged ?? -1]);
+  // Names that always show come first; the others share the room.
+  const room = Math.max(1, Math.floor((width * height) / LABEL_AREA_PX));
   let drawn = 0;
+  let others = 0;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.lineJoin = "round";
@@ -524,7 +556,7 @@ function drawLabels(frame, { rect, mask, fade, radiusOf, sx, sy, shown }) {
   ctx.strokeStyle = palette.halo;
   let currentFont = "";
   for (const [at, always] of labelCandidates(frame, mask)) {
-    if (drawn >= LABEL_BUDGET) break;
+    if (drawn >= LABEL_BUDGET || (!always && others >= room)) break;
     if (!shown(at)) continue;
     const x = xy[at * 2];
     const y = xy[at * 2 + 1];
@@ -551,6 +583,7 @@ function drawLabels(frame, { rect, mask, fade, radiusOf, sx, sy, shown }) {
     ctx.fillStyle = bold ? palette.labelStrong : palette.label;
     ctx.fillText(text, left + textWidth / 2, top);
     drawn += 1;
+    if (!always) others += 1;
   }
   return drawn;
 }

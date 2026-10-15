@@ -8,18 +8,22 @@
 // table brings the small tables hanging on it along while the rest of the
 // picture holds still, and leaves it where it is dropped; the
 // wheel zooms smoothly around the pointer, a released pan coasts, and names
-// fade in as the user zooms, busier tables first. A picture opened before in
-// this session comes back at once, and a changed graph only adjusts.
+// fade in as the user zooms, busier tables first. A new picture takes the
+// shape of the view, so a wide window is filled rather than left with empty
+// sides. A picture opened before in this session comes back at once (eased
+// into the new shape when the view differs), and a changed graph only
+// adjusts.
 import { t } from "../i18n/index.js";
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { tableDisplayComment, tableDisplayName } from "../utils/configRelations.js";
 import { GRAPH_HEIGHT } from "../utils/relationGraph.js";
 import { relationGraphCard } from "../utils/relationGraphCard.js";
-import { buildGraphModel, neighborMask, positionsBox, seedPositions } from "../utils/relationGraphModel.js";
+import { buildGraphModel, layoutAspect, neighborMask, positionsBox, seedPositions } from "../utils/relationGraphModel.js";
 import { LAYOUT_ALPHA } from "../utils/forceLayoutAlpha.js";
 import { createLayoutRunner, recallLayout, rememberLayout } from "../utils/relationGraphLayout.js";
 import { createGraphCamera, wheelFactor } from "../utils/graphCamera.js";
 import { drawGraphFrame, nodeAtPoint, nodeScreenRadius, readGraphPalette, shortLabel } from "../utils/relationGraphCanvas.js";
+import { TOOL_STRIP_PX } from "../utils/relationGraphGeometry.js";
 import { prefersReducedMotion } from "../composables/useGraphViewport.js";
 import { quadtree } from "d3-quadtree";
 import ConfigRelationGraphFrame from "./ConfigRelationGraphFrame.vue";
@@ -79,6 +83,9 @@ let drawnModel = null;
 let drawnKey = null;
 let layoutVersion = 0;
 let layoutRunning = false;
+// The view's width-to-height ratio the picture was laid out for; it keeps
+// that shape while the view stays open, however it is resized.
+let layoutShape = 1;
 // Tables the user put somewhere, by id: [x, y].
 let fixed = new Map();
 let runner = null;
@@ -112,7 +119,7 @@ function packFixed(next) {
 
 function remember({ resting = !layoutRunning } = {}) {
   if (!drawnModel || !drawnKey) return;
-  rememberLayout(drawnKey, { ids: drawnModel.ids, xy, fixed, resting });
+  rememberLayout(drawnKey, { ids: drawnModel.ids, xy, fixed, resting, aspect: layoutShape });
 }
 
 // `quiet`: the layout only eases around a dropped table; no note for that.
@@ -127,18 +134,20 @@ function setStatus(running, { quiet = false } = {}) {
 }
 
 // A new or changed graph: tables already drawn keep their place, new ones
-// grow out of their neighbours, and a picture seen before comes back as it was.
+// grow out of their neighbours, and a picture seen before comes back as it
+// was (stretched to this view when it was laid out for another shape).
 function syncLayout() {
   const next = model.value;
   const key = props.layoutKey || "";
   const sameKey = drawnModel !== null && key === drawnKey;
   if (!sameKey) remember();
-  const memory = sameKey ? null : recallLayout(key);
+  if (!sameKey) layoutShape = layoutAspect(hostSize.value.width, hostSize.value.height, FIT_PADDING_PX);
+  const memory = sameKey ? null : recallLayout(key, layoutShape);
   const known = sameKey ? positionsById(drawnModel, xy) : memory?.points || null;
   if (!sameKey) fixed = new Map(memory?.fixed || []);
   for (const id of [...fixed.keys()]) if (!next.index.has(id)) fixed.delete(id);
   arranged.value = fixed.size > 0;
-  const seeds = seedPositions(next, known);
+  const seeds = seedPositions(next, known, { aspect: layoutShape });
   for (const [id, point] of fixed) {
     const at = next.index.get(id);
     seeds[at * 2] = point[0];
@@ -162,6 +171,7 @@ function syncLayout() {
     fixed: packFixed(next),
     alpha,
     reset: !sameKey,
+    aspect: layoutShape,
   });
   resetCaches(next);
   if (pinnedId.value && !next.index.has(pinnedId.value)) pinnedId.value = "";
@@ -228,6 +238,7 @@ function onRestart() {
     fixed: packFixed(drawnModel),
     alpha: layoutRunning ? LAYOUT_ALPHA.update : 0,
     reset: true,
+    aspect: layoutShape,
   });
 }
 
@@ -539,6 +550,7 @@ function drawFrame(now = globalThis.performance?.now?.() ?? 0) {
     labelText,
     labelWidth,
     fieldText: props.fill ? fieldText : null,
+    reserveRight: TOOL_STRIP_PX,
   });
   contentDirty = false;
   sharpView = { scale: view.scale, x: view.x, y: view.y };

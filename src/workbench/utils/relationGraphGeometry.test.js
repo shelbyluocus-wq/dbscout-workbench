@@ -125,6 +125,42 @@ test("names take the side of their table that keeps lines and arrowheads clear",
   }
 });
 
+test("names never pile up: a ranked name waits for room, an unranked one never does", () => {
+  // Twelve tables on a small ring around the center, with names far wider than the gaps.
+  const ring = Array.from({ length: 12 }, (_, index) => {
+    const angle = (index / 12) * 2 * Math.PI;
+    return { id: `t${index}`, x: Math.cos(angle) * 60, y: Math.sin(angle) * 60, radius: 6, width: 70, height: 12, rank: 2 };
+  });
+  const center = { id: "center", x: 0, y: 0, radius: 11, width: 50, height: 12 };
+  const lines = ring.map((node) => ({ source: node.id, target: "center", pieces: [[node.x, node.y, 0, 0]], arrows: [] }));
+  const sides = placeLabels([...ring, center], lines, { center: "center", gap: 3 });
+  assert.ok(sides.has("center"), "the current table is always named");
+  assert.ok(sides.size > 3 && sides.size < 13, `only the names that fit (${sides.size})`);
+  const boxes = [...sides.values()];
+  for (let left = 0; left < boxes.length; left += 1) {
+    for (let right = left + 1; right < boxes.length; right += 1) {
+      const [a, b] = [boxes[left], boxes[right]];
+      assert.ok(!(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1), "no two names overlap");
+    }
+  }
+  // Without ranks every name is placed, as before.
+  assert.equal(placeLabels(ring.map(({ rank, ...node }) => node), lines, { gap: 3 }).size, 12);
+});
+
+test("a ranked name stays inside the frame; only a busy table's may turn toward its lines", () => {
+  const edge = { id: "edge", x: 100, y: 0, radius: 6, width: 40, height: 12 };
+  const lines = [{ source: "edge", target: "center", pieces: [[100, 0, 0, 0]], arrows: [] }];
+  const frame = { x0: -200, y0: -100, x1: 125, y1: 100 };
+  // Ring neighbours just above and below leave no room beside the table.
+  const obstacles = [{ id: "center", x: 0, y: 0, radius: 11 }, { id: "above", x: 100, y: -22, radius: 6 }, { id: "below", x: 100, y: 22, radius: 6 }];
+  // Outward, the name would stick out of the frame.
+  assert.equal(placeLabels([{ ...edge, rank: 2 }], lines, { gap: 3, frame, obstacles }).has("edge"), false, "an ordinary table waits");
+  const busy = placeLabels([{ ...edge, rank: 1 }], lines, { gap: 3, frame, obstacles }).get("edge");
+  assert.ok(busy.x1 <= frame.x1, "a busy table names itself on another free side");
+  const unranked = placeLabels([edge], lines, { gap: 3, frame, obstacles }).get("edge");
+  assert.equal(unranked.anchor, "start", "an unranked name keeps its best side whatever the frame");
+});
+
 test("a table keeps its side unless another is clearly better", () => {
   const lonely = { id: "a", x: 0, y: 0, radius: 8, width: 30, height: 12 };
   const fresh = placeLabels([lonely], [], {});

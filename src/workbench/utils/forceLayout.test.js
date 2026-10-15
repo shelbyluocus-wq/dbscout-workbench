@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { forceCollide, forceManyBody, forceSimulation } from "d3-force";
+import { forceCollide, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
 
 import { LAYOUT_ALPHA, chargeTheta, createForceLayout, createLayoutHost, settleSteps } from "./forceLayout.js";
-import { forceCollideFast, forceManyBodyFast } from "./fastForces.js";
+import { forceCollideFast, forceManyBodyFast, forcePull } from "./fastForces.js";
 
 // A star (0 linked to 1–4) and a pair (5–6), started on a line.
 function graph() {
@@ -40,6 +40,57 @@ test("a fresh layout settles, keeps linked tables near and circles apart", () =>
   }
 });
 
+// Sixty tables in pairs, or one busy table with sixty small ones around it,
+// started in a small disc.
+function cloud(kind, aspect) {
+  const ids = Array.from({ length: 61 }, (_, at) => `t${at}`);
+  const seeds = new Float32Array(ids.flatMap((_, at) => [Math.cos(at * 2.4) * Math.sqrt(at) * 30, Math.sin(at * 2.4) * Math.sqrt(at) * 30]));
+  const radius = new Float32Array(ids.length).fill(5);
+  const links = [];
+  if (kind === "star") {
+    radius[0] = 16;
+    for (let at = 1; at < ids.length; at += 1) links.push(0, at);
+  } else {
+    for (let at = 1; at + 1 < ids.length; at += 2) links.push(at, at + 1);
+  }
+  return { ids, seeds, radius, links: new Uint32Array(links), fixed: new Float32Array(0), alpha: LAYOUT_ALPHA.fresh, reset: true, aspect };
+}
+
+// How wide the tables spread for their height.
+function widthForHeight(xy) {
+  const xs = xy.filter((_, at) => at % 2 === 0);
+  const ys = xy.filter((_, at) => at % 2 === 1);
+  const spread = (values) => {
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0));
+  };
+  return spread(xs) / spread(ys);
+}
+
+function settled(kind, aspect) {
+  const layout = createForceLayout();
+  layout.setGraph(cloud(kind, aspect));
+  settle(layout);
+  return layout.positions();
+}
+
+test("the picture takes the shape of its view without flattening into a band", () => {
+  const [tall, square, wide] = [0.5, 1, 2].map((aspect) => widthForHeight(settled("pairs", aspect)));
+  assert.ok(tall > 0.4 && tall < 0.65, `a tall view, a tall picture (${tall.toFixed(2)})`);
+  assert.ok(square > 0.85 && square < 1.18, `a square view, a round picture (${square.toFixed(2)})`);
+  assert.ok(wide > 1.6 && wide < 2.5, `a wide view, a wide picture (${wide.toFixed(2)})`);
+  // A busy table's fan stays rounder, but still leans the view's way.
+  const fan = widthForHeight(settled("star", 2));
+  assert.ok(fan > 1.1 && fan < 2.5, `a fan in a wide view (${fan.toFixed(2)})`);
+});
+
+test("tables keep generous room around them", () => {
+  const xy = settled("star", 1);
+  for (let left = 1; left < 61; left += 1) {
+    for (let right = left + 1; right < 61; right += 1) assert.ok(distance(xy, left, right) >= 45, "small tables keep well apart");
+  }
+});
+
 test("tables already laid out keep their place when the graph grows", () => {
   const layout = createForceLayout();
   layout.setGraph(graph());
@@ -56,6 +107,24 @@ test("tables already laid out keep their place when the graph grows", () => {
   const after = layout.positions();
   for (let at = 0; at < 7; at += 1) assert.ok(distance(before, at, at) === 0 && Math.abs(after[at * 2] - before[at * 2]) < 1e-3);
   assert.deepEqual([after[14], after[15]], [400, 400], "the new table starts at its seed");
+});
+
+test("a new picture remembered at rest stays at rest, even right after another that was still settling", () => {
+  const layout = createForceLayout();
+  layout.setGraph(graph());
+  for (let step = 0; step < 5; step += 1) layout.step();
+  assert.equal(layout.running(), true, "the first picture is still settling");
+  const resting = graph();
+  resting.alpha = 0;
+  layout.setGraph(resting);
+  assert.equal(layout.running(), false);
+  assert.equal(layout.step(), false, "nothing moves");
+  // A changed graph in the same picture carries on settling instead.
+  const changed = graph();
+  layout.setGraph(changed);
+  for (let step = 0; step < 5; step += 1) layout.step();
+  layout.setGraph({ ...changed, alpha: 0, reset: false });
+  assert.equal(layout.running(), true);
 });
 
 test("a table put somewhere stays there; restoring lets it go", () => {
@@ -170,6 +239,19 @@ test("the fast many-body force matches d3's when it approximates nothing", () =>
   forceSimulation(fast).stop().force("charge", forceManyBodyFast({ strength: -120, theta: 0 })).alphaDecay(0).velocityDecay(0).tick();
   for (let at = 0; at < reference.length; at += 1) {
     assert.ok(Math.abs(reference[at].x - fast[at].x) < 1e-6 && Math.abs(reference[at].y - fast[at].y) < 1e-6, `table ${at}`);
+  }
+});
+
+test("the pull toward the middle matches d3's forceX and forceY, and its strengths can change", () => {
+  const make = () => Array.from({ length: 20 }, (_, at) => ({ x: Math.cos(at) * (40 + at * 5), y: Math.sin(at) * (30 + at * 4), vx: 0, vy: 0 }));
+  const reference = make();
+  const fast = make();
+  forceSimulation(reference).stop().force("x", forceX(0).strength(0.02)).force("y", forceY(0).strength(0.2)).tick(3);
+  const pull = forcePull({ x: 0.5, y: 0.5 });
+  pull.setStrength(0.02, 0.2);
+  forceSimulation(fast).stop().force("pull", pull).tick(3);
+  for (let at = 0; at < reference.length; at += 1) {
+    assert.ok(Math.abs(reference[at].x - fast[at].x) < 1e-9 && Math.abs(reference[at].y - fast[at].y) < 1e-9, `table ${at}`);
   }
 });
 

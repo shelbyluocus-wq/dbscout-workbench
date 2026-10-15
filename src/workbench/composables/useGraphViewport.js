@@ -3,6 +3,7 @@
 // around the pointer, buttons and "fit" glide there, and dragging empty
 // space pans. "Fit" never blows a small drawing up past `maxFitScale` screen
 // pixels per unit, and a fitted view stays fitted while the host resizes.
+// `fitFrame` is what the fitted view shows, for names that must stay inside.
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 export const MIN_ZOOM = 0.4;
@@ -58,6 +59,22 @@ export function fitZoomFor(baseScale, maxFitScale = Infinity) {
   return scale > maxFitScale ? maxFitScale / scale : 1;
 }
 
+/**
+ * What a `width`×`height` host shows of the graph (graph units) while the
+ * drawing `box` is fitted, letterboxing included, with the scale it is shown
+ * at: { x0, y0, x1, y1, scale }, or null before the host has a size.
+ */
+export function fittedFrame(box, { width, height } = {}, maxFitScale = Infinity) {
+  if (!box || !(width > 0) || !(height > 0) || !(box.width > 0) || !(box.height > 0)) return null;
+  const base = Math.min(width / box.width, height / box.height);
+  const scale = base * fitZoomFor(base, maxFitScale);
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  const halfWidth = width / scale / 2;
+  const halfHeight = height / scale / 2;
+  return { x0: centerX - halfWidth, y0: centerY - halfHeight, x1: centerX + halfWidth, y1: centerY + halfHeight, scale };
+}
+
 // The center that keeps `point` fixed on screen while zooming from `from` to `to`.
 export function centerAfterZoom(center, point, from, to) {
   const ratio = from / to;
@@ -102,6 +119,7 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
   });
   const fitZoom = computed(() => fitZoomFor(baseScale.value, maxFitScale));
   const minZoom = computed(() => Math.min(MIN_ZOOM, fitZoom.value * MIN_ZOOM));
+  const fitFrame = computed(() => fittedFrame(fit.value, hostSize.value, maxFitScale));
 
   function moveTo(nextZoom, nextCenter, { animate = true } = {}) {
     stopGlide();
@@ -183,5 +201,5 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
 
   onBeforeUnmount(() => stopGlide());
 
-  return { zoom, center, panning, viewBox, scale, resetView, zoomBy, graphPoint, onWheel, startPan, movePan, endPan };
+  return { zoom, center, panning, viewBox, scale, fitFrame, resetView, zoomBy, graphPoint, onWheel, startPan, movePan, endPan };
 }

@@ -85,3 +85,17 @@ test("laid-out graphs are remembered for the session, the oldest forgotten first
   assert.equal(recallLayout(""), null);
   forgetLayouts();
 });
+
+test("a picture laid out for a view of another shape comes back stretched to the new one", () => {
+  forgetLayouts();
+  rememberLayout("k", { ids: ["a", "b"], xy: new Float32Array([100, 50, -100, -50]), fixed: new Map([["b", [-100, -50]]]), resting: true, aspect: 1 });
+  const similar = recallLayout("k", 1.1);
+  assert.equal(similar.resting, true, "a view of about the same shape shows it as it was");
+  assert.deepEqual(similar.points.get("a"), [100, 50]);
+  const wide = recallLayout("k", 4);
+  assert.equal(wide.resting, false, "it settles into its new room");
+  assert.deepEqual(wide.points.get("a"), [200, 25], "twice as wide, half as tall: the same area");
+  assert.deepEqual(wide.fixed.get("b"), [-200, -25], "dragged tables move with the picture");
+  assert.deepEqual(recallLayout("k", 1).points.get("a"), [100, 50], "the remembered picture itself is unchanged");
+  forgetLayouts();
+});

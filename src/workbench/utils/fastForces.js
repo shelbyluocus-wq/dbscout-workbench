@@ -1,9 +1,10 @@
-// Two d3-force compatible forces rewritten over typed arrays for graphs of
-// thousands of tables: many-body repulsion with a flat Barnes–Hut quadtree,
-// and circle collision with a uniform grid. They follow d3's forceManyBody
-// and forceCollide formulas (including predicted positions for collisions)
-// but avoid per-node closures and objects, which is where d3 spends its time
-// at this size.
+// d3-force compatible forces for graphs of thousands of tables: many-body
+// repulsion with a flat Barnes–Hut quadtree and circle collision with a
+// uniform grid, both over typed arrays, and a pull toward the middle whose
+// across and up-down strengths can change every step. They follow d3's
+// forceManyBody, forceCollide and forceX/forceY formulas (including
+// predicted positions for collisions) but avoid per-node closures, objects
+// and rebuilt arrays, which is where d3 spends its time at this size.
 
 const MAX_DEPTH = 32;
 const INTERNAL = -2;
@@ -344,6 +345,37 @@ export function forceCollideFast({ radius = (node) => node.r || 1, strength = 1 
     list.forEach((node, at) => {
       radii[at] = Number(radius(node)) || 0;
     });
+  };
+
+  return force;
+}
+
+/**
+ * A pull toward the origin, like d3's forceX(0) and forceY(0) with one
+ * strength each (`v -= position * strength * alpha`); `setStrength` changes
+ * them for the next step without rebuilding anything.
+ */
+export function forcePull({ x = 0.1, y = 0.1 } = {}) {
+  let nodes = [];
+  let strengthX = x;
+  let strengthY = y;
+
+  function force(alpha) {
+    const kx = strengthX * alpha;
+    const ky = strengthY * alpha;
+    for (const node of nodes) {
+      node.vx -= node.x * kx;
+      node.vy -= node.y * ky;
+    }
+  }
+
+  force.initialize = (list) => {
+    nodes = list;
+  };
+
+  force.setStrength = (nextX, nextY) => {
+    strengthX = nextX;
+    strengthY = nextY;
   };
 
   return force;

@@ -3,11 +3,13 @@
 // reference them and tinted by which side of the current table they are on,
 // the relations between two tables as one line coloured by its worst status.
 // Lines bow around tables in their way and every name takes the side of its
-// table that keeps lines and arrowheads clear. Hovering, focusing or dragging
-// a table keeps only it and its direct neighbours bright. Tables can be
-// dragged anywhere and stay there; the wheel zooms around the pointer,
-// dragging empty space pans, the bottom edge resizes the inline graph, and a
-// large view stretches the rings to use its room.
+// table that keeps lines and arrowheads clear; in a crowded ring the names
+// that would pile up wait until zooming in makes room for them. Hovering,
+// focusing or dragging a table keeps only it and its direct neighbours
+// bright, and names them. Tables can be dragged anywhere and stay there; the
+// wheel zooms around the pointer, dragging empty space pans, the bottom edge
+// resizes the inline graph, and a large view stretches the rings to use its
+// room.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import {
@@ -19,6 +21,7 @@ import {
 import { GRAPH_HEIGHT, graphNeighbors, layoutRelationGraph } from "../utils/relationGraph.js";
 import { relationGraphCard } from "../utils/relationGraphCard.js";
 import {
+  TOOL_STRIP_PX,
   arrowZones,
   layoutSpread,
   linkGeometry,
@@ -80,6 +83,12 @@ const CENTER_HALO = 5;
 const ALL_LABELS_NODE_LIMIT = 24;
 const OUTER_LABEL_FADE_START = 0.8;
 const OUTER_LABEL_FULL_SCALE = 1.1;
+// The active table's neighbours are always named, unless there are more than
+// this many: then they only come first among the names that wait for room.
+const NAMED_NEIGHBORS_MAX = 12;
+// Tables referenced by at least this many others are busy: where their name
+// waits for room it may take any free side.
+const BUSY_TABLE_REFERENCES = 8;
 const DRAG_THRESHOLD_PX = 4;
 const NUDGE_STEP_PX = 12;
 // Screen room kept free right of the drawing for the tool strip.
@@ -261,6 +270,24 @@ const geometries = computed(() => {
 
 // ── names: each on the side of its table that keeps lines clear ──
 
+// The current and the active table are always named, and so are the active
+// table's neighbours when there are few. Other names wait for room where
+// they would pile up or be cut off by the edge of the fitted view, clear of
+// the tool strip (see placeLabels): the active table's neighbours and busy
+// tables first, on any free side, then the first ring and the second, on
+// the side away from their lines.
+function nameRank(node, active, keepNeighbors) {
+  if (node.depth === 0 || node.id === active) return 0;
+  if (active && neighbors.value.has(node.id)) return keepNeighbors ? 0 : 1;
+  if (node.referencedBy >= BUSY_TABLE_REFERENCES) return 1;
+  return node.depth < 2 ? 2 : 3;
+}
+
+const nameFrame = computed(() => {
+  const frame = viewport.fitFrame.value;
+  return frame ? { ...frame, x1: frame.x1 - TOOL_STRIP_PX / frame.scale } : null;
+});
+
 let previousSides = new Map();
 const placement = computed(() => {
   const current = positions.value;
@@ -269,6 +296,7 @@ const placement = computed(() => {
   const commentSize = COMMENT_SCREEN_SIZE / unitScale;
   const outerOpacity = outerLabelOpacity();
   const active = activeId.value;
+  const keepNeighbors = Boolean(active) && neighbors.value.size - 1 <= NAMED_NEIGHBORS_MAX;
   const named = [];
   const unnamed = [];
   for (const node of props.graph.nodes) {
@@ -282,7 +310,7 @@ const placement = computed(() => {
     }
     const width = Math.max(textWidth(texts.label, fontSize), texts.comment ? textWidth(texts.comment, commentSize) : 0);
     const height = fontSize * LINE_HEIGHT + (texts.comment ? commentSize * LINE_HEIGHT : 0);
-    named.push({ id: node.id, x: point.x, y: point.y, radius: node.radius, width, height });
+    named.push({ id: node.id, x: point.x, y: point.y, radius: node.radius, width, height, rank: nameRank(node, active, keepNeighbors) });
   }
   const lines = props.graph.links.flatMap((link) => {
     const geometry = geometries.value.get(link.id);
@@ -299,6 +327,7 @@ const placement = computed(() => {
     gap: LABEL_SCREEN_GAP / unitScale,
     previous: previousSides,
     obstacles: unnamed,
+    frame: nameFrame.value,
   });
   previousSides = new Map([...result].map(([id, side]) => [id, side.direction]));
   return result;

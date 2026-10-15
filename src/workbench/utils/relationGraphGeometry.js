@@ -169,6 +169,9 @@ const DIRECTIONS = Object.freeze(Array.from({ length: 8 }, (_, index) => {
   return { index, angle, x: Math.cos(angle), y: Math.sin(angle) };
 }));
 const SIDE_THRESHOLD = 0.38;
+// How much worse than a table's best side a name that waits for room may
+// settle for: down to beside the table, never toward its lines.
+const AWAY_SIDE_SLACK = 4;
 
 const WIDE_CHAR = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/u;
 
@@ -238,13 +241,20 @@ export function labelBox(node, direction, { gap, width, height }) {
  * table, clear of other tables, names and arrowheads, outward from the center
  * when that is free, and below when nothing else decides. Busy tables choose
  * first; a table keeps its previous side unless another is clearly better.
+ * Names never pile up: a name with a `rank` (1, 2, …) comes after the
+ * unranked ones, in rank order, and takes its best side that covers no name
+ * already placed, no other table and no arrowhead, and stays inside
+ * `frame`; from rank 2 on, only a side facing away from the table's lines
+ * will do, so names stay off the spokes of a ring. Without such a side the
+ * name is left out, and shows once the user zooms in far enough for it to fit.
  *
- * nodes:    [{ id, x, y, radius, width, height }] in graph units
+ * nodes:    [{ id, x, y, radius, width, height, rank }] in graph units
  * lines:    [{ source, target, pieces: [[x1, y1, x2, y2], ...], arrows: [[...], ...] }]
  * obstacles tables without a name to place, which names still avoid
- * returns   Map(id -> { direction, anchor, x, y0, x0, x1, y1 })
+ * frame     { x0, y0, x1, y1 } ranked names must stay inside, or null
+ * returns   Map(id -> { direction, anchor, x, y0, x0, x1, y1 }), without left-out names
  */
-export function placeLabels(nodes, lines, { center = null, gap = 4, previous = null, obstacles = [] } = {}) {
+export function placeLabels(nodes, lines, { center = null, gap = 4, previous = null, obstacles = [], frame = null } = {}) {
   const byId = new Map([...obstacles, ...nodes].map((node) => [node.id, node]));
   const incident = new Map(nodes.map((node) => [node.id, []]));
   for (const line of lines) {
@@ -257,8 +267,10 @@ export function placeLabels(nodes, lines, { center = null, gap = 4, previous = n
   const circles = [...byId.values()];
   const centerNode = center ? byId.get(center) : null;
   const order = [...nodes].sort((left, right) =>
+    (left.rank || 0) - (right.rank || 0) ||
     Number(right.id === center) - Number(left.id === center) ||
     (incident.get(right.id)?.length || 0) - (incident.get(left.id)?.length || 0) ||
+    right.radius - left.radius ||
     left.id.localeCompare(right.id));
   // Bounds of every line piece and arrowhead, computed once for all tables.
   const pieces = [];
@@ -282,17 +294,33 @@ export function placeLabels(nodes, lines, { center = null, gap = 4, previous = n
       if (previous?.get(node.id) === direction.index) score += 0.45;
       return { direction, score };
     }).sort((left, right) => right.score - left.score);
+    const optional = node.rank > 0;
+    const lowest = node.rank >= 2 ? candidates[0].score - AWAY_SIDE_SLACK : -Infinity;
     let best = null;
     for (const candidate of candidates) {
-      if (best && candidate.score <= best.score) break;
+      if ((best && candidate.score <= best.score) || candidate.score < lowest) break;
       const box = labelBox(node, candidate.direction, { gap, width: node.width, height: node.height });
+      if (optional && crowded(box, node, { circles, placed, pieces, frame, margin: gap / 2 })) continue;
       const score = candidate.score - collisions(box, node, circles, placed, pieces);
       if (!best || score > best.score) best = { score, direction: candidate.direction, box };
     }
+    if (!best) continue;
     placed.push(best.box);
     result.set(node.id, { direction: best.direction.index, ...best.box });
   }
   return result;
+}
+
+// Whether a name box (with a margin around it) would cover a name already
+// placed, another table or an arrowhead, or stick out of the frame.
+function crowded(box, node, { circles, placed, pieces, frame, margin }) {
+  const room = { x0: box.x0 - margin, y0: box.y0 - margin, x1: box.x1 + margin, y1: box.y1 + margin };
+  if (frame && (room.x0 < frame.x0 || room.y0 < frame.y0 || room.x1 > frame.x1 || room.y1 > frame.y1)) return true;
+  return placed.some((other) => boxesOverlap(room, other)) ||
+    circles.some((other) => other.id !== node.id && boxHitsCircle(box, other.x, other.y, other.radius + 2)) ||
+    pieces.some(({ piece, arrow, bounds }) => arrow &&
+      bounds.x1 >= box.x0 && bounds.x0 <= box.x1 && bounds.y1 >= box.y0 && bounds.y0 <= box.y1 &&
+      boxHitsSegment(box, piece));
 }
 
 function segmentBounds([x1, y1, x2, y2]) {
@@ -315,7 +343,12 @@ function collisions(box, node, circles, placed, pieces) {
   return penalty;
 }
 
-// ── card ────────────────────────────────────────────────────────
+// ── card and tool strip ─────────────────────────────────────────
+
+// The tool strip runs along the right edge of every graph view (see
+// ConfigRelationGraphFrame.vue: 8px from the edge, 28px wide); names keep
+// this much room clear of it.
+export const TOOL_STRIP_PX = 38;
 
 // Narrower than this, the info card spans the graph's width.
 const WIDE_HOST = 560;

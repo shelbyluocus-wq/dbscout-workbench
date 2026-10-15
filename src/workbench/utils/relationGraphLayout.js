@@ -6,6 +6,8 @@
 
 const MEMORY_LIMIT = 24;
 const FALLBACK_BUDGET_MS = 5;
+// Views whose shapes differ by less than this share a remembered picture as it is.
+const SAME_SHAPE = 1.2;
 const memory = new Map();
 
 function defaultWorker() {
@@ -73,7 +75,7 @@ export function createLayoutRunner({ onPositions, onRestart = () => {}, createWo
   }
 
   return {
-    // { version, ids, seeds, radius, links, fixed, alpha, reset }
+    // { version, ids, seeds, radius, links, fixed, alpha, reset, aspect }
     setGraph: (graph) => post({ type: "graph", ...graph }),
     pin: (index, x, y) => post({ type: "pin", index, x, y }),
     unpin: (index) => post({ type: "unpin", index }),
@@ -95,22 +97,34 @@ export function createLayoutRunner({ onPositions, onRestart = () => {}, createWo
 
 // ── session memory ────────────────────────────────────────────
 
-/** { points: Map(id → [x, y]), fixed: Map(id → [x, y]), resting } or null. */
-export function recallLayout(key) {
+function stretched(points, sx, sy) {
+  return new Map([...points].map(([id, [x, y]]) => [id, [x * sx, y * sy]]));
+}
+
+/**
+ * { points: Map(id → [x, y]), fixed: Map(id → [x, y]), resting } or null.
+ * A picture laid out for a view of another shape (`aspect`, see
+ * layoutAspect) comes back stretched to this one, keeping its area, and not
+ * at rest, so it can settle into its new room.
+ */
+export function recallLayout(key, aspect = 1) {
   if (!key || !memory.has(key)) return null;
   const entry = memory.get(key);
   // Most recently used last, so the oldest goes first.
   memory.delete(key);
   memory.set(key, entry);
-  return entry;
+  const ratio = aspect / entry.aspect;
+  if (!Number.isFinite(ratio) || Math.abs(Math.log(ratio)) < Math.log(SAME_SHAPE)) return entry;
+  const sx = Math.sqrt(ratio);
+  return { points: stretched(entry.points, sx, 1 / sx), fixed: stretched(entry.fixed, sx, 1 / sx), resting: false };
 }
 
-export function rememberLayout(key, { ids, xy, fixed = new Map(), resting = false }) {
+export function rememberLayout(key, { ids, xy, fixed = new Map(), resting = false, aspect = 1 }) {
   if (!key || !ids?.length) return;
   const points = new Map();
   for (let at = 0; at < ids.length; at += 1) points.set(ids[at], [xy[at * 2], xy[at * 2 + 1]]);
   memory.delete(key);
-  memory.set(key, { points, fixed: new Map(fixed), resting });
+  memory.set(key, { points, fixed: new Map(fixed), resting, aspect });
   while (memory.size > MEMORY_LIMIT) memory.delete(memory.keys().next().value);
 }
 

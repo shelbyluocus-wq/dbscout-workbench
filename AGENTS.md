@@ -113,16 +113,24 @@ capabilities:
   second-ring tables gather beside the table that brought them in, lines
   bow around tables in their way and every name takes the side of its table
   that keeps lines and arrowheads clear (busy tables choose first, a side is
-  kept unless another is clearly better). Past that (a hub's neighbourhood,
-  up to thousands of tables) it is a large-graph view after Obsidian's graph
-  view: a force layout (d3-force with typed-array many-body and collision
-  forces) runs in a worker and streams positions, and one canvas draws only
-  what is on screen, lines batched by colour, circles that shrink slower
-  than the zoom, names that fade in with the zoom (busier tables first,
-  never piled up) and arrowheads once they can be seen; drawing stops when
-  nothing moves. A fresh picture starts in rings by distance and grows from
-  the middle, a picture seen before in the session comes back at rest, and a
-  changed graph only adjusts (new tables start beside their neighbours).
+  kept unless another is clearly better); in a crowded ring, names that
+  would pile up or be cut off at the edge wait until zooming in makes room
+  (the current table, the hovered one and its neighbours keep theirs).
+  Past that (a hub's neighbourhood, up to thousands of tables) it is a
+  large-graph view after Obsidian's graph view: a force layout (d3-force
+  with typed-array many-body and collision forces) runs in a worker and
+  streams positions, keeping generous room around every table and steering
+  the picture toward the shape of its view as it settles (a wide window gets
+  a wide picture, never a flat band), and one canvas draws only what is on
+  screen, lines batched by colour, circles that shrink slower than the zoom
+  (round dots when small, squares once thousands are in view), names that
+  fade in with the zoom (busier tables first, never piled up, no more than
+  the view has calm room for, clear of the tool strip) and arrowheads once
+  they can be seen; drawing stops when nothing moves. A fresh picture starts
+  in rings by distance and grows from the middle, a picture seen before in
+  the session comes back at rest (stretched and eased into a view of
+  another shape, such as full screen), and a changed graph only adjusts
+  (new tables start beside their neighbours).
   When painting a frame costs more than a frame (no graphics acceleration),
   camera moves reuse the last sharp picture and highlights switch at once.
   A depth switch always announces what it changed (how many tables depth 2
