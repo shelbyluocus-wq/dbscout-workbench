@@ -283,7 +283,7 @@ function targetTitle(target, relation) {
             <div class="wb-row-target-head">
               <span class="wb-row-target-column" :title="entry.relation.sourceColumn">{{ entry.relation.sourceColumn }}</span>
               <ArrowRight :size="11" :stroke-width="2.2" class="wb-row-target-arrow" aria-hidden="true" />
-              <span class="wb-row-target-table" :title="tableDisplayComment(tables, entry.relation.targetTable) || targetTableName(entry.relation)">
+              <span class="wb-row-target-table" :title="`${targetTableName(entry.relation)}.${entry.relation.targetColumn}`">
                 <TableMentionText :text="targetTableName(entry.relation)" :tables="mentionTables" @open="emit('open-table', $event)" /><span class="wb-row-target-key">.{{ entry.relation.targetColumn }}</span>
               </span>
               <button
@@ -327,6 +327,7 @@ function targetTitle(target, relation) {
             v-for="entry in referencedRows"
             :key="entry.relation.id"
             :table="sourceTableName(entry.relation)"
+            :table-comment="tableDisplayComment(tables, entry.relation.sourceTable)"
             :column="entry.relation.sourceColumn"
             :count="entry.result ? entry.result.count : null"
             :counting="!entry.result"

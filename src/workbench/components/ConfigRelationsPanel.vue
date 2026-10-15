@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ChevronRight, Info, LoaderCircle, Network, TriangleAlert } from "lucide-vue-next";
 import { coverageGapText } from "../utils/configRelations.js";
 import { loadRelationPanelSections, saveRelationPanelSections } from "../utils/relationPanelPrefs.js";
+import { provideTableCommentTips } from "../composables/tableCommentTips.js";
 import ConfigRelationRowSection from "./ConfigRelationRowSection.vue";
 import ConfigRelationTableSection from "./ConfigRelationTableSection.vue";
 import ConfigRelationGraphSection from "./ConfigRelationGraphSection.vue";
@@ -21,6 +22,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["open-relation", "open-review", "open-table"]);
+provideTableCommentTips();
 
 const scope = computed(() => ({
   connectionId: String(props.tab?.connectionId || ""),

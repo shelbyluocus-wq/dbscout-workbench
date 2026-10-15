@@ -175,7 +175,10 @@ capabilities:
   nor the system's menu opens there. **Field relations** lists every
   relation by direction, waiting decisions first; each row opens its
   evidence (comment text, client code file:line with the line itself, data
-  sample). A slim notice appears only when the client folder needs binding;
+  sample). On the relation page and in the review dialog, hovering (or
+  keyboard-focusing) a table name floats a small card with that table's
+  comment (`TableCommentTip.vue`, opted in via `tableCommentTips.js`).
+  A slim notice appears only when the client folder needs binding;
   softer coverage notes and the way into review sit at the bottom. One hue
   per direction (`--wb-relation-out*` / `--wb-relation-in*`, derived from the
   hit palette) is shared by the page, the map and the relation chip. The tab
@@ -387,6 +390,7 @@ from UI):
   labels, the tab chip, the per-connection capability gate, the row-name
   column mirrored from the backend and the switch-badge summary);
   `relationPanelPrefs.js` (remembered open state of the relation page sections);
+  `tableCommentTip.js` (placement and warm-up timing of the table comment card);
   `relationGraph.js` (local relation subgraph by depth/direction and the
   whole-database graph, per-pair worst-status merge, node sizing,
   deterministic ring layout with an optional stretch, parent-grouped second
