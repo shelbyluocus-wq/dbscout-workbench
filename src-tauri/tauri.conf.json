@@ -58,7 +58,7 @@
       "resources/agent-runner.mjs": "agent-runner.mjs",
       "resources/mcp-server.mjs": "mcp-server.mjs",
       "resources/agent-auth*.json": ".",
-      "resources/svn/**/*": "svn/"
+      "resources/svn/": "svn/"
     }
   }
 }

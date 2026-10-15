@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tauri::{AppHandle, Emitter, Window};
 
-use crate::svn_updater;
+use crate::svn_client::{self, SvnClient};
 use crate::types::{
     TableTransferProgress, TableTransferRunRequest, TableTransferRunResult, TableTransferTemplatePaths,
 };
@@ -598,13 +598,13 @@ async fn run_inner(
     // 3. SVN 更新用户选择的游戏工程目录（等同于在资源管理器里对该文件夹
     //    点「SVN 更新」）。只更新 assets/props 与 src/props 时，工程里其它
     //    已提交改动不会被拉下来，日志会显示 At revision N，看起来像没更新。
-    let svn = svn_updater::resolve_svn_exe(app).ok_or_else(svn_updater::svn_not_found_message)?;
     let svn_target = resolve_svn_update_dir(&project_root).to_path_buf();
+    let mut svn = SvnClient::for_working_copy(app, &svn_target).await?;
     let props_dir = assets.join("props");
     let src_props_dir = assets.join("src").join("props");
     ensure_not_cancelled(guard)?;
     let svn_started = Instant::now();
-    let leftover = svn_update_with_strategy(&svn, &svn_target, strategy, progress).await?;
+    let leftover = svn_update_with_strategy(&mut svn, &svn_target, strategy, progress).await?;
     progress.log(
         STAGE_SVN,
         format!(
@@ -1176,7 +1176,7 @@ fn format_manual_conflict_error(target: &Path, conflicts: &[PathBuf]) -> String 
 /// 对一个工作副本目录执行 update。云端/本地为准时自动消冲突；
 /// 「由我处理」只 postpone，把残留冲突交还给调用方，不覆盖拷贝。
 async fn svn_update_with_strategy(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
     strategy: ConflictStrategy,
     progress: &ProgressEmitter,
@@ -1198,13 +1198,21 @@ async fn svn_update_with_strategy(
             progress.log(STAGE_SVN, "检测到工作副本锁定，自动清理后重试…".to_string());
             run_svn(svn, target, &["cleanup", "--non-interactive"], progress)
                 .await
-                .map_err(|error| format!("svn cleanup 重试失败（{}）: {error}", target.display()))?;
+                .map_err(|error| {
+                    format!("svn cleanup 重试失败（{}）: {error}", target.display())
+                })?;
             update_result = run_svn(svn, target, &update_args, progress).await;
         }
         // 文本冲突、树冲突（E155027）都会让 update 以 exit 1 结束。
         // 「云端/本地为准」不能在这里直接失败，否则到不了后面的自动消冲突。
     }
 
+    // A failed connection must not be turned into success by resolving old conflicts.
+    if let Err(error) = &update_result {
+        if svn_client::update_connection_failed(error) {
+            return Err(error.clone());
+        }
+    }
     let conflicts = svn_conflicted_entries(svn, target).await?;
     if conflicts.is_empty() {
         update_result.map_err(|error| format!("svn update 失败（{}）: {error}", target.display()))?;
@@ -1262,7 +1270,7 @@ async fn svn_update_with_strategy(
 }
 
 async fn svn_cleanup(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
     progress: &ProgressEmitter,
 ) -> Result<(), String> {
@@ -1272,7 +1280,7 @@ async fn svn_cleanup(
 }
 
 async fn revert_conflict_path(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
     entry: &SvnConflictPath,
     progress: &ProgressEmitter,
@@ -1302,7 +1310,7 @@ async fn revert_conflict_path(
 }
 
 async fn resolve_conflicts_theirs(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
     conflicts: &[SvnConflictPath],
     update_args: &[&str],
@@ -1333,17 +1341,14 @@ async fn resolve_conflicts_theirs(
 }
 
 async fn run_svn(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
     args: &[&str],
     progress: &ProgressEmitter,
 ) -> Result<(), String> {
-    let output = tokio_command_without_window(svn)
-        .args(args)
-        .arg(target)
-        .output()
-        .await
-        .map_err(|error| format!("执行 svn {} 失败: {error}", args[0]))?;
+    let output = svn
+        .run(args, target, &|line| progress.log(STAGE_SVN, line))
+        .await?;
     let stdout = decode_console(&output.stdout);
     let stderr = decode_console(&output.stderr);
     let svn_lines: Vec<String> = stdout
@@ -1406,15 +1411,12 @@ fn summarize_svn_error_lines(stdout: &str, stderr: &str) -> String {
 }
 
 async fn svn_conflicted_entries(
-    svn: &Path,
+    svn: &mut SvnClient,
     target: &Path,
 ) -> Result<Vec<SvnConflictPath>, String> {
-    let output = tokio_command_without_window(svn)
-        .args(["status", "--non-interactive"])
-        .arg(target)
-        .output()
-        .await
-        .map_err(|error| format!("执行 svn status 失败: {error}"))?;
+    let output = svn
+        .run(&["status", "--non-interactive"], target, &|_| {})
+        .await?;
     if !output.status.success() {
         return Err(format!(
             "svn status 失败: {}\n{}",

@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { bundledSvnExists, fetchSvn } from "./fetch-svn.mjs";
+import { SVN_PACKAGES, bundledSvnExists, fetchSvn } from "./fetch-svn.mjs";
 
 const SKIP = process.env.DBSCOUT_SKIP_SVN_FETCH === "1";
 
@@ -15,9 +15,11 @@ export async function ensureSvn({ platform = process.platform } = {}) {
     return;
   }
   if (platform !== "win32") return;
-  if (bundledSvnExists()) return;
-  console.log("[ensure-svn] Bundled svn.exe missing, fetching…");
-  await fetchSvn();
+  for (const packageSpec of SVN_PACKAGES) {
+    if (bundledSvnExists(undefined, packageSpec)) continue;
+    console.log("[ensure-svn] Bundled SVN client missing, fetching…");
+    await fetchSvn({ packageSpec });
+  }
 }
 
 const invokedDirectly =

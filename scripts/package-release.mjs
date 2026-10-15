@@ -7,7 +7,7 @@ import {
   createManifest,
   windowsInstallerName,
 } from "./svn-updater-manifest.mjs";
-import { bundledSvnExists } from "./fetch-svn.mjs";
+import { bundledSvnClientsExist } from "./fetch-svn.mjs";
 import { ensureSvn } from "./ensure-svn.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -134,8 +134,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   assertSlimBundleConfiguration(root);
   if (!process.argv.includes("--skip-build")) {
     await ensureSvn();
-    if (process.platform === "win32" && !bundledSvnExists(root)) {
-      throw new Error("Windows release requires a bundled svn.exe under src-tauri/resources/svn/");
+    if (process.platform === "win32" && !bundledSvnClientsExist(root)) {
+      throw new Error("Windows release requires both default and compatibility SVN clients under src-tauri/resources/svn/");
     }
     execSync("npm run tauri -- build", {
       cwd: root,

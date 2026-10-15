@@ -28,7 +28,9 @@ describe("Tauri dev configuration", () => {
     assert.equal(config.bundle?.resources?.["resources/mcp-server.mjs"], "mcp-server.mjs");
     assert.equal(config.bundle?.resources?.["resources/agent-auth*.json"], ".");
     assert.equal(config.bundle?.resources?.["resources/node/*"], undefined);
-    assert.equal(config.bundle?.resources?.["resources/svn/**/*"], "svn/");
+    // Directory mappings preserve nested client DLLs; globs flatten them.
+    assert.equal(config.bundle?.resources?.["resources/svn/"], "svn/");
+    assert.equal(config.bundle?.resources?.["resources/svn/**/*"], undefined);
   });
 
   it("does not bundle a native CLI binary on either desktop platform", async () => {

@@ -21,20 +21,32 @@ export const SVN_PACKAGE = Object.freeze({
   size: 4227878,
 });
 
+export const SVN_COMPAT_PACKAGE = Object.freeze({
+  url: "https://www.visualsvn.com/files/Apache-Subversion-1.9.7.zip",
+  sha256: "a2e99c9bbbf9a52cda22343e825e9c4a1b28be529cd763ca124690f549d998a2",
+  size: 3358359,
+  subdirectory: "compat-1.9.7",
+});
+export const SVN_PACKAGES = [SVN_PACKAGE, SVN_COMPAT_PACKAGE];
+
 function projectRootFrom(root) {
   return root || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 }
 
-export function bundledSvnDir(root) {
-  return path.join(projectRootFrom(root), "src-tauri", "resources", "svn");
+export function bundledSvnDir(root, packageSpec = SVN_PACKAGE) {
+  return path.join(projectRootFrom(root), "src-tauri", "resources", "svn", packageSpec.subdirectory || "");
 }
 
-export function bundledSvnPath(root) {
-  return path.join(bundledSvnDir(root), "svn.exe");
+export function bundledSvnPath(root, packageSpec = SVN_PACKAGE) {
+  return path.join(bundledSvnDir(root, packageSpec), "svn.exe");
 }
 
-export function bundledSvnExists(root) {
-  return existsSync(bundledSvnPath(root));
+export function bundledSvnExists(root, packageSpec = SVN_PACKAGE) {
+  return existsSync(bundledSvnPath(root, packageSpec));
+}
+
+export function bundledSvnClientsExist(root) {
+  return SVN_PACKAGES.every((spec) => bundledSvnExists(root, spec));
 }
 
 function normalizeEntry(entry) {
@@ -122,7 +134,8 @@ function walkFiles(dir) {
 }
 
 async function defaultDownload(url, dest) {
-  const urls = [process.env.DBSCOUT_SVN_URL, url].filter(Boolean);
+  const override = url === SVN_COMPAT_PACKAGE.url ? process.env.DBSCOUT_SVN_COMPAT_URL : process.env.DBSCOUT_SVN_URL;
+  const urls = [override, url].filter(Boolean);
   let lastError = null;
   for (const candidate of [...new Set(urls)]) {
     try {
@@ -143,8 +156,8 @@ export async function fetchSvn({
   packageSpec = SVN_PACKAGE,
   download = defaultDownload,
 } = {}) {
-  const destDir = bundledSvnDir(root);
-  const destBinary = bundledSvnPath(root);
+  const destDir = bundledSvnDir(root, packageSpec);
+  const destBinary = bundledSvnPath(root, packageSpec);
   if (!force && existsSync(destBinary)) {
     console.log(`Bundled svn.exe already present at ${destBinary}`);
     return destBinary;
@@ -196,7 +209,11 @@ export async function fetchSvn({
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  fetchSvn({ force: process.argv.includes("--force") }).catch((error) => {
+  (async () => {
+    for (const packageSpec of SVN_PACKAGES) {
+      await fetchSvn({ packageSpec, force: process.argv.includes("--force") });
+    }
+  })().catch((error) => {
     console.error(error.message || error);
     process.exit(1);
   });

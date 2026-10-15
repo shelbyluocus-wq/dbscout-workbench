@@ -8,6 +8,8 @@ import test from "node:test";
 import { createZipArchive } from "./zip-archive.mjs";
 import {
   SVN_PACKAGE,
+  SVN_COMPAT_PACKAGE,
+  bundledSvnClientsExist,
   bundledSvnExists,
   bundledSvnPath,
   fetchSvn,
@@ -117,4 +119,33 @@ test("verifyFileSha256 reports the actual digest on mismatch", async (t) => {
   const digest = createHash("sha256").update("payload").digest("hex");
   assert.equal(verifyFileSha256(filePath, digest), digest);
   assert.throws(() => verifyFileSha256(filePath, "0".repeat(64)), /SHA-256/);
+});
+
+test("both SVN clients retain their own DLLs and licenses across refreshes", async (t) => {
+  const root = tempDir(t, "dbscout-svn-dual-");
+  const source = tempDir(t, "dbscout-svn-dual-src-");
+  for (const [spec, label] of [[SVN_PACKAGE, "current"], [SVN_COMPAT_PACKAGE, "compat"]]) {
+    const entries = [];
+    for (const name of ["bin/svn.exe", "bin/libsvn_ra-1.dll", "Licenses/Subversion License.txt"]) {
+      const sourcePath = path.join(source, label, name);
+      writeFile(sourcePath, `${label}: ${name}`);
+      entries.push({ sourcePath, name });
+    }
+    const archivePath = path.join(source, `${label}.zip`);
+    await createZipArchive(entries, archivePath);
+    const packageSpec = {
+      ...spec,
+      size: fs.statSync(archivePath).size,
+      sha256: createHash("sha256").update(fs.readFileSync(archivePath)).digest("hex"),
+    };
+    const download = async (_url, dest) => fs.copyFileSync(archivePath, dest);
+    await fetchSvn({ root, packageSpec, download });
+    await fetchSvn({ root, packageSpec, download, force: true });
+    const directory = path.dirname(bundledSvnPath(root, spec));
+    assert.equal(fs.readFileSync(path.join(directory, "libsvn_ra-1.dll"), "utf8"), `${label}: bin/libsvn_ra-1.dll`);
+    assert.equal(fs.readFileSync(path.join(directory, "Licenses/Subversion License.txt"), "utf8"), `${label}: Licenses/Subversion License.txt`);
+    assert.equal(bundledSvnClientsExist(root), label === "compat");
+  }
+  assert.equal(fs.readFileSync(bundledSvnPath(root), "utf8"), "current: bin/svn.exe");
+  assert.equal(fs.readFileSync(bundledSvnPath(root, SVN_COMPAT_PACKAGE), "utf8"), "compat: bin/svn.exe");
 });

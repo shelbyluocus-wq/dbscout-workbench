@@ -238,7 +238,9 @@ installer larger than 20 MB or any configuration that puts Node / the native
 Claude CLI back into the main bundle. Windows builds fetch a pinned Apache
 Subversion command-line client into `src-tauri/resources/svn/` (`npm run
 ensure-svn` / `npm run fetch-svn`) and ship it with the installer so in-app
-updates work without a system `svn.exe`.
+updates work without a system `svn.exe`. The default 1.14.5 client and the
+1.9.7 SSL compatibility client (`svn/compat-1.9.7/`) ship with separate DLLs
+and licenses; both downloads have pinned sizes and hashes.
 
 To launch the full app against a real MySQL server:
 
@@ -527,6 +529,12 @@ The Rust backend is split by concern:
   several copies exist, pick the one whose latest.json version is newest.
   Windows `resolve_svn_exe` prefers local TortoiseSVN, then PATH `svn.exe`,
   then the bundled client.
+- **`svn_client.rs`** — Shared SVN execution for updates and table transfer.
+  Retries an update once with the other client only for `E120171` SSL
+  communication failures, never certificate validation/authentication/conflict
+  failures. Successful choices are remembered per HTTPS origin in
+  `svn-client-preferences.json` in the app config directory (survives upgrades).
+  Local commands use the selected client; conversion scripts are never replayed.
 - **`table_transfer.rs`** — One-click table transfer: runs the user's conversion script,
   locates the timestamped output package, svn-updates the selected game
   project folder (same as a manual SVN Update on that folder) with automatic

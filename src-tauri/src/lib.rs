@@ -30,6 +30,7 @@ pub mod schema_cache;
 mod sql_console;
 mod sql_history;
 mod svn_updater;
+mod svn_client;
 mod sync;
 mod sync_guard;
 mod sync_verification;

@@ -8,17 +8,12 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::types::AgentRuntimeUpdateInfo;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
 const CONFIG_FILE_NAME: &str = "svn-update.json";
 const MANIFEST_FILE_NAME: &str = "latest.json";
 const WINDOWS_PLATFORM: &str = "windows-x86_64";
 const REQUIRED_DIRECTORY_NAME: &str = "navicat";
 const BACKGROUND_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const UPDATE_AVAILABLE_EVENT: &str = "svn-update-available";
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 static UPDATE_CHECK_LOCK: Mutex<()> = Mutex::new(());
 
@@ -238,9 +233,11 @@ fn read_manifest(directory: &Path) -> Result<UpdateManifest, String> {
 }
 
 fn run_svn_update(app: &AppHandle, directory: &Path) -> Result<(), String> {
-    let svn = resolve_svn_exe(app).ok_or_else(svn_not_found_message)?;
-    run_svn_command(&svn, "cleanup", directory)?;
-    run_svn_command(&svn, "update", directory)
+    tauri::async_runtime::block_on(async {
+        let mut svn = crate::svn_client::SvnClient::for_working_copy(app, directory).await?;
+        run_svn_command(&mut svn, "cleanup", directory).await?;
+        run_svn_command(&mut svn, "update", directory).await
+    })
 }
 
 pub(crate) fn svn_not_found_message() -> String {
@@ -251,13 +248,16 @@ pub(crate) fn svn_not_found_message() -> String {
     }
 }
 
-fn run_svn_command(svn: &Path, operation: &str, directory: &Path) -> Result<(), String> {
-    let output = command_without_window(svn)
-        .arg(operation)
-        .arg("--non-interactive")
-        .arg(directory)
-        .output()
-        .map_err(|error| format!("执行 svn {operation} 失败: {error}"))?;
+async fn run_svn_command(
+    svn: &mut crate::svn_client::SvnClient,
+    operation: &str,
+    directory: &Path,
+) -> Result<(), String> {
+    let output = svn
+        .run(&[operation, "--non-interactive"], directory, &|line| {
+            eprintln!("[svn] {line}");
+        })
+        .await?;
     if output.status.success() {
         return Ok(());
     }
@@ -276,13 +276,6 @@ fn run_svn_command(svn: &Path, operation: &str, directory: &Path) -> Result<(), 
             output.status, details
         ))
     }
-}
-
-fn command_without_window(program: &Path) -> Command {
-    let mut command = Command::new(program);
-    #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
-    command
 }
 
 fn is_c_drive_root(path: &Path) -> bool {
