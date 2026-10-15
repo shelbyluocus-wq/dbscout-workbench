@@ -176,8 +176,11 @@ capabilities:
   relation by direction, waiting decisions first; each row opens its
   evidence (comment text, client code file:line with the line itself, data
   sample). On the relation page and in the review dialog, hovering (or
-  keyboard-focusing) a table name floats a small card with that table's
-  comment (`TableCommentTip.vue`, opted in via `tableCommentTips.js`).
+  keyboard-focusing) a table or field name floats a small card with its
+  comment (`CommentTip.vue`, opted in via `commentTips.js`); fields of the
+  relation map's info card offer it once the card is pinned. Relation
+  responses' table labels carry the comments of the columns their relations
+  use (`columns`, lowercase name -> comment).
   A slim notice appears only when the client folder needs binding;
   softer coverage notes and the way into review sit at the bottom. One hue
   per direction (`--wb-relation-out*` / `--wb-relation-in*`, derived from the
@@ -390,7 +393,7 @@ from UI):
   labels, the tab chip, the per-connection capability gate, the row-name
   column mirrored from the backend and the switch-badge summary);
   `relationPanelPrefs.js` (remembered open state of the relation page sections);
-  `tableCommentTip.js` (placement and warm-up timing of the table comment card);
+  `commentTip.js` (placement and warm-up timing of the table/field comment card);
   `relationGraph.js` (local relation subgraph by depth/direction and the
   whole-database graph, per-pair worst-status merge, node sizing,
   deterministic ring layout with an optional stretch, parent-grouped second

@@ -458,12 +458,20 @@ export function createMockConfigRelations({
     return totals;
   }
 
+  // Like the backend: each table once, with the comments of the columns the
+  // listed relations use.
   function tableLabels(tables, views) {
     const labels = {};
     for (const view of views) {
-      for (const lower of [view.sourceTable, view.targetTable]) {
+      const ends = [[view.sourceTable, view.sourceColumn], [view.targetTable, view.targetColumn]];
+      for (const [lower, column] of ends) {
         const table = tables.get(lower);
-        if (table && !labels[lower]) labels[lower] = { name: table.table_name, comment: table.table_comment || "" };
+        if (!table) continue;
+        labels[lower] ||= { name: table.table_name, comment: table.table_comment || "" };
+        const comment = String(findColumn(table, column)?.column_comment || "").trim();
+        if (!comment) continue;
+        labels[lower].columns ||= {};
+        labels[lower].columns[String(column).toLowerCase()] = comment;
       }
     }
     return labels;

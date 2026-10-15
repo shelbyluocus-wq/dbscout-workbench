@@ -11,7 +11,7 @@ function edge(source, target, column = `${target}_id`, status = "confirmed") {
 const many = Array.from({ length: 70 }, (_, index) => edge(`user_${String(index).padStart(2, "0")}`, "item"));
 const DATA = {
   edges: [...many, edge("item", "attr"), edge("item", "attr", "bonus_id", "stale"), edge("item", "item", "parent_id")],
-  tables: { item: { name: "Item", comment: "道具表" }, attr: { name: "attr", comment: "属性表" } },
+  tables: { item: { name: "Item", comment: "道具表", columns: { attr_id: "属性ID" } }, attr: { name: "attr", comment: "属性表" } },
 };
 
 test("the card groups relations by the other table, with fields and the worst status", () => {
@@ -27,6 +27,12 @@ test("the card groups relations by the other table, with fields and the worst st
   assert.equal(references.fieldCount, 2);
   assert.equal(references.groups[0].status, "stale");
   assert.deepEqual(references.groups[0].fields.map((field) => field.from), ["attr_id", "bonus_id"]);
+  const [attrField, bonusField] = references.groups[0].fields;
+  assert.equal(attrField.fromName, "Item.attr_id");
+  assert.equal(attrField.fromComment, "属性ID");
+  assert.equal(attrField.toName, "attr.id");
+  assert.equal(attrField.toComment, "");
+  assert.equal(bonusField.fromComment, "", "a field without a comment has no card");
   assert.ok(card.sections.some((section) => section.key === "self"));
 });
 

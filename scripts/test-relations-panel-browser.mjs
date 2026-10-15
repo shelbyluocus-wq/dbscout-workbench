@@ -80,12 +80,19 @@ try {
   // Hovering a table name reveals its comment in a card; leaving lets it go.
   const shop = panel.locator(".wb-relation-card .wb-table-mention").filter({ hasText: /^shop$/ }).first();
   await shop.hover();
-  const tip = page.locator(".wb-table-tip.is-placed");
+  const tip = page.locator(".wb-comment-tip.is-placed");
   await tip.waitFor();
   assert.match(await tip.textContent(), /shop\s*商店配置表/);
   assert.equal(await shop.getAttribute("aria-describedby"), await tip.getAttribute("id"));
   await page.mouse.move(4, 4);
-  await page.waitForFunction(() => !document.querySelector(".wb-table-tip"));
+  await page.waitForFunction(() => !document.querySelector(".wb-comment-tip"));
+  // A field shows its column comment the same way, named with its table.
+  const shopCard = panel.locator(".wb-relation-card").filter({ hasText: "shop.item_id" });
+  await shopCard.locator(".wb-comment-tip-anchor.is-field").filter({ hasText: /^item_id$/ }).hover();
+  await tip.waitFor();
+  assert.match(await tip.textContent(), /shop\.item_id\s*\S/);
+  await page.mouse.move(4, 4);
+  await page.waitForFunction(() => !document.querySelector(".wb-comment-tip"));
   await page.locator(".wb-inspector").screenshot({ path: join(shots, "blackcat-relations-panel.png") });
 
   // Every referencing drop opens as one filtered tab that lands on its first row.
@@ -142,7 +149,7 @@ try {
   assert.match(await field.innerText(), /备注保存刷新验证/);
 
   assert.deepEqual(errors, []);
-  console.log("Relation page: badges, row references, evidence, table comment cards, remembered sections, comment save and reference jump passed.");
+  console.log("Relation page: badges, row references, evidence, table and field comment cards, remembered sections, comment save and reference jump passed.");
 } finally {
   await browser.close();
 }

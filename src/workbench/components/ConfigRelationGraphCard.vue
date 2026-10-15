@@ -7,6 +7,7 @@
 import { t } from "../i18n/index.js";
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Crosshair, Pin, PinOff, Repeat2, SquareArrowOutUpRight } from "lucide-vue-next";
 import { relationStatusLabel } from "../utils/configRelations.js";
+import CommentTip from "./CommentTip.vue";
 
 defineProps({
   // { id, pinned, side, name, comment, center, openable, focusable, total, sections }
@@ -73,9 +74,10 @@ function sectionTitle(section) {
             </div>
             <ul class="wb-relation-graph-card-fields">
               <li v-for="field in group.fields" :key="field.id">
-                <code>{{ field.from }}</code>
+                <!-- Only the pinned card takes the pointer, so only it offers field comments. -->
+                <code><CommentTip field :name="field.fromName" :comment="card.pinned ? field.fromComment : ''">{{ field.from }}</CommentTip></code>
                 <ArrowRight :size="10" :stroke-width="2.2" class="wb-relation-graph-card-arrow" aria-hidden="true" />
-                <code>{{ field.to }}</code>
+                <code><CommentTip field :name="field.toName" :comment="card.pinned ? field.toComment : ''">{{ field.to }}</CommentTip></code>
                 <span
                   v-if="field.status !== 'confirmed'"
                   class="wb-relation-graph-card-status"

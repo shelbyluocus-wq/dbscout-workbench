@@ -13,6 +13,7 @@ import {
   referenceValuesFromCell,
   relationChipLabel,
   relationDirection,
+  relationEndParts,
   relationEvidenceKey,
   relationEvidenceTitle,
   relationIsActionable,
@@ -27,6 +28,7 @@ import {
   rowCellValue,
   shortCodePath,
   splitRejectedRelations,
+  tableColumnComment,
   tableDisplayComment,
   tableDisplayName,
 } from "./configRelations.js";
@@ -131,6 +133,13 @@ test("titles use database table case and rows are read case-insensitively", () =
   assert.equal(tableDisplayName(tables, "missing"), "missing");
   assert.equal(tableDisplayComment(tables, "heroprop"), "英雄");
   assert.equal(tableDisplayComment(tables, "missing"), "");
+  const labelled = { heroprop: { ...tables.heroprop, columns: { skillid: "技能" } } };
+  assert.equal(tableColumnComment(labelled, "heroprop", "SkillID"), "技能");
+  assert.equal(tableColumnComment(labelled, "heroprop", "ID"), "");
+  assert.equal(tableColumnComment(tables, "heroprop", "SkillID"), "");
+  assert.deepEqual(relationEndParts("HeroProp.SkillID", "SkillID"), { prefix: "HeroProp.", column: "SkillID" });
+  assert.deepEqual(relationEndParts("SkillID", "skillid"), { prefix: "", column: "SkillID" });
+  assert.deepEqual(relationEndParts("HeroProp.MySkillID", "SkillID"), { prefix: "HeroProp.MySkillID", column: "" });
   assert.deepEqual(
     relationRelevantColumns([relation, { ...relation, sourceColumn: "Gone", status: "rejected" }]),
     ["skillid", "id"],

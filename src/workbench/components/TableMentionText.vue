@@ -5,7 +5,7 @@
 import { computed } from "vue";
 import { t } from "../i18n/index.js";
 import { splitTableMentions } from "../utils/tableMentions.js";
-import TableCommentTip from "./TableCommentTip.vue";
+import CommentTip from "./CommentTip.vue";
 
 const props = defineProps({
   text: { type: String, default: "" },
@@ -26,7 +26,7 @@ function openTable(table, event) {
 <template>
   <span class="wb-table-mention-text">
     <template v-for="(part, index) in parts" :key="index">
-      <TableCommentTip
+      <CommentTip
         v-if="part.table"
         v-slot="{ describedBy, tip }"
         :name="part.table.name"
@@ -40,7 +40,7 @@ function openTable(table, event) {
           @mousedown.stop.prevent
           @click.stop.prevent="openTable(part.table, $event)"
         >{{ part.text }}</button>
-      </TableCommentTip>
+      </CommentTip>
       <template v-else>{{ part.text }}</template>
     </template>
   </span>

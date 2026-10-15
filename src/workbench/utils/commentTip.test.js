@@ -6,15 +6,15 @@ import {
   TIP_SHOW_DELAY,
   TIP_WARM_MS,
   createTipWarmth,
-  placeTableTip,
-} from "./tableCommentTip.js";
+  placeCommentTip,
+} from "./commentTip.js";
 
 const viewport = { width: 1000, height: 700 };
 const tip = { width: 220, height: 48 };
 
 test("the comment card sits above the table name, aligned with it", () => {
   const anchor = { left: 300, top: 200, bottom: 218 };
-  assert.deepEqual(placeTableTip(anchor, tip, viewport), {
+  assert.deepEqual(placeCommentTip(anchor, tip, viewport), {
     side: "above",
     left: 300,
     top: 200 - TIP_GAP - tip.height,
@@ -23,13 +23,13 @@ test("the comment card sits above the table name, aligned with it", () => {
 
 test("the comment card drops below a name near the top edge", () => {
   const anchor = { left: 300, top: 20, bottom: 38 };
-  assert.deepEqual(placeTableTip(anchor, tip, viewport), { side: "below", left: 300, top: 38 + TIP_GAP });
+  assert.deepEqual(placeCommentTip(anchor, tip, viewport), { side: "below", left: 300, top: 38 + TIP_GAP });
 });
 
 test("the comment card stays inside the window horizontally", () => {
-  const right = placeTableTip({ left: 940, top: 300, bottom: 318 }, tip, viewport);
+  const right = placeCommentTip({ left: 940, top: 300, bottom: 318 }, tip, viewport);
   assert.equal(right.left, viewport.width - tip.width - TIP_MARGIN);
-  const left = placeTableTip({ left: -20, top: 300, bottom: 318 }, tip, viewport);
+  const left = placeCommentTip({ left: -20, top: 300, bottom: 318 }, tip, viewport);
   assert.equal(left.left, TIP_MARGIN);
 });
 

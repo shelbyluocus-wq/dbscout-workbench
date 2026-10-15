@@ -7,7 +7,7 @@ import { computed, onBeforeUnmount, watch } from "vue";
 import { ArrowRight, ChevronRight, LoaderCircle, SquareArrowOutUpRight } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { createIncomingRelationRows, fetchIncomingRelationRows } from "../incomingRelationRows.js";
-import TableCommentTip from "./TableCommentTip.vue";
+import CommentTip from "./CommentTip.vue";
 
 const props = defineProps({
   context: { type: Object, required: true },
@@ -17,6 +17,7 @@ const props = defineProps({
   counting: { type: Boolean, default: false },
   table: { type: String, required: true },
   tableComment: { type: String, default: "" },
+  columnComment: { type: String, default: "" },
   column: { type: String, required: true },
 });
 const emit = defineEmits(["open-row", "open-all"]);
@@ -46,7 +47,11 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
       >
         <ChevronRight :size="12" :stroke-width="2.2" class="wb-incoming-chevron" :class="{ 'is-open': state.expanded }" aria-hidden="true" />
         <span class="wb-incoming-title">
-          <TableCommentTip :name="table" :comment="tableComment"><span class="wb-incoming-table">{{ table }}</span></TableCommentTip><span class="wb-incoming-column">.{{ column }}</span>
+          <CommentTip :name="table" :comment="tableComment"><span class="wb-incoming-table">{{ table }}</span></CommentTip><span class="wb-incoming-column">.<CommentTip
+            field
+            :name="`${table}.${column}`"
+            :comment="columnComment"
+          >{{ column }}</CommentTip></span>
         </span>
         <span v-if="listKind" class="wb-incoming-tag">{{ t('relations.kindList') }}</span>
         <span v-if="counting" class="wb-incoming-count is-pending" role="status">

@@ -20,11 +20,15 @@ import {
   Undo2,
 } from "lucide-vue-next";
 import {
+  relationEndParts,
   relationEvidenceKey,
   relationEvidenceTitle,
   relationIsActionable,
   relationReasonLabel,
+  tableColumnComment,
+  tableDisplayName,
 } from "../utils/configRelations.js";
+import CommentTip from "./CommentTip.vue";
 import TableMentionText from "./TableMentionText.vue";
 import RelationStatusBadge from "./RelationStatusBadge.vue";
 import RelationEvidenceList from "./RelationEvidenceList.vue";
@@ -36,6 +40,9 @@ const props = defineProps({
   titleHint: { type: String, default: "" },
   // Current-database table index. Names in the title link only when present.
   tables: { type: Object, default: null },
+  // Backend lowercase-name -> { name, comment, columns } map; gives each
+  // field in the title its comment card.
+  labels: { type: Object, default: null },
   busy: { type: Boolean, default: false },
   // "outgoing" / "incoming" relative to the inspected table; picks the icon.
   direction: { type: String, default: "" },
@@ -52,9 +59,23 @@ const rejected = computed(() => props.relation.status === "rejected");
 const actionable = computed(() => relationIsActionable(props.relation));
 // Confirmed relations are the norm; only the exceptions carry a pill.
 const showStatus = computed(() => !rejected.value && props.relation.status !== "confirmed");
+// The title reads source → target; each end's field carries its comment.
+function titleEnd(text, table, column) {
+  return {
+    ...relationEndParts(text, column),
+    tipName: `${tableDisplayName(props.labels, table)}.${column}`,
+    comment: tableColumnComment(props.labels, table, column),
+  };
+}
+
 const ends = computed(() => {
   const [from, ...rest] = String(props.title || "").split(" → ");
-  return { from, to: rest.join(" → ") };
+  const to = rest.join(" → ");
+  const relation = props.relation;
+  return {
+    from: titleEnd(from, relation.sourceTable, relation.sourceColumn),
+    to: to ? titleEnd(to, relation.targetTable, relation.targetColumn) : null,
+  };
 });
 const leadIcon = computed(() => DIRECTION_ICONS[props.direction] || Link2);
 const evidence = computed(() => props.relation.evidence || []);
@@ -100,10 +121,16 @@ function onRowClick(event) {
       />
       <div class="wb-relation-card-copy">
         <div class="wb-relation-card-title" :title="titleHint || title">
-          <TableMentionText class="wb-relation-card-end" :text="ends.from" :tables="tables" @open="emit('open', $event)" />
-          <template v-if="ends.to">
-            <ArrowRight :size="11" :stroke-width="2.2" class="wb-relation-card-arrow" aria-hidden="true" />
-            <TableMentionText class="wb-relation-card-end" :text="ends.to" :tables="tables" @open="emit('open', $event)" />
+          <template v-for="(end, index) in [ends.from, ends.to]" :key="index">
+            <ArrowRight v-if="end && index" :size="11" :stroke-width="2.2" class="wb-relation-card-arrow" aria-hidden="true" />
+            <span v-if="end" class="wb-relation-card-end">
+              <TableMentionText v-if="end.prefix" :text="end.prefix" :tables="tables" @open="emit('open', $event)" /><CommentTip
+                v-if="end.column"
+                field
+                :name="end.tipName"
+                :comment="end.comment"
+              >{{ end.column }}</CommentTip>
+            </span>
           </template>
           <span v-if="relation.kind === 'list'" class="wb-relation-card-tag">{{ t('relations.kindList') }}</span>
           <RelationStatusBadge v-if="showStatus" :status="relation.status" />

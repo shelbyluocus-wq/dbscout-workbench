@@ -46,6 +46,24 @@ export function tableDisplayComment(tables, lowerName) {
   return tables?.[String(lowerName || "")]?.comment || "";
 }
 
+// The label map also carries the comments of the columns its relations use.
+export function tableColumnComment(tables, lowerName, column) {
+  return tables?.[String(lowerName || "")]?.columns?.[String(column || "").toLowerCase()] || "";
+}
+
+// One end of a relation title ("Table.column" or a bare "column") split so
+// the field can carry its own hover card. Text that does not end in the
+// column stays whole.
+export function relationEndParts(text, column) {
+  const value = String(text ?? "");
+  const field = String(column || "");
+  if (field && value.toLowerCase().endsWith(field.toLowerCase())) {
+    const prefix = value.slice(0, value.length - field.length);
+    if (!prefix || prefix.endsWith(".")) return { prefix, column: value.slice(prefix.length) };
+  }
+  return { prefix: value, column: "" };
+}
+
 export function relationTitle(relation, tables) {
   if (!relation) return "";
   const source = `${tableDisplayName(tables, relation.sourceTable)}.${relation.sourceColumn}`;

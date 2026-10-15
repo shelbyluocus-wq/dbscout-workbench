@@ -1,30 +1,33 @@
 <script>
-import { createTipWarmth } from "../utils/tableCommentTip.js";
+import { createTipWarmth } from "../utils/commentTip.js";
 
 // One warmth for every card, so moving between names feels continuous.
 const warmth = createTipWarmth();
 </script>
 
 <script setup>
-// Wraps a table name on the relation surfaces. Hovering it (or reaching it
-// with the keyboard) floats a small card with the table's comment, so the
-// lists stay as quiet as before and the purpose of a table is one glance
-// away. Without a comment, or outside an opted-in surface, it renders only
-// its content.
+// Wraps a table or field name on the relation surfaces. Hovering it (or
+// reaching it with the keyboard) floats a small card with its comment, so the
+// lists stay as quiet as before and what a table or field is for is one
+// glance away. Without a comment, or outside an opted-in surface, it renders
+// only its content.
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { useTableCommentTips } from "../composables/tableCommentTips.js";
-import { placeTableTip } from "../utils/tableCommentTip.js";
+import { useCommentTips } from "../composables/commentTips.js";
+import { placeCommentTip } from "../utils/commentTip.js";
 
 const props = defineProps({
+  // Shown quietly above the comment: "table" or "table.field".
   name: { type: String, default: "" },
   comment: { type: String, default: "" },
+  // A plain field name (not a link) hints at its card with a dotted underline.
+  field: { type: Boolean, default: false },
 });
 
-const enabled = useTableCommentTips();
+const enabled = useCommentTips();
 const text = computed(() => String(props.comment || "").trim());
 const active = computed(() => enabled && Boolean(text.value));
 
-const tipId = `wb-table-tip-${Math.random().toString(36).slice(2, 10)}`;
+const tipId = `wb-comment-tip-${Math.random().toString(36).slice(2, 10)}`;
 const anchor = ref(null);
 const card = ref(null);
 const visible = ref(false);
@@ -56,7 +59,7 @@ async function show() {
   listen(true);
   await nextTick();
   if (!visible.value || !card.value || !anchor.value) return;
-  placement.value = placeTableTip(anchor.value.getBoundingClientRect(), {
+  placement.value = placeCommentTip(anchor.value.getBoundingClientRect(), {
     width: card.value.offsetWidth,
     height: card.value.offsetHeight,
   }, {
@@ -101,7 +104,8 @@ onBeforeUnmount(hide);
   <span
     v-else
     ref="anchor"
-    class="wb-table-tip-anchor"
+    class="wb-comment-tip-anchor"
+    :class="{ 'is-field': field }"
     title=""
     @pointerenter="schedule"
     @pointerleave="hide"
@@ -115,24 +119,29 @@ onBeforeUnmount(hide);
       :id="tipId"
       ref="card"
       role="tooltip"
-      class="wb-table-tip wb-floating-themed"
+      class="wb-comment-tip wb-floating-themed"
       :data-theme="theme"
       :class="placement ? ['is-placed', `is-${placement.side}`] : ''"
       :style="placement ? { left: `${placement.left}px`, top: `${placement.top}px` } : null"
     >
-      <span class="wb-table-tip-name">{{ name }}</span>
-      <span class="wb-table-tip-comment">{{ text }}</span>
+      <span class="wb-comment-tip-name">{{ name }}</span>
+      <span class="wb-comment-tip-comment">{{ text }}</span>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
-.wb-table-tip-anchor {
+.wb-comment-tip-anchor {
   display: inline;
 }
 
+.wb-comment-tip-anchor.is-field:hover {
+  text-decoration: underline dotted color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 3px;
+}
+
 /* Measured hidden first, then placed and faded in beside the name. */
-.wb-table-tip {
+.wb-comment-tip {
   position: fixed;
   top: 0;
   left: 0;
@@ -154,16 +163,16 @@ onBeforeUnmount(hide);
   opacity: 0;
 }
 
-.wb-table-tip.is-placed {
+.wb-comment-tip.is-placed {
   visibility: visible;
-  animation: wb-table-tip-in var(--wb-duration-fast, 120ms) var(--wb-ease-out, ease-out) both;
+  animation: wb-comment-tip-in var(--wb-duration-fast, 120ms) var(--wb-ease-out, ease-out) both;
 }
 
-.wb-table-tip.is-below {
-  animation-name: wb-table-tip-in-below;
+.wb-comment-tip.is-below {
+  animation-name: wb-comment-tip-in-below;
 }
 
-.wb-table-tip-name {
+.wb-comment-tip-name {
   overflow: hidden;
   color: var(--wb-secondary-text);
   font-size: 10.5px;
@@ -173,7 +182,7 @@ onBeforeUnmount(hide);
   white-space: nowrap;
 }
 
-.wb-table-tip-comment {
+.wb-comment-tip-comment {
   display: -webkit-box;
   overflow: hidden;
   font-size: 12px;
@@ -183,18 +192,18 @@ onBeforeUnmount(hide);
   -webkit-line-clamp: 4;
 }
 
-@keyframes wb-table-tip-in {
+@keyframes wb-comment-tip-in {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes wb-table-tip-in-below {
+@keyframes wb-comment-tip-in-below {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wb-table-tip.is-placed {
+  .wb-comment-tip.is-placed {
     animation: none;
     opacity: 1;
   }

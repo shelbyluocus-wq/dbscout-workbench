@@ -72,6 +72,10 @@ pub struct TableLabel {
     /// Table name in database case, used to open it.
     pub name: String,
     pub comment: String,
+    /// Lowercase column name -> comment, for the columns the listed relations
+    /// use that have one, so a field can show its comment on hover.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub columns: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,20 +145,27 @@ pub struct ReviewList {
 }
 
 fn table_labels<'a>(snapshot: &DbSnapshot, views: impl Iterator<Item = &'a RelationView>) -> BTreeMap<String, TableLabel> {
-    let mut labels = BTreeMap::new();
+    let mut labels: BTreeMap<String, TableLabel> = BTreeMap::new();
     for view in views {
-        for table in [&view.key.source_table, &view.key.target_table] {
-            if labels.contains_key(table) {
+        let ends = [
+            (&view.key.source_table, &view.key.source_column),
+            (&view.key.target_table, &view.key.target_column),
+        ];
+        for (table, column) in ends {
+            let Some(meta) = snapshot.table(table) else {
+                continue;
+            };
+            let label = labels.entry(table.clone()).or_insert_with(|| TableLabel {
+                name: meta.name.clone(),
+                comment: meta.comment.clone(),
+                columns: BTreeMap::new(),
+            });
+            let lower = column.to_lowercase();
+            if label.columns.contains_key(&lower) {
                 continue;
             }
-            if let Some(meta) = snapshot.table(table) {
-                labels.insert(
-                    table.clone(),
-                    TableLabel {
-                        name: meta.name.clone(),
-                        comment: meta.comment.clone(),
-                    },
-                );
+            if let Some(found) = meta.column(column).filter(|found| !found.comment.trim().is_empty()) {
+                label.columns.insert(lower, found.comment.clone());
             }
         }
     }
@@ -376,6 +387,42 @@ mod tests {
                 "targetColumn": "ID",
                 "kind": "list",
                 "status": "stale",
+            })
+        );
+    }
+
+    #[test]
+    fn table_labels_carry_comments_of_the_columns_relations_use() {
+        use super::super::catalog::test_support::{snapshot, table};
+        use super::super::model::{RelationKind, StatusReason};
+        let mut hero = table("Hero", &[("ID", "int", "英雄ID", true), ("Skill_ID", "int", "技能", false), ("Name", "varchar", "名称", false)]);
+        hero.comment = "英雄表".into();
+        let skill = table("skill", &[("ID", "int", "", true)]);
+        let snapshot = snapshot(vec![hero, skill]);
+        let key = RelationKey {
+            source_table: "hero".into(),
+            source_column: "skill_id".into(),
+            target_table: "skill".into(),
+            target_column: "ID".into(),
+            kind: RelationKind::Value,
+        };
+        let view = RelationView {
+            id: key.id(),
+            key,
+            status: RelationStatus::Confirmed,
+            reason: StatusReason::MatchesCode,
+            is_new: false,
+            evidence: Vec::new(),
+            code_target: None,
+            decided_at: None,
+            disagreeing_code: Default::default(),
+        };
+        let json = serde_json::to_value(table_labels(&snapshot, [view].iter())).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "hero": { "name": "Hero", "comment": "英雄表", "columns": { "skill_id": "技能" } },
+                "skill": { "name": "skill", "comment": "" },
             })
         );
     }

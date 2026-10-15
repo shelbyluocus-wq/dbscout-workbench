@@ -82,7 +82,7 @@ test("the demo server opens bound to the jswz client with a little history to re
   assert.equal(passive.reason, "codeOnly");
   assert.equal(passive.isNew, false);
   assert.equal(byId(hero.outgoing, "hero.skill_id>skill.id").reason, "matchesCode");
-  assert.deepEqual(hero.tables.skill, { name: "skill", comment: "技能配置表" });
+  assert.deepEqual(hero.tables.skill, { name: "skill", comment: "技能配置表", columns: { id: "技能ID" } });
 
   const item = await call("config_relations_table", { table: "item" });
   assert.deepEqual(item.coverage.gaps.map((gap) => gap.code), ["untracedLookups"]);
@@ -176,7 +176,7 @@ test("the graph lists every relation of the database without evidence", async ()
   for (const relation of [...table.outgoing, ...table.incoming]) {
     assert.equal(byId(graph.edges, relation.id)?.status, relation.status);
   }
-  assert.deepEqual(graph.tables.skill, { name: "skill", comment: "技能配置表" });
+  assert.deepEqual(graph.tables.skill, { name: "skill", comment: "技能配置表", columns: { id: "技能ID" } });
 });
 
 test("list relations carry their data format as evidence", async () => {

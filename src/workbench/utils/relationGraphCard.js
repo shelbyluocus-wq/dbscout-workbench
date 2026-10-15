@@ -3,7 +3,7 @@
 // beneath and the worst status among them) and its self references. A
 // hovered card keeps a few tables per section; a pinned one can scroll, so
 // it lists many more before saying how many are left.
-import { tableDisplayComment, tableDisplayName } from "./configRelations.js";
+import { tableColumnComment, tableDisplayComment, tableDisplayName } from "./configRelations.js";
 import { graphNodeRelations, groupByOtherTable } from "./relationGraph.js";
 
 export const CARD_TABLES_PER_SECTION = Object.freeze({ hover: 4, pinned: 60 });
@@ -25,6 +25,11 @@ function cardSection(key, relations, id, { pinned, tables, currentTable }) {
         id: relation.id,
         from: relation.sourceColumn,
         to: relation.targetColumn,
+        // "table.field" and its comment, for the pinned card's hover cards.
+        fromName: `${tableDisplayName(tables, relation.sourceTable)}.${relation.sourceColumn}`,
+        fromComment: tableColumnComment(tables, relation.sourceTable, relation.sourceColumn),
+        toName: `${tableDisplayName(tables, relation.targetTable)}.${relation.targetColumn}`,
+        toComment: tableColumnComment(tables, relation.targetTable, relation.targetColumn),
         status: relation.status,
       })),
     })),

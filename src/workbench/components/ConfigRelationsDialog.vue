@@ -8,7 +8,7 @@ import { t } from "../i18n/index.js";
 import { computed, onMounted, ref, watch } from "vue";
 import { CircleCheck, Folder, FolderSearch, LoaderCircle, RefreshCw, TriangleAlert, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
-import { provideTableCommentTips } from "../composables/tableCommentTips.js";
+import { provideCommentTips } from "../composables/commentTips.js";
 import {
   clientDialectLabel,
   relationTitle,
@@ -25,7 +25,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "open-table"]);
-provideTableCommentTips();
+provideCommentTips();
 
 const dialogRef = ref(null);
 useEscClose(() => true, () => emit("close"), null, { dialogRef });
@@ -382,6 +382,7 @@ onMounted(async () => {
                 :relation="item"
                 detailed
                 :tables="mentionTables"
+                :labels="reviewTables"
                 :title="relationTitle(item, reviewTables)"
                 :title-hint="t('relations.action.openTable')"
                 :busy="pendingIds.has(item.id)"

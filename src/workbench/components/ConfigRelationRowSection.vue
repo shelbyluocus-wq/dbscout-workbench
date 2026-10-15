@@ -14,6 +14,7 @@ import {
   relationRelevantColumns,
   relationRowName,
   rowCellValue,
+  tableColumnComment,
   tableDisplayComment,
   tableDisplayName,
 } from "../utils/configRelations.js";
@@ -21,6 +22,7 @@ import { incomingRelationFilter } from "../incomingRelationRows.js";
 import RelationSectionHead from "./RelationSectionHead.vue";
 import TableMentionText from "./TableMentionText.vue";
 import IncomingRelationRows from "./IncomingRelationRows.vue";
+import CommentTip from "./CommentTip.vue";
 
 const props = defineProps({
   tab: { type: Object, default: null },
@@ -281,10 +283,18 @@ function targetTitle(target, relation) {
           </div>
           <div v-for="entry in outgoingRows" :key="entry.relation.id" class="wb-row-target">
             <div class="wb-row-target-head">
-              <span class="wb-row-target-column" :title="entry.relation.sourceColumn">{{ entry.relation.sourceColumn }}</span>
+              <span class="wb-row-target-column" :title="entry.relation.sourceColumn"><CommentTip
+                field
+                :name="`${sourceTableName(entry.relation)}.${entry.relation.sourceColumn}`"
+                :comment="tableColumnComment(tables, entry.relation.sourceTable, entry.relation.sourceColumn)"
+              >{{ entry.relation.sourceColumn }}</CommentTip></span>
               <ArrowRight :size="11" :stroke-width="2.2" class="wb-row-target-arrow" aria-hidden="true" />
               <span class="wb-row-target-table" :title="`${targetTableName(entry.relation)}.${entry.relation.targetColumn}`">
-                <TableMentionText :text="targetTableName(entry.relation)" :tables="mentionTables" @open="emit('open-table', $event)" /><span class="wb-row-target-key">.{{ entry.relation.targetColumn }}</span>
+                <TableMentionText :text="targetTableName(entry.relation)" :tables="mentionTables" @open="emit('open-table', $event)" /><span class="wb-row-target-key">.<CommentTip
+                  field
+                  :name="`${targetTableName(entry.relation)}.${entry.relation.targetColumn}`"
+                  :comment="tableColumnComment(tables, entry.relation.targetTable, entry.relation.targetColumn)"
+                >{{ entry.relation.targetColumn }}</CommentTip></span>
               </span>
               <button
                 v-if="entry.values.length > 1"
@@ -328,6 +338,7 @@ function targetTitle(target, relation) {
             :key="entry.relation.id"
             :table="sourceTableName(entry.relation)"
             :table-comment="tableDisplayComment(tables, entry.relation.sourceTable)"
+            :column-comment="tableColumnComment(tables, entry.relation.sourceTable, entry.relation.sourceColumn)"
             :column="entry.relation.sourceColumn"
             :count="entry.result ? entry.result.count : null"
             :counting="!entry.result"
@@ -360,7 +371,14 @@ function targetTitle(target, relation) {
           </button>
           <ul v-if="showUnreferenced" class="wb-relations-quiet-list">
             <li v-for="entry in unreferencedRows" :key="entry.relation.id">
-              <span class="wb-relations-quiet-table">{{ sourceTableName(entry.relation) }}</span>.{{ entry.relation.sourceColumn }}
+              <CommentTip
+                :name="sourceTableName(entry.relation)"
+                :comment="tableDisplayComment(tables, entry.relation.sourceTable)"
+              ><span class="wb-relations-quiet-table">{{ sourceTableName(entry.relation) }}</span></CommentTip>.<CommentTip
+                field
+                :name="`${sourceTableName(entry.relation)}.${entry.relation.sourceColumn}`"
+                :comment="tableColumnComment(tables, entry.relation.sourceTable, entry.relation.sourceColumn)"
+              >{{ entry.relation.sourceColumn }}</CommentTip>
             </li>
           </ul>
         </template>
