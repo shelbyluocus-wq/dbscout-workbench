@@ -651,7 +651,11 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   `useActivityRailSort.js`, Alt+Arrow from the keyboard) and the order persists
   in `dbscout_activity_rail_order`. New feature entries go in
   `useActivityRail.js`; the width is shared by `--wb-activity-rail-width` and
-  `ACTIVITY_RAIL_WIDTH`. The settings sheet itself stays in
+  `ACTIVITY_RAIL_WIDTH`. A fixed More button below the tool group opens a
+  right-side menu for database sync, sending tables, batch import/export and
+  relation review. It snapshots the focused page's database and home selection;
+  unsupported actions are disabled. `WorkbenchMoreMenu.vue` owns its popup.
+  The settings sheet itself stays in
   `WorkbenchSidebar.vue` and teleports to `<body>` anchored at the rail's
   bottom-left.
 - **Left pane** — Connection cards, database selector, search, virtualized table
@@ -704,7 +708,10 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   the active tab and more than 15 tables ask first. Delete (Backspace on
   macOS) deletes after a confirmation, F2 renames, Esc clears and Shift+F10
   opens the menu. Context menus show the key that does the same thing in that
-  place (`.wb-context-shortcut`, `aria-hidden`). Destructive confirmations
+  place (`.wb-context-shortcut`, `aria-hidden`). Text inputs get selection-aware
+  Copy/Paste before page menus, including in dialogs; `textInputClipboard.js`
+  preserves native insertion/undo and refuses stale asynchronous pastes. The
+  cell-detail editor retains its own draft-aware menu. Destructive confirmations
   focus Cancel; others focus the primary button. F5 is the rebindable
   `refresh` shortcut and must never fall through to a WebView reload.
 - **Safety layers** — Writes flow through backup (layer 1) + audit (layer 2); a

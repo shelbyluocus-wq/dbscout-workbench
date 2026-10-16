@@ -134,24 +134,25 @@ const contextMenuStyle = computed(() => ({
     v-if="open"
     ref="menuRef"
     class="wb-context-menu"
+    :class="{ 'wb-input-context-menu': surface === 'input' }"
     :style="contextMenuStyle"
     role="menu"
     tabindex="-1"
     :aria-label="t('m_1a94fed1be72')"
-    @mousedown.stop
+    @mousedown.stop="surface === 'input' && $event.preventDefault()"
     @click.stop
     @contextmenu.prevent.stop
     @keydown="handleKeydown"
   >
     <template v-if="canEditComment">
       <button type="button" role="menuitem" @click="emit('edit-comment')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_2d22af42a79f') }}</button>
-      <hr class="wb-context-separator" role="separator" />
+      <hr v-if="surface !== 'input'" class="wb-context-separator" role="separator" />
     </template>
     <template v-if="showClipboardActions">
       <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.copy }}</kbd></button>
       <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.paste }}</kbd></button>
       <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
-      <hr class="wb-context-separator" role="separator" />
+      <hr v-if="surface !== 'input'" class="wb-context-separator" role="separator" />
     </template>
     <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
@@ -203,7 +204,7 @@ const contextMenuStyle = computed(() => ({
     <!-- 通用操作组 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
-    <button type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
+    <button v-if="surface !== 'input'" type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
     <!-- 危险操作放最后 -->
     <button v-if="showSidebarTableActions" type="button" role="menuitem" class="danger" :disabled="!canDeleteTables" @click="emit('delete-tables')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.deleteTables', { count: tableCount }) : t('m_d545721cef25') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.deleteTables }}</kbd></button>
     <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e4e4e0ad5de1') }}</button>

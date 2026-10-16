@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, FileSpreadsheet, Link2, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -51,6 +51,7 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     hintKey: "shell.configRelationsHint",
     popup: "dialog",
   }),
+  Object.freeze({ id: "more", icon: Ellipsis, labelKey: "m_38844b135cf7", popup: "menu", controls: "wb-activity-more-menu", zone: "more" }),
   Object.freeze({
     id: "settings",
     icon: Settings,
@@ -167,5 +168,6 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
     if (typeof action === "function") action(...args);
   }
 
-  return { leadItems, items, bottomItems, select, reorder };
+  const moreItem = computed(() => toItem(entryById.get("more")));
+  return { leadItems, items, bottomItems, moreItem, select, reorder };
 }

@@ -192,8 +192,8 @@ export function useContextMenu(
     if (typeof action !== "function") return false;
     try {
       const result = await action();
-      if (result?.ok === false) {
-        if (result.message) statusText.value = result.message;
+      if (result === false || result?.ok === false) {
+        if (result?.message) statusText.value = result.message;
         return false;
       }
       statusText.value = successMessage;

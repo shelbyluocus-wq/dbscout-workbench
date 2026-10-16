@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "./i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { ArrowLeftToLine, ArrowRightToLine, CopyX, ListX, Pin, RefreshCw, X } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, Pin, RefreshCw, Send, Upload, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -165,6 +165,7 @@ import { applySchemaComment } from "./utils/applySchemaComment.js";
 import { useDatabaseSync } from "./composables/useDatabaseSync.js";
 import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableTransfer } from "./composables/useTableTransfer.js";
+import { textInputClipboard, usesNativeTextMenu } from "./utils/textInputClipboard.js";
 import { useActivityRail } from "./composables/useActivityRail.js";
 import { useConfigRelations } from "./composables/useConfigRelations.js";
 import { CONFIG_RELATION_CONTEXT } from "./composables/configRelationContext.js";
@@ -1082,6 +1083,7 @@ const {
   leadItems: activityRailLeadItems,
   items: activityRailItems,
   bottomItems: activityRailBottomItems,
+  moreItem: activityRailMoreItem,
   select: selectActivityRailEntry,
   reorder: reorderActivityRailEntry,
 } = useActivityRail({
@@ -1102,6 +1104,36 @@ const {
     settings: openSidebarSettings,
   },
 });
+
+// Keep the source stable while the menu is open, including home multi-selection.
+const moreSource = ref(null);
+const moreActions = computed(() => {
+  const source = moreSource.value || batchTransferSource(activeTab.value);
+  const hasDatabase = Boolean(source.connectionId && source.database);
+  const writable = hasDatabase && !isReadOnlySource(source);
+  return [
+    { id: "sync", icon: DatabaseZap, label: t("m_623281e9dfdb"), disabled: !writable || !sourceHasCapability("sync", source) },
+    { id: "send", icon: Send, label: t("m_8f211e16faf2"), disabled: !writable || !sourceHasCapability("tableCopy", source) },
+    { id: "import", icon: Upload, label: t("m_fd7719273970"), disabled: !writable || !sourceHasCapability("import", source) },
+    { id: "export", icon: Download, label: t("m_d2fcdde81f06"), disabled: !hasDatabase },
+    { id: "relations", icon: Link2, label: t("shell.configRelations"), disabled: !hasDatabase || !configRelationsAvailable(source.connectionId) },
+  ];
+});
+
+function openMoreActions() {
+  closeAllContextMenus();
+  moreSource.value = batchTransferSource(activeTab.value);
+}
+
+function selectMoreAction(id) {
+  const source = moreSource.value;
+  if (!source || moreActions.value.find((action) => action.id === id)?.disabled) return;
+  if (id === "sync") openDatabaseSync({ ...source, kind: "database" });
+  else if (id === "send") tableCopy.open({ ...source, tableNames: source.selectedTableNames });
+  else if (id === "import") void openBatchImport(source);
+  else if (id === "export") void openBatchExport(source);
+  else if (id === "relations") openConfigRelationsReview(source);
+}
 
 const tableCopy = useTableCopy({
   connections,
@@ -3702,6 +3734,37 @@ async function confirmRemoveConnection({ connectionId = "" } = {}) {
   pinnedDatabases.value = removePinnedDatabasesForConnection(connectionId, pinnedDatabases.value);
 }
 
+function dismissInputContextMenu(event) {
+  if (!contextMenu.open || contextMenu.surface !== "input") return;
+  if (event.type === "keydown") {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+  } else if (event.target?.closest?.(".wb-input-context-menu")) return;
+  closeContextMenu();
+}
+
+function openInputContextMenu(event) {
+  if (usesNativeTextMenu(event.target)) {
+    closeAllContextMenus();
+    event.stopPropagation();
+    return;
+  }
+  // The detail editor already supplies its own draft-aware clipboard actions.
+  if (event.target?.closest?.(".wb-detail-input")) return;
+  const clipboardActions = textInputClipboard(event.target, {
+    copyText: copyTextToClipboard,
+    readText: () => isTauriRuntime()
+      ? invokeWorkbench("read_clipboard_text")
+      : navigator.clipboard.readText(),
+  });
+  if (!clipboardActions) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeTabContextMenu();
+  openContextMenu(event, null, { surface: "input", menuHeight: 80, clipboardActions });
+}
+
 function openGeneralContextMenu(event) {
   closeTabContextMenu();
   openContextMenu(event);
@@ -4811,6 +4874,9 @@ onMounted(async () => {
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
   document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
+  document.addEventListener("contextmenu", openInputContextMenu, true);
+  document.addEventListener("pointerdown", dismissInputContextMenu, true);
+  document.addEventListener("keydown", dismissInputContextMenu, true);
   void windowPin.sync();
   // Re-register the global "open window" shortcut from the persisted binding
   // so a user-rebound combo takes effect this session instead of the Rust
@@ -4853,6 +4919,9 @@ onBeforeUnmount(() => {
   void disposeTableSessions();
   window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
+  document.removeEventListener("contextmenu", openInputContextMenu, true);
+  document.removeEventListener("pointerdown", dismissInputContextMenu, true);
+  document.removeEventListener("keydown", dismissInputContextMenu, true);
   databaseSync.dispose();
   backupCenter.dispose();
   tableTransfer.dispose();
@@ -5039,6 +5108,11 @@ onBeforeUnmount(() => {
         :lead-items="activityRailLeadItems"
         :items="activityRailItems"
         :bottom-items="activityRailBottomItems"
+        :more-item="activityRailMoreItem"
+        :theme="effectiveTheme"
+        :more-actions="moreActions"
+        @more-open="openMoreActions"
+        @more-select="selectMoreAction"
         :label="t('shell.activityRail')"
         @select="selectActivityRailEntry"
         @reorder="reorderActivityRailEntry"

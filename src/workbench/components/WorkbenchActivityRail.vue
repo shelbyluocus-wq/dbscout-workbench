@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, toRef } from "vue";
 import { useActivityRailSort } from "../composables/useActivityRailSort.js";
 import { retainPointerActivationChrome } from "../pointerActivationChrome.js";
+import WorkbenchMoreMenu from "./WorkbenchMoreMenu.vue";
 import WorkbenchActivityRailButton from "./WorkbenchActivityRailButton.vue";
 
 const props = defineProps({
@@ -9,9 +10,12 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   bottomItems: { type: Array, default: () => [] },
   label: { type: String, default: "" },
+  moreItem: { type: Object, default: null },
+  theme: { type: String, default: "light" },
+  moreActions: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(["select", "reorder"]);
+const emit = defineEmits(["select", "reorder", "more-open", "more-select"]);
 
 const sortGroupRef = ref(null);
 const sort = useActivityRailSort({
@@ -101,6 +105,9 @@ function sortableStyle(item, index) {
         @click="selectSortable(item, $event)"
       />
     </div>
+
+    <WorkbenchMoreMenu v-if="moreItem" :item="moreItem" :actions="moreActions" :theme="theme"
+      @open="emit('more-open')" @select="emit('more-select', $event)" />
 
     <div v-if="bottomItems.length" class="wb-activity-rail-bottom">
       <WorkbenchActivityRailButton

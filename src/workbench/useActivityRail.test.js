@@ -231,7 +231,7 @@ test("activity rail keeps the rail component inside the workbench before the sid
   assert.match(button, /:data-wb-rail-id="item\.id"/);
 
   assert.match(i18n, /"shell\.activityRail":\s*"功能入口"/);
-  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 7);
+  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 8);
 });
 
 test("activity rail badges reflect live counts, cap at 99+, and hide at zero", () => {
