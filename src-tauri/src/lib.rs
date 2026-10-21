@@ -114,6 +114,7 @@ pub fn run() {
             // Windows 10's undecorated shadow is a black frame on three sides;
             // drop it before the first reveal.
             window_frame::soften_main_window_frame(app.handle());
+            window_reveal::prepare_initial_window(app.handle());
             if !launch_headless {
                 window_reveal::reveal_main_window(app.handle());
             }

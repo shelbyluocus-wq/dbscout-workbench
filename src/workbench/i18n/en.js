@@ -936,6 +936,7 @@ export default Object.freeze({
   "m_3da29c4a3338": "Close Table Transfer",
   "m_fc621ca9bf0b": "Transfer template",
   "m_df3b0c3feaf7": "Conversion script",
+  "tableTransfer.macScriptHint": "Choose a .sh or .command conversion script",
   "m_c6aadb8f03ed": "Choose an .exe, .bat, or .lnk conversion script",
   "m_56675578a75d": "Conversion script path",
   "m_b902d80b8b41": "Choose script…",

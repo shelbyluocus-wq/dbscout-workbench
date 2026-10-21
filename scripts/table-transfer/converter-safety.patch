@@ -1,0 +1,29 @@
+--- a/genPropCli.ts
++++ b/genPropCli.ts
+@@ -60 +60 @@
+-            console.log(`_dbCli failed! _dbCfg[${JSON.stringify(this._dbCfg)}]`);
++            console.error("Database initialization failed.");
+@@ -71 +71 @@
+-            console.log(`tmpCfg failed! _dbCfg[${JSON.stringify(tmpCfg)}]`);
++            console.error("Metadata connection initialization failed.");
+@@ -79 +79 @@
+-                    console.log(`db getConnection failed! _dbCfg[${JSON.stringify(this._dbCfg)}]`);
++                    console.error("Database connection failed; check propcfg.json and network access.");
+@@ -122,0 +123,4 @@
++            if (tableCount === 0) {
++                console.error("No configuration tables found; refusing an empty export.");
++                return resolve(false);
++            }
+@@ -252,0 +257 @@
++        if (process.env.DBSCOUT_SKIP_CONFIG_ALARMS === "1") return;
+@@ -536 +541,9 @@
+-CGenProp.getInstance().init();
++CGenProp.getInstance().init().then(ok => {
++    if (!ok) {
++        console.error("Configuration generation failed; partial output must not be copied.");
++        exit(1);
++    }
++}).catch(() => {
++    console.error("Configuration generation failed; check database access and output permissions.");
++    exit(1);
++});

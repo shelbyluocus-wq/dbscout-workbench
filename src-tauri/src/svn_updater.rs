@@ -475,6 +475,14 @@ fn pick_windows_svn_exe(
 }
 
 fn find_svn_in_standard_locations() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        if let Some(home) = std::env::var_os("HOME") {
+            let local = PathBuf::from(home).join(".local/bin/svn");
+            if local.is_file() {
+                return Some(local);
+            }
+        }
+    }
     let locations: &[&str] = if cfg!(target_os = "macos") {
         &[
             "/opt/homebrew/bin/svn",

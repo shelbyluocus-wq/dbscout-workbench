@@ -2,6 +2,40 @@ use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
+/// Position once, while hidden. Later tray/dock reveals preserve the user's placement.
+pub(crate) fn prepare_initial_window<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if let Some(monitor) = window.current_monitor().ok().flatten()
+            .or_else(|| window.primary_monitor().ok().flatten())
+        {
+            let area = monitor.work_area();
+            let scale = monitor.scale_factor();
+            let (width, height) = initial_window_size(
+                area.size.width as f64 / scale,
+                area.size.height as f64 / scale,
+            );
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(
+                1120.0_f64.min(width), 720.0_f64.min(height),
+            )));
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            // Use the actual outer size so the native title bar also fits.
+            if let Ok(size) = window.outer_size() {
+                let x = area.position.x + (area.size.width.saturating_sub(size.width) / 2) as i32;
+                let y = area.position.y + (area.size.height.saturating_sub(size.height) / 2) as i32;
+                let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn initial_window_size(work_width: f64, work_height: f64) -> (f64, f64) {
+    ((work_width - 32.0).clamp(1.0, 1280.0), (work_height - 32.0).clamp(1.0, 820.0))
+}
+
 pub(crate) trait RevealWindowOps {
     fn reveal_show(&self);
     fn reveal_unminimize(&self);
@@ -52,6 +86,13 @@ pub(crate) fn toggle_main_window<R: Runtime>(app: &AppHandle<R>) {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn initial_size_fits_small_and_retina_work_areas() {
+        assert_eq!(initial_window_size(1440.0, 875.0), (1280.0, 820.0));
+        assert_eq!(initial_window_size(1280.0, 697.0), (1248.0, 665.0));
+        assert_eq!(initial_window_size(1024.0, 600.0), (992.0, 568.0));
+    }
 
     struct FakeWindow {
         calls: RefCell<Vec<&'static str>>,

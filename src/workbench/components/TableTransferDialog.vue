@@ -19,6 +19,8 @@ import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { TABLE_TRANSFER_TEMPLATE_NAME_MAX_LENGTH } from "../composables/useTableTransfer.js";
 
+import { isMacOSPlatform } from "../utils/desktopPlatform.js";
+
 const props = defineProps({
   transfer: { type: Object, required: true },
 });
@@ -348,7 +350,7 @@ async function deleteActiveTemplate() {
                 type="text"
                 :value="activeTemplate.scriptPath"
                 readonly
-                :placeholder="t('m_c6aadb8f03ed')"
+                :placeholder="t(isMacOSPlatform() ? 'tableTransfer.macScriptHint' : 'm_c6aadb8f03ed')"
                 :aria-label="t('m_56675578a75d')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickScript">

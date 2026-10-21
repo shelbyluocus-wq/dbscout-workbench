@@ -1,9 +1,9 @@
-//! 一键转表：运行用户选择的外部转表脚本（.exe/.bat/.cmd/.lnk），定位脚本
+//! 一键转表：运行 Windows 或 macOS 转表脚本，定位脚本
 //! 产出的时间戳配置包，对用户选择的游戏工程目录执行带自动冲突处理的 SVN
 //! 更新（等同于在该文件夹上点「SVN 更新」），最后把包内 `props` /
 //! `src/props` 合并覆盖进工程。
 //!
-//! 只支持 Windows（转表脚本本身是 Windows 工具链）；所有写操作限定在用户
+//! macOS 使用 Bash 执行 .sh/.command；所有写操作限定在用户
 //! 选择的脚本工作目录与游戏工程目录内。
 
 use std::collections::{HashMap, VecDeque};
@@ -201,6 +201,8 @@ pub async fn pick_script() -> Result<Option<String>, String> {
     let mut dialog = rfd::AsyncFileDialog::new().set_title("选择转表脚本");
     if cfg!(target_os = "windows") {
         dialog = dialog.add_filter("转表脚本", &["exe", "bat", "cmd", "lnk"]);
+    } else {
+        dialog = dialog.add_filter("转表脚本", &["sh", "command"]);
     }
     let file = dialog.pick_file().await;
     Ok(file.map(|file| file.path().to_string_lossy().to_string()))
@@ -549,6 +551,9 @@ async fn run_inner(
         ));
     }
     let strategy = parse_conflict_strategy(request.conflict_strategy.as_deref());
+    // Check the next stage before doing potentially expensive generation.
+    let svn_target = resolve_svn_update_dir(&project_root).to_path_buf();
+    let mut svn = SvnClient::for_working_copy(app, &svn_target).await?;
 
     // 1. 解析脚本（.lnk 先解析出真实目标），并启动。完整路径进日志，状态
     //    消息保持简短（对话框状态行空间有限）。
@@ -598,8 +603,6 @@ async fn run_inner(
     // 3. SVN 更新用户选择的游戏工程目录（等同于在资源管理器里对该文件夹
     //    点「SVN 更新」）。只更新 assets/props 与 src/props 时，工程里其它
     //    已提交改动不会被拉下来，日志会显示 At revision N，看起来像没更新。
-    let svn_target = resolve_svn_update_dir(&project_root).to_path_buf();
-    let mut svn = SvnClient::for_working_copy(app, &svn_target).await?;
     let props_dir = assets.join("props");
     let src_props_dir = assets.join("src").join("props");
     ensure_not_cancelled(guard)?;
@@ -709,13 +712,21 @@ impl ScriptLaunch {
 /// PowerShell COM 解析出目标/参数/工作目录；bat 类脚本的工作目录必须是
 /// 脚本所在目录，因为脚本内部普遍使用 `../../props` 这类相对路径。
 async fn resolve_script_launch(script: &Path) -> Result<ScriptLaunch, String> {
-    if !cfg!(target_os = "windows") {
-        return Err("一键转表仅支持 Windows（转表脚本是 Windows 工具链）".into());
-    }
     let extension = script
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    if !cfg!(target_os = "windows") {
+        if !matches!(extension.as_str(), "sh" | "command") {
+            return Err("Mac 转表请选择 .sh / .command 启动脚本，不能直接运行 Windows 脚本".into());
+        }
+        return Ok(ScriptLaunch {
+            program: script.to_path_buf(),
+            args: Vec::new(),
+            work_dir: script.parent().unwrap_or_else(|| Path::new(".")).to_path_buf(),
+            kind: ScriptKind::Batch,
+        });
+    }
     match extension.as_str() {
         "exe" => Ok(ScriptLaunch {
             program: script.to_path_buf(),
@@ -876,10 +887,16 @@ fn build_script_command(launch: &ScriptLaunch) -> tokio::process::Command {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn build_script_command(_launch: &ScriptLaunch) -> tokio::process::Command {
-    // 转表脚本仅支持 Windows（resolve_script_launch 已先行拒绝），此分支只
-    // 为保证非 Windows 平台可编译；直接返回一个立即失败的命令。
-    tokio::process::Command::new("false")
+fn build_script_command(launch: &ScriptLaunch) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("/bin/bash");
+    command.arg(&launch.program).args(&launch.args);
+    // Finder-launched apps do not inherit the user's interactive shell PATH.
+    let path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+    command.env("PATH", format!("{path}:{home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"));
+    #[cfg(unix)]
+    command.process_group(0);
+    command
 }
 
 /// 打开一份可被脚本进程和本进程同时使用的日志文件。Windows 必须显式
@@ -1550,7 +1567,7 @@ fn kill_process_tree(pid: u32) {
         let _ = command.status();
     } else {
         let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
+            .args(["-KILL", "--", &format!("-{pid}")])
             .status();
     }
 }
@@ -1559,6 +1576,76 @@ fn kill_process_tree(pid: u32) {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mac_script_runs_without_executable_permission_and_preserves_spaces() {
+        let temp = TestTempDir::create("mac-script");
+        let script = temp.path().join("convert tables.command");
+        std::fs::write(&script, "printf 'mac-output'; exit 7\n").unwrap();
+        let launch = resolve_script_launch(&script).await.unwrap();
+        let log = temp.path().join("output.log");
+        let mut child = spawn_script(&launch, &log).unwrap();
+        assert_eq!(child.wait().await.unwrap().code(), Some(7));
+        assert_eq!(std::fs::read_to_string(log).unwrap(), "mac-output");
+        assert!(resolve_script_launch(&temp.path().join("windows.bat")).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_mac_script_stops_its_children() {
+        let temp = TestTempDir::create("mac-cancel");
+        let script = temp.path().join("convert.command");
+        let heartbeat = temp.path().join("heartbeat");
+        std::fs::write(&script,
+            "(trap '' TERM; while true; do echo tick >> heartbeat; sleep 0.02; done) &\nwait\n"
+        ).unwrap();
+        let launch = resolve_script_launch(&script).await.unwrap();
+        let mut child = spawn_script(&launch, &temp.path().join("log")).unwrap();
+        for _ in 0..100 {
+            if heartbeat.exists() { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(heartbeat.exists());
+        kill_process_tree(child.id().unwrap());
+        tokio::time::timeout(Duration::from_secs(2), child.wait()).await.unwrap().unwrap();
+        let before = std::fs::read(&heartbeat).unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(before, std::fs::read(&heartbeat).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "requires local svn and svnadmin; only touches a temporary repository"]
+    async fn mac_transfer_local_svn_and_merge() {
+        let temp = TestTempDir::create("mac-transfer");
+        let repository = temp.path().join("repository");
+        let project = temp.path().join("游戏 工程");
+        let svn = |args: &[&str]| {
+            let output = std::process::Command::new("svn").args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        assert!(std::process::Command::new("svnadmin").arg("create").arg(&repository).status().unwrap().success());
+        svn(&["checkout", &format!("file://{}", repository.display()), project.to_str().unwrap()]);
+        std::fs::create_dir_all(project.join("assets/props")).unwrap();
+        std::fs::write(project.join("assets/props/keep.meta"), "preserve").unwrap();
+        svn(&["add", project.join("assets").to_str().unwrap()]);
+        svn(&["commit", "-m", "fixture", project.to_str().unwrap()]);
+        let script = temp.path().join("生成 配置.command");
+        std::fs::write(&script, "mkdir -p 'config/2026-10-21 01-02-03/props' 'config/2026-10-21 01-02-03/src/props'\nprintf '{}' > 'config/2026-10-21 01-02-03/props/sample.json'\nprintf 'export {}' > 'config/2026-10-21 01-02-03/src/props/sample.ts'\n").unwrap();
+        let started = SystemTime::now();
+        let launch = resolve_script_launch(&script).await.unwrap();
+        assert!(spawn_script(&launch, &temp.path().join("log")).unwrap().wait().await.unwrap().success());
+        let output = locate_output_dir(temp.path(), started).await.unwrap();
+        svn(&["update", "--non-interactive", "--accept", "postpone", project.to_str().unwrap()]);
+        let mut count = 0;
+        for relative in ["props", "src/props"] {
+            merge_copy_dir(&output.join(relative), &project.join("assets").join(relative), &mut count, None, &WorkCancellation::default()).unwrap();
+        }
+        assert_eq!(count, 2);
+        assert_eq!(std::fs::read_to_string(project.join("assets/props/keep.meta")).unwrap(), "preserve");
+        assert!(project.join("assets/src/props/sample.ts").is_file());
+    }
 
     static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1767,20 +1854,20 @@ mod tests {
     #[test]
     fn assets_dir_accepts_both_project_root_and_assets_layer() {
         assert_eq!(
-            resolve_assets_dir(Path::new("D:\\client\\jswz")),
-            PathBuf::from("D:\\client\\jswz\\assets")
+            resolve_assets_dir(Path::new("/client/jswz")),
+            PathBuf::from("/client/jswz/assets")
         );
         assert_eq!(
-            resolve_assets_dir(Path::new("D:\\client\\jswz\\assets")),
-            PathBuf::from("D:\\client\\jswz\\assets")
+            resolve_assets_dir(Path::new("/client/jswz/assets")),
+            PathBuf::from("/client/jswz/assets")
         );
         assert_eq!(
-            resolve_assets_dir(Path::new("D:\\client\\jswz\\Assets")),
-            PathBuf::from("D:\\client\\jswz\\Assets")
+            resolve_assets_dir(Path::new("/client/jswz/Assets")),
+            PathBuf::from("/client/jswz/Assets")
         );
         assert_eq!(
-            resolve_assets_dir(Path::new("D:\\Versions\\nzg")),
-            PathBuf::from("D:\\Versions\\nzg\\assets")
+            resolve_assets_dir(Path::new("/Versions/nzg")),
+            PathBuf::from("/Versions/nzg/assets")
         );
     }
 

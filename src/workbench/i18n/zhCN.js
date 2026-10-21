@@ -936,6 +936,7 @@ export default Object.freeze({
   "m_3da29c4a3338": "关闭一键转表窗口",
   "m_fc621ca9bf0b": "转表模板",
   "m_df3b0c3feaf7": "转表脚本",
+  "tableTransfer.macScriptHint": "选择 .sh / .command 转表脚本",
   "m_c6aadb8f03ed": "选择 .exe / .bat / .lnk 转表脚本",
   "m_56675578a75d": "转表脚本路径",
   "m_b902d80b8b41": "选择脚本…",

@@ -71,7 +71,8 @@ capabilities:
 - **One-click table transfer** — an activity-rail entry below the backup
   center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
   the conversion script
-  (`.exe/.bat/.cmd/.lnk`; `.lnk` resolved via PowerShell COM, script stdin is
+  (Windows: `.exe/.bat/.cmd/.lnk`; macOS: Bash `.sh/.command`, manually selected;
+  `.lnk` resolved via PowerShell COM, script stdin is
   nulled so a trailing `pause` can't hang it), locates the produced
   timestamped package (`YYYY-MM-DD HH-mm-ss`, possibly nested one level under
   a database-name folder, must contain `props` + `src/props`), svn-updates the

@@ -937,6 +937,7 @@ export default Object.freeze({
   "m_3da29c4a3338": "關閉一鍵轉表視窗",
   "m_fc621ca9bf0b": "轉表模板",
   "m_df3b0c3feaf7": "轉表指令碼",
+  "tableTransfer.macScriptHint": "選擇 .sh / .command 轉表指令碼",
   "m_c6aadb8f03ed": "選擇 .exe / .bat / .lnk 轉表指令碼",
   "m_56675578a75d": "轉表指令碼路徑",
   "m_b902d80b8b41": "選擇指令碼…",
