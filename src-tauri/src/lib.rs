@@ -149,8 +149,13 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    // Double-click the tray icon to reveal the window.
-                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                    // A single primary click opens and focuses the workbench;
+                    // secondary clicks remain available for the tray menu.
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event {
                         let app = tray.app_handle();
                         window_reveal::reveal_main_window(&app);
                     }
