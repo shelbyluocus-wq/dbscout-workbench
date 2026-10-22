@@ -126,8 +126,17 @@ pub fn run() {
             let show_item = tauri::menu::MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let quit_item = tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = tauri::menu::Menu::with_items(app, &[&show_item, &quit_item])?;
+            // macOS tints the transparent template for the menu bar's actual
+            // background, independently of the workbench's light/dark theme.
+            #[cfg(target_os = "macos")]
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/tray-template.png"
+            ))?;
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = app.default_window_icon().cloned().unwrap();
             let _tray = tauri::tray::TrayIconBuilder::new()
-                .icon(app.default_window_icon().cloned().unwrap())
+                .icon(tray_icon)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
