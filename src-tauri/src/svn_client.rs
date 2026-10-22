@@ -12,6 +12,8 @@ use tauri::{AppHandle, Manager};
 const PREFERENCES_FILE: &str = "svn-client-preferences.json";
 const INITIAL_ERROR_MARKER: &str = "svn: Initial SSL failure before client fallback:";
 static PREFERENCES_LOCK: Mutex<()> = Mutex::new(());
+const TRUSTED_SERVERS_FILE: &str = "svn-trusted-servers.json";
+const CERTIFICATE_EXCEPTION: &str = "--trust-server-cert-failures=unknown-ca,cn-mismatch,expired,not-yet-valid,other";
 
 pub(crate) struct SvnClient {
     primary: PathBuf,
@@ -20,6 +22,8 @@ pub(crate) struct SvnClient {
     switched: bool,
     preferences: Option<PathBuf>,
     server: Option<String>,
+    legacy_tls_config: Option<PathBuf>,
+    trust_certificate: bool,
 }
 
 impl SvnClient {
@@ -40,7 +44,7 @@ impl SvnClient {
             .app_config_dir()
             .ok()
             .map(|dir| dir.join(PREFERENCES_FILE));
-        if compatibility.is_none() {
+        if compatibility.is_none() && !cfg!(target_os = "macos") {
             return Ok(Self::new(primary, None, preferences, None));
         }
         // Local info does not contact the server. Never persist credentials or repository paths.
@@ -52,12 +56,18 @@ impl SvnClient {
         .ok()
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
-        Ok(Self::new(
+        let mut client = Self::new(
             primary,
             compatibility,
             preferences,
             url.as_deref(),
-        ))
+        );
+        #[cfg(target_os = "macos")]
+        if let (Some(server), Ok(directory)) = (&client.server, app.path().app_config_dir()) {
+            client.legacy_tls_config = legacy_tls_config(&directory, server);
+            client.trust_certificate = load_preferences(&directory.join(TRUSTED_SERVERS_FILE)).contains(server);
+        }
+        Ok(client)
     }
 
     fn new(
@@ -79,6 +89,8 @@ impl SvnClient {
             switched: false,
             preferences,
             server,
+            legacy_tls_config: None,
+            trust_certificate: false,
         }
     }
 
@@ -96,7 +108,30 @@ impl SvnClient {
         target: &Path,
         log: &(dyn Fn(String) + Sync),
     ) -> Result<Output, String> {
-        self.run_with(args, target, log, execute).await
+        let config = self.legacy_tls_config.clone();
+        let mut args = args.to_vec();
+        if (config.is_some() || self.trust_certificate) && args.first() == Some(&"update") {
+            // An external can point at another server; never give it this server's TLS policy.
+            args.push("--ignore-externals");
+            log("正在使用此服务器专用的连接配置，本次不更新外部引用。".into());
+        }
+        if self.trust_certificate {
+            args.push(CERTIFICATE_EXCEPTION);
+            if args.first() == Some(&"update") {
+                log("已按你的授权信任此 SVN 服务器的证书，仅对此服务器生效。".into());
+            }
+        }
+        let output = self.run_with(&args, target, log, |program, args| {
+            let config = config.clone();
+            async move { execute_with_config(program, args, config.as_deref()).await }
+        }).await?;
+        if !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("E230001") {
+            log("SVN 服务器证书未通过校验。请先由管理员核对证书并配置受信任证书；黑猫不会自动忽略证书错误。".into());
+        }
+        if !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("E215004") {
+            log("已连接 SVN 服务器，但当前 SVN 客户端没有可用的登录凭据。Cairn 内保存的账号密码不会自动共享给黑猫，请先为此客户端登录。".into());
+        }
+        Ok(output)
     }
 
     async fn run_with<F, Fut>(
@@ -164,15 +199,34 @@ fn command_args(args: &[&str], target: &Path) -> Vec<OsString> {
 }
 
 async fn execute(program: PathBuf, args: Vec<OsString>) -> Result<Output, String> {
+    execute_with_config(program, args, None).await
+}
+
+async fn execute_with_config(program: PathBuf, args: Vec<OsString>, config: Option<&Path>) -> Result<Output, String> {
     let mut command = tokio::process::Command::new(program);
+    if let Some(config) = config {
+        command.env("OPENSSL_CONF", config);
+    }
     #[cfg(target_os = "windows")]
     command.creation_flags(0x0800_0000);
+    // Finder/Dock launches may have no locale (or a non-UTF-8 LC_ALL). SVN
+    // otherwise misdecodes Chinese paths before checking the working copy.
+    #[cfg(target_os = "macos")]
+    command.env("LANG", "en_US.UTF-8").env("LC_ALL", "en_US.UTF-8");
     command
         .args(args)
         .kill_on_drop(true)
         .output()
         .await
         .map_err(|error| format!("执行 SVN 失败: {error}"))
+}
+
+// Explicit local opt-in by exact HTTPS origin. No automatic downgrade for arbitrary servers.
+fn legacy_tls_config(directory: &Path, server: &str) -> Option<PathBuf> {
+    let content = std::fs::read(directory.join("svn-legacy-tls.json")).ok()?;
+    let profiles: std::collections::BTreeMap<String, PathBuf> = serde_json::from_slice(&content).ok()?;
+    let path = profiles.get(server)?;
+    (path.is_absolute() && path.is_file()).then(|| path.clone())
 }
 
 fn is_ssl_communication_error(error: &str) -> bool {
@@ -245,6 +299,76 @@ fn save_preference(path: &Path, server: &str, compatibility: bool) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_tls_profile_is_exact_origin_and_requires_existing_absolute_file() {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(&fixture.directory).unwrap();
+        let config = fixture.directory.join("legacy.cnf");
+        std::fs::write(&config, "openssl_conf = default_conf\n").unwrap();
+        std::fs::write(fixture.directory.join("svn-legacy-tls.json"),
+            serde_json::to_vec(&serde_json::json!({"https://svn.example.test": config})).unwrap()).unwrap();
+        assert_eq!(legacy_tls_config(&fixture.directory, "https://svn.example.test"), Some(config));
+        assert!(legacy_tls_config(&fixture.directory, "https://svn.example.test:444").is_none());
+        assert!(legacy_tls_config(&fixture.directory, "https://other.example.test").is_none());
+        assert!(legacy_tls_config(&fixture.directory, "http://svn.example.test").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn legacy_tls_update_excludes_externals_and_never_bypasses_certificates() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(&fixture.directory).unwrap();
+        let program = fixture.directory.join("svn");
+        std::fs::write(&program, "#!/bin/sh\nprintf '%s\\n' \"$OPENSSL_CONF\" \"$@\"\necho 'svn: E230001: certificate not trusted' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut client = SvnClient::new(program, None, None, Some("https://svn.example.test/repo"));
+        client.legacy_tls_config = Some(fixture.directory.join("legacy.cnf"));
+        let output = client.run(&["update", "--non-interactive"], Path::new("project"), &|_| {}).await.unwrap();
+        assert!(!output.status.success());
+        let args = String::from_utf8(output.stdout).unwrap();
+        assert!(args.contains("legacy.cnf"));
+        assert!(args.contains("--ignore-externals"));
+        assert!(!args.contains("--trust-server-cert"));
+        client.trust_certificate = true;
+        let output = client.run(&["update", "--non-interactive"], Path::new("project"), &|_| {}).await.unwrap();
+        let args = String::from_utf8(output.stdout).unwrap();
+        assert!(args.contains(CERTIFICATE_EXCEPTION));
+        assert!(args.contains("--ignore-externals"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn mac_svn_process_has_an_explicit_utf8_locale() {
+        let output = execute("/usr/bin/env".into(), Vec::new()).await.unwrap();
+        assert!(output.status.success());
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(environment.lines().any(|line| line == "LANG=en_US.UTF-8"));
+        assert!(environment.lines().any(|line| line == "LC_ALL=en_US.UTF-8"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "requires svn and svnadmin; run with LANG/LC_ALL unset and with LC_ALL=C"]
+    async fn mac_svn_updates_chinese_paths_through_production_runner() {
+        let fixture = Fixture::new();
+        std::fs::create_dir_all(&fixture.directory).unwrap();
+        let repo = fixture.directory.join("repository");
+        let project = fixture.directory.join("客户端 with spaces");
+        let output = execute("svnadmin".into(), vec!["create".into(), repo.as_os_str().to_owned()]).await.unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let url = format!("file://{}", repo.display());
+        for args in [
+            command_args(&["checkout", &url, "--non-interactive"], &project),
+            command_args(&["info", "--show-item", "wc-root"], &project),
+            command_args(&["update", "--non-interactive", "--accept", "postpone"], &project),
+            command_args(&["status", "--non-interactive"], &project),
+        ] {
+            let output = execute("svn".into(), args).await.unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
 
     struct Fixture {
         directory: PathBuf,
