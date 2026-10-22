@@ -1193,6 +1193,9 @@ export function replaceTabPage(state, tabId, pageData = {}) {
   if (!tab) return null;
   tab.sessionId = String(pageData.sessionId ?? tab.sessionId ?? "");
   assignTabColumns(tab, Array.isArray(pageData.columns) ? pageData.columns : []);
+  if ("tableComment" in pageData || "table_comment" in pageData) {
+    tab.tableComment = pageData.tableComment ?? pageData.table_comment ?? "";
+  }
   replaceTabRows(tab, rowsWithRestoredNulls(pageData));
   const primaryKeysChanged = replacePrimaryKeysFromPage(tab, pageData);
   tab.totalRows = coerceNonNegativeInteger(pageData.totalRows, 0);

@@ -78,7 +78,7 @@ test("late background and ordinary schema responses cannot restore a comment sav
   installLocalStorage();
   const workspace = createWorkspaceState();
   const pending = deferred();
-  const schema = (comment) => ({ table_name: "shopprop", columns: [{ column_name: "OpenCond", column_comment: comment }] });
+  const schema = (comment) => ({ table_name: "shopprop", table_comment: comment, columns: [{ column_name: "OpenCond", column_comment: comment }] });
   const conn = useConnection(workspace, async (command, payload = {}) => {
     if (command === "select_database") return { tables: [{ table_name: "shopprop" }] };
     if (command === "get_table_schemas") return payload.force ? [schema("conditionopencondprop")] : pending.promise;
@@ -93,9 +93,53 @@ test("late background and ordinary schema responses cannot restore a comment sav
     const late = await ordinary;
     await flushAsync();
     assert.equal(workspace.schema[0].columns[0].column_comment, "conditionopencondprop");
+    assert.equal(workspace.schema[0].table_comment, "conditionopencondprop");
+    assert.equal(workspace.tables[0].table_comment, "conditionopencondprop");
     assert.equal(late.columns[0].column_comment, "conditionopencondprop");
   } finally {
     pending.resolve([]);
+    conn.dispose();
+  }
+});
+
+test("live table comments survive cached schema loads and forced refresh updates both lists", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  let comment = "Original";
+  let background = deferred();
+  const conn = useConnection(workspace, async (command, payload = {}) => {
+    if (command === "select_database") return { tables: [{ table_name: "items", table_comment: comment }] };
+    if (command === "list_tables") return [{ table_name: "items", table_comment: comment }];
+    if (command === "get_table_schemas") return payload.force
+      ? [{ table_name: "items", table_comment: comment, columns: [{ column_name: "id" }] }]
+      : background.promise;
+    return {};
+  });
+  try {
+    await conn.selectDatabase({ connectionId: "mysql-1", database: "game" });
+    background.resolve([{ table_name: "items", table_comment: "Cached", columns: [{ column_name: "id" }] }]);
+    await flushUntil(() => workspace.schema[0]?.schemaLoaded);
+    assert.equal(workspace.schema[0].table_comment, "Original");
+    for (const updated of ["External", ""]) {
+      comment = updated;
+      background = deferred();
+      await conn.loadTables();
+      assert.equal(workspace.schema[0].table_comment, updated);
+      background.resolve([{ table_name: "items", table_comment: "Cached", columns: [{ column_name: "id" }] }]);
+      await flushUntil(() => workspace.schema[0]?.schemaLoaded);
+      await conn.ensureTableSchema("items");
+      assert.equal(workspace.schema[0].table_comment, updated);
+      assert.equal(workspace.schema[0].tableComment, updated);
+    }
+    for (const updated of ["Forced external", ""]) {
+      comment = updated;
+      await conn.ensureTableSchema("items", { force: true });
+      assert.equal(workspace.schema[0].table_comment, updated);
+      assert.equal(workspace.tables[0].table_comment, updated);
+      assert.equal(workspace.tables[0].tableComment, updated);
+    }
+  } finally {
+    background.resolve([]);
     conn.dispose();
   }
 });

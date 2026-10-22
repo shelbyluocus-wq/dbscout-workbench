@@ -1082,6 +1082,21 @@ test("closeConnectionTabs removes tabs across all databases for a connection", (
   assert.equal(state.activeTabId, other.id);
 });
 
+test("replaceTabPage updates and clears comments but preserves them when omitted", () => {
+  const state = createWorkspaceState();
+  const tab = openTableTab(state, { tableName: "items", tableComment: "Original" });
+  const other = openTableTab(state, { tableName: "other", tableComment: "Unchanged" });
+  replaceTabPage(state, tab.id, { tableComment: "External" });
+  assert.equal(tab.tableComment, "External");
+  replaceTabPage(state, tab.id, {});
+  assert.equal(tab.tableComment, "External");
+  replaceTabPage(state, tab.id, { table_comment: "Snake case" });
+  assert.equal(tab.tableComment, "Snake case");
+  replaceTabPage(state, tab.id, { tableComment: "" });
+  assert.equal(tab.tableComment, "");
+  assert.equal(other.tableComment, "Unchanged");
+});
+
 test("replaceTabPage stores paged rows without mutating other tabs", () => {
   const state = createWorkspaceState();
   const first = openTableTab(state, { tableName: "items" });

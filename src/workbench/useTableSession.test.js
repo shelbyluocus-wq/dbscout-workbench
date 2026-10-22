@@ -10,16 +10,18 @@ import { ensureTabRowStore } from "./rowStore.js";
 test("explicit refresh reads external columns before fetching rows, ordinary paging keeps the cache", async () => {
   const workspace = reactive(createWorkspaceState({ connectionId: "demo", database: "game_db" }));
   let columns = [{ name: "id" }];
+  let tableComment = "Original comment";
   const calls = [];
   const session = useTableSession(workspace, async (command) => {
     calls.push(command);
-    return { sessionId: "s1", columns, rows: [], totalRows: 0, page: 1, pageSize: 100, hasMore: false };
+    return { sessionId: "s1", tableComment, columns, rows: [], totalRows: 0, page: 1, pageSize: 100, hasMore: false };
   }, {
     statusText: ref(""),
     ensureTableSchema: async (_, options) => {
       if (options.force) {
         calls.push("refresh-schema");
         columns = [{ name: "id" }, { name: "external_field" }];
+        tableComment = "External comment";
       }
     },
   });
@@ -28,11 +30,35 @@ test("explicit refresh reads external columns before fetching rows, ordinary pag
   calls.length = 0;
   await session.fetchPage(tab, 1, { refreshSchema: true });
   assert.deepEqual(tab.columns.map((column) => column.name), ["id", "external_field"]);
+  assert.equal(tab.tableComment, "External comment");
   assert.deepEqual(calls, ["refresh-schema", "fetch_table_page"]);
   calls.length = 0;
   await session.fetchPage(tab, 2);
   assert.deepEqual(calls, ["fetch_table_page"]);
   await session.dispose();
+});
+
+test("refresh updates and clears comments while showing search results without page metadata", async () => {
+  const workspace = createWorkspaceState({ connectionId: "demo", database: "game_db" });
+  const tab = openTableTab(workspace, { tableName: "hero", tableComment: "Original" });
+  tab.sessionId = "s1";
+  tab.searchResultMode = true;
+  tab.searchResultQuery = "needle";
+  let comment = "External";
+  const session = useTableSession(workspace, async (command) => {
+    if (command === "get_table_schemas") return [{ table_name: "hero", table_comment: comment }];
+    if (command === "begin_table_search") return { rows: [], complete: true };
+    return {};
+  }, { statusText: ref("") });
+  try {
+    assert.equal((await session.fetchPage(tab, 1, { refreshSchema: true })).ok, true);
+    assert.equal(tab.tableComment, "External");
+    comment = "";
+    assert.equal((await session.fetchPage(tab, 1, { refreshSchema: true })).ok, true);
+    assert.equal(tab.tableComment, "");
+  } finally {
+    await session.dispose();
+  }
 });
 
 test("a slow schema refresh cannot replace a newer page, and failure retains the visible columns", async () => {

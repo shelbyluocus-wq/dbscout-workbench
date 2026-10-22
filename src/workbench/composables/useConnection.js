@@ -152,11 +152,17 @@ function schemaPlaceholder(table, connectionId, database, readOnly = false) {
   };
 }
 
-function sourcedSchema(schema, connectionId, database, readOnly = false, tableMetadata = null) {
+function sourcedSchema(schema, connectionId, database, readOnly = false, tableMetadata = null, force = false) {
   const columnCount = Array.isArray(schema?.columns) ? schema.columns.length : (schema?.columnCount ?? schema?.column_count ?? null);
+  // The table list is live; ordinary schema reads may still come from cache.
+  const schemaComment = schema?.table_comment ?? schema?.tableComment;
+  const tableComment = tableMetadata?.table_comment ?? tableMetadata?.tableComment;
+  const comment = (force ? schemaComment ?? tableComment : tableComment ?? schemaComment) ?? "";
   return {
     ...(tableMetadata || {}),
     ...schema,
+    table_comment: comment,
+    tableComment: comment,
     connectionId: connectionId || "",
     database: database || "",
     readOnly: Boolean(readOnly || schema?.readOnly),
@@ -858,9 +864,15 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         database,
         isReadOnlyConnection(connectionId),
         index >= 0 ? workspace.schema[index] : null,
+        force,
       );
       if (index >= 0) workspace.schema[index] = nextSchema;
       else workspace.schema.push(nextSchema);
+      if (force) {
+        workspace.tables = workspace.tables.map((table) => normalizeTableName(table) === tableName
+          ? { ...table, table_comment: nextSchema.table_comment, tableComment: nextSchema.table_comment }
+          : table);
+      }
     }
     return schema;
   }

@@ -830,12 +830,17 @@ export function useTableSession(
       tab.loadingMore = false;
       try {
         const source = { connectionId: tab.connectionId, database: tab.database, force: true };
+        let schema;
         if (typeof sharedEnsureTableSchema === "function") {
-          await sharedEnsureTableSchema(tab.tableName, source);
+          schema = await sharedEnsureTableSchema(tab.tableName, source);
         } else {
-          await invokeWorkbench("get_table_schemas", { ...source, tableNames: [tab.tableName] });
+          [schema] = await invokeWorkbench("get_table_schemas", { ...source, tableNames: [tab.tableName] });
         }
         if (!findTabById(tab.id) || !isCurrentTabRequest(tab.id, refreshToken)) return { ok: false, stale: true };
+        // Search result pages do not carry the table's comment.
+        if (schema && ("table_comment" in schema || "tableComment" in schema)) {
+          tab.tableComment = schema.table_comment ?? schema.tableComment ?? "";
+        }
       } catch (error) {
         if (!isCurrentTabRequest(tab.id, refreshToken)) return { ok: false, stale: true };
         const message = `刷新字段失败：${String(error?.message || error)}`;
