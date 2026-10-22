@@ -1203,6 +1203,42 @@ test("pointer drag from a trailing insert cell uses rendered visual coordinates 
   assert.equal(editor.selectedRange.value.focus.rowIndex, 1);
 });
 
+for (const reverse of [false, true]) {
+  test(`insert input focus preserves a ${reverse ? "reverse" : "forward"} drag before and after mouseup`, () => {
+    const { editor, tab } = createEditor();
+    const first = editor.insertDraftBelow(tab, 0);
+    const second = editor.insertDraftBelow(tab, { row: { __insertRowId: first.id } });
+    const [source, target] = reverse ? [second, first] : [first, second];
+    const sourceIndex = editor.visualRowEntries(tab).visualIndexOfInsert(source.id);
+    const targetIndex = editor.visualRowEntries(tab).visualIndexOfInsert(target.id);
+    const sourceColumn = reverse ? 2 : 1;
+    const targetColumn = reverse ? 1 : 2;
+    editor.startRangeSelection(tab, { __insertRowId: source.id }, tab.columns[sourceColumn].column_name,
+      sourceIndex, sourceColumn, { button: 0, preventDefault() {} });
+    editor.extendRangeSelection(tab, { __insertRowId: target.id }, tab.columns[targetColumn].column_name,
+      targetIndex, targetColumn);
+    const range = editor.selectedRange.value;
+
+    editor.handleInsertCellFocus(tab, target.id, targetColumn);
+    assert.equal(editor.selectedRange.value, range);
+    assert.equal(editor.isSelectingRange.value, true);
+    editor.finishRangeSelection();
+    editor.handleInsertCellFocus(tab, target.id, targetColumn);
+    assert.equal(editor.selectedRange.value, range);
+    assert.deepEqual(selectedCoordinates(editor, tab), ["1:1", "1:2", "2:1", "2:2"]);
+  });
+}
+
+test("focusing a different insert cell still selects it", () => {
+  const { editor, tab } = createEditor();
+  const row = editor.insertDraftBelow(tab, 0);
+  editor.handleInsertCellFocus(tab, row.id, 2);
+  assert.equal(editor.selectedCell.value.rowKey, editor.getInsertRowKey(tab, row.id));
+  assert.equal(editor.selectedCell.value.column, "guild");
+  assert.equal(editor.selectedRange.value.anchor.columnIndex, 2);
+  assert.equal(editor.selectedRange.value.focus.columnIndex, 2);
+});
+
 test("pointer drag does not refresh or animate while staying inside the same non-edge cell", () => {
   let animationRequests = 0;
   globalThis.requestAnimationFrame = () => {
@@ -5937,6 +5973,86 @@ test("dragging the fill handle writes a WPS number series", async () => {
   assert.match(statusText.value, /已填充 3 个单元格/);
   assert.equal(editor.fillOptions.value?.appliedMode, "series");
   assert.equal(editor.selectedRange.value.focus.rowIndex, 3);
+});
+
+test("upward fill keeps the whole range selected for another fill and batch undo", async () => {
+  const { editor, tab, editState, invokeCalls, clipboard } = createEditor({
+    columns: [
+      { column_name: "id", is_primary_key: true },
+      { column_name: "level" },
+    ],
+  });
+  tab.rows = [
+    { id: "1", level: "a" },
+    { id: "2", level: "b" },
+    { id: "3", level: "c" },
+    { id: "4", level: "10" },
+  ];
+  pointerSelect(editor, tab, 3, 1);
+  editor.startFillDrag({ preventDefault() {} });
+  editor.extendFillTo(1, 1);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["1:1", "2:1", "3:1"]);
+  assert.equal((await editor.finishFillDrag()).ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["a", "8", "9", "10"]);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["1:1", "2:1", "3:1"]);
+  assert.equal(updatedCellCount(invokeCalls), 2);
+  await editor.handleGridKeydown({ key: "c", ctrlKey: true, preventDefault() {} });
+  assert.equal(clipboard.text, "8\n9\n10");
+
+  editor.startFillDrag({ preventDefault() {} });
+  editor.extendFillTo(0, 1);
+  assert.equal((await editor.finishFillDrag()).ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["7", "8", "9", "10"]);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1", "3:1"]);
+
+  const undoStatus = { value: "" };
+  const undo = useUndo(editState, async (command, payload) => (
+    command === "update_cells"
+      ? { updated: payload?.request?.rows?.length || 0, conflict: false }
+      : { updated: true, conflict: false }
+  ), computed(() => tab), { statusText: undoStatus });
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => tab.rows[0].level === "a", "second upward fill should undo");
+  undo.handleUndoKeydown({ key: "z", ctrlKey: true, shiftKey: false, preventDefault() {} });
+  await waitForTestCondition(() => editState.activeHistoryEntries.size === 0, "first upward fill should undo as a batch");
+  assert.deepEqual(tab.rows.map((row) => row.level), ["a", "b", "c", "10"]);
+});
+
+for (const { direction, sourceRow, sourceColumn, targetRow, targetColumn, expected } of [
+  { direction: "left", sourceRow: 1, sourceColumn: 2, targetRow: 1, targetColumn: 0, expected: ["1:0", "1:1", "1:2"] },
+  { direction: "right", sourceRow: 1, sourceColumn: 0, targetRow: 1, targetColumn: 2, expected: ["1:0", "1:1", "1:2"] },
+]) {
+  test(`${direction} fill keeps every filled cell selected`, async () => {
+    const { editor, tab } = createEditor();
+    pointerSelect(editor, tab, sourceRow, sourceColumn);
+    editor.startFillDrag({ preventDefault() {} });
+    editor.extendFillTo(targetRow, targetColumn);
+    assert.equal((await editor.finishFillDrag()).ok, true);
+    assert.deepEqual(selectedCoordinates(editor, tab), expected);
+  });
+}
+
+test("upward copy fill can switch to a series without losing its selection", async () => {
+  const { editor, tab } = createEditor();
+  pointerSelect(editor, tab, 2, 1);
+  editor.startFillDrag({ preventDefault() {}, ctrlKey: true });
+  editor.extendFillTo(0, 1);
+  assert.equal((await editor.finishFillDrag()).ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["14", "14", "14"]);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1"]);
+  assert.equal((await editor.applyFillOption("series")).ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["12", "13", "14"]);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1"]);
+});
+
+test("filling a reverse-selected block preserves its full source and target range", async () => {
+  const { editor, tab } = createEditor();
+  pointerSelect(editor, tab, 1, 2);
+  pointerSelect(editor, tab, 0, 1, { shiftKey: true });
+  editor.startFillDrag({ preventDefault() {}, ctrlKey: true });
+  editor.extendFillTo(2, 2);
+  assert.equal((await editor.finishFillDrag()).ok, true);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "0:2", "1:1", "1:2", "2:1", "2:2"]);
 });
 
 test("Ctrl fill copies values and the option switcher can change to a series", async () => {

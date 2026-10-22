@@ -167,7 +167,7 @@ async function waitForInputValue(input, expected, timeoutMs = 2_000) {
   assert.equal(actual, expected);
 }
 
-async function assertNativeInputContextMenu(page, input) {
+async function assertInputContextMenu(page, input) {
   await page.evaluate(() => {
     window.__wbContextMenuPrevented = null;
     document.addEventListener("contextmenu", (event) => {
@@ -176,8 +176,13 @@ async function assertNativeInputContextMenu(page, input) {
   });
   await input.click({ button: "right" });
   await page.waitForFunction(() => window.__wbContextMenuPrevented !== null);
-  assert.equal(await page.evaluate(() => window.__wbContextMenuPrevented), false);
-  assert.equal(await page.locator(".wb-context-menu").isVisible().catch(() => false), false);
+  assert.equal(await page.evaluate(() => window.__wbContextMenuPrevented), true);
+  const menu = page.locator(".wb-input-context-menu");
+  await menu.waitFor();
+  assert.equal(await menu.getByRole("menuitem").count(), 2);
+  assert.equal(await menu.getByRole("menuitem", { name: "粘贴", exact: true }).isEnabled(), true);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden" });
 }
 
 async function assertInputDoesNotStartGridDrag(input) {
@@ -255,6 +260,35 @@ try {
   page.on("pageerror", (error) => consoleErrors.push(String(error)));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   let grid = await openPlayerGrid(page);
+
+  const fillRows = Array.from({ length: 5 }, (_, index) => page.locator(`tr[data-row-selection-index="${index}"]`));
+  const fillBefore = await Promise.all(fillRows.map((row) => cellValues(row, [3])));
+  const fillSource = Number(fillBefore[4][0]);
+  const fillCell = (row) => fillRows[row].locator('td[data-column-index="3"]');
+  const waitForFillValues = (values) => Promise.all(fillRows.map((row, index) => waitForValues(row, [3], [values[index]])));
+  const fillUpValues = [fillBefore[0][0], String(fillSource - 3), String(fillSource - 2), String(fillSource - 1), String(fillSource)];
+  await fillCell(4).click();
+  await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(1));
+  await waitForFillValues(fillUpValues);
+  await waitForCellSelection(page, ["1:3", "2:3", "3:3", "4:3"]);
+
+  // A second upward drag must extend the entire first result.
+  await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(0));
+  await waitForFillValues([String(fillSource - 4), ...fillUpValues.slice(1)]);
+  await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3", "4:3"]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForFillValues(fillUpValues);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForFillValues(fillBefore.map(([value]) => value));
+
+  await fillCell(0).click();
+  await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(3));
+  const fillDownSource = Number(fillBefore[0][0]);
+  await waitForFillValues([String(fillDownSource), String(fillDownSource + 1), String(fillDownSource + 2), String(fillDownSource + 3), fillBefore[4][0]]);
+  await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3"]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForFillValues(fillBefore.map(([value]) => value));
+  console.log("Upward/downward fill, continued upward drag, selection and batch undo passed.");
 
   // Selecting a cell focuses its hidden IME input. Clipboard events from that
   // input must paste into the grid, not disappear into the empty input.
@@ -373,9 +407,11 @@ try {
   await waitForValues(secondInsertRow, [1, 2], ["beta", "two"]);
   assert.equal(await page.locator("tr.wb-insert-row").count(), 2, "bounded paste must not create an overflow insert row");
 
-  const allColumnIndexes = await grid.locator("thead [data-column-index]").evaluateAll((cells) => (
-    cells.map((cell) => Number(cell.dataset.columnIndex)).filter(Number.isInteger)
-  ));
+  // Row copy includes off-screen fields omitted by column virtualization.
+  const allColumnIndexes = Array.from(
+    { length: Number(await grid.getAttribute("aria-colcount")) - 1 },
+    (_, index) => index,
+  );
   const expectedFullRows = [firstInsertRow, secondInsertRow]
     .map(async (row) => (await cellValues(row, allColumnIndexes)).join("\t"));
   const fullRowTsv = (await Promise.all(expectedFullRows)).join("\n");
@@ -440,7 +476,7 @@ try {
   const insertInput = inputPasteCell.locator("input");
   await insertInput.waitFor();
   await assertInputDoesNotStartGridDrag(insertInput);
-  await assertNativeInputContextMenu(page, insertInput);
+  await assertInputContextMenu(page, insertInput);
   await writeClipboard(page, "input_a\tinput_nick_a\ninput_b\tinput_nick_b");
   await insertInput.press(shortcut("V"));
   const generatedInputRow = page.locator('tr.wb-insert-row[data-row-selection-index="2"]');
@@ -456,7 +492,7 @@ try {
   const savedInput = editableSavedCell.locator("input");
   await savedInput.waitFor();
   await assertInputDoesNotStartGridDrag(savedInput);
-  await assertNativeInputContextMenu(page, savedInput);
+  await assertInputContextMenu(page, savedInput);
   await savedInput.press(shortcut("A"));
   await savedInput.type("temporary_value");
   await savedInput.press(shortcut("S"));

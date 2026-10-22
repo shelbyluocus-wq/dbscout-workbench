@@ -1811,7 +1811,7 @@ export function useGridEditor(
     const range = selectedRange.value;
     selectedRange.value = createGridSelection(
       tab.id,
-      range?.tabId === tab.id ? range.anchor : start.position,
+      start.position,
       end.position,
       { shiftAnchor: range?.tabId === tab.id ? range.shiftAnchor || range.anchor : start.position },
     );
@@ -2497,6 +2497,14 @@ export function useGridEditor(
         || gridWrapRef.value?.querySelector(`input[data-insert-column-index="${columnIndex}"]`);
       (input || gridWrapRef.value)?.focus?.();
     });
+  }
+
+  function handleInsertCellFocus(tab, rowId, columnIndex) {
+    // Standby inputs follow the active cell without replacing a dragged range.
+    if (isSelectingRange.value || isFilling.value) return;
+    const column = columnName(tab?.columns?.[columnIndex]);
+    if (selectedInsertCellMatches(tab, rowId, column)) return;
+    selectInsertCell(tab, rowId, columnIndex, { scrollColumn: false });
   }
 
   function selectInsertCell(tab, rowIdOrColumnIndex, maybeColumnIndex, options = {}) {
@@ -4715,6 +4723,7 @@ export function useGridEditor(
     // navigation
     navigateCell,
     selectInsertCell,
+    handleInsertCellFocus,
     insertDraftAbove,
     insertDraftBelow,
     insertDraftsAbove,

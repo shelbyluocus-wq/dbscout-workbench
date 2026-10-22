@@ -298,6 +298,7 @@ const {
   cancelEditing,
   navigateCell,
   selectInsertCell,
+  handleInsertCellFocus,
   insertDraftAbove: createInsertDraftAbove,
   insertDraftBelow: createInsertDraftBelow,
   insertDraftsAbove: createInsertDraftsAbove,
@@ -1841,7 +1842,7 @@ onMounted(() => emitPaneState());
       @toggle-all-rows="toggleAllGridRows"
       @insert-input="updateInsertDraft"
       @insert-paste="pasteIntoInsertInput"
-      @insert-focus="selectInsertCell"
+      @insert-focus="handleInsertCellFocus"
       @insert-keydown="handleInsertKeydown"
       @insert-row-select="selectGridInsertRow"
       @save-insert-row="saveInsertDraftRow"
