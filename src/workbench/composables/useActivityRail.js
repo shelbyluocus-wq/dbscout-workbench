@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plus, Search, Settings, ShieldCheck, Workflow } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -42,6 +42,13 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     labelKey: "m_a36603b169a6",
     hintKey: "shell.tableTransferHint",
     shortcutAction: "openTableTransfer",
+    popup: "dialog",
+  }),
+  Object.freeze({
+    id: "releaseWorkflow",
+    icon: Workflow,
+    labelKey: "release.title",
+    hintKey: "release.hint",
     popup: "dialog",
   }),
   Object.freeze({

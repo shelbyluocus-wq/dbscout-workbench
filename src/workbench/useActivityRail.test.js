@@ -15,7 +15,7 @@ test("activity rail pins add connection on top, lists the tool group, then pins 
   assert.deepEqual(leadItems.value.map((item) => item.id), ["addConnection"]);
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "configRelations"],
+    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "releaseWorkflow", "configRelations"],
   );
   assert.deepEqual(
     bottomItems.value.map((item) => item.id),
@@ -156,11 +156,11 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("tableTransfer", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "configRelations"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseWorkflow", "configRelations"],
   );
   assert.equal(
     storage.getItem("dbscout_activity_rail_order"),
-    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "configRelations"]),
+    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseWorkflow", "configRelations"]),
   );
 
   // Fixed zones never join the sortable order.
@@ -168,14 +168,14 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("settings", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "configRelations"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseWorkflow", "configRelations"],
   );
 
   // A fresh composable on the same storage restores the custom order.
   const restored = useActivityRail({ storage });
   assert.deepEqual(
     restored.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "configRelations"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseWorkflow", "configRelations"],
   );
 });
 
@@ -188,7 +188,7 @@ test("activity rail order drops unknown ids and re-inserts missing entries at th
   // Stored ids keep their relative order; missing defaults re-insert at their slot.
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen", "configRelations"],
+    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen", "releaseWorkflow", "configRelations"],
   );
 });
 
@@ -199,7 +199,7 @@ test("activity rail ignores corrupt or absent stored order", () => {
     });
     assert.deepEqual(
       rail.items.value.map((item) => item.id),
-      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "configRelations"],
+      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "releaseWorkflow", "configRelations"],
       `stored=${stored}`,
     );
   }
@@ -231,7 +231,7 @@ test("activity rail keeps the rail component inside the workbench before the sid
   assert.match(button, /:data-wb-rail-id="item\.id"/);
 
   assert.match(i18n, /"shell\.activityRail":\s*"功能入口"/);
-  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 8);
+  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 9);
 });
 
 test("activity rail badges reflect live counts, cap at 99+, and hide at zero", () => {

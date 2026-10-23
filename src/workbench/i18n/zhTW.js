@@ -1,5 +1,6 @@
 // Application-owned interface messages in Traditional Chinese (Taiwan).
 // Never translate user data.
+import { releaseZhTW } from "./releaseWorkflowMessages.js";
 export default Object.freeze({
   "m_a49b9e3cc423": "展開全部連線",
   "m_809ec93960dd": "收合全部連線",
@@ -1697,5 +1698,6 @@ export default Object.freeze({
   "tableTransfer.builtInTemplateHint": "內建模板，會自動尋找轉表指令碼和遊戲專案（按兩下重新命名）",
   "tableTransfer.customTemplateHint": "{name}（按兩下重新命名）",
   "tableTransfer.deleteTemplateMessage": "確定刪除模板「{name}」？",
-  "tableTransfer.deleteTemplateNote": "只會刪除這個模板儲存的指令碼、專案路徑和衝突設定，不會更動磁碟上的檔案。"
+  "tableTransfer.deleteTemplateNote": "只會刪除這個模板儲存的指令碼、專案路徑和衝突設定，不會更動磁碟上的檔案。",
+  ...releaseZhTW,
 });

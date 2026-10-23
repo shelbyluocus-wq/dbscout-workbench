@@ -106,6 +106,20 @@ capabilities:
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
   Path rows have a Browse button that reveals the script/project in Explorer.
+- **Release workflow demo** — the activity-rail Release workspace opens a
+  lazy-loaded, guided rehearsal for one platform at a time: preparation,
+  database availability planning, SVN/client copy and table conversion, Cocos
+  build, GM uploads/scheduling, then maintenance/restart/check/reopen. All
+  execution is explicitly simulated: `releaseWorkflowState.js` and
+  `useReleaseWorkflow.js` have no backend bridge, network or filesystem calls.
+  Platform-specific drafts and results persist under `dbscout_release_demo_v1`;
+  changing an earlier input invalidates downstream results. Existing transfer
+  templates are read-only choices, never executed. Sample identifiers and paths
+  must stay synthetic. Keep real integrations behind a separately reviewed
+  execution boundary rather than replacing simulation callbacks silently.
+  Checks: `node --test src/workbench/releaseWorkflow.test.js` and
+  `node scripts/test-release-workflow-browser.mjs` against a Vite server
+  (`DBSCOUT_RELEASE_TEST_URL`, default `http://127.0.0.1:1431`).
 - **Config relations** — for game-config databases the workbench works out
   which config tables reference each other from three evidence sources:
   database column comments, a static scan of the bound game client's source
