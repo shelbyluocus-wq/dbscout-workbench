@@ -16,7 +16,8 @@ use std::sync::Arc;
 use super::catalog::DbSnapshot;
 use super::code_scan::CodeScanReport;
 use super::comments;
-use super::formats::FormatFinding;
+use super::formats::TableFormats;
+use super::parser::ReferenceParser;
 use super::model::{
     CoverageGap, Evidence, RelationKey, RelationKind, RelationStatus, RelationView, StatusReason,
     StatusTotals, TableCoverage, UntracedSample,
@@ -47,7 +48,7 @@ pub struct Inputs<'a> {
     pub snapshot: &'a DbSnapshot,
     pub code: &'a CodeState,
     /// Lowercase table name -> list-format columns found in its data.
-    pub formats: &'a BTreeMap<String, Vec<FormatFinding>>,
+    pub formats: &'a BTreeMap<String, TableFormats>,
     pub formats_pending: bool,
     pub record: Option<&'a ServerRecord>,
     pub now: &'a str,
@@ -59,6 +60,10 @@ struct Candidate {
     code: Vec<Evidence>,
     fingerprints: BTreeSet<String>,
     format: Option<String>,
+    parser: Option<ReferenceParser>,
+    encoded: bool,
+    rule: Option<String>,
+    source_constraints: Vec<super::constraints::RowConstraint>,
 }
 
 impl Candidate {
@@ -69,6 +74,7 @@ impl Candidate {
             .map(|text| Evidence::Comment { text: text.clone() })
             .collect::<Vec<_>>();
         evidence.extend(self.code.iter().cloned());
+        if let Some(text) = &self.rule { evidence.push(Evidence::Rule { text: text.clone() }); }
         if let Some(sample) = &self.format {
             evidence.push(Evidence::Format {
                 sample: sample.clone(),
@@ -91,18 +97,42 @@ fn push_unique(list: &mut Vec<String>, text: &str) {
 
 fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
     let mut candidates: BTreeMap<RelationKey, Candidate> = BTreeMap::new();
+    let mut profiles = inputs.formats.clone();
+    // Metadata-declared formats work on first paint, before background sampling.
+    for (name, table) in &inputs.snapshot.tables {
+        profiles.entry(name.clone()).or_insert_with(|| {
+            let mut profile = TableFormats::default();
+            for column in table.columns.iter().filter(|column| column.is_text()) {
+                if !table.primary_keys.contains(&column.name) {
+                    profile.inspect(column, &[], inputs.snapshot);
+                    super::project_formats::inspect(name, column, &[], inputs.snapshot, &mut profile);
+                }
+            }
+            profile
+        });
+    }
     let mut list_columns = HashSet::new();
-    for (table, findings) in inputs.formats {
-        for finding in findings {
-            list_columns.insert((table.clone(), finding.column.to_lowercase()));
+    for (table, profile) in &profiles {
+        for finding in &profile.findings {
+            if finding.kind == RelationKind::List {
+                list_columns.insert((table.clone(), finding.column.to_lowercase()));
+            }
             let key = RelationKey {
                 source_table: table.clone(),
                 source_column: finding.column.clone(),
                 target_table: finding.target_table.clone(),
                 target_column: finding.target_column.clone(),
-                kind: RelationKind::List,
+                kind: finding.kind,
             };
-            candidates.entry(key).or_default().format = Some(finding.sample.clone());
+            let candidate = candidates.entry(key).or_default();
+            candidate.format = (!finding.sample.is_empty()).then(|| finding.sample.clone());
+            candidate.parser = finding.parser.clone();
+            candidate.encoded = profile.replaced.contains(&finding.column.to_lowercase());
+            if profile.replaced.contains(&finding.column.to_lowercase()) || finding.sample.is_empty() {
+                if let Some(column) = inputs.snapshot.table(table).and_then(|table| table.column(&finding.column)) {
+                    push_unique(&mut candidate.comments, &column.comment);
+                }
+            }
         }
     }
     if let Some(report) = inputs.code.report() {
@@ -117,13 +147,26 @@ fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
             ) else {
                 continue;
             };
-            let key = RelationKey {
+            let profile = profiles.get(&relation.source_table.to_lowercase());
+            let replacement = profile.is_some_and(|profile| profile.replaced.contains(&source_column.to_lowercase()));
+            let found = candidates.keys().find(|key| {
+                key.source_table.eq_ignore_ascii_case(&relation.source_table)
+                    && key.source_column.eq_ignore_ascii_case(source_column)
+                    && key.target_table.eq_ignore_ascii_case(&relation.target_table)
+                    && key.target_column.eq_ignore_ascii_case(target_column)
+            }).cloned();
+            if replacement && found.is_none() {
+                continue;
+            }
+            let key = found.unwrap_or_else(|| RelationKey {
                 source_table: relation.source_table.to_lowercase(),
                 source_column: source_column.to_string(),
                 target_table: relation.target_table.to_lowercase(),
                 target_column: target_column.to_string(),
-                kind: RelationKind::Value,
-            };
+                kind: if list_columns.contains(&(relation.source_table.to_lowercase(), source_column.to_lowercase())) {
+                    RelationKind::List
+                } else { RelationKind::Value },
+            });
             let candidate = candidates.entry(key).or_default();
             if candidate.fingerprints.insert(relation.fingerprint.clone()) {
                 candidate.code.push(Evidence::Code {
@@ -139,6 +182,9 @@ fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
     for (table_name, table) in &inputs.snapshot.tables {
         for column in &table.columns {
             let text = column.comment.trim();
+            if profiles.get(table_name).is_some_and(|profile| profile.replaced.contains(&column.name.to_lowercase())) {
+                continue;
+            }
             let kind = if list_columns.contains(&(table_name.clone(), column.name.to_lowercase())) {
                 RelationKind::List
             } else {
@@ -195,6 +241,29 @@ fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
         !(format_only
             && commented_sources.contains(&(key.source_table.clone(), key.source_column.to_lowercase())))
     });
+    for (key, candidate) in &mut candidates {
+        if candidate.parser.is_none() {
+            candidate.parser = profiles.get(&key.source_table)
+                .and_then(|profile| profile.columns.get(&key.source_column.to_lowercase())).cloned();
+        }
+    }
+    if super::project_formats::matches_schema(inputs.snapshot) {
+        candidates.retain(|key, _| !super::project_relations::suppressed(key));
+        for rule in super::project_relations::rules(inputs.snapshot) {
+            let comment = inputs.snapshot.table(&rule.key.source_table)
+                .and_then(|table| table.column(&rule.key.source_column)).map(|column| column.comment.as_str());
+            let candidate = candidates.entry(rule.key).or_default();
+            if let Some(comment) = comment.filter(|comment| !comment.is_empty()) {
+                push_unique(&mut candidate.comments, comment);
+            }
+            candidate.rule = Some(rule.note);
+            if rule.parser.is_some() {
+                candidate.parser = rule.parser;
+            }
+            candidate.source_constraints = rule.constraints;
+            candidate.encoded = true;
+        }
+    }
     candidates
 }
 
@@ -211,7 +280,7 @@ fn disagreement(
     candidate: &Candidate,
     candidates: &BTreeMap<RelationKey, Candidate>,
 ) -> Option<Disagreement> {
-    if candidate.comments.is_empty() || !candidate.code.is_empty() {
+    if candidate.comments.is_empty() || !candidate.code.is_empty() || candidate.encoded {
         return None;
     }
     let mut found: Option<Disagreement> = None;
@@ -284,6 +353,7 @@ impl Verdicts<'_> {
                     (RelationStatus::Confirmed, StatusReason::Manual)
                 }
             }
+            None if candidate.rule.is_some() => (RelationStatus::Confirmed, StatusReason::ProjectRule),
             None if disagreement.is_some() => (RelationStatus::Conflict, StatusReason::CommentConflict),
             None if agrees => {
                 self.record(&id, key, candidate, true);
@@ -306,6 +376,8 @@ impl Verdicts<'_> {
         RelationView {
             id,
             key: key.clone(),
+            parser: candidate.parser.clone(),
+            source_constraints: candidate.source_constraints.clone(),
             status,
             reason,
             is_new,
@@ -355,6 +427,8 @@ impl Verdicts<'_> {
         Some(RelationView {
             id: id.to_string(),
             key: key.clone(),
+            parser: None,
+            source_constraints: Vec::new(),
             status,
             reason,
             is_new: false,
@@ -372,6 +446,7 @@ pub struct RelationIndex {
     by_source: HashMap<String, Vec<usize>>,
     by_target: HashMap<String, Vec<usize>>,
     untraced: HashMap<String, (usize, Vec<UntracedSample>)>,
+    unsupported_fields: HashMap<String, Vec<String>>,
     used_tables: Option<BTreeSet<String>>,
     code_gap: Option<CoverageGap>,
     formats_pending: bool,
@@ -397,14 +472,48 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
     for (key, candidate) in &candidates {
         let id = key.id();
         let found = disagreement(key, candidate, &candidates);
-        relations.push(verdicts.view(key, candidate, decisions.get(&id), found));
+        let decision = decisions.get(&id).or_else(|| decisions.values().find(|decision| {
+            let old = &decision.relation;
+            same_source(key, old) && key.target_table == old.target_table
+                && key.target_column.eq_ignore_ascii_case(&old.target_column)
+        }));
+        relations.push(verdicts.view(key, candidate, decision, found));
         relation_ids.insert(id);
     }
     for (id, decision) in decisions {
         if relation_ids.contains(id) {
             continue;
         }
-        if let Some(view) = verdicts.orphan(id, decision, inputs.snapshot) {
+        let source = &decision.relation;
+        if super::project_formats::matches_schema(inputs.snapshot) && super::project_relations::suppressed(source) {
+            if decision.auto { continue; }
+            if let Some(mut view) = verdicts.orphan(id, decision, inputs.snapshot) {
+                view.parser = Some(ReferenceParser::Unsupported);
+                view.status = RelationStatus::Stale;
+                view.reason = StatusReason::EvidenceGone;
+                relations.push(view);
+            }
+            continue;
+        }
+        let replaced = inputs.formats.get(&source.source_table)
+            .is_some_and(|profile| profile.replaced.contains(&source.source_column.to_lowercase()))
+            || inputs.snapshot.table(&source.source_table)
+                .and_then(|table| table.column(&source.source_column))
+                .is_some_and(|column| super::formats::condition_column(column, inputs.snapshot));
+        let same_target = candidates.keys().any(|key| same_source(key, source)
+            && key.target_table == source.target_table && key.target_column.eq_ignore_ascii_case(&source.target_column));
+        if same_target || (decision.auto && replaced) {
+            continue;
+        }
+        if let Some(mut view) = verdicts.orphan(id, decision, inputs.snapshot) {
+            view.parser = if replaced {
+                // Preserve manual history without continuing an obsolete
+                // literal lookup of a newly understood encoded expression.
+                Some(ReferenceParser::Unsupported)
+            } else {
+                inputs.formats.get(&source.source_table)
+                    .and_then(|profile| profile.columns.get(&source.source_column.to_lowercase())).cloned()
+            };
             relations.push(view);
         }
     }
@@ -413,6 +522,7 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
         by_source: HashMap::new(),
         by_target: HashMap::new(),
         untraced: HashMap::new(),
+        unsupported_fields: HashMap::new(),
         used_tables: inputs.code.report().map(|report| report.used_tables.clone()),
         code_gap: match inputs.code {
             CodeState::NoClient => Some(CoverageGap::NoClient),
@@ -441,6 +551,20 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
             .entry(view.key.target_table.clone())
             .or_default()
             .push(position);
+    }
+    for (name, table) in &inputs.snapshot.tables {
+        let mut columns = Vec::new();
+        let unsupported_relations = index.outgoing(name).into_iter()
+            .filter(|view| view.parser == Some(ReferenceParser::Unsupported))
+            .map(|view| view.key.source_column.to_lowercase()).collect::<HashSet<_>>();
+        for column in &table.columns {
+            let unsupported = column.name.to_ascii_lowercase().ends_with("func")
+                || inputs.formats.get(name).and_then(|profile| profile.columns.get(&column.name.to_lowercase()))
+                    == Some(&ReferenceParser::Unsupported)
+                || unsupported_relations.contains(&column.name.to_lowercase());
+            if unsupported { columns.push(column.name.clone()); }
+        }
+        if !columns.is_empty() { index.unsupported_fields.insert(name.clone(), columns); }
     }
     if let Some(report) = inputs.code.report() {
         for lookup in &report.untraced {
@@ -514,6 +638,9 @@ impl RelationIndex {
         if self.formats_pending && !gaps.iter().any(|gap| matches!(gap, CoverageGap::Analyzing)) {
             gaps.push(CoverageGap::Analyzing);
         }
+        if let Some(columns) = self.unsupported_fields.get(&table) {
+            gaps.push(CoverageGap::UnsupportedFields { columns: columns.clone() });
+        }
         TableCoverage {
             complete: gaps.is_empty(),
             gaps,
@@ -542,6 +669,19 @@ mod tests {
                 ],
             ),
         ])
+    }
+
+    #[test]
+    fn function_only_tables_do_not_claim_complete_relation_coverage() {
+        let snapshot = snapshot(vec![table("dynamicprop", &[("RewardFunc", "text", "", false)])]);
+        let code = CodeState::Ready(Arc::new(CodeScanReport {
+            used_tables: BTreeSet::from(["dynamicprop".into()]), ..CodeScanReport::default()
+        }));
+        let index = assemble(&Inputs { snapshot: &snapshot, code: &code, formats: &BTreeMap::new(),
+            formats_pending: false, record: None, now: "test" });
+        let coverage = index.coverage("dynamicprop");
+        assert!(!coverage.complete);
+        assert!(matches!(&coverage.gaps[0], CoverageGap::UnsupportedFields { columns } if columns == &["RewardFunc"]));
     }
 
     fn code(source: (&str, &str), target: (&str, &str), fingerprint: &str) -> CodeRelation {
@@ -577,15 +717,17 @@ mod tests {
         }))
     }
 
-    fn goods_formats() -> BTreeMap<String, Vec<FormatFinding>> {
+    fn goods_formats() -> BTreeMap<String, TableFormats> {
         BTreeMap::from([(
             "rewardprop".to_string(),
-            vec![FormatFinding {
+            TableFormats { findings: vec![super::super::formats::FormatFinding {
                 column: "Items".into(),
                 target_table: "goodsprop".into(),
                 target_column: "ID".into(),
                 sample: r#"[{"ID":1,"Num":2}]"#.into(),
-            }],
+                kind: RelationKind::List,
+                parser: None,
+            }], ..TableFormats::default() },
         )])
     }
 
@@ -683,6 +825,44 @@ mod tests {
             target_column: "ID".into(),
             kind: RelationKind::Value,
         }
+    }
+
+    #[test]
+    fn changing_a_scalar_to_a_list_preserves_manual_verdict_without_duplicate_orphans() {
+        let old = RelationKey {
+            source_table: "rewardprop".into(), source_column: "Items".into(),
+            target_table: "goodsprop".into(), target_column: "ID".into(), kind: RelationKind::Value,
+        };
+        let mut record = confirmed(old.clone(), &[], false);
+        for verdict in [Verdict::Confirmed, Verdict::Rejected] {
+            record.decisions.get_mut(&old.id()).unwrap().verdict = verdict;
+            let index = assemble_with(&report(Vec::new()), Some(&record));
+            assert!(index.find(&old.id()).is_none());
+            let current = index.find("rewardprop.items[]>goodsprop.id").unwrap();
+            assert_eq!(current.decided_at.as_deref(), Some("2024-04-01 09:00"));
+            assert_eq!(current.status, if verdict == Verdict::Rejected {
+                RelationStatus::Rejected
+            } else { RelationStatus::Confirmed });
+        }
+    }
+
+    #[test]
+    fn obsolete_manual_encoded_target_stays_visible_but_is_not_looked_up_literally() {
+        let mut formats = goods_formats();
+        formats.get_mut("rewardprop").unwrap().replaced.insert("items".into());
+        let old = RelationKey {
+            source_table: "rewardprop".into(), source_column: "Items".into(),
+            target_table: "heroprop".into(), target_column: "ID".into(), kind: RelationKind::Value,
+        };
+        let snapshot = db();
+        let record = confirmed(old.clone(), &[], false);
+        let index = assemble(&Inputs {
+            snapshot: &snapshot, code: &CodeState::NoClient, formats: &formats,
+            formats_pending: false, record: Some(&record), now: "test",
+        });
+        let view = index.find(&old.id()).unwrap();
+        assert_eq!(view.parser, Some(ReferenceParser::Unsupported));
+        assert_eq!(view.decided_at.as_deref(), Some("2024-04-01 09:00"));
     }
 
     #[test]

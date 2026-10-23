@@ -26,7 +26,7 @@ use super::assembly::{self, CodeState, Inputs, RelationIndex};
 use super::catalog::{DbSnapshot, DbTable};
 use super::code_scan::{self, ClientDialect, ScanCache};
 use super::discovery::{self, ClientCandidate};
-use super::formats::{self, FormatFinding};
+use super::formats::{condition_column, TableFormats, CONDITION_PROBES};
 use super::model::{Evidence, StatusTotals};
 use super::store::{ClientBinding, Decision, ServerRecord, Store, Verdict, FILE_NAME};
 
@@ -87,7 +87,7 @@ pub fn row_ticket(context: &Context, channel: &str) -> RowTicket {
 struct SampledFormats {
     modified_at: Option<String>,
     sampled_at: Instant,
-    findings: Vec<FormatFinding>,
+    findings: TableFormats,
 }
 
 struct ContextData {
@@ -276,10 +276,10 @@ async fn sample_formats(
     database: &str,
     table: &DbTable,
     snapshot: &DbSnapshot,
-) -> Result<Vec<FormatFinding>, String> {
+) -> Result<TableFormats, String> {
     let columns = table.columns.iter().filter(|column| column.is_text()).collect::<Vec<_>>();
     if columns.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TableFormats::default());
     }
     let selects = columns
         .iter()
@@ -303,22 +303,39 @@ async fn sample_formats(
             }
         }
     }
-    Ok(columns
-        .iter()
-        .zip(values)
-        .filter_map(|(column, values)| {
-            let (rule, sample) = formats::classify(&values, snapshot)?;
-            Some(FormatFinding {
-                column: column.name.clone(),
-                target_table: rule.target_table.to_lowercase(),
-                target_column: snapshot
-                    .column_name(rule.target_table, rule.target_column)
-                    .unwrap_or(rule.target_column)
-                    .to_string(),
-                sample,
-            })
-        })
-        .collect())
+    // Rare conditions can occur well past the first page. One background
+    // aggregate per table covers each reference-bearing branch without
+    // downloading every row or adding scans to a selected-row interaction.
+    let condition_columns = columns.iter().enumerate()
+        .filter(|(_, column)| condition_column(column, snapshot)).collect::<Vec<_>>();
+    if !condition_columns.is_empty() {
+        let mut selects = Vec::new();
+        let mut parameters = Vec::new();
+        for (index, column) in &condition_columns {
+            let source = format!("CAST(`{}` AS CHAR)", escape_ident(&column.name));
+            for (probe, prefix) in CONDITION_PROBES.iter().enumerate() {
+                selects.push(format!("MAX(CASE WHEN {source} REGEXP ? THEN {source} END) AS c{index}p{probe}"));
+                parameters.push(format!("\\|[[:space:]]*{prefix}"));
+            }
+        }
+        let sql = format!("SELECT /*+ MAX_EXECUTION_TIME(10000) */ {} FROM {}", selects.join(", "), qualified_table(database, &table.name));
+        let mut query = sqlx::query(&sql);
+        for parameter in parameters { query = query.bind(parameter); }
+        let row = query.fetch_one(pool).await.map_err(|error| format!("读取条件格式失败: {error}"))?;
+        for (index, _) in condition_columns {
+            for probe in 0..CONDITION_PROBES.len() {
+                if let Ok(Some(value)) = mysql_text::optional_string(&row, format!("c{index}p{probe}").as_str()) {
+                    values[index].push(value);
+                }
+            }
+        }
+    }
+    let mut formats = TableFormats::default();
+    for (column, values) in columns.into_iter().zip(values) {
+        formats.inspect(column, &values, snapshot);
+        super::project_formats::inspect(&table.name.to_lowercase(), column, &values, snapshot, &mut formats);
+    }
+    Ok(formats)
 }
 
 // ── index ──────────────────────────────────────────────────────
@@ -366,7 +383,6 @@ async fn rebuild(app: &AppHandle, context: &Context) -> Result<Arc<RelationIndex
         let formats = data
             .formats
             .iter()
-            .filter(|(_, sampled)| !sampled.findings.is_empty())
             .map(|(table, sampled)| (table.clone(), sampled.findings.clone()))
             .collect::<BTreeMap<_, _>>();
         let index = assembly::assemble(&Inputs {
@@ -626,8 +642,10 @@ async fn refresh_formats(app: &AppHandle, context: &Context, force: bool) -> Res
             WorkClass::Background,
             sample_formats(&pool, &context.database, table, &snapshot),
         )
-        .await
-        .unwrap_or_default();
+        .await;
+        // A transient read failure must not replace the last known parser
+        // with a literal-value interpretation.
+        let Ok(findings) = findings else { continue };
         let mut data = context.data.lock().await;
         let previous = data.formats.insert(
             name.clone(),

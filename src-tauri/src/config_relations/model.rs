@@ -58,6 +58,8 @@ pub enum Evidence {
     },
     /// The column's data has the shape of a known list format.
     Format { sample: String },
+    /// Versioned, schema-gated project mapping verified against its readers.
+    Rule { text: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -94,6 +96,7 @@ pub enum StatusReason {
     CommentWithoutClient,
     /// Only the data format suggests it.
     FormatOnly,
+    ProjectRule,
     /// Code backing the confirmation changed.
     CodeChanged,
     /// Code backing the confirmation is gone.
@@ -112,6 +115,10 @@ pub struct RelationView {
     pub id: String,
     #[serde(flatten)]
     pub key: RelationKey,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parser: Option<super::parser::ReferenceParser>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_constraints: Vec<super::constraints::RowConstraint>,
     pub status: RelationStatus,
     pub reason: StatusReason,
     /// Appeared after the client was bound and nobody has reviewed it yet.
@@ -141,6 +148,8 @@ pub enum CoverageGap {
     ScanFailed { message: String },
     /// The client code never reads this table.
     NotUsedByClient,
+    /// Config expressions cannot be safely interpreted without execution.
+    UnsupportedFields { columns: Vec<String> },
     /// Some code reads this table with keys whose origin is unknown, so
     /// other tables may reference it without being listed.
     UntracedLookups {

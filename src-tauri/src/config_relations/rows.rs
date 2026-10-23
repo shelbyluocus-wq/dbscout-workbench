@@ -11,13 +11,13 @@ use crate::db::{escape_ident, qualified_table};
 use crate::mysql_text;
 
 use super::catalog::DbSnapshot;
-use super::filter::{list_item_pattern, list_item_values};
+use super::filter::{list_item_values, reference_predicate};
 use super::formats::ITEM_KEY;
 use super::model::{RelationKind, RelationStatus, RelationView};
+use super::parser::ReferenceParser;
 
 const MAX_VALUES_PER_RELATION: usize = 50;
 const MAX_LOOKUP_VALUES: usize = 500;
-const MAX_INCOMING_RELATIONS: usize = 300;
 /// Keeps one wide aggregate from exceeding MySQL's select-list comfort zone.
 const MAX_COUNTS_PER_QUERY: usize = 40;
 
@@ -46,6 +46,9 @@ pub struct RowOutgoing {
     pub targets: Vec<RowTarget>,
     /// More references exist than are listed.
     pub truncated: bool,
+    /// The cell requires a parser we cannot safely evaluate.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unparsed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,9 +74,15 @@ fn is_empty_reference(value: &str) -> bool {
 
 /// Keys the row references through one relation, in cell order.
 pub fn reference_values(view: &RelationView, row: &HashMap<String, String>) -> Vec<String> {
+    if !super::constraints::matches(&view.source_constraints, row) {
+        return Vec::new();
+    }
     let Some(value) = cell(row, &view.key.source_column) else {
         return Vec::new();
     };
+    if let Some(parser) = &view.parser {
+        return parser.values(value).unwrap_or_default();
+    }
     let values = match view.key.kind {
         RelationKind::Value => vec![value.to_string()],
         RelationKind::List => list_item_values(value, ITEM_KEY).unwrap_or_default(),
@@ -101,6 +110,19 @@ fn active(relations: &[RelationView]) -> impl Iterator<Item = &RelationView> {
 }
 
 type Labels = HashMap<String, Option<String>>;
+
+fn row_target(value: String, fetched: Option<&(Option<Labels>, Vec<String>)>) -> RowTarget {
+    let found = fetched
+        .filter(|(_, queried)| queried.contains(&value))
+        .and_then(|(labels, _)| labels.as_ref())
+        .map(|labels| labels.get(&value.to_lowercase()).cloned());
+    let (state, label) = match found {
+        None => (TargetState::Unknown, None),
+        Some(None) => (TargetState::Missing, None),
+        Some(Some(label)) => (TargetState::Found, label),
+    };
+    RowTarget { value, state, label }
+}
 
 async fn lookup_targets(
     pool: &MySqlPool,
@@ -165,6 +187,9 @@ pub async fn resolve_outgoing(
     let mut wanted: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     let mut plans = Vec::new();
     for view in active(relations) {
+        let unparsed = super::constraints::matches(&view.source_constraints, row) && view.parser.as_ref().is_some_and(|parser| {
+            cell(row, &view.key.source_column).is_some_and(|value| parser.values(value).is_none())
+        });
         let mut values = reference_values(view, row);
         let truncated = values.len() > MAX_VALUES_PER_RELATION;
         values.truncate(MAX_VALUES_PER_RELATION);
@@ -175,9 +200,9 @@ pub async fn resolve_outgoing(
                 bucket.push(value.clone());
             }
         }
-        plans.push((view.id.clone(), values, truncated, target));
+        plans.push((view.id.clone(), values, truncated, target, unparsed));
     }
-    let mut resolved: HashMap<(String, String), Option<Labels>> = HashMap::new();
+    let mut resolved: HashMap<(String, String), (Option<Labels>, Vec<String>)> = HashMap::new();
     for ((table, column), values) in wanted {
         if values.is_empty() || !is_current() {
             continue;
@@ -185,30 +210,21 @@ pub async fn resolve_outgoing(
         let labels = lookup_targets(pool, database, snapshot, &table, &column, &values)
             .await
             .ok();
-        resolved.insert((table, column), labels);
+        resolved.insert((table, column), (labels, values));
     }
     plans
         .into_iter()
-        .map(|(relation_id, values, truncated, target)| {
-            let labels = resolved.get(&target).cloned().flatten();
+        .map(|(relation_id, values, truncated, target, unparsed)| {
+            let fetched = resolved.get(&target);
             let targets = values
                 .into_iter()
-                .map(|value| {
-                    let found = labels
-                        .as_ref()
-                        .map(|labels| labels.get(&value.to_lowercase()).cloned());
-                    let (state, label) = match found {
-                        None => (TargetState::Unknown, None),
-                        Some(None) => (TargetState::Missing, None),
-                        Some(Some(label)) => (TargetState::Found, label),
-                    };
-                    RowTarget { value, state, label }
-                })
+                .map(|value| row_target(value, fetched))
                 .collect();
             RowOutgoing {
                 relation_id,
                 targets,
                 truncated,
+                unparsed,
             }
         })
         .collect()
@@ -218,7 +234,9 @@ struct CountItem {
     relation_id: String,
     column: String,
     kind: RelationKind,
+    parser: Option<ReferenceParser>,
     value: String,
+    source_constraints: Vec<super::constraints::RowConstraint>,
 }
 
 async fn count_in_table(
@@ -231,15 +249,15 @@ async fn count_in_table(
     let mut binds = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let column = escape_ident(&item.column);
-        let (predicate, bind) = match item.kind {
-            RelationKind::Value => (format!("CAST(`{column}` AS CHAR) = ?"), item.value.clone()),
-            RelationKind::List => (
-                format!("CAST(`{column}` AS CHAR) REGEXP ?"),
-                list_item_pattern(ITEM_KEY, &item.value),
-            ),
-        };
+        let (mut predicate, mut values) = reference_predicate(
+            &format!("CAST(`{column}` AS CHAR)"), item.kind == RelationKind::List,
+            item.parser.as_ref(), ITEM_KEY, &item.value,
+        );
+        let (guard, guard_binds) = super::constraints::predicate(&item.source_constraints);
+        if !guard.is_empty() { predicate = format!("({predicate}) AND ({guard})"); }
+        values.extend(guard_binds);
         selects.push(format!("COUNT(CASE WHEN {predicate} THEN 1 END) AS n{index}"));
-        binds.push(bind);
+        binds.extend(values);
     }
     let sql = format!(
         "SELECT /*+ MAX_EXECUTION_TIME(10000) */ {} FROM {}",
@@ -275,10 +293,14 @@ pub async fn count_incoming(
 ) -> Vec<RowIncoming> {
     let mut groups: BTreeMap<String, Vec<CountItem>> = BTreeMap::new();
     let mut results = Vec::new();
-    for view in active(relations).take(MAX_INCOMING_RELATIONS) {
+    for view in active(relations) {
         let Some(value) = referenced_key(view, row) else {
             continue;
         };
+        if view.parser == Some(ReferenceParser::Unsupported) {
+            results.push(RowIncoming { relation_id: view.id.clone(), value, count: None });
+            continue;
+        }
         let column = snapshot
             .table(&view.key.source_table)
             .and_then(|table| Some((table.name.clone(), table.column(&view.key.source_column)?.name.clone())));
@@ -294,7 +316,9 @@ pub async fn count_incoming(
             relation_id: view.id.clone(),
             column,
             kind: view.key.kind,
+            parser: view.parser.clone(),
             value,
+            source_constraints: view.source_constraints.clone(),
         });
     }
     for (table, items) in groups {
@@ -332,6 +356,8 @@ mod tests {
                 kind,
             },
             status: RelationStatus::Unconfirmed,
+            parser: None,
+            source_constraints: Vec::new(),
             reason: StatusReason::CodeOnly,
             is_new: false,
             evidence: Vec::new(),
@@ -360,5 +386,42 @@ mod tests {
         assert_eq!(referenced_key(&view("ItemID", RelationKind::Value), &row).as_deref(), Some("1001"));
         let empty = HashMap::from([("ID".to_string(), "".to_string())]);
         assert!(referenced_key(&view("ItemID", RelationKind::Value), &empty).is_none());
+    }
+
+    #[test]
+    fn source_discriminator_applies_before_extracting_a_key() {
+        let mut view = view("Param1", RelationKind::Value);
+        view.source_constraints = vec![super::super::constraints::RowConstraint {
+            column: "Kind".into(), values: vec!["3".into()],
+        }];
+        let mut row = HashMap::from([("Param1".into(), "11".into()), ("Kind".into(), "1".into())]);
+        assert!(reference_values(&view, &row).is_empty());
+        row.insert("Kind".into(), "3".into());
+        assert_eq!(reference_values(&view, &row), ["11"]);
+    }
+
+    #[tokio::test]
+    async fn incoming_relations_are_never_silently_truncated() {
+        let pool = sqlx::mysql::MySqlPoolOptions::new().connect_lazy("mysql://localhost/test").unwrap();
+        let mut relations = vec![view("ItemID", RelationKind::Value); 350];
+        for (index, relation) in relations.iter_mut().enumerate() { relation.id = format!("relation-{index}"); }
+        let result = count_incoming(&pool, "test", &DbSnapshot::default(), &relations,
+            &HashMap::from([("ID".into(), "7".into())]), &|| false).await;
+        assert_eq!(result.len(), 350);
+        assert!(result.iter().all(|entry| entry.count.is_none()));
+    }
+
+    #[test]
+    fn only_successfully_queried_keys_can_be_missing() {
+        let fetched = (
+            Some(HashMap::from([("1".into(), Some("Gold".into()))])),
+            vec!["1".into(), "2".into()],
+        );
+        assert_eq!(row_target("1".into(), Some(&fetched)).state, TargetState::Found);
+        assert_eq!(row_target("2".into(), Some(&fetched)).state, TargetState::Missing);
+        assert_eq!(row_target("3".into(), Some(&fetched)).state, TargetState::Unknown,
+            "a key omitted by the lookup cap was never checked");
+        assert_eq!(row_target("1".into(), None).state, TargetState::Unknown);
+        assert_eq!(row_target("1".into(), Some(&(None, vec!["1".into()]))).state, TargetState::Unknown);
     }
 }

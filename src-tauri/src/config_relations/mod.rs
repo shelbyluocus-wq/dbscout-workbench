@@ -7,10 +7,16 @@ mod catalog;
 pub mod code_scan;
 pub mod commands;
 mod comments;
+pub mod constraints;
 mod discovery;
 pub mod engine;
 pub mod filter;
 mod formats;
 mod model;
+pub mod parser;
+mod project_formats;
+mod project_relations;
 mod rows;
 mod store;
+#[cfg(test)]
+mod audit_tests;

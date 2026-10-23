@@ -8,6 +8,7 @@ import { ArrowRight, ChevronRight, LoaderCircle, SquareArrowOutUpRight } from "l
 import { t } from "../i18n/index.js";
 import { createIncomingRelationRows, fetchIncomingRelationRows } from "../incomingRelationRows.js";
 import CommentTip from "./CommentTip.vue";
+import { relationHasMultipleValues } from "../utils/referenceParser.js";
 
 const props = defineProps({
   context: { type: Object, required: true },
@@ -28,7 +29,8 @@ watch(() => JSON.stringify(props.context), reset, { flush: "sync" });
 onBeforeUnmount(reset);
 
 const empty = computed(() => !props.counting && props.count === 0);
-const listKind = computed(() => props.context?.relation?.kind === "list");
+const unsupported = computed(() => props.context?.relation?.parser?.type === "unsupported");
+const listKind = computed(() => relationHasMultipleValues(props.context?.relation));
 const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count > 0
   ? t("relations.incoming.openAll", { count: props.count })
   : t("relations.incoming.openAllUnknown")));
@@ -41,8 +43,8 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
         class="wb-incoming-toggle"
         type="button"
         :aria-expanded="state.expanded"
-        :disabled="empty"
-        :title="`${table}.${column}`"
+        :disabled="empty || unsupported"
+        :title="unsupported ? t('relations.target.unparsed') : `${table}.${column}`"
         @click="toggle"
       >
         <ChevronRight :size="12" :stroke-width="2.2" class="wb-incoming-chevron" :class="{ 'is-open': state.expanded }" aria-hidden="true" />
@@ -54,7 +56,8 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
           >{{ column }}</CommentTip></span>
         </span>
         <span v-if="listKind" class="wb-incoming-tag">{{ t('relations.kindList') }}</span>
-        <span v-if="counting" class="wb-incoming-count is-pending" role="status">
+        <span v-if="unsupported" class="wb-incoming-count">{{ t('relations.incoming.unchecked') }}</span>
+        <span v-else-if="counting" class="wb-incoming-count is-pending" role="status">
           <LoaderCircle :size="11" class="wb-incoming-spin" aria-hidden="true" />
           <span class="wb-visually-hidden">{{ t('relations.incoming.counting') }}</span>
         </span>
@@ -62,7 +65,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
         <span v-else class="wb-incoming-count">{{ t('relations.incoming.rows', { count }) }}</span>
       </button>
       <button
-        v-if="!empty"
+        v-if="!empty && !unsupported"
         type="button"
         class="wb-incoming-open"
         :title="openAllLabel"

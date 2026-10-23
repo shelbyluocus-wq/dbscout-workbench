@@ -92,6 +92,7 @@ test("coverage gaps explain what the list may be missing", () => {
   assert.equal(coverageGapText({ code: "noClient" }, translate), "relations.gap.noClient");
   assert.equal(coverageGapText({ code: "scanFailed", message: "boom" }, translate), "relations.gap.scanFailed|message=boom");
   assert.equal(coverageGapText({ code: "untracedLookups", count: 2 }, translate), "relations.gap.untracedLookups|count=2");
+  assert.equal(coverageGapText({ code: "unsupportedFields", columns: ["RewardFunc"] }, translate), "relations.gap.unsupportedFields|columns=RewardFunc");
   assert.equal(coverageGapText({ code: "somethingNew" }, translate), "");
   assert.equal(coverageGapText(null, translate), "");
 });

@@ -2246,7 +2246,18 @@ impl<'s> Parser<'s> {
             TokKind::Template => {
                 self.scan_template_refs(i);
                 self.pos += 1;
-                Expr::Other
+                // requireProp(`../props/${__Prop__.heroprop}`) is a static
+                // table path. Arbitrary interpolation remains untraced.
+                let text = self.t(i).trim_matches('`');
+                let reference = ["${__Prop__.", "${Prop."].iter().find_map(|prefix| {
+                    let (before, after) = text.split_once(prefix)?;
+                    if before.contains("${") { return None; }
+                    let name = after.strip_suffix('}')?;
+                    name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_').then_some(name)
+                });
+                if let Some(name) = reference { Expr::TableRef(self.sym(name)) }
+                else if !text.contains("${") { Expr::Str(self.sym(text)) }
+                else { Expr::Other }
             }
             TokKind::Ident => match self.t(i) {
                 "true" | "false" | "null" | "undefined" | "NaN" | "Infinity" => {
@@ -3533,6 +3544,7 @@ export class RewardView {
         const goods = g_PropMgr.getPropLine(__Prop__.goodsprop, { key: "ID", value: reward.ItemID });
         const again: goodspropData = g_PropMgr.getPropLine(__Prop__.goodsprop, { key: 'ID', value: this.reward.ItemID }) as goodspropData;
     }
+
 }
 "#,
         );
@@ -3544,6 +3556,19 @@ export class RewardView {
         assert_eq!(first.location.line, 5);
         assert!(first.location.snippet.starts_with("const goods = g_PropMgr.getPropLine"));
         assert_ne!(report.relations[0].fingerprint, report.relations[1].fingerprint);
+    }
+
+    #[test]
+    fn static_template_config_paths_preserve_row_provenance() {
+        let report = scan_one(ClientDialect::Jswz, r#"
+            async function check() {
+                const rows = await this.requireProp(`../props/${__Prop__.rewardprop}`);
+                for (const reward of rows) {
+                    g_PropMgr.getPropLine(__Prop__.goodsprop, {key: "ID", value: reward.ItemID});
+                }
+            }
+        "#);
+        assert!(rel_keys(&report).contains(&"rewardprop.ItemID -> goodsprop.ID".into()));
     }
 
     #[test]

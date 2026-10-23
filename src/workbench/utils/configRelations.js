@@ -6,6 +6,7 @@
 import { connectionHasCapability } from "./connectionKinds.js";
 import { columnName } from "./normalize.js";
 import { listItemValues, normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
+import { parseReferenceValues } from "./referenceParser.js";
 
 export const RELATION_STATUSES = Object.freeze(["confirmed", "unconfirmed", "stale", "conflict", "rejected"]);
 
@@ -75,6 +76,7 @@ export function relationTitle(relation, tables) {
 // or the sampled cell that showed the list format.
 export function relationEvidenceTitle(evidence) {
   if (evidence?.type === "comment") return evidence.text || "";
+  if (evidence?.type === "rule") return evidence.text || "";
   if (evidence?.type === "code") return `${evidence.file}:${evidence.line}`;
   if (evidence?.type === "format") return evidence.sample || "";
   return "";
@@ -98,6 +100,8 @@ export function coverageGapText(gap, translate) {
       return translate("relations.gap.notUsedByClient");
     case "untracedLookups":
       return translate("relations.gap.untracedLookups", { count: gap.count ?? 0 });
+    case "unsupportedFields":
+      return translate("relations.gap.unsupportedFields", { columns: (gap.columns || []).join(", ") });
     default:
       return "";
   }
@@ -111,6 +115,7 @@ export function relationRelevantColumns(relations) {
     if (!relation || relation.status === "rejected") continue;
     if (relation.sourceColumn) columns.add(String(relation.sourceColumn).toLowerCase());
     if (relation.targetColumn) columns.add(String(relation.targetColumn).toLowerCase());
+    for (const guard of relation.sourceConstraints || []) columns.add(guard.column.toLowerCase());
   }
   return [...columns];
 }
@@ -208,7 +213,8 @@ export function isEmptyReferenceValue(value) {
 // Keys one cell references through a relation, in cell order. Mirrors the
 // backend's rows::reference_values so jump filters cover every value, even
 // past the display cap.
-export function referenceValuesFromCell(kind, text) {
+export function referenceValuesFromCell(kind, text, parser = null) {
+  if (parser) return parseReferenceValues(text, parser) || [];
   const values = kind === "list"
     ? listItemValues(text) || []
     : [String(text ?? "").trim()];
@@ -240,7 +246,7 @@ export function relationChipLabel(tab, translate) {
       values,
     });
   }
-  const key = filter.kind === "listContains" ? "relations.chip.contains" : "relations.chip.equals";
+  const key = filter.kind === "listContains" || filter.parser ? "relations.chip.contains" : "relations.chip.equals";
   return translate(key, { column: filter.column, values });
 }
 

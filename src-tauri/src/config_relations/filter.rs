@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::db::escape_ident;
 use crate::types::{ColumnMeta, RelationFilter, RelationMatchKind, TablePageRequest};
+use super::parser::ReferenceParser;
 
 const MATCH_NOTHING_SQL: &str = "(1 = 0)";
 
@@ -40,6 +41,18 @@ pub fn sql_clause(
     relation: Option<&RelationFilter>,
 ) -> Option<(String, Vec<String>)> {
     let relation = active(relation)?;
+    if relation.source_constraints.iter().any(|guard| find_column(columns, &guard.column).is_none()) {
+        return Some((MATCH_NOTHING_SQL.into(), Vec::new()));
+    }
+    let (mut sql, mut binds) = value_clause(columns, Some(relation))?;
+    let (guard, parameters) = super::constraints::predicate(&relation.source_constraints);
+    if !guard.is_empty() { sql = format!("({sql} AND ({guard}))"); }
+    binds.extend(parameters);
+    Some((sql, binds))
+}
+
+fn value_clause(columns: &[ColumnMeta], relation: Option<&RelationFilter>) -> Option<(String, Vec<String>)> {
+    let relation = active(relation)?;
     let values = relation.normalized_values();
     let Some(column) = find_column(columns, &relation.column) else {
         return Some((MATCH_NOTHING_SQL.into(), Vec::new()));
@@ -48,6 +61,16 @@ pub fn sql_clause(
         return Some((MATCH_NOTHING_SQL.into(), Vec::new()));
     }
     let column_sql = format!("CAST(`{}` AS CHAR)", escape_ident(&column.column_name));
+    if let Some(parser) = &relation.parser {
+        let mut predicates = Vec::new();
+        let mut binds = Vec::new();
+        for value in values {
+            let (predicate, parameters) = parser.predicate(&column_sql, &value);
+            predicates.push(predicate);
+            binds.extend(parameters);
+        }
+        return Some((format!("({})", predicates.join(" OR ")), binds));
+    }
     match relation.kind {
         RelationMatchKind::Equals => {
             let placeholders = vec!["?"; values.len()].join(", ");
@@ -66,6 +89,17 @@ pub fn sql_clause(
                 .collect();
             Some((format!("({predicates})"), binds))
         }
+    }
+}
+
+pub fn reference_predicate(column: &str, list: bool, parser: Option<&ReferenceParser>,
+                           item_key: &str, value: &str) -> (String, Vec<String>) {
+    if let Some(parser) = parser {
+        parser.predicate(column, value)
+    } else if list {
+        (format!("{column} REGEXP ?"), vec![list_item_pattern(item_key, value)])
+    } else {
+        (format!("{column} = ?"), vec![value.to_string()])
     }
 }
 
@@ -100,6 +134,7 @@ pub fn row_matches(
     let Some(relation) = active(relation) else {
         return true;
     };
+    if !super::constraints::matches(&relation.source_constraints, row) { return false; }
     let Some(column) = find_column(columns, &relation.column) else {
         return false;
     };
@@ -107,6 +142,9 @@ pub fn row_matches(
         return false;
     };
     let values = relation.normalized_values();
+    if let Some(parser) = &relation.parser {
+        return parser.values(cell).is_some_and(|items| items.iter().any(|item| values.contains(item)));
+    }
     match relation.kind {
         RelationMatchKind::Equals => values.iter().any(|value| value == cell.trim()),
         RelationMatchKind::ListContains => list_item_values(cell, relation.item_key())
@@ -162,6 +200,8 @@ mod tests {
             kind,
             values: values.iter().map(|value| value.to_string()).collect(),
             item_key: None,
+            parser: None,
+            source_constraints: Vec::new(),
         }
     }
 
@@ -171,6 +211,23 @@ mod tests {
         let (sql, binds) = sql_clause(&columns(), Some(&filter)).unwrap();
         assert_eq!(sql, "(CAST(`ID` AS CHAR) IN (?, ?))");
         assert_eq!(binds, vec!["1001", "1002"]);
+    }
+
+    #[test]
+    fn overloaded_parameters_keep_discriminators_in_counts_and_tabs() {
+        let mut filter = relation("ID", RelationMatchKind::Equals, &["11"]);
+        filter.source_constraints = vec![super::super::constraints::RowConstraint {
+            column: "Kind".into(), values: vec!["3".into()],
+        }];
+        assert_eq!(sql_clause(&columns(), Some(&filter)).unwrap().0, MATCH_NOTHING_SQL);
+        let mut columns = columns();
+        columns.push(ColumnMeta::with_basic("Kind", "int", "", false, false));
+        let (sql, binds) = sql_clause(&columns, Some(&filter)).unwrap();
+        assert!(sql.contains("AND (BINARY TRIM(CAST(`Kind` AS CHAR)) IN (?))"));
+        assert_eq!(binds, ["11", "3"]);
+        assert!(!row_matches(&HashMap::from([("ID".into(), "11".into()), ("Kind".into(), "1".into())]), &columns, Some(&filter)));
+        assert!(row_matches(&HashMap::from([("ID".into(), "11".into()), ("Kind".into(), "3".into())]), &columns, Some(&filter)));
+        assert!(row_matches(&HashMap::from([("ID".into(), "11".into()), ("Kind".into(), " 3 ".into())]), &columns, Some(&filter)));
     }
 
     #[test]
@@ -230,5 +287,18 @@ mod tests {
             relation: Some(relation("ID", RelationMatchKind::Equals, &["1"])),
         });
         assert!(ensure_engine_supports(&request).is_err());
+    }
+
+    #[test]
+    fn adapted_filters_share_the_incoming_count_predicate() {
+        let parser = ReferenceParser::Keys { delimiter: ",".into() };
+        let mut filter = relation("Reward", RelationMatchKind::ListContains, &["7"]);
+        filter.parser = Some(parser.clone());
+        let (sql, binds) = sql_clause(&columns(), Some(&filter)).unwrap();
+        let (count_sql, count_binds) = reference_predicate("CAST(`Reward` AS CHAR)", false, Some(&parser), "ID", "7");
+        assert_eq!(sql, format!("({count_sql})"));
+        assert_eq!(binds, count_binds);
+        assert!(row_matches(&HashMap::from([("Reward".into(), "70,7".into())]), &columns(), Some(&filter)));
+        assert!(!row_matches(&HashMap::from([("Reward".into(), "70,17".into())]), &columns(), Some(&filter)));
     }
 }

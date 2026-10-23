@@ -2,14 +2,17 @@ import { reactive } from "vue";
 import { invokeWorkbench } from "./utils/tauriBridge.js";
 import { buildRowIdentity, buildRowKey } from "./utils/rowIdentity.js";
 import { relationLabelColumn, relationRowName, rowCellValue } from "./utils/configRelations.js";
+import { relationHasMultipleValues } from "./utils/referenceParser.js";
 
 export const INCOMING_PAGE_SIZE = 50;
 
 export function incomingRelationFilter(relation, value) {
   return {
     column: relation.sourceColumn,
-    kind: relation.kind === "list" ? "listContains" : "equals",
+    kind: relationHasMultipleValues(relation) ? "listContains" : "equals",
     values: [String(value)],
+    ...(relation.parser ? { parser: relation.parser } : {}),
+    ...(relation.sourceConstraints?.length ? { sourceConstraints: relation.sourceConstraints } : {}),
   };
 }
 

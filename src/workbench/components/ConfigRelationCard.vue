@@ -5,6 +5,7 @@
 // laid out (`detailed`).
 import { t } from "../i18n/index.js";
 import { computed, ref } from "vue";
+import { relationHasMultipleValues } from "../utils/referenceParser.js";
 import {
   ArrowDownLeft,
   ArrowRight,
@@ -132,7 +133,7 @@ function onRowClick(event) {
               >{{ end.column }}</CommentTip>
             </span>
           </template>
-          <span v-if="relation.kind === 'list'" class="wb-relation-card-tag">{{ t('relations.kindList') }}</span>
+          <span v-if="relationHasMultipleValues(relation)" class="wb-relation-card-tag">{{ t('relations.kindList') }}</span>
           <RelationStatusBadge v-if="showStatus" :status="relation.status" />
           <span v-if="relation.isNew && !rejected" class="wb-relation-card-tag is-new">{{ t('relations.review.new') }}</span>
         </div>

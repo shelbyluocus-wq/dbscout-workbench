@@ -8,7 +8,9 @@ import { emitMockEvent } from "./mockEventBus.js";
 import { columnName } from "../utils/normalize.js";
 import { listItemValues, normalizeRelationFilter } from "../utils/relationFilter.js";
 import { isEmptyReferenceValue, referenceValuesFromCell, rowCellValue } from "../utils/configRelations.js";
+import { matchesRelationConstraints } from "../utils/relationConstraints.js";
 import { RELATION_LAB_DATABASE, isRelationLabTable, relationLabRelations } from "./mockRelationLab.js";
+import { parseReferenceValues } from "../utils/referenceParser.js";
 
 const UPDATED_EVENT = "config-relations-updated";
 const COMMAND_PREFIX = "config_relations_";
@@ -173,10 +175,12 @@ function nowText() {
 export function relationRowMatches(row, columns, relation) {
   const filter = normalizeRelationFilter(relation);
   if (!filter) return true;
+  if (!matchesRelationConstraints(row, filter.sourceConstraints)) return false;
   const column = findColumn({ columns }, filter.column);
   if (!column) return false;
   const cell = row?.[columnName(column)];
   if (cell === null || cell === undefined) return false;
+  if (filter.parser) return Boolean(parseReferenceValues(cell, filter.parser)?.some((item) => filter.values.includes(item)));
   if (filter.kind === "listContains") {
     const items = listItemValues(cell, filter.itemKey);
     return Boolean(items?.some((item) => filter.values.includes(item)));
@@ -708,7 +712,9 @@ export function createMockConfigRelations({
     const table = String(tableName || "").toLowerCase();
     const built = buildIndex(context);
     const outgoing = activeViews(built.views.filter((view) => view.sourceTable === table)).map((view) => {
-      const values = referenceValuesFromCell(view.kind, rowCellValue(row, view.sourceColumn));
+      const text = rowCellValue(row, view.sourceColumn);
+      const values = matchesRelationConstraints(row, view.sourceConstraints) ? referenceValuesFromCell(view.kind, text, view.parser) : [];
+      const unparsed = matchesRelationConstraints(row, view.sourceConstraints) && view.parser && parseReferenceValues(text, view.parser) === null;
       const target = built.tables.get(view.targetTable);
       const keys = target && findColumn(target, view.targetColumn) ? targetKeys(context, target, view.targetColumn) : null;
       const targets = values.slice(0, MAX_VALUES_PER_RELATION).map((value) => {
@@ -717,7 +723,7 @@ export function createMockConfigRelations({
         if (label === undefined) return { value, state: "missing" };
         return label ? { value, state: "found", label } : { value, state: "found" };
       });
-      return { relationId: view.id, targets, truncated: values.length > MAX_VALUES_PER_RELATION };
+      return { relationId: view.id, targets, truncated: values.length > MAX_VALUES_PER_RELATION, ...(unparsed ? { unparsed: true } : {}) };
     });
     return { outgoing, revision: context.revision, superseded: false };
   }
@@ -731,11 +737,15 @@ export function createMockConfigRelations({
       if (isEmptyReferenceValue(value)) continue;
       const source = built.tables.get(view.sourceTable);
       const column = findColumn(source, view.sourceColumn);
-      if (!column) {
+      if (!column || view.parser?.type === "unsupported") {
         incoming.push({ relationId: view.id, value, count: null });
         continue;
       }
-      const filter = { column: columnName(column), kind: view.kind === "list" ? "listContains" : "equals", values: [value] };
+      const filter = {
+        column: columnName(column), kind: view.kind === "list" ? "listContains" : "equals", values: [value],
+        ...(view.parser ? { parser: view.parser } : {}),
+        ...(view.sourceConstraints?.length ? { sourceConstraints: view.sourceConstraints } : {}),
+      };
       const rows = rowsFor(context.connectionId, context.database, source.table_name) || [];
       const count = rows.filter((candidate) => relationRowMatches(candidate, source.columns, filter)).length;
       incoming.push({ relationId: view.id, value, count });

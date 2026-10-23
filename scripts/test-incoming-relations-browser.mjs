@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const base = process.env.DBSCOUT_RELATIONS_TEST_URL || "http://127.0.0.1:1431";
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.DBSCOUT_PLAYWRIGHT_CHANNEL || undefined });
 const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });

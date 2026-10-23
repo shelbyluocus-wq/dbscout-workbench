@@ -2,6 +2,9 @@
 // The backend matches rows with it; the key decides whether two jumps share
 // one tab.
 
+import { normalizeReferenceParser } from "./referenceParser.js";
+import { normalizeRelationConstraints } from "./relationConstraints.js";
+
 export const RELATION_LIST_ITEM_KEY = "ID";
 
 export function normalizeRelationKind(kind) {
@@ -20,11 +23,15 @@ export function normalizeRelationFilter(filter) {
   if (!values.length) return null;
   const kind = normalizeRelationKind(filter.kind);
   const itemKey = String(filter.itemKey || "").trim();
+  const parser = normalizeReferenceParser(filter.parser);
+  const sourceConstraints = normalizeRelationConstraints(filter.sourceConstraints);
   return {
     column,
     kind,
     values,
     ...(kind === "listContains" ? { itemKey: itemKey || RELATION_LIST_ITEM_KEY } : {}),
+    ...(parser ? { parser } : {}),
+    ...(sourceConstraints.length ? { sourceConstraints } : {}),
   };
 }
 
@@ -60,6 +67,8 @@ export function relationFilterKey(filter) {
     normalized.kind,
     normalized.column.toLowerCase(),
     normalized.itemKey || "",
+    ...(normalized.parser ? [JSON.stringify(normalized.parser)] : []),
+    ...(normalized.sourceConstraints ? [JSON.stringify(normalized.sourceConstraints)] : []),
     ...[...normalized.values].sort(),
   ].join("\u001f");
 }

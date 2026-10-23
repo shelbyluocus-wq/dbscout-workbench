@@ -560,6 +560,22 @@ The Rust backend is split by concern:
   `config_relations_refresh`, `config_relations_discover_clients`,
   `config_relations_inspect_client`, `config_relations_bind_client`,
   `config_relations_unbind_client`, `config_relations_pick_client_dir`.
+  `parser.rs` and the frontend `utils/referenceParser.js` share explicit
+  parsers for comma/pipe key lists, scalar JSON arrays, flat JSON members,
+  conditional ENC members and open-condition prefixes. `project_formats.rs`
+  holds schema-gated client conventions; numeric arrays alone never establish
+  foreign keys. Counts, expanded incoming rows and filtered tabs carry the same
+  parser. Unsupported dynamic expressions stay unchecked, not missing; client
+  functions are never executed. Rare condition branches are probed only in the
+  background. Shared fixtures live in `tests/fixtures/config-reference-formats.json`.
+  `project_relations.rs` holds audited jswz mappings and scoped corrections;
+  `constraints.rs` / `relationConstraints.js` apply type guards to outgoing
+  targets, incoming counts, expanded rows and tab filters. Restricted nested
+  JSON paths, selected tokens and prefixed keys have shared Rust/JS fixtures.
+  Nested inverse filters require JSON_TABLE support; failures remain unknown,
+  not zero. Function/context-dependent fields show incomplete coverage.
+  See `docs/config-reference-formats.md` for read-only export/SQL/browser replay
+  commands and `docs/jswz-relations-audit-2026-10-23.md` for the per-table audit.
 - **`agent/`** — Node sidecar lifecycle (`mod.rs`), stdio JSON-lines protocol
   (`protocol.rs`), DB MCP bridge (`db_bridge.rs`), read-only SQL guard
   (`sql_guard.rs`), and generated-artifact path validation/opening (`artifact.rs`)

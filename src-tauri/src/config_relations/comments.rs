@@ -16,7 +16,7 @@ const RELATION_CUES: [&str; 15] = [
     "对应", "引用", "关联", "来自", "取自", "读取", "索引", "参照", "参考", "见", "表", "id", "编号", "键", "key",
 ];
 /// Comments that describe who references this column rather than what it references.
-const REVERSE_MARKERS: [&str; 4] = ["引用本字段", "引用此字段", "被引用", "被关联"];
+const REVERSE_MARKERS: [&str; 5] = ["引用本字段", "引用此字段", "被引用", "被关联", "引用方"];
 const CUE_WINDOW_CHARS: usize = 12;
 /// Shorter table names collide with ordinary words in comments.
 const MIN_TABLE_NAME_LEN: usize = 4;
@@ -86,9 +86,11 @@ fn preceded_by_supply_marker(text: &str, start: usize) -> bool {
 
 pub fn parse(comment: &str, own_table: &str, own_column: &str, snapshot: &DbSnapshot) -> Vec<CommentMention> {
     let comment = comment.trim();
-    if comment.is_empty() || REVERSE_MARKERS.iter().any(|marker| comment.contains(marker)) {
+    if comment.is_empty() || REVERSE_MARKERS.iter().any(|marker| comment.contains(marker))
+        || (comment.contains('被') && comment.contains("引用")) {
         return Vec::new();
     }
+
     let words = words(comment);
     let own_table = own_table.to_lowercase();
     let mut mentions: Vec<CommentMention> = Vec::new();
@@ -104,7 +106,19 @@ pub fn parse(comment: &str, own_table: &str, own_column: &str, snapshot: &DbSnap
         }
         let target_table = word.text.to_lowercase();
         let column = explicit_column(comment, word.end, words.get(index + 1), table);
-        let cued = column.is_some() || {
+        // Mentioning where a label, unit or threshold is defined is not a
+        // lookup with the value of this cell.
+        if column.as_ref().is_some_and(|name| {
+            table.column(name).is_some_and(|column| column.is_text())
+                && !table.primary_keys.iter().any(|key| key.eq_ignore_ascii_case(name))
+                && ["param", "desc", "des", "name", "text", "title"].iter()
+                    .any(|prefix| name.to_lowercase().starts_with(prefix))
+        }) {
+            continue;
+        }
+        let bracketed = comment[..word.start].trim_end().ends_with(['(', '（'])
+            && comment[word.end..].trim_start().starts_with([')', '）']);
+        let cued = column.is_some() || bracketed || {
             let around = window(comment, word.start, word.end);
             RELATION_CUES.iter().any(|cue| around.contains(cue))
         };
@@ -161,6 +175,10 @@ mod tests {
             parse("引用 goodsprop 表的 id", "rewardprop", "ItemID", &db),
             vec![mention("goodsprop", Some("ID"))]
         );
+        assert_eq!(
+            parse("引用 goodsprop.ID；具体条件由Param1至Param3配置", "rewardprop", "ItemID", &db),
+            vec![mention("goodsprop", Some("ID"))]
+        );
     }
 
     #[test]
@@ -193,5 +211,12 @@ mod tests {
             parse("goodsprop.ID（对应goodsprop.ID）", "rewardprop", "ItemID", &db),
             vec![mention("goodsprop", Some("ID"))]
         );
+    }
+
+    #[test]
+    fn parenthesized_table_names_are_explicit_lookup_hints() {
+        assert_eq!(parse("formation template (taskprop)", "rewardprop", "Template", &db()),
+            vec![mention("taskprop", None)]);
+        assert!(parse("description taskprop", "rewardprop", "Desc", &db()).is_empty());
     }
 }

@@ -246,6 +246,10 @@ pub struct RelationFilter {
     pub values: Vec<String>,
     #[serde(default)]
     pub item_key: Option<String>,
+    #[serde(default)]
+    pub parser: Option<crate::config_relations::parser::ReferenceParser>,
+    #[serde(default)]
+    pub source_constraints: Vec<crate::config_relations::constraints::RowConstraint>,
 }
 
 impl RelationFilter {

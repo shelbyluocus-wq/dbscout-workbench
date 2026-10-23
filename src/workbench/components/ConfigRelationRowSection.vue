@@ -19,6 +19,7 @@ import {
   tableDisplayName,
 } from "../utils/configRelations.js";
 import { incomingRelationFilter } from "../incomingRelationRows.js";
+import { matchesRelationConstraints } from "../utils/relationConstraints.js";
 import RelationSectionHead from "./RelationSectionHead.vue";
 import TableMentionText from "./TableMentionText.vue";
 import IncomingRelationRows from "./IncomingRelationRows.vue";
@@ -145,15 +146,15 @@ onBeforeUnmount(() => {
 // display list is truncated.
 function relationCellValues(relation) {
   const row = selectedRow.value;
-  if (!row) return [];
-  return referenceValuesFromCell(relation.kind, rowCellValue(row, relation.sourceColumn));
+  if (!row || !matchesRelationConstraints(row, relation.sourceConstraints)) return [];
+  return referenceValuesFromCell(relation.kind, rowCellValue(row, relation.sourceColumn), relation.parser);
 }
 
 const outgoingRows = computed(() => {
   const results = new Map(rowTargets.value.map((item) => [item.relationId, item]));
   return activeOutgoing.value
     .map((relation) => ({ relation, result: results.get(relation.id) || null, values: relationCellValues(relation) }))
-    .filter((entry) => (entry.result ? entry.result.targets.length > 0 : !targetsLoaded.value && entry.values.length > 0));
+    .filter((entry) => (entry.result ? entry.result.targets.length > 0 || entry.result.unparsed : !targetsLoaded.value && entry.values.length > 0));
 });
 
 // ── what points at the row ─────────────────────────────────────
@@ -169,7 +170,7 @@ const incomingEntries = computed(() => {
   return activeIncoming.value
     .map((relation) => ({ relation, result: results.get(relation.id) || null, value: referencedValue(relation) }))
     // A relation whose key is empty in this row has nothing to count.
-    .filter((entry) => !isEmptyReferenceValue(entry.value) && (entry.result || !referencesLoaded.value));
+    .filter((entry) => !isEmptyReferenceValue(entry.value));
 });
 const referencedRows = computed(() => incomingEntries.value.filter((entry) => entry.result?.count !== 0));
 const unreferencedRows = computed(() => incomingEntries.value.filter((entry) => entry.result?.count === 0));
@@ -306,6 +307,7 @@ function targetTitle(target, relation) {
             </div>
             <div class="wb-row-target-values">
               <template v-if="entry.result">
+                <span v-if="entry.result.unparsed" class="wb-relations-note">{{ t('relations.target.unparsed') }}</span>
                 <button
                   v-for="target in entry.result.targets"
                   :key="target.value"
@@ -341,7 +343,7 @@ function targetTitle(target, relation) {
             :column-comment="tableColumnComment(tables, entry.relation.sourceTable, entry.relation.sourceColumn)"
             :column="entry.relation.sourceColumn"
             :count="entry.result ? entry.result.count : null"
-            :counting="!entry.result"
+            :counting="!entry.result && !referencesLoaded"
             :context="{
               scope,
               tableName: sourceTableName(entry.relation),

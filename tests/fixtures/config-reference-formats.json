@@ -1,0 +1,402 @@
+[
+  {
+    "name": "comma provenance",
+    "parser": {
+      "type": "keys",
+      "delimiter": ","
+    },
+    "text": "103, 118101,101002,123501,103,0,-1",
+    "values": [
+      "103",
+      "118101",
+      "101002",
+      "123501"
+    ]
+  },
+  {
+    "name": "one value in comma column",
+    "parser": {
+      "type": "keys",
+      "delimiter": ","
+    },
+    "text": "123201",
+    "values": [
+      "123201"
+    ]
+  },
+  {
+    "name": "pipe currencies",
+    "parser": {
+      "type": "keys",
+      "delimiter": "|"
+    },
+    "text": "11|1|2|11",
+    "values": [
+      "11",
+      "1",
+      "2"
+    ]
+  },
+  {
+    "name": "json entity keys",
+    "parser": {
+      "type": "keys",
+      "delimiter": "json"
+    },
+    "text": "[1075,\"1076\",1075,0]",
+    "values": [
+      "1075",
+      "1076"
+    ]
+  },
+  {
+    "name": "objects are not scalar keys",
+    "parser": {
+      "type": "keys",
+      "delimiter": "json"
+    },
+    "text": "[{\"ID\":1,\"Num\":100}]",
+    "values": null
+  },
+  {
+    "name": "conditions use complete prefixes",
+    "parser": {
+      "type": "condition"
+    },
+    "text": "and|B232|CD10|CW20|N_com.pc|P_tap|SRL2",
+    "values": [
+      "B",
+      "CD",
+      "CW",
+      "N_",
+      "P_",
+      "SRL"
+    ]
+  },
+  {
+    "name": "condition build ids",
+    "parser": {
+      "type": "condition",
+      "prefix": "B"
+    },
+    "text": "and|B232|L60|B232",
+    "values": [
+      "232"
+    ]
+  },
+  {
+    "name": "invalid condition must not partially match",
+    "parser": {
+      "type": "condition",
+      "prefix": "B"
+    },
+    "text": "and|B232|123",
+    "values": null
+  },
+  {
+    "name": "condition item count is not a key",
+    "parser": {
+      "type": "condition",
+      "prefix": "G"
+    },
+    "text": "or||G21001_10|L12",
+    "values": [
+      "21001"
+    ]
+  },
+  {
+    "name": "instance category routing",
+    "parser": {
+      "type": "condition",
+      "prefix": "F",
+      "valuePrefix": "2"
+    },
+    "text": "and|F201010|F100410",
+    "values": [
+      "201010"
+    ]
+  },
+  {
+    "name": "json member with weights",
+    "parser": {
+      "type": "json",
+      "member": "ID"
+    },
+    "text": "[{\"ID\":1,\"Rate\":100},{\"id\":2,\"Rate\":1}]",
+    "values": [
+      "1",
+      "2"
+    ]
+  },
+  {
+    "name": "rewards exclude special markers",
+    "parser": {
+      "type": "json",
+      "member": "ID",
+      "exclude": [
+        "0",
+        "998",
+        "999"
+      ]
+    },
+    "text": "[{\"ID\":2,\"Num\":900},{\"ID\":0,\"Num\":10031},{\"ID\":999,\"Num\":81},{\"ID\":998,\"Num\":0}]",
+    "values": [
+      "2"
+    ]
+  },
+  {
+    "name": "optional gift uses Num only for ID zero",
+    "parser": {
+      "type": "json",
+      "member": "Num",
+      "selector": {
+        "member": "ID",
+        "value": "0"
+      }
+    },
+    "text": "[{\"ID\":2,\"Num\":900},{\"Num\":10031,\"ID\":0},{\"ID\":999,\"Num\":81}]",
+    "values": [
+      "10031"
+    ]
+  },
+  {
+    "name": "purchase uses Num only for ID 999",
+    "parser": {
+      "type": "json",
+      "member": "Num",
+      "selector": {
+        "member": "ID",
+        "value": "999"
+      }
+    },
+    "text": "[{\"ID\":2,\"Num\":81},{\"ID\":0,\"Num\":10031},{\"ID\":999,\"Num\":91}]",
+    "values": [
+      "91"
+    ]
+  },
+  {
+    "name": "dynamic code is not executed",
+    "parser": {
+      "type": "unsupported"
+    },
+    "text": "function(round){return [{ID:2,Num:round}];}",
+    "values": null
+  },
+  {
+    "name": "invalid json is not a missing key",
+    "parser": {
+      "type": "json",
+      "member": "ID"
+    },
+    "text": "[{bad",
+    "values": null
+  },
+  {
+    "name": "empty configuration",
+    "parser": {
+      "type": "json",
+      "member": "ID"
+    },
+    "text": "[]",
+    "values": []
+  },
+  {
+    "name": "reward entities use their table",
+    "parser": {
+      "type": "json",
+      "member": "ID",
+      "ranges": [
+        [
+          1001,
+          1999
+        ],
+        [
+          2101,
+          2998
+        ],
+        [
+          5100,
+          5998
+        ],
+        [
+          6101,
+          6998
+        ]
+      ]
+    },
+    "text": "[{\"ID\":2,\"Num\":100},{\"ID\":1036,\"Num\":1},{\"ID\":5501,\"Num\":2}]",
+    "values": [
+      "1036",
+      "5501"
+    ]
+  },
+  {
+    "name": "resources exclude entity ranges",
+    "parser": {
+      "type": "json",
+      "member": "ID",
+      "exclude": [
+        "0",
+        "998",
+        "999"
+      ],
+      "ranges": [
+        [
+          1001,
+          1999
+        ],
+        [
+          2101,
+          2998
+        ],
+        [
+          5100,
+          5998
+        ],
+        [
+          6101,
+          6998
+        ]
+      ],
+      "outsideRanges": true
+    },
+    "text": "[{\"ID\":2,\"Num\":100},{\"ID\":1036,\"Num\":1},{\"ID\":5501,\"Num\":2}]",
+    "values": [
+      "2"
+    ]
+  },
+  {
+    "name": "selectors cannot cross objects",
+    "parser": {
+      "type": "json",
+      "member": "Num",
+      "selector": {
+        "member": "ID",
+        "value": "999"
+      }
+    },
+    "text": "[{\"ID\":999,\"Num\":91},{\"ID\":0,\"Num\":81}]",
+    "values": [
+      "91"
+    ]
+  },
+  {
+    "name": "member text inside strings is not a key",
+    "parser": {
+      "type": "json",
+      "member": "ID"
+    },
+    "text": "[{\"Name\":\"fake \\\"ID\\\":7,\",\"ID\":81}]",
+    "values": [
+      "81"
+    ]
+  },
+  {
+    "name": "nested formation identities only",
+    "parser": {
+      "type": "jsonPaths",
+      "paths": [
+        "$[*].Init[*].HeroID",
+        "$[*].Dyn[*].HeroID"
+      ],
+      "exclude": []
+    },
+    "text": "[{\"Init\":[{\"HeroID\":1001,\"MonsterIdx\":7},{\"HeroID\":\"1002\"}],\"Dyn\":[{\"HeroID\":1001,\"BirthParam\":900}],\"Npc\":[{\"HeroID\":999}]}]",
+    "values": [
+      "1001",
+      "1002"
+    ]
+  },
+  {
+    "name": "tuple suit ids not stars",
+    "parser": {
+      "type": "jsonPaths",
+      "paths": [
+        "$[*][0]"
+      ],
+      "exclude": []
+    },
+    "text": "[[101,7],[102,10],[101,20],[0,90]]",
+    "values": [
+      "101",
+      "102"
+    ]
+  },
+  {
+    "name": "formation pet placeholder",
+    "parser": {
+      "type": "jsonPaths",
+      "paths": [
+        "$[*]"
+      ],
+      "exclude": [
+        "P"
+      ]
+    },
+    "text": "[1001,\"P\",1002,0]",
+    "values": [
+      "1001",
+      "1002"
+    ]
+  },
+  {
+    "name": "group entry never resolves as a single activity",
+    "parser": { "type": "prefix", "prefix": "S" },
+    "text": "G10",
+    "values": []
+  },
+  {
+    "name": "single activity keeps its whole prefixed key",
+    "parser": { "type": "prefix", "prefix": "S" },
+    "text": " S10 ",
+    "values": ["S10"]
+  },
+  {
+    "name": "source category uses first comma token only",
+    "parser": { "type": "token", "delimiter": ",", "index": 0 },
+    "text": "7,10,900",
+    "values": ["7"]
+  },
+  {
+    "name": "nested leaf arrays are not scalar identities",
+    "parser": { "type": "jsonPaths", "paths": ["$[*].ID"], "exclude": [] },
+    "text": "[{\"ID\":[7]},{\"ID\":81},{\"ID\":true},{\"ID\":{\"id\":10}}]",
+    "values": ["81"]
+  },
+  {
+    "name": "tuple arrays never auto wrap scalars",
+    "parser": { "type": "jsonPaths", "paths": ["$[*][0]"], "exclude": [] },
+    "text": "[[81,7],900,[[10],1],{\"0\":999}]",
+    "values": ["81"]
+  },
+  {
+    "name": "json path string keys trim whitespace and preserve case",
+    "parser": { "type": "jsonPaths", "paths": ["$[*].ID"], "exclude": [] },
+    "text": "[{\"ID\":\"  B  \"},{\"id\":7},{\"ID\":\"b\"}]",
+    "values": ["B","b"]
+  },
+  {
+    "name": "array paths refuse scalar roots",
+    "parser": { "type": "jsonPaths", "paths": ["$[0]"], "exclude": [] },
+    "text": "7",
+    "values": []
+  },
+  {
+    "name": "invalid index is not a supported json path",
+    "parser": { "type": "jsonPaths", "paths": ["$[+0]"], "exclude": [] },
+    "text": "[7]",
+    "values": null
+  },
+  {
+    "name": "json paths refuse functions",
+    "parser": {
+      "type": "jsonPaths",
+      "paths": [
+        "$[*].ID"
+      ],
+      "exclude": []
+    },
+    "text": "function(){return [{ID:7}]}",
+    "values": null
+  }
+]

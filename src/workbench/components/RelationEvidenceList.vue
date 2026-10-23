@@ -37,7 +37,10 @@ const EVIDENCE_ICONS = Object.freeze({ comment: MessageSquareText, code: CodeXml
       <component :is="EVIDENCE_ICONS[evidence.type] || Info" :size="13" class="wb-relation-evidence-icon" aria-hidden="true" />
       <div class="wb-relation-evidence-body">
         <span class="wb-relation-evidence-kind">{{ t(`relations.evidence.${evidence.type}`) }}</span>
-        <q v-if="evidence.type === 'comment'" class="wb-relation-evidence-text">{{ evidence.text }}</q>
+        <q v-if="evidence.type === 'comment' || evidence.type === 'rule'" class="wb-relation-evidence-text">{{ evidence.text }}</q>
+        <span v-if="evidence.type === 'rule' && relation.sourceConstraints?.length" class="wb-relation-evidence-code">
+          {{ relation.sourceConstraints.map((guard) => `${guard.column} = ${guard.values.join(' / ')}`).join(' · ') }}
+        </span>
         <template v-else-if="evidence.type === 'code'">
           <span class="wb-relation-evidence-location" :title="`${evidence.file}:${evidence.line}`">{{ shortCodePath(evidence.file) }}:{{ evidence.line }}</span>
           <code v-if="evidence.snippet" class="wb-relation-evidence-code">{{ evidence.snippet }}</code>
