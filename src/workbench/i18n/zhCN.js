@@ -1446,6 +1446,7 @@ export default Object.freeze({
   "batch.exportFiles": "导出 {count} 个 Excel",
   "batch.exportTables": "导出 {count} 张表",
   "home.openTables": "打开 {count} 张表",
+  "home.editTableComment": "修改表备注",
   "home.deleteTables": "删除 {count} 张表",
   "home.deleteSelectedTables": "删除所选表",
   "home.deleteMessage": "即将从 {database} 删除以下表",

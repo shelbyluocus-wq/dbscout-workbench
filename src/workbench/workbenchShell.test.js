@@ -468,6 +468,13 @@ test("database homepage is wired as the current database table management tab", 
   assert.match(orchestrator, /function\s+sendHomeTables\(source = \{\}\)[\s\S]*tableCopy\.open\(\{[\s\S]*tableNames,[\s\S]*\}\)/);
   assert.match(home, /function\s+sendSelection\(\)[\s\S]*emit\("send-tables", \{[\s\S]*tableNames: \[\.\.\.menu\.selectedNames\]/);
   assert.match(home, /@click="sendSelection"><Send :size="14" class="wb-context-icon"[^>]*\/>发送到…/);
+  assert.match(home, /function\s+editTableComment\(/);
+  assert.match(home, /emit\("edit-table-comment", tablePayload\(name\)\)/);
+  assert.match(home, /@click="editTableComment\(menu\.tableName\)"[\s\S]*?t\('home\.editTableComment'\)/);
+  assert.match(pane, /@edit-table-comment="emit\('edit-home-table-comment'/);
+  assert.match(splitLayout, /@edit-home-table-comment="emit\('edit-home-table-comment'/);
+  assert.match(orchestrator, /function\s+openHomeTableCommentEdit/);
+  assert.match(orchestrator, /@edit-home-table-comment="openHomeTableCommentEdit"/);
   assert.match(splitLayout, /@batch-export=/);
   assert.match(splitLayout, /@batch-import=/);
 

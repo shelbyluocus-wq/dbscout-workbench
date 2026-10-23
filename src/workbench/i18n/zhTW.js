@@ -1447,6 +1447,7 @@ export default Object.freeze({
   "batch.exportFiles": "匯出 {count} 個 Excel",
   "batch.exportTables": "匯出 {count} 張表",
   "home.openTables": "開啟 {count} 張表",
+  "home.editTableComment": "修改表備註",
   "home.deleteTables": "刪除 {count} 張表",
   "home.deleteSelectedTables": "刪除所選表",
   "home.deleteMessage": "即將從 {database} 刪除以下表",

@@ -3906,16 +3906,8 @@ const canEditInspectorComment = computed(() => {
   return !isReadOnlySource(source) && sourceHasCapability("tableDesign", source);
 });
 
-function openCommentEditFromMenu() {
-  const target = contextMenu.commentTarget;
-  const source = {
-    connectionId: contextMenu.connectionId,
-    database: contextMenu.database,
-    tableName: contextMenu.tableName,
-    readOnly: focusedInspectorTab.value?.readOnly || focusedInspectorTab.value?.read_only,
-  };
-  closeContextMenu();
-  if (!target || !source.tableName) return;
+function openCommentEdit(source, target) {
+  if (!target || !source?.tableName) return;
   if (isReadOnlySource(source)) {
     blockReadOnlyAction("修改备注");
     return;
@@ -3933,6 +3925,25 @@ function openCommentEditFromMenu() {
   commentEdit.database = source.database;
   commentEdit.tableName = source.tableName;
   commentEdit.value = target.comment || "";
+}
+
+function openCommentEditFromMenu() {
+  const target = contextMenu.commentTarget;
+  const source = {
+    connectionId: contextMenu.connectionId,
+    database: contextMenu.database,
+    tableName: contextMenu.tableName,
+    readOnly: focusedInspectorTab.value?.readOnly || focusedInspectorTab.value?.read_only,
+  };
+  closeContextMenu();
+  openCommentEdit(source, target);
+}
+
+function openHomeTableCommentEdit(source = {}) {
+  openCommentEdit(source, {
+    kind: "table",
+    comment: source.tableComment || source.table_comment || "",
+  });
 }
 
 function closeCommentEdit() {
@@ -5244,6 +5255,7 @@ onBeforeUnmount(() => {
           @copy-home-tables="copyHomeTables"
           @paste-home-tables="pasteHomeTables"
           @rename-home-table="renameHomeTable"
+          @edit-home-table-comment="openHomeTableCommentEdit"
           @delete-home-tables="deleteHomeTables"
           @send-home-tables="sendHomeTables"
           @refresh-home="refreshHome"

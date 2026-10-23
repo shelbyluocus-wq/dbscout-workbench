@@ -1446,6 +1446,7 @@ export default Object.freeze({
   "batch.exportFiles": "Export {count} Excel files",
   "batch.exportTables": "Export {count} tables",
   "home.openTables": "Open {count} tables",
+  "home.editTableComment": "Edit table comment",
   "home.deleteTables": "Delete {count} tables",
   "home.deleteSelectedTables": "Delete selected tables",
   "home.deleteMessage": "These tables will be deleted from {database}:",

@@ -5,6 +5,7 @@ import {
   ClipboardPaste,
   Copy,
   FolderOpen,
+  MessageSquareText,
   Pencil,
   RefreshCw,
   Send,
@@ -58,6 +59,7 @@ const emit = defineEmits([
   "copy-tables",
   "paste-tables",
   "rename-table",
+  "edit-table-comment",
   "delete-tables",
   "send-tables",
   "refresh",
@@ -647,6 +649,12 @@ function refreshHome() {
   emit("refresh", props.tab);
 }
 
+function editTableComment(name = menu.tableName) {
+  if (!canTableDesign.value || !name) return;
+  emit("edit-table-comment", tablePayload(name));
+  closeMenu();
+}
+
 function sendSelection() {
   if (!canTableCopy.value || !menu.selectedNames.length) return;
   emit("send-tables", {
@@ -1002,6 +1010,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="editTableComment(menu.tableName)"><MessageSquareText :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.editTableComment') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
         <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.copy }}</kbd></button>
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.paste }}</kbd></button>
