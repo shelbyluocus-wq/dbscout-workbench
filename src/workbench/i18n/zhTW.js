@@ -1628,8 +1628,6 @@ export default Object.freeze({
   "relations.toggle.review": "有 {count} 條關聯待複核",
   "relations.row.openAllTargets": "在一個分頁中開啟這 {count} 筆被引用的資料",
   "relations.row.openAllShort": "全部 {count} 筆",
-  "relations.row.unreferenced": "另有 {count} 個欄位沒有引用本列",
-  "relations.row.noIncoming": "沒有其他資料引用這一列。",
   "relations.target.open": "開啟 {table} · {value}",
   "relations.incoming.openAll": "在分頁中開啟這 {count} 列",
   "relations.incoming.openAllUnknown": "在分頁中開啟引用它的列",

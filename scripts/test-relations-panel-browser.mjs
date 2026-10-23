@@ -34,6 +34,18 @@ try {
       localStorage.removeItem("dbscout_relation_panel_sections");
     }
   });
+  await page.route("**/src/workbench/mock/mockConfigRelations.js*", async (route) => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const marker = "return { incoming, revision: context.revision, superseded: false };";
+    assert.ok(source.includes(marker));
+    await route.fulfill({ response, body: source.replace(marker, `
+      const mode = globalThis.__relationCountMode;
+      if (mode) for (const entry of incoming) entry.count = mode === "zero" ? 0 : null;
+      globalThis.__relationCountResult = { table, row, incoming, mode };
+      ${marker}
+    `) });
+  });
   await page.goto(base, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await openTable(page, "item");
 
@@ -61,12 +73,13 @@ try {
   const referencing = Number((await dropTable.locator(".wb-incoming-count").textContent()).match(/\d+/)[0]);
   assert.ok(referencing > 1, `${referencing} drops reference the item`);
 
-  // Columns that do not reference the row wait behind one quiet toggle.
-  const quiet = panel.locator(".wb-relations-quiet-toggle").filter({ hasText: "没有引用本行" });
-  await quiet.waitFor();
-  assert.equal(await panel.locator(".wb-relations-quiet-list").count(), 0);
-  await quiet.click();
-  assert.ok(await panel.locator(".wb-relations-quiet-list li").count() > 0);
+  // Zero references have no row, summary, or expandable list.
+  const rowSection = panel.locator(".wb-relations-block").first();
+  const counts = await page.evaluate(() => globalThis.__relationCountResult.incoming);
+  assert.ok(counts.some((entry) => entry.count === 0), "fixture includes zero references");
+  assert.equal(await rowSection.locator(".wb-incoming-relation").count(), counts.filter((entry) => entry.count !== 0).length);
+  assert.equal(await rowSection.locator(".wb-relations-quiet-toggle, .wb-relations-quiet-list").count(), 0);
+  assert.doesNotMatch(await rowSection.textContent(), /没有引用本行/);
 
   // Evidence opens on demand with the comment and the code location.
   const card = panel.locator(".wb-relation-card").filter({ hasText: "drop_table.item_id" });
@@ -114,6 +127,34 @@ try {
   });
   await page.waitForFunction(() => document.querySelector(".wb-relations-row-identity")?.textContent.startsWith("id=1"));
 
+  // With no matches in either direction, show only the single empty-row hint.
+  await page.evaluate(() => { globalThis.__relationCountMode = "zero"; });
+  await page.locator(".wb-relation-chip button").click();
+  await page.locator('.wb-grid-row td[data-column-index="0"]').nth(1).click();
+  await page.waitForFunction(() => globalThis.__relationCountResult?.mode === "zero"
+    && document.querySelectorAll(".wb-incoming-relation").length === 0);
+  assert.match(await rowSection.textContent(), /这一行没有引用其他配置，也没有被引用/);
+  assert.equal(await rowSection.locator(".wb-relations-group-label.is-incoming").count(), 0);
+  assert.equal(await rowSection.locator(".wb-relations-quiet-toggle, .wb-relations-quiet-list").count(), 0);
+
+  // Outgoing targets remain, but an empty incoming group never occupies space.
+  await openTable(page, "quest");
+  await page.locator('.wb-grid-row td[data-column-index="0"]').nth(3).click();
+  await page.waitForFunction(() => globalThis.__relationCountResult?.table === "quest"
+    && globalThis.__relationCountResult.row.id === "4"
+    && document.querySelectorAll(".wb-incoming-relation").length === 0);
+  assert.ok(await rowSection.locator(".wb-row-target").count() > 0);
+  assert.equal(await rowSection.locator(".wb-relations-group-label.is-incoming").count(), 0);
+
+  // Unknown counts must not be treated as zero and silently hidden.
+  await page.evaluate(() => { globalThis.__relationCountMode = "unknown"; });
+  await page.locator('.wb-grid-row td[data-column-index="0"]').nth(2).click();
+  await page.waitForFunction(() => globalThis.__relationCountResult?.mode === "unknown"
+    && document.querySelectorAll(".wb-incoming-count.is-failed").length > 0);
+  const unknownCount = await page.evaluate(() => globalThis.__relationCountResult.incoming.length);
+  assert.equal(await rowSection.locator(".wb-incoming-relation").count(), unknownCount);
+  await page.evaluate(() => { globalThis.__relationCountMode = null; });
+
   // Section state is remembered.
   const tableToggle = panel.locator(".wb-relation-section-toggle").filter({ hasText: "字段关联" });
   await tableToggle.click();
@@ -149,7 +190,7 @@ try {
   assert.match(await field.innerText(), /备注保存刷新验证/);
 
   assert.deepEqual(errors, []);
-  console.log("Relation page: badges, row references, evidence, table and field comment cards, remembered sections, comment save and reference jump passed.");
+  console.log("Relation page: hidden zero references, visible unknown counts, badges, row references, evidence, comment cards, remembered sections, comment save and reference jump passed.");
 } finally {
   await browser.close();
 }

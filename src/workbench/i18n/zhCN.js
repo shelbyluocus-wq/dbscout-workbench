@@ -1627,8 +1627,6 @@ export default Object.freeze({
   "relations.toggle.review": "有 {count} 条关联待复核",
   "relations.row.openAllTargets": "在一个标签页里打开这 {count} 条被引用的记录",
   "relations.row.openAllShort": "全部 {count} 条",
-  "relations.row.unreferenced": "另有 {count} 个字段没有引用本行",
-  "relations.row.noIncoming": "没有其他记录引用这一行。",
   "relations.target.open": "打开 {table} · {value}",
   "relations.incoming.openAll": "在标签页中打开这 {count} 行",
   "relations.incoming.openAllUnknown": "在标签页中打开引用它的行",

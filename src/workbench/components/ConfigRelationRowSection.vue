@@ -5,7 +5,7 @@
 // debounced per selection and dropped when the selection moves on.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, ChevronRight, MousePointerClick } from "lucide-vue-next";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, MousePointerClick } from "lucide-vue-next";
 import { findRowByKey, rowIdentityLabel } from "../utils/rowIdentity.js";
 import {
   isEmptyReferenceValue,
@@ -173,12 +173,6 @@ const incomingEntries = computed(() => {
     .filter((entry) => !isEmptyReferenceValue(entry.value));
 });
 const referencedRows = computed(() => incomingEntries.value.filter((entry) => entry.result?.count !== 0));
-const unreferencedRows = computed(() => incomingEntries.value.filter((entry) => entry.result?.count === 0));
-const showUnreferenced = ref(false);
-
-watch(() => props.selectedCell?.rowKey, () => {
-  showUnreferenced.value = false;
-});
 
 const referenceTotal = computed(() => referencedRows.value.reduce((sum, entry) => sum + (Number(entry.result?.count) || 0), 0));
 const loaded = computed(() => targetsLoaded.value && referencesLoaded.value);
@@ -329,7 +323,7 @@ function targetTitle(target, relation) {
           </div>
         </div>
 
-        <div v-if="referencedRows.length || (unreferencedRows.length && outgoingRows.length)" class="wb-relations-group">
+        <div v-if="referencedRows.length" class="wb-relations-group">
           <div class="wb-relations-group-label is-incoming">
             <ArrowDownLeft :size="12" :stroke-width="2.2" aria-hidden="true" />
             <span>{{ t('relations.row.incoming') }}</span>
@@ -355,35 +349,10 @@ function targetTitle(target, relation) {
             @open-row="jumpToIncomingRow(entry.relation, $event)"
             @open-all="openAllIncoming(entry.relation, entry.value)"
           />
-          <p v-if="!referencedRows.length" class="wb-relations-note">{{ t('relations.row.noIncoming') }}</p>
         </div>
 
         <p v-if="rowEmpty" class="wb-relations-hint is-quiet">{{ t('relations.row.empty') }}</p>
 
-        <!-- Columns that could point at this row but do not, kept out of the way. -->
-        <template v-if="unreferencedRows.length">
-          <button
-            type="button"
-            class="wb-relations-quiet-toggle"
-            :aria-expanded="showUnreferenced"
-            @click="showUnreferenced = !showUnreferenced"
-          >
-            <ChevronRight :size="12" :stroke-width="2.2" :class="{ 'is-open': showUnreferenced }" aria-hidden="true" />
-            {{ t('relations.row.unreferenced', { count: unreferencedRows.length }) }}
-          </button>
-          <ul v-if="showUnreferenced" class="wb-relations-quiet-list">
-            <li v-for="entry in unreferencedRows" :key="entry.relation.id">
-              <CommentTip
-                :name="sourceTableName(entry.relation)"
-                :comment="tableDisplayComment(tables, entry.relation.sourceTable)"
-              ><span class="wb-relations-quiet-table">{{ sourceTableName(entry.relation) }}</span></CommentTip>.<CommentTip
-                field
-                :name="`${sourceTableName(entry.relation)}.${entry.relation.sourceColumn}`"
-                :comment="tableColumnComment(tables, entry.relation.sourceTable, entry.relation.sourceColumn)"
-              >{{ entry.relation.sourceColumn }}</CommentTip>
-            </li>
-          </ul>
-        </template>
         <p v-if="rowError" class="wb-relations-error" role="alert">{{ rowError }}</p>
       </template>
     </div>

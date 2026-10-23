@@ -1627,8 +1627,6 @@ export default Object.freeze({
   "relations.toggle.review": "{count} relations wait for review",
   "relations.row.openAllTargets": "Open all {count} referenced rows in one tab",
   "relations.row.openAllShort": "Open all {count}",
-  "relations.row.unreferenced": "{count} more columns do not reference this row",
-  "relations.row.noIncoming": "No other rows reference this row.",
   "relations.target.open": "Open {table} · {value}",
   "relations.incoming.openAll": "Open these {count} rows in a tab",
   "relations.incoming.openAllUnknown": "Open the referencing rows in a tab",

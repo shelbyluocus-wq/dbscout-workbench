@@ -117,7 +117,8 @@ capabilities:
   targets openable at once — and the rows that point back. Incoming lines
   show their count, expand on demand into key + name lists (50 rows per
   batch), and open every referencing row as one filtered tab; columns that
-  do not reference the row fold into one quiet toggle. Composite-key jumps
+  do not reference the row are hidden, with no zero-reference toggle or list.
+  Unknown and pending counts stay visible. Composite-key jumps
   match every key, and a jump to referenced rows selects the first of them so
   the chain can be followed. `IncomingRelationRows.vue` renders these lines
   and `incomingRelationRows.js` owns their paging and stale-request guards.
