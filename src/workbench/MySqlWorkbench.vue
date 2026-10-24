@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "./i18n/index.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, Pin, RefreshCw, Send, Upload, X } from "lucide-vue-next";
 
 import {
@@ -139,6 +139,8 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
+// The release workspace is large and rarely opened: load it on first use.
+const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
@@ -926,6 +928,13 @@ function openTableTransfer() {
   tableTransfer.open();
 }
 
+// Release guide: the workspace keeps its own progress, so reopening it resumes.
+const releaseFlowOpen = ref(false);
+
+function openReleaseFlow() {
+  releaseFlowOpen.value = true;
+}
+
 // 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，
 // 检查器里的关联页则按各自标签页的来源读取。
 const configRelations = useConfigRelations({});
@@ -1100,6 +1109,7 @@ const {
     databaseFavorites: openDatabaseFavorites,
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
+    releaseFlow: openReleaseFlow,
     configRelations: openConfigRelationsReview,
     settings: openSidebarSettings,
   },
@@ -5510,6 +5520,13 @@ onBeforeUnmount(() => {
       v-if="tableTransfer.dialog.open"
       :transfer="tableTransfer"
       @close="tableTransfer.close"
+    />
+
+    <ReleaseFlowDialog
+      v-if="releaseFlowOpen"
+      :templates="tableTransfer.templates.value"
+      :exclusion-templates="databaseSync.exclusionTemplates.value"
+      @close="releaseFlowOpen = false"
     />
 
     <ConfigRelationsDialog

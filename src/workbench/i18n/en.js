@@ -1,4 +1,6 @@
 // Application-owned interface messages. Never translate user data.
+import { releaseFlowEn } from "./releaseFlowMessages.js";
+
 export default Object.freeze({
   "m_a49b9e3cc423": "Expand all connections",
   "m_809ec93960dd": "Collapse all connections",
@@ -1696,5 +1698,6 @@ export default Object.freeze({
   "tableTransfer.builtInTemplateHint": "Built-in template. The script and project are found automatically. Double-click to rename.",
   "tableTransfer.customTemplateHint": "{name} · Double-click to rename",
   "tableTransfer.deleteTemplateMessage": "Delete the template \"{name}\"?",
-  "tableTransfer.deleteTemplateNote": "Only the saved script, project folder and conflict setting are removed. Files on disk are not touched."
+  "tableTransfer.deleteTemplateNote": "Only the saved script, project folder and conflict setting are removed. Files on disk are not touched.",
+  ...releaseFlowEn,
 });
