@@ -1,4 +1,3 @@
-import { releaseZhCN } from "./releaseWorkflowMessages.js";
 // Application-owned interface messages. Never translate user data.
 export default Object.freeze({
   "m_a49b9e3cc423": "展开全部连接",
@@ -1697,6 +1696,5 @@ export default Object.freeze({
   "tableTransfer.builtInTemplateHint": "内置模板，会自动查找转表脚本和游戏工程（双击重命名）",
   "tableTransfer.customTemplateHint": "{name}（双击重命名）",
   "tableTransfer.deleteTemplateMessage": "确定删除模板“{name}”？",
-  "tableTransfer.deleteTemplateNote": "只删除这个模板保存的脚本、工程路径和冲突设置，不会改动磁盘上的文件。",
-  ...releaseZhCN,
+  "tableTransfer.deleteTemplateNote": "只删除这个模板保存的脚本、工程路径和冲突设置，不会改动磁盘上的文件。"
 });

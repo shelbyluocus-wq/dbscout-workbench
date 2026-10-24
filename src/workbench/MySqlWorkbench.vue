@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "./i18n/index.js";
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, Pin, RefreshCw, Send, Upload, X } from "lucide-vue-next";
 
 import {
@@ -139,7 +139,6 @@ import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
-const ReleaseWorkflowDialog = defineAsyncComponent(() => import("./components/ReleaseWorkflowDialog.vue"));
 import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
@@ -927,8 +926,6 @@ function openTableTransfer() {
   tableTransfer.open();
 }
 
-const releaseWorkflowOpen = ref(false);
-
 // 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，
 // 检查器里的关联页则按各自标签页的来源读取。
 const configRelations = useConfigRelations({});
@@ -1093,7 +1090,6 @@ const {
   shortcuts: shortcutHelper,
   expanded: {
     settings: () => Boolean(sidebarRef.value?.settingsOpen),
-    releaseWorkflow: () => releaseWorkflowOpen.value,
   },
   badges: {
     configRelations: () => configRelationsBadge.value,
@@ -1104,7 +1100,6 @@ const {
     databaseFavorites: openDatabaseFavorites,
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
-    releaseWorkflow: () => { releaseWorkflowOpen.value = true; },
     configRelations: openConfigRelationsReview,
     settings: openSidebarSettings,
   },
@@ -5515,12 +5510,6 @@ onBeforeUnmount(() => {
       v-if="tableTransfer.dialog.open"
       :transfer="tableTransfer"
       @close="tableTransfer.close"
-    />
-
-    <ReleaseWorkflowDialog
-      v-if="releaseWorkflowOpen"
-      :templates="tableTransfer.templates.value"
-      @close="releaseWorkflowOpen = false"
     />
 
     <ConfigRelationsDialog
