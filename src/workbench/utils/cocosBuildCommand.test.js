@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cocosBuildCommand, cocosMajorVersion, defaultCocosEditorPath, describeCocosExit } from "./cocosBuildCommand.js";
+import {
+  cocosBuildCommand,
+  cocosBuildOptions,
+  cocosBuildProblems,
+  cocosFamily,
+  cocosMajorVersion,
+  cocosOutputDir,
+  cocosPlatformsFor,
+  defaultCocosEditorPath,
+  describeCocosExit,
+  isNativeCocosPlatform,
+  resolveProjectPath,
+} from "./cocosBuildCommand.js";
 
 test("Cocos Creator 3.x builds with --project and an exported build configuration", () => {
   const command = cocosBuildCommand({
@@ -45,4 +57,49 @@ test("exit codes follow the documented meanings", () => {
   assert.equal(cocosMajorVersion("v3"), 0);
   assert.equal(cocosMajorVersion(" 3.8.8"), 3);
   assert.equal(defaultCocosEditorPath("3.8.8"), "C:\\ProgramData\\cocos\\editors\\Creator\\3.8.8\\CocosCreator.exe");
+});
+
+test("a platform's settings become build options; a relative configuration follows the project", () => {
+  const options = cocosBuildOptions({
+    targetClient: "D:\\jswz\\release\\tw\\jswz",
+    cocosPath: "D:\\jswz\\chengxu\\client\\creator3.8\\CocosCreator.exe",
+    cocosVersion: "3.8.8",
+    buildPlatform: "android",
+    buildConfig: "build-config/android.json",
+    buildOutputName: "android-tw",
+    buildDebug: false,
+    buildMd5Cache: true,
+    buildQaGuard: true,
+  });
+  assert.equal(options.configPath, "D:\\jswz\\release\\tw\\jswz\\build-config/android.json");
+  assert.equal(resolveProjectPath("/Users/dev/nzg", "/abs/config.json"), "/abs/config.json");
+  assert.equal(resolveProjectPath("/Users/dev/nzg", ""), "");
+  assert.deepEqual(cocosBuildCommand(options).args.slice(2), ["--build", `configPath=${options.configPath};outputName=android-tw`]);
+});
+
+test("3.x and 2.4 have their own platforms, native targets and output folders", () => {
+  assert.equal(cocosFamily("3.8.8"), 3);
+  assert.equal(cocosFamily("2.4.13"), 2);
+  assert.equal(cocosFamily("x"), 0);
+  assert.ok(cocosPlatformsFor("3.8.8").includes("windows"));
+  assert.ok(cocosPlatformsFor("2.4.13").includes("win32"));
+  assert.equal(isNativeCocosPlatform("3.8.8", "android"), true);
+  assert.equal(isNativeCocosPlatform("2.4.13", "web-mobile"), false);
+  assert.equal(cocosOutputDir({ projectPath: "D:\\tw\\jswz", version: "3.8.8", platform: "android" }), "D:\\tw\\jswz\\build\\android");
+  assert.equal(cocosOutputDir({ projectPath: "D:\\tw\\jswz", version: "3.8.8", platform: "android", outputName: "tw" }), "D:\\tw\\jswz\\build\\tw");
+  assert.equal(cocosOutputDir({ projectPath: "/dev/nzg", version: "2.4.13", platform: "android" }), "/dev/nzg/build/jsb-link");
+  assert.equal(cocosOutputDir({ projectPath: "/dev/nzg", version: "2.4.13", platform: "web-mobile" }), "/dev/nzg/build/web-mobile");
+});
+
+test("checks before a build: missing pieces stop it, version differences warn", () => {
+  const options = { projectPath: "D:\\jswz", editorPath: "C:\\Cocos\\CocosCreator.exe", version: "3.8.6", platform: "android", configPath: "" };
+  const codes = (problems) => problems.map((problem) => `${problem.level}:${problem.code}`);
+  assert.deepEqual(codes(cocosBuildProblems({ ...options, projectPath: "", editorPath: "", platform: "" })), ["error:noProject", "error:noEditor", "error:noPlatform"]);
+  assert.deepEqual(codes(cocosBuildProblems(options, { project: { exists: false } })), ["error:projectMissing", "warning:nativeWithoutConfig"]);
+  const project = { exists: true, engine: { version: "3.8.8" }, editorExists: true };
+  assert.deepEqual(codes(cocosBuildProblems(options, { project, editorVersion: "3.8.6" })), ["warning:versionMismatch", "warning:nativeWithoutConfig"]);
+  assert.deepEqual(codes(cocosBuildProblems(options, { project, editorVersion: "2.4.13" })), ["error:familyMismatch", "warning:nativeWithoutConfig"]);
+  assert.deepEqual(codes(cocosBuildProblems({ ...options, platform: "web-mobile" }, { project, editorVersion: "3.8.8" })), []);
+  assert.deepEqual(codes(cocosBuildProblems({ ...options, configPath: "D:\\x.json" }, { project: { ...project, configExists: false }, editorVersion: "3.8.8" })), ["error:configMissing"]);
+  assert.deepEqual(codes(cocosBuildProblems({ ...options, platform: "android;rm" }, { project, editorVersion: "3.8.8" })), ["error:noPlatform"]);
 });

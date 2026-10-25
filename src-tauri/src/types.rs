@@ -1025,6 +1025,7 @@ pub struct AppState {
     pub account: AccountState,
     pub perf: crate::perf::PerformanceRecorder,
     pub table_transfer: crate::table_transfer::TableTransferJobs,
+    pub cocos_build: crate::cocos_build::CocosBuildJobs,
     pub config_relations: crate::config_relations::engine::ConfigRelationsState,
 }
 
@@ -1589,6 +1590,7 @@ impl AppState {
             },
             perf: crate::perf::PerformanceRecorder::default(),
             table_transfer: crate::table_transfer::TableTransferJobs::default(),
+            cocos_build: crate::cocos_build::CocosBuildJobs::default(),
             config_relations: crate::config_relations::engine::ConfigRelationsState::default(),
         }
     }

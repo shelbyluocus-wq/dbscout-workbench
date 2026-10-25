@@ -1,359 +1,108 @@
 <script setup>
-// Guided release workspace: one place that walks a release from the database
-// overwrite through the client copy, the Cocos build and the GM operations,
-// with the open plans and platform settings as tools beside the steps.
-// Progress is kept on this device, so the workspace can be closed and resumed.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeft, ArrowRight, FlaskConical, LoaderCircle, Rocket, SlidersHorizontal, X } from "lucide-vue-next";
+// Release workspace: every platform's update on the left as cards, the open
+// update's steps under its card, and the workspace pages (overview, history,
+// open plans, client build, SVN, platform settings) in the header. Updates
+// keep their own progress on this device, so the workspace can be closed and
+// resumed, and several platforms can be updated side by side.
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
+import { CalendarCheck2, FolderGit2, History, LayoutDashboard, Package, Rocket, Server, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
-import { useReleaseFlow } from "../composables/useReleaseFlow.js";
-import {
-  RELEASE_PAGE_BY_ID,
-  RELEASE_TASK_BY_ID,
-  TASK_STATUS,
-  adjacentPage,
-  dependentsOf,
-  isReleaseTool,
-  missingDependencies,
-  nextTaskOnPage,
-} from "../releaseFlowState.js";
-import { formatCountdown } from "../utils/releaseServer.js";
-import { formatReleaseDate, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
-import ReleaseFlowRail from "./ReleaseFlowRail.vue";
-import ReleaseFlowOverview from "./ReleaseFlowOverview.vue";
-import ReleaseDatabasePage from "./ReleaseDatabasePage.vue";
-import ReleaseSvnPage from "./ReleaseSvnPage.vue";
-import ReleaseFileSyncPage from "./ReleaseFileSyncPage.vue";
-import ReleaseTransferPage from "./ReleaseTransferPage.vue";
-import ReleaseDiffPage from "./ReleaseDiffPage.vue";
-import ReleaseCocosPage from "./ReleaseCocosPage.vue";
-import ReleaseGmTasksPage from "./ReleaseGmTasksPage.vue";
-import ReleaseServerPage from "./ReleaseServerPage.vue";
-import ReleaseFlowSummary from "./ReleaseFlowSummary.vue";
+import { useReleaseWorkspace } from "../composables/useReleaseWorkspace.js";
+import { composeDrivers, createReleaseBuildDriver } from "../composables/useCocosBuild.js";
+import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
+import { isTauriRuntime } from "../utils/tauriBridge.js";
+import ReleasePlatformBoard from "./ReleasePlatformBoard.vue";
+import ReleaseDemoMenu from "./ReleaseDemoMenu.vue";
+import ReleaseNewUpdateDialog from "./ReleaseNewUpdateDialog.vue";
+import ReleaseHomePage from "./ReleaseHomePage.vue";
+import ReleasePlatformPage from "./ReleasePlatformPage.vue";
+import ReleaseRunView from "./ReleaseRunView.vue";
+import ReleaseHistoryPage from "./ReleaseHistoryPage.vue";
 import ReleasePlanBoard from "./ReleasePlanBoard.vue";
+import ReleaseBuildPage from "./ReleaseBuildPage.vue";
+import ReleaseSvnToolPage from "./ReleaseSvnToolPage.vue";
 import ReleasePlatformsPage from "./ReleasePlatformsPage.vue";
 import "../releaseFlow.css";
+import "../releaseWorkspace.css";
 
 const props = defineProps({
-  templates: { type: Array, default: () => [] },
+  transfer: { type: Object, default: null },
   exclusionTemplates: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(["close"]);
 
-const flow = useReleaseFlow({ templates: () => props.templates });
-const state = flow.state;
+// The build step runs Cocos Creator for real; everything else is the demo.
+// In the browser preview the backend is a mock, which can also fail a build.
+const workspace = useReleaseWorkspace({
+  templates: () => props.transfer?.templates?.value || [],
+  driver: composeDrivers(
+    createReleaseBuildDriver({ simulateFailure: (context) => !isTauriRuntime() && context.demo.buildFailure && context.attempt === 1 }),
+    createReleaseDemoDriver(),
+  ),
+});
+onBeforeUnmount(() => workspace.dispose());
+
+const view = workspace.view;
 const dialogRef = ref(null);
-const pageRef = ref(null);
-const menuOpen = ref(false);
-const menuRef = ref(null);
-const menuButtonRef = ref(null);
-const confirming = ref(false);
-const { confirm } = useConfirm();
+const mainRef = ref(null);
+const newUpdate = reactive({ open: false, platformId: "" });
 
-const busy = computed(() => flow.busy.value);
-useEscClose(() => true, () => emit("close"), () => busy.value || confirming.value, { dialogRef });
-onBeforeUnmount(() => flow.dispose());
+// Any page can start a new update; the dialog asks which platform (and what
+// to do with an update that platform still has open).
+provide("releaseNewUpdate", (platformId = "") => {
+  newUpdate.platformId = platformId;
+  newUpdate.open = true;
+});
 
-const PAGE_COMPONENTS = {
-  overview: ReleaseFlowOverview,
-  database: ReleaseDatabasePage,
-  clientSvn: ReleaseSvnPage,
-  clientSync: ReleaseFileSyncPage,
-  clientTransfer: ReleaseTransferPage,
-  clientDiff: ReleaseDiffPage,
-  build: ReleaseCocosPage,
-  gmUpload: ReleaseGmTasksPage,
-  gmServer: ReleaseServerPage,
-  summary: ReleaseFlowSummary,
+// Confirmations and the new-update dialog are layers above the workspace and
+// take Escape first.
+const busy = computed(() => workspace.anyBusy.value);
+useEscClose(() => true, () => emit("close"), () => busy.value, { dialogRef });
+
+const NAV = Object.freeze([
+  { id: "home", icon: LayoutDashboard },
+  { id: "history", icon: History },
+  { id: "plans", icon: CalendarCheck2 },
+  { id: "build", icon: Package },
+  { id: "svn", icon: FolderGit2 },
+  { id: "platforms", icon: Server },
+]);
+
+function openNav(id) {
+  if (id === "home") workspace.openHome();
+  else workspace.openSection(id);
+}
+
+const SECTION_COMPONENTS = {
+  home: ReleaseHomePage,
+  platform: ReleasePlatformPage,
+  history: ReleaseHistoryPage,
   plans: ReleasePlanBoard,
+  build: ReleaseBuildPage,
+  svn: ReleaseSvnToolPage,
   platforms: ReleasePlatformsPage,
 };
-// Pages built around wide tables or two columns get more room.
-const WIDE_PAGES = new Set(["plans", "clientSync", "clientDiff", "platforms"]);
 
-const pageComponent = computed(() => PAGE_COMPONENTS[state.page] || ReleaseFlowOverview);
-const pageProps = computed(() => {
-  if (state.page === "database") return { flow, exclusionTemplates: props.exclusionTemplates };
-  return { flow };
-});
-const isTool = computed(() => isReleaseTool(state.page));
-const mode = computed(() => state.brief.mode);
+const currentFlow = computed(() => workspace.currentFlow.value);
+const sectionKey = computed(() => (view.section === "run" ? `run:${view.runId}` : `${view.section}:${view.platformId}`));
 
-function focusPageHeading() {
-  pageRef.value?.querySelector("h3")?.focus({ preventScroll: true });
+function focusHeading() {
+  mainRef.value?.querySelector("h3")?.focus({ preventScroll: true });
 }
 
 watch(
-  () => state.page,
+  () => [sectionKey.value, currentFlow.value?.state.page],
   async () => {
-    menuOpen.value = false;
     await nextTick();
-    if (pageRef.value) pageRef.value.scrollTop = 0;
-    focusPageHeading();
+    mainRef.value?.querySelector("[data-release-scroll]")?.scrollTo?.({ top: 0 });
+    focusHeading();
   },
 );
 
-// Open on the page's heading rather than its first field, so opening the
-// workspace never lands in a date picker by accident.
-onMounted(() => void nextTick(focusPageHeading));
-
-/* ── Footer: the one next action of the current page ── */
-const CONFIRMED_TASKS = new Set(["db.sync", "gm.restart", "gm.open"]);
-
-function blockerText(taskId, blocker) {
-  if (blocker === "notStarted") return t("releaseFlow.blocker.notStarted");
-  if (blocker === "busy") return t("releaseFlow.blocker.busy");
-  if (blocker === "dependency") {
-    const [missing] = missingDependencies(taskId, state.tasks, state.brief);
-    return t("releaseFlow.blocker.dependency", { step: taskTitle(missing) });
-  }
-  return "";
-}
-
-function runLabel(taskId) {
-  if (taskId === "db.plans") {
-    const { open, close } = flow.planCounts.value;
-    return open + close ? t("releaseFlow.task.db.plans.runCount", { count: open + close }) : t("releaseFlow.task.db.plans.runNone");
-  }
-  return t(`releaseFlow.task.${taskId}.run`);
-}
-
-function nextStep(pageId) {
-  const nextPage = adjacentPage(pageId, state.brief, 1);
-  return {
-    status: nextPage === "summary"
-      ? t("releaseFlow.footer.doneLast")
-      : t("releaseFlow.footer.doneNext", { step: pageTitle(nextPage, mode.value) }),
-    primary: { label: t(nextPage === "summary" ? "releaseFlow.footer.toSummary" : "releaseFlow.footer.next"), action: "next" },
-  };
-}
-
-function runningFooter() {
-  return {
-    status: t("releaseFlow.footer.running", { step: taskTitle(flow.runningTask.value) }),
-    running: true,
-    primary: { label: t("releaseFlow.footer.runningButton"), disabled: true },
-  };
-}
-
-// The maintenance page follows the server rather than a task list: schedule,
-// wait for the time, restart during maintenance, then open.
-function serverFooter() {
-  const phase = flow.serverPhase.value;
-  if (phase === "running") {
-    // The maintenance window and the hot update's opening are handed over together.
-    const blockedTask = flow.scheduleBlocker.value;
-    const blocker = blockedTask ? flow.blockerOf(blockedTask) : "";
-    const problem = flow.scheduleProblem.value;
-    const blocking = problem === "endBeforeStart" || problem === "startPassed";
-    return {
-      status: blockerText(blockedTask, blocker) || (problem ? t(`releaseFlow.schedule.problem.${problem}`) : t("releaseFlow.server.footer.schedule")),
-      tone: blocking ? "warning" : "",
-      primary: { label: t("releaseFlow.server.action.schedule"), action: "schedule", disabled: Boolean(blocker) || blocking },
-    };
-  }
-  if (phase === "scheduled" && flow.shutdownRefused.value) {
-    return {
-      status: releaseErrorText(state.tasks["gm.shutdown"].error),
-      tone: "danger",
-      primary: { label: t("releaseFlow.footer.retry"), action: "run", taskId: "gm.shutdown", disabled: Boolean(flow.blockerOf("gm.shutdown")) },
-    };
-  }
-  if (phase === "scheduled") {
-    const left = formatCountdown(flow.maintenanceStartAt.value - flow.serverNow.value);
-    return {
-      status: t("releaseFlow.server.footer.waiting", { time: left }),
-      primary: { label: t("releaseFlow.server.action.waiting"), disabled: true },
-    };
-  }
-  if (phase === "maintenance" || phase === "readyToOpen") {
-    const taskId = phase === "maintenance" ? "gm.restart" : "gm.open";
-    const blocker = flow.blockerOf(taskId);
-    const failed = state.tasks[taskId].status === TASK_STATUS.FAILED;
-    return {
-      status: blockerText(taskId, blocker) || (failed ? releaseErrorText(state.tasks[taskId].error) : t(`releaseFlow.server.footer.${phase}`)),
-      tone: failed ? "danger" : "",
-      primary: { label: taskTitle(taskId), action: "run", taskId, disabled: Boolean(blocker) },
-    };
-  }
-  return nextStep("gmServer");
-}
-
-const footer = computed(() => {
-  const pageId = state.page;
-  if (isTool.value) {
-    return {
-      status: t("releaseFlow.footer.toolHint"),
-      primary: { label: t("releaseFlow.footer.back", { step: pageTitle(state.returnPage, mode.value) }), action: "return" },
-    };
-  }
-  if (pageId === "overview") {
-    if (state.brief.started) return { ...nextStep("overview"), status: t("releaseFlow.footer.started") };
-    return {
-      status: flow.canStart.value ? t("releaseFlow.footer.ready") : t("releaseFlow.footer.confirmFirst"),
-      primary: { label: t("releaseFlow.footer.start"), action: "start", disabled: !flow.canStart.value },
-    };
-  }
-  if (pageId === "summary") {
-    return {
-      status: flow.complete.value ? t("releaseFlow.footer.complete") : t("releaseFlow.footer.incomplete"),
-      primary: { label: t("releaseFlow.footer.newRelease"), action: "restart", disabled: busy.value },
-    };
-  }
-  if (flow.runningTask.value) return runningFooter();
-  if (pageId === "gmServer" && mode.value === "maintenance") return serverFooter();
-  if (pageId === "clientSvn" && flow.conflictsPending.value) {
-    const pending = flow.svnConflicts.value.filter((conflict) => !conflict.choice).length;
-    return {
-      status: pending ? t("releaseFlow.footer.conflictsLeft", { count: pending }) : t("releaseFlow.footer.conflictsChosen"),
-      tone: "warning",
-      primary: { label: t("releaseFlow.footer.resolve"), action: "resolve", disabled: pending > 0 },
-    };
-  }
-  const page = RELEASE_PAGE_BY_ID.get(pageId);
-  const tasks = page.tasks.filter((id) => flow.applies(id));
-  const nextTask = nextTaskOnPage(pageId, state.tasks, state.brief);
-  if (!nextTask) {
-    const rerun = tasks.length === 1 && state.tasks[tasks[0]].status === TASK_STATUS.DONE ? tasks[0] : "";
-    return { ...nextStep(pageId), tone: "success", rerun };
-  }
-  const blocker = flow.blockerOf(nextTask);
-  const failed = state.tasks[nextTask].status === TASK_STATUS.FAILED;
-  const definition = RELEASE_TASK_BY_ID.get(nextTask);
-  // GM pages list operations as cards; the button names the one it runs.
-  const named = page.phase === "gm" && tasks.length > 1;
-  let status = blockerText(nextTask, blocker);
-  if (!status && failed) status = releaseErrorText(state.tasks[nextTask].error);
-  if (!status && tasks.length > 1) {
-    const settled = tasks.filter((id) => [TASK_STATUS.DONE, TASK_STATUS.SKIPPED].includes(state.tasks[id].status)).length;
-    status = t("releaseFlow.footer.pageProgress", { done: settled, total: tasks.length });
-  }
-  let label = failed ? t("releaseFlow.footer.retry") : runLabel(nextTask);
-  if (named && !failed) label = taskTitle(nextTask);
-  return {
-    status,
-    tone: failed ? "danger" : "",
-    primary: { label, action: "run", taskId: nextTask, disabled: Boolean(blocker) },
-    skip: definition.skippable && !blocker ? nextTask : "",
-  };
-});
-
-async function withConfirm(options) {
-  confirming.value = true;
-  try {
-    return await confirm({ note: t("releaseFlow.demo.confirmNote"), cancelText: t("releaseFlow.cancel"), ...options });
-  } finally {
-    confirming.value = false;
-  }
-}
-
-function confirmOptions(taskId) {
-  const platform = flow.platform.value;
-  if (taskId === "db.sync") {
-    return {
-      title: t("releaseFlow.confirm.sync.title", { database: platform.targetDatabase }),
-      message: t("releaseFlow.confirm.sync.message", {
-        source: platform.sourceDatabase,
-        target: platform.targetDatabase,
-        tables: flow.syncPlan.value.tables.length,
-      }),
-      confirmText: t("releaseFlow.confirm.sync.action"),
-      danger: true,
-    };
-  }
-  if (taskId === "gm.restart") {
-    return {
-      title: t("releaseFlow.confirm.restart.title"),
-      message: t("releaseFlow.confirm.restart.message", { platform: platform.name }),
-      confirmText: t("releaseFlow.confirm.restart.action"),
-      danger: true,
-    };
-  }
-  return {
-    title: t("releaseFlow.confirm.open.title"),
-    message: t("releaseFlow.confirm.open.message", { platform: platform.name }),
-    confirmText: t("releaseFlow.confirm.open.action"),
-  };
-}
-
-async function runTask(taskId) {
-  if (CONFIRMED_TASKS.has(taskId) && !(await withConfirm(confirmOptions(taskId)))) return;
-  await flow.runTask(taskId);
-}
-
-async function rerunTask(taskId) {
-  const affected = dependentsOf(taskId).filter((id) => state.tasks[id].status !== TASK_STATUS.IDLE);
-  if (affected.length && !(await withConfirm({
-    title: t("releaseFlow.confirm.rerun.title", { step: taskTitle(taskId) }),
-    message: t("releaseFlow.confirm.rerun.message", { count: affected.length }),
-    items: affected.map((id) => taskTitle(id)),
-    confirmText: t("releaseFlow.confirm.rerun.action"),
-  }))) return;
-  await runTask(taskId);
-}
-
-async function skipTask(taskId) {
-  if (!(await withConfirm({
-    title: t("releaseFlow.confirm.skip.title", { step: taskTitle(taskId) }),
-    message: t(`releaseFlow.task.${taskId}.skipHint`),
-    confirmText: t("releaseFlow.confirm.skip.action"),
-  }))) return;
-  flow.skipTask(taskId);
-}
-
-async function restart({ resetDemoData = false } = {}) {
-  menuOpen.value = false;
-  if (!(await withConfirm({
-    title: t(resetDemoData ? "releaseFlow.confirm.resetDemo.title" : "releaseFlow.confirm.restart.flowTitle"),
-    message: t(resetDemoData ? "releaseFlow.confirm.resetDemo.message" : "releaseFlow.confirm.restart.flowMessage"),
-    confirmText: t(resetDemoData ? "releaseFlow.confirm.resetDemo.action" : "releaseFlow.footer.newRelease"),
-    danger: resetDemoData,
-  }))) return;
-  flow.restart({ resetDemoData });
-}
-
-function primaryAction() {
-  const action = footer.value.primary;
-  if (!action || action.disabled) return;
-  if (action.action === "start") flow.start();
-  else if (action.action === "next") flow.step(1);
-  else if (action.action === "return") flow.returnToFlow();
-  else if (action.action === "run") void runTask(action.taskId);
-  else if (action.action === "resolve") void flow.resolveConflicts();
-  else if (action.action === "schedule") void flow.scheduleMaintenance();
-  else if (action.action === "restart") void restart();
-}
-
-const previousPage = computed(() => (isTool.value ? "" : adjacentPage(state.page, state.brief, -1)));
-
-/* ── Demo options ── */
-function toggleMenu() {
-  menuOpen.value = !menuOpen.value;
-  if (menuOpen.value) void nextTick(() => menuRef.value?.querySelector("input, button")?.focus());
-}
-
-function onMenuKeydown(event) {
-  if (event.key !== "Escape") return;
-  // A prevented Escape keeps the dialog open; only the menu closes.
-  event.preventDefault();
-  menuOpen.value = false;
-  menuButtonRef.value?.focus();
-}
-
-function onMenuFocusOut(event) {
-  const next = event.relatedTarget;
-  if (next && (menuRef.value?.contains(next) || menuButtonRef.value?.contains(next))) return;
-  menuOpen.value = false;
-}
-
-function onDialogPointerDown(event) {
-  if (!menuOpen.value) return;
-  if (menuRef.value?.contains(event.target) || menuButtonRef.value?.contains(event.target)) return;
-  menuOpen.value = false;
-}
+// Open on the page's heading rather than its first field.
+onMounted(() => void nextTick(focusHeading));
 </script>
 
 <template>
@@ -364,73 +113,28 @@ function onDialogPointerDown(event) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="wb-rf-title"
-      aria-describedby="wb-rf-brief"
       tabindex="-1"
-      @pointerdown="onDialogPointerDown"
     >
       <header class="wb-rf-header">
         <span class="wb-rf-brand" aria-hidden="true"><Rocket :size="16" /></span>
-        <div class="wb-rf-heading">
-          <h2 id="wb-rf-title">{{ t('releaseFlow.title') }}</h2>
-          <div id="wb-rf-brief" class="wb-rf-brief">
-            <span class="wb-rf-chip is-accent">{{ flow.platform.value.name }}</span>
-            <span class="wb-rf-chip">{{ formatReleaseDate(state.brief.date) }}</span>
-            <span class="wb-rf-chip">{{ t(`releaseFlow.mode.${state.brief.mode}`) }}</span>
-          </div>
-        </div>
-        <div class="wb-rf-header-actions">
-          <span class="wb-rf-demo-badge" :title="t('releaseFlow.demo.badgeHint')">
-            <FlaskConical :size="12" aria-hidden="true" />{{ t('releaseFlow.demo.badge') }}
-          </span>
+        <h2 id="wb-rf-title" class="wb-rf-title">{{ t('releaseFlow.title') }}</h2>
+        <nav class="wb-rf-nav" :aria-label="t('releaseFlow.nav.label')">
           <button
-            ref="menuButtonRef"
+            v-for="item in NAV"
+            :key="item.id"
             type="button"
-            class="wb-rf-btn is-quiet"
-            aria-haspopup="true"
-            aria-controls="wb-rf-demo-menu"
-            :aria-expanded="menuOpen"
-            @click="toggleMenu"
+            class="wb-rf-nav-item"
+            :data-release-section="item.id"
+            :aria-current="view.section === item.id ? 'page' : undefined"
+            :title="t(`releaseFlow.nav.${item.id}`)"
+            @click="openNav(item.id)"
           >
-            <SlidersHorizontal :size="14" aria-hidden="true" />{{ t('releaseFlow.demo.options') }}
+            <component :is="item.icon" :size="15" aria-hidden="true" />
+            <span>{{ t(`releaseFlow.nav.${item.id}`) }}</span>
           </button>
-          <div
-            v-if="menuOpen"
-            id="wb-rf-demo-menu"
-            ref="menuRef"
-            class="wb-rf-menu"
-            role="group"
-            :aria-label="t('releaseFlow.demo.options')"
-            @keydown="onMenuKeydown"
-            @focusout="onMenuFocusOut"
-          >
-            <p class="wb-rf-menu-title">{{ t('releaseFlow.demo.optionsHint') }}</p>
-            <label>
-              <input type="checkbox" :checked="state.demo.conflicts" @change="flow.setDemoOption('conflicts', $event.target.checked)" />
-              {{ t('releaseFlow.demo.conflicts') }}
-            </label>
-            <label>
-              <input type="checkbox" :checked="state.demo.buildFailure" @change="flow.setDemoOption('buildFailure', $event.target.checked)" />
-              {{ t('releaseFlow.demo.buildFailure') }}
-            </label>
-            <div class="wb-rf-menu-row">
-              <span>{{ t('releaseFlow.demo.speed') }}</span>
-              <div class="wb-rf-segmented" role="radiogroup" :aria-label="t('releaseFlow.demo.speed')">
-                <button
-                  v-for="speed in ['normal', 'fast']"
-                  :key="speed"
-                  type="button"
-                  role="radio"
-                  :aria-checked="state.demo.speed === speed"
-                  @click="flow.setDemoOption('speed', speed)"
-                >{{ t(`releaseFlow.demo.speed.${speed}`) }}</button>
-              </div>
-            </div>
-            <p class="wb-rf-menu-title">{{ t('releaseFlow.demo.dataSource') }}</p>
-            <div class="wb-rf-menu-divider" />
-            <button type="button" class="wb-rf-btn is-quiet wb-rf-menu-reset" :disabled="busy" @click="restart({ resetDemoData: true })">
-              {{ t('releaseFlow.demo.reset') }}
-            </button>
-          </div>
+        </nav>
+        <div class="wb-rf-header-actions">
+          <ReleaseDemoMenu :workspace="workspace" />
           <button
             type="button"
             class="wb-rf-btn is-quiet wb-rf-close"
@@ -445,51 +149,34 @@ function onDialogPointerDown(event) {
       </header>
 
       <div class="wb-rf-body">
-        <ReleaseFlowRail :flow="flow" @navigate="flow.go" />
-        <div class="wb-rf-main">
-          <div ref="pageRef" class="wb-rf-page" :data-release-current="state.page">
-            <div class="wb-rf-page-inner" :class="{ 'is-wide': WIDE_PAGES.has(state.page) }">
+        <ReleasePlatformBoard :workspace="workspace" />
+        <main ref="mainRef" class="wb-rf-main" :data-release-section="view.section">
+          <ReleaseRunView
+            v-if="view.section === 'run' && currentFlow"
+            :key="sectionKey"
+            :workspace="workspace"
+            :flow="currentFlow"
+            :transfer="transfer"
+            :exclusion-templates="exclusionTemplates"
+          />
+          <div v-else class="wb-rf-page" data-release-scroll>
+            <div class="wb-rf-page-inner" :class="{ 'is-wide': view.section !== 'home' && view.section !== 'platform' }">
               <component
-                :is="pageComponent"
-                :key="state.page"
-                v-bind="pageProps"
-                @run="runTask"
-                @rerun="rerunTask"
-                @navigate="flow.go"
+                :is="SECTION_COMPONENTS[view.section] || ReleaseHomePage"
+                :key="sectionKey"
+                :workspace="workspace"
               />
             </div>
           </div>
-          <footer class="wb-rf-footer">
-            <button v-if="previousPage" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="flow.step(-1)">
-              <ArrowLeft :size="14" aria-hidden="true" />{{ t('releaseFlow.footer.previous') }}
-            </button>
-            <div class="wb-rf-footer-status" :data-tone="footer.tone || undefined" aria-live="polite">
-              <span>{{ footer.status }}</span>
-            </div>
-            <div class="wb-rf-footer-actions">
-              <button v-if="footer.running" type="button" class="wb-rf-btn is-quiet" @click="flow.cancel()">{{ t('releaseFlow.footer.stop') }}</button>
-              <button v-if="footer.rerun" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="rerunTask(footer.rerun)">
-                {{ t('releaseFlow.footer.rerun') }}
-              </button>
-              <button v-if="footer.skip" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="skipTask(footer.skip)">
-                {{ t('releaseFlow.footer.skip') }}
-              </button>
-              <button
-                type="button"
-                class="wb-rf-btn is-primary is-large"
-                data-release-primary
-                :disabled="footer.primary.disabled"
-                @click="primaryAction"
-              >
-                <LoaderCircle v-if="footer.running" :size="15" class="wb-rf-spin" aria-hidden="true" />
-                <ArrowLeft v-if="footer.primary.action === 'return'" :size="15" aria-hidden="true" />
-                <span>{{ footer.primary.label }}</span>
-                <ArrowRight v-if="footer.primary.action === 'next'" :size="15" aria-hidden="true" />
-              </button>
-            </div>
-          </footer>
-        </div>
+        </main>
       </div>
+
+      <ReleaseNewUpdateDialog
+        v-if="newUpdate.open"
+        :workspace="workspace"
+        :platform-id="newUpdate.platformId"
+        @close="newUpdate.open = false"
+      />
     </section>
   </div>
 </template>
@@ -498,10 +185,5 @@ function onDialogPointerDown(event) {
 .wb-rf-close {
   width: 34px;
   padding: 0;
-}
-
-.wb-rf-menu-reset {
-  justify-content: flex-start;
-  color: var(--wb-danger);
 }
 </style>

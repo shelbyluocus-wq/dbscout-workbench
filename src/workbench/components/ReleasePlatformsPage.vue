@@ -1,28 +1,35 @@
 <script setup>
-// Platforms, a tool beside the release steps: where each platform's release
-// goes. Changing the platform of the current release resets the steps that
-// used the changed value.
+// Platform settings, a workspace page: where each platform's update goes.
+// Changing a platform resets the steps of its open update that used the
+// changed value.
 import { computed, ref } from "vue";
 import { t } from "../i18n/index.js";
-import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleasePlatformEditor from "./ReleasePlatformEditor.vue";
+import ReleaseSectionHead from "./ReleaseSectionHead.vue";
 
 const props = defineProps({
-  flow: { type: Object, required: true },
+  workspace: { type: Object, required: true },
 });
-defineEmits(["run", "rerun", "navigate"]);
 
-const state = props.flow.state;
-const selectedId = ref(state.brief.platformId);
-const selected = computed(() => state.platforms.find((entry) => entry.id === selectedId.value) || state.platforms[0]);
+const platforms = computed(() => props.workspace.state.platforms);
+const returnRun = computed(() => {
+  const target = props.workspace.view.returnTo;
+  return target?.section === "run" ? props.workspace.flowFor(target.runId) : null;
+});
+const selectedId = ref(returnRun.value?.platform.value.id || platforms.value[0]?.id);
+const selected = computed(() => platforms.value.find((entry) => entry.id === selectedId.value) || platforms.value[0]);
+// A platform with an update on its card says how far it is.
+const states = computed(() => Object.fromEntries(props.workspace.cards.value
+  .filter((card) => card.runId && card.status !== "done")
+  .map((card) => [card.platformId, card.status])));
 </script>
 
 <template>
-  <ReleasePageHead page-id="platforms" />
+  <ReleaseSectionHead :workspace="workspace" :title="t('releaseFlow.page.platforms.title')" :description="t('releaseFlow.page.platforms.description')" />
 
   <div class="wb-rf-segmented" role="tablist" :aria-label="t('releaseFlow.platformEditor.choose')">
     <button
-      v-for="platform in state.platforms"
+      v-for="platform in platforms"
       :key="platform.id"
       type="button"
       role="tab"
@@ -30,9 +37,9 @@ const selected = computed(() => state.platforms.find((entry) => entry.id === sel
       @click="selectedId = platform.id"
     >
       {{ platform.name }}
-      <span v-if="platform.id === state.brief.platformId" class="wb-rf-count">{{ t('releaseFlow.plan.thisRelease') }}</span>
+      <span v-if="states[platform.id]" class="wb-rf-count">{{ t(`releaseFlow.card.status.${states[platform.id]}`) }}</span>
     </button>
   </div>
 
-  <ReleasePlatformEditor :key="selected.id" :flow="flow" :platform="selected" />
+  <ReleasePlatformEditor :key="selected.id" :workspace="workspace" :platform="selected" />
 </template>

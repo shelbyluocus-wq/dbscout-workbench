@@ -11,6 +11,7 @@ import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
 });
 defineEmits(["run", "rerun", "navigate"]);
 

@@ -11,6 +11,7 @@ import ReleasePageHead from "./ReleasePageHead.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
 

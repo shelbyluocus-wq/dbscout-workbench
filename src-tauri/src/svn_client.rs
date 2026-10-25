@@ -94,6 +94,12 @@ impl SvnClient {
         }
     }
 
+    /// A client on one executable without fallback or saved choices.
+    #[cfg(test)]
+    pub(crate) fn for_tests(executable: PathBuf) -> Self {
+        Self::new(executable, None, None, None)
+    }
+
     pub(crate) fn executable(&self) -> &Path {
         if self.use_compatibility {
             self.compatibility.as_deref().unwrap_or(&self.primary)
@@ -132,6 +138,19 @@ impl SvnClient {
             log("已连接 SVN 服务器，但当前 SVN 客户端没有可用的登录凭据。Cairn 内保存的账号密码不会自动共享给黑猫，请先为此客户端登录。".into());
         }
         Ok(output)
+    }
+
+    /// Run a command on several paths (`svn commit`, `revert`, …). Options
+    /// come before `--`, the paths after it, so a path can never read as an
+    /// option. The certificate exception applies like for `run`.
+    pub(crate) async fn run_targets(&self, args: &[&str], targets: &[PathBuf]) -> Result<Output, String> {
+        let mut command: Vec<OsString> = args.iter().map(OsString::from).collect();
+        if self.trust_certificate {
+            command.push(CERTIFICATE_EXCEPTION.into());
+        }
+        command.push("--".into());
+        command.extend(targets.iter().map(|target| target.as_os_str().to_owned()));
+        execute_with_config(self.executable().to_path_buf(), command, self.legacy_tls_config.as_deref()).await
     }
 
     async fn run_with<F, Fut>(

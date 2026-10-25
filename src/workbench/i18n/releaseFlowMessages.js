@@ -1,5 +1,9 @@
-// Copy of the guided release workspace, kept in one place: every key maps to
-// [English, Simplified Chinese, Traditional Chinese (Taiwan)].
+// Copy of the guided release workspace: every key maps to
+// [English, Simplified Chinese, Traditional Chinese (Taiwan)]. The pages
+// added with the multi-platform workspace keep theirs in
+// releaseWorkspaceMessages.js.
+import { RELEASE_WORKSPACE_MESSAGES } from "./releaseWorkspaceMessages.js";
+
 const MESSAGES = {
   "releaseFlow.title": ["Release", "版本更新", "版本更新"],
   "releaseFlow.hint": [
@@ -19,11 +23,11 @@ const MESSAGES = {
   "releaseFlow.phase.build": ["Cocos build", "Cocos 打包", "Cocos 打包"],
   "releaseFlow.phase.gm": ["GM operations", "GM 操作", "GM 操作"],
 
-  "releaseFlow.page.overview.title": ["This release", "本次更新", "本次更新"],
-  "releaseFlow.page.overview.description": [
-    "Choose the platform, the day and what this release contains.",
-    "选择平台、日期与更新内容。",
-    "選擇平台、日期與更新內容。",
+  "releaseFlow.page.brief.title": ["This release", "本次更新", "本次更新"],
+  "releaseFlow.page.brief.description": [
+    "Choose the day, the kind of update and what it contains.",
+    "选择日期、更新方式与更新内容。",
+    "選擇日期、更新方式與更新內容。",
   ],
   "releaseFlow.page.database.title": ["Sync and apply plans", "覆盖同步与规划", "覆蓋同步與規劃"],
   "releaseFlow.page.database.description": [
@@ -82,9 +86,9 @@ const MESSAGES = {
   "releaseFlow.page.summary.title": ["Done", "完成", "完成"],
   "releaseFlow.page.plans.title": ["Open plans", "开放规划", "開放規劃"],
   "releaseFlow.page.plans.description": [
-    "Each platform's plan for heroes, mounts, spirits, battle pets and features. Once this release's plan is applied, a change asks for a new apply.",
-    "各平台的英雄、坐骑、祭灵、战宠与功能开放规划；本次规划套用后再修改，需重新套用。",
-    "各平台的英雄、坐騎、祭靈、戰寵與功能開放規劃；本次規劃套用後再修改，需重新套用。",
+    "A memo the team keeps: each platform's plan for heroes, mounts, spirits, battle pets, features and anything else. It reads no table.",
+    "团队自己维护的备忘录：各平台的英雄、坐骑、祭灵、战宠、功能与其他开放计划，不读取任何数据表。",
+    "團隊自己維護的備忘錄：各平台的英雄、坐騎、祭靈、戰寵、功能與其他開放計畫，不讀取任何資料表。",
   ],
   "releaseFlow.page.platforms.title": ["Platforms", "平台设置", "平台設定"],
   "releaseFlow.page.platforms.description": [
@@ -176,9 +180,11 @@ const MESSAGES = {
   "releaseFlow.duration.seconds": ["{seconds}s", "{seconds} 秒", "{seconds} 秒"],
   "releaseFlow.duration.minutes": ["{minutes}m {seconds}s", "{minutes} 分 {seconds} 秒", "{minutes} 分 {seconds} 秒"],
 
-  "releaseFlow.rail.label": ["Release steps", "更新步骤", "更新步驟"],
-  "releaseFlow.rail.progress": ["{done} / {total} done", "已完成 {done} / {total}", "已完成 {done} / {total}"],
-  "releaseFlow.rail.tools": ["Tools", "工具", "工具"],
+  "releaseFlow.rail.label": [
+    "{platform}'s update steps",
+    "{platform} 的更新步骤",
+    "{platform} 的更新步驟",
+  ],
   "releaseFlow.rail.state.done": ["Done", "已完成", "已完成"],
   "releaseFlow.rail.state.skipped": ["Skipped", "已略过", "已略過"],
   "releaseFlow.rail.state.running": ["Running", "执行中", "執行中"],
@@ -191,15 +197,17 @@ const MESSAGES = {
   "releaseFlow.footer.toSummary": ["See the result", "查看结果", "查看結果"],
   "releaseFlow.footer.doneNext": ["Done · next: {step}", "已完成 · 接着是“{step}”", "已完成 · 接著是「{step}」"],
   "releaseFlow.footer.doneLast": ["Every step is done", "所有步骤都已完成", "所有步驟都已完成"],
-  "releaseFlow.footer.back": ["Back to {step}", "返回“{step}”", "返回「{step}」"],
-  "releaseFlow.footer.toolHint": ["You return to the step you were on", "返回后回到原本的步骤", "返回後回到原本的步驟"],
   "releaseFlow.footer.started": ["Under way; the date and contents can still change", "更新进行中，仍可调整日期与内容", "更新進行中，仍可調整日期與內容"],
   "releaseFlow.footer.ready": ["Ready", "准备好了", "準備好了"],
   "releaseFlow.footer.confirmFirst": ["Choose the contents and confirm the files are ready", "选好内容并确认文件已准备好", "選好內容並確認檔案已準備好"],
   "releaseFlow.footer.start": ["Start release", "开始更新", "開始更新"],
   "releaseFlow.footer.complete": ["Every step is done", "所有步骤都已完成", "所有步驟都已完成"],
   "releaseFlow.footer.incomplete": ["Some steps are still open", "还有步骤未完成", "還有步驟未完成"],
-  "releaseFlow.footer.newRelease": ["Start a new release", "开始新的更新", "開始新的更新"],
+  "releaseFlow.footer.newRelease": [
+    "New update",
+    "建立新更新",
+    "建立新更新",
+  ],
   "releaseFlow.footer.running": ["{step} is running…", "{step} 执行中…", "{step} 執行中…"],
   "releaseFlow.footer.runningButton": ["Running", "执行中", "執行中"],
   "releaseFlow.footer.conflictsLeft": ["{count} conflict(s) still need a choice", "还有 {count} 个冲突待选择", "還有 {count} 個衝突待選擇"],
@@ -242,25 +250,23 @@ const MESSAGES = {
   "releaseFlow.confirm.rerun.action": ["Run again", "重新执行", "重新執行"],
   "releaseFlow.confirm.skip.title": ["Skip \"{step}\"?", "略过“{step}”？", "略過「{step}」？"],
   "releaseFlow.confirm.skip.action": ["Skip", "略过", "略過"],
-  "releaseFlow.confirm.restart.flowTitle": ["Start a new release?", "开始新的更新？", "開始新的更新？"],
-  "releaseFlow.confirm.restart.flowMessage": [
-    "This release's progress is cleared. Platforms, plans and rules are kept.",
-    "会清除本次进度；平台、规划与规则会保留。",
-    "會清除本次進度；平台、規劃與規則會保留。",
-  ],
   "releaseFlow.confirm.resetDemo.title": ["Reset the demo data?", "重设演示数据？", "重設演示資料？"],
   "releaseFlow.confirm.resetDemo.message": [
-    "Platforms, plans, rules and progress return to the sample data.",
-    "平台、规划、规则与进度都会恢复成示例数据。",
-    "平台、規劃、規則與進度都會恢復成範例資料。",
+    "Platforms, open plans, rules, every update and the history return to the sample data.",
+    "平台、开放规划、规则、所有更新与更新记录都会恢复成示例数据。",
+    "平台、開放規劃、規則、所有更新與更新紀錄都會恢復成範例資料。",
   ],
   "releaseFlow.confirm.resetDemo.action": ["Reset", "重设", "重設"],
 
-  "releaseFlow.demo.badge": ["Demo", "演示", "演示"],
+  "releaseFlow.demo.badge": [
+    "Demo steps",
+    "演示流程",
+    "演示流程",
+  ],
   "releaseFlow.demo.badgeHint": [
-    "Every step is simulated: no database, file, SVN working copy, Cocos editor or GM is touched.",
-    "所有步骤都是模拟执行，不会动到数据库、文件、SVN 工作副本、Cocos 或 GM。",
-    "所有步驟都是模擬執行，不會動到資料庫、檔案、SVN 工作複本、Cocos 或 GM。",
+    "The update steps are simulated and change no database, file, working copy or GM server. The client build, the SVN page and picking excluded files are real.",
+    "版本更新的步骤都是模拟执行，不会改动数据库、文件、工作副本或 GM。客户端打包、SVN 页面与选择排除文件是实际操作。",
+    "版本更新的步驟都是模擬執行，不會改動資料庫、檔案、工作複本或 GM。客戶端打包、SVN 頁面與選擇排除檔案是實際操作。",
   ],
   "releaseFlow.demo.confirmNote": ["Demo: nothing is actually changed.", "演示模式：只会模拟执行，不会改动任何数据。", "演示模式：只會模擬執行，不會改動任何資料。"],
   "releaseFlow.demo.options": ["Demo options", "演示选项", "演示選項"],
@@ -286,11 +292,6 @@ const MESSAGES = {
 
   "releaseFlow.overview.platform": ["Platform", "平台", "平台"],
   "releaseFlow.overview.platformSettings": ["Platform settings", "平台设置", "平台設定"],
-  "releaseFlow.overview.platformLocked": [
-    "The release has started; start a new one to switch platforms",
-    "更新已开始，要换平台请先开始新的更新",
-    "更新已開始，要換平台請先開始新的更新",
-  ],
   "releaseFlow.overview.date": ["Update date", "更新日期", "更新日期"],
   "releaseFlow.overview.today": ["Today", "今天", "今天"],
   "releaseFlow.overview.tomorrow": ["Tomorrow", "明天", "明天"],
@@ -349,13 +350,7 @@ const MESSAGES = {
   "releaseFlow.database.remove": ["Stop keeping {table}", "不再保留 {table}", "不再保留 {table}"],
   "releaseFlow.database.addPlaceholder": ["Keep another table…", "保留其他表…", "保留其他資料表…"],
   "releaseFlow.database.add": ["Keep", "保留", "保留"],
-  "releaseFlow.database.keepPlanTables": [
-    "Keep the open-plan tables (buildopenplatprop …)",
-    "保留开放规划表（buildopenplatprop 等）",
-    "保留開放規劃表（buildopenplatprop 等）",
-  ],
   "releaseFlow.database.syncDone": ["Overwrote {tables} tables", "已覆盖 {tables} 张表", "已覆蓋 {tables} 張表"],
-  "releaseFlow.database.snapshot": ["local safety snapshot taken", "已建立本机安全快照", "已建立本機安全快照"],
   "releaseFlow.database.plans": ["Apply open plans", "套用开放规划", "套用開放規劃"],
   "releaseFlow.database.editPlans": ["Open plans", "开放规划", "開放規劃"],
   "releaseFlow.database.planSentence": ["Per {platform}'s plan, on {date}:", "依 {platform} 的规划，{date} 需要", "依 {platform} 的規劃，{date} 需要"],
@@ -388,7 +383,6 @@ const MESSAGES = {
   "releaseFlow.plan.cell.ended": ["Ended", "已结束", "已結束"],
   "releaseFlow.plan.cell.upcoming": ["In {days} d", "{days} 天后", "{days} 天後"],
   "releaseFlow.plan.cell.unknown": ["Unclear", "看不懂", "看不懂"],
-  "releaseFlow.plan.target": ["Writes {table}.{flag} by {key}", "写入 {table}.{flag}（依 {key}）", "寫入 {table}.{flag}（依 {key}）"],
   "releaseFlow.plan.syntax": [
     "Notes: Open 10/28 · Open 10/28-11/30 · Open until 11/30 · Closes 11/30 · Already open · Not yet",
     "备注写法：10/28 开放 · 10/28-11/30 开放 · 开放至 11/30 · 11/30 关闭 · 已开放 · 暂不开放",
@@ -444,54 +438,29 @@ const MESSAGES = {
   "releaseFlow.transfer.templates": ["Conversion template", "转表模板", "轉表模板"],
   "releaseFlow.transfer.templatesHint": ["from One-click transfer", "来自“一键转表”", "來自「一鍵轉表」"],
   "releaseFlow.transfer.noScript": ["No script chosen yet", "尚未选择转表脚本", "尚未選擇轉表指令碼"],
-  "releaseFlow.transfer.empty": ["No template yet. Create one in One-click transfer.", "还没有模板，请先在“一键转表”建立。", "還沒有模板，請先在「一鍵轉表」建立。"],
-  "releaseFlow.transfer.target": ["The output is copied into", "产出会拷贝进", "產出會拷貝進"],
+  "releaseFlow.transfer.empty": ["No template yet. Create one with New template.", "还没有模板，点“新增模板”建立一个。", "還沒有模板，點「新增模板」建立一個。"],
+  "releaseFlow.transfer.target": [
+    "Output copied into",
+    "产出拷贝到",
+    "產出拷貝到",
+  ],
   "releaseFlow.transfer.stages": ["Conversion stages", "转表阶段", "轉表階段"],
   "releaseFlow.transfer.stage.script": ["Run the script", "执行转表脚本", "執行轉表指令碼"],
   "releaseFlow.transfer.stage.locate": ["Find the output", "定位产出", "定位產出"],
   "releaseFlow.transfer.stage.copy": ["Copy into assets", "拷贝进 assets", "拷貝進 assets"],
   "releaseFlow.transfer.done": ["{count} files copied into assets", "拷贝 {count} 个文件进 assets", "拷貝 {count} 個檔案進 assets"],
 
-  "releaseFlow.diff.files": ["changed files", "个文件变更", "個檔案變更"],
   "releaseFlow.diff.binary": ["Binary file. Compare it in TortoiseSVN.", "二进制文件，请在 TortoiseSVN 中比对。", "二進位檔案，請在 TortoiseSVN 中比對。"],
   "releaseFlow.diff.content": ["Changes in {path}", "{path} 的变更", "{path} 的變更"],
   "releaseFlow.diff.done": ["{count} files reviewed", "已确认 {count} 个文件", "已確認 {count} 個檔案"],
 
   "releaseFlow.cocos.version": ["Editor", "编辑器", "編輯器"],
-  "releaseFlow.cocos.platform": ["Platform", "平台", "平台"],
   "releaseFlow.cocos.output": ["Output", "输出", "輸出"],
   "releaseFlow.cocos.command": ["Build command", "打包指令", "打包指令"],
   "releaseFlow.cocos.copy": ["Copy", "复制", "複製"],
   "releaseFlow.cocos.copied": ["Copied", "已复制", "已複製"],
-  "releaseFlow.cocos.research": ["About command-line builds", "关于命令行打包", "關於指令列打包"],
-  "releaseFlow.cocos.research.supported": [
-    "Cocos Creator 2.4 and 3.x both support official command-line publishing; the editor window is not needed.",
-    "Cocos Creator 2.4 与 3.x 都支持官方命令行发布，不必打开编辑器界面。",
-    "Cocos Creator 2.4 與 3.x 都支援官方指令列發佈，不必開啟編輯器介面。",
-  ],
-  "releaseFlow.cocos.research.exitCodes": [
-    "3.x reports through its exit code: 36 success, 32 invalid options, 34 build error.",
-    "3.x 以退出码回报：36 成功、32 参数错误、34 打包出错。",
-    "3.x 以結束代碼回報：36 成功、32 參數錯誤、34 打包出錯。",
-  ],
-  "releaseFlow.cocos.research.legacy": [
-    "2.4 takes the project with --path and documents no exit codes, so the output is checked too.",
-    "2.4 以 --path 指定项目，官方未定义退出码，需另外检查产出。",
-    "2.4 以 --path 指定專案，官方未定義結束代碼，需另外檢查產出。",
-  ],
-  "releaseFlow.cocos.research.guard": [
-    "Afterwards the project's own npm run qa:release checks that no QA tooling ships.",
-    "打包后执行项目内的 npm run qa:release，确认产物不含 QA 工具。",
-    "打包後執行專案內的 npm run qa:release，確認產物不含 QA 工具。",
-  ],
-  "releaseFlow.cocos.research.desktop": [
-    "It still needs a desktop session; close any editor that has the same project open.",
-    "仍需桌面环境；建议先关闭打开同一项目的 Cocos 编辑器。",
-    "仍需桌面環境；建議先關閉開著同一專案的 Cocos 編輯器。",
-  ],
   "releaseFlow.cocos.done": ["Built (exit code {code})", "打包成功（退出码 {code}）", "打包成功（結束代碼 {code}）"],
   "releaseFlow.cocos.qaPassed": ["QA guard passed ({count} files)", "QA 发布检查通过（{count} 个文件）", "QA 發佈檢查通過（{count} 個檔案）"],
-  "releaseFlow.cocos.hotUpdate": ["hot update {version}", "热更新 {version}", "熱更新 {version}"],
   "releaseFlow.cocos.failed": [
     "Build failed with exit code {code}: {meaning}. Fix it from the log and retry.",
     "打包失败（退出码 {code}：{meaning}），可依记录修正后重试。",
@@ -593,7 +562,11 @@ const MESSAGES = {
   "releaseFlow.summary.db.sync": ["{tables} tables ({rows} rows)", "覆盖 {tables} 张表（{rows} 行）", "覆蓋 {tables} 張表（{rows} 列）"],
   "releaseFlow.summary.db.plans": ["{open} opened, {close} closed", "开启 {open}、关闭 {close}", "開啟 {open}、關閉 {close}"],
   "releaseFlow.summary.client.svn": ["r{revision}, {count} conflict(s) settled", "r{revision}，处理 {count} 个冲突", "r{revision}，處理 {count} 個衝突"],
-  "releaseFlow.summary.build": ["Cocos Creator {version} · hot update {hotUpdate}", "Cocos Creator {version} · 热更新 {hotUpdate}", "Cocos Creator {version} · 熱更新 {hotUpdate}"],
+  "releaseFlow.summary.build": [
+    "Cocos Creator {version} · {platform}",
+    "Cocos Creator {version} · {platform}",
+    "Cocos Creator {version} · {platform}",
+  ],
   "releaseFlow.summary.reportTitle": ["Release log (demo)", "版本更新记录（演示）", "版本更新紀錄（演示）"],
   "releaseFlow.summary.reportFooter": [
     "Generated by Blackcat's release guide. Demo: no operation was really executed.",
@@ -602,8 +575,10 @@ const MESSAGES = {
   ],
 };
 
+const ALL_MESSAGES = { ...MESSAGES, ...RELEASE_WORKSPACE_MESSAGES };
+
 function catalog(index) {
-  return Object.fromEntries(Object.entries(MESSAGES).map(([key, values]) => [key, values[index]]));
+  return Object.fromEntries(Object.entries(ALL_MESSAGES).map(([key, values]) => [key, values[index]]));
 }
 
 export const releaseFlowEn = catalog(0);

@@ -3,6 +3,7 @@ import { mockDatabaseSchemas, resetMockDatabaseSchemas, resolveMockSchema } from
 import { getOrInitRows, rowCache } from "./mockRows.js";
 import { emitMockEvent } from "./mockEventBus.js";
 import { createMockConfigRelations, relationRowMatches } from "./mockConfigRelations.js";
+import { createMockReleaseTools } from "./mockReleaseTools.js";
 import { RELATION_LAB_DATABASE, requestedRelationLabSize } from "./mockRelationLab.js";
 import {
   activePerfFixture,
@@ -60,6 +61,7 @@ const mockConnectionDatabases = {
 };
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 const schemaOverrides = new Map();
+const mockReleaseTools = createMockReleaseTools();
 const mockConfigRelations = createMockConfigRelations({
   connectionFor: (connectionId) => mockConnections.find((connection) => connection.id === connectionId),
   schemaFor: (connectionId, database) => tableSchemaFor(connectionId, database),
@@ -2185,6 +2187,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (mockConfigRelations.handles(command)) {
     return mockConfigRelations.invoke(command, payload);
+  }
+  if (mockReleaseTools.handles(command)) {
+    return mockReleaseTools.invoke(command, payload);
   }
   if (command === "table_transfer_pick_script" || command === "table_transfer_pick_project_dir") {
     // 浏览器预览没有原生文件对话框，按用户取消处理。

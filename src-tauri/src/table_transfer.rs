@@ -1541,7 +1541,7 @@ fn tokio_command_without_window(program: impl AsRef<Path>) -> tokio::process::Co
 
 /// Windows 控制台程序输出通常是 GBK（中文系统）；先按 UTF-8 尝试，失败再
 /// 按 GBK 解码，保证脚本与 svn 的日志在前端可读。
-fn decode_console(bytes: &[u8]) -> String {
+pub(crate) fn decode_console(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_string();
     }
@@ -1555,7 +1555,7 @@ fn decode_console(bytes: &[u8]) -> String {
 }
 
 /// 按进程树强杀（cmd /c 派生的子进程一并结束）。尽力而为，失败静默。
-fn kill_process_tree(pid: u32) {
+pub(crate) fn kill_process_tree(pid: u32) {
     if cfg!(target_os = "windows") {
         let mut command = std::process::Command::new("taskkill");
         command.args(["/PID", &pid.to_string(), "/T", "/F"]);

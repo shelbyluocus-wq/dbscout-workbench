@@ -15,6 +15,7 @@ import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
 
@@ -81,7 +82,7 @@ function stageTime(stage) {
 }
 
 // The server's own timeline, in server time.
-const events = computed(() => state.history
+const events = computed(() => state.events
   .filter((entry) => entry.taskId?.startsWith("gm.") && ["gm.maintenance", "gm.clientOpen", "gm.shutdown", "gm.restart", "gm.open"].includes(entry.taskId))
   .filter((entry) => entry.event === "done" || entry.event === "cancelled")
   .slice(-8)

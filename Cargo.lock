@@ -1043,6 +1043,7 @@ dependencies = [
  "mongodb",
  "reqwest",
  "rfd",
+ "roxmltree",
  "rust_xlsxwriter",
  "serde",
  "serde_json",

@@ -92,46 +92,88 @@ capabilities:
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
   Path rows have a Browse button that reveals the script/project in Explorer.
-- **Release guide (demo)** — the activity-rail Release entry (below one-click
-  table transfer) opens a lazily loaded workspace that walks one platform's
-  release in order. The brief (platform, update date, maintenance or
-  no-downtime, and which of database / client / server / activities the
-  release contains) decides which steps apply. Then: one database page
-  (overwrite sync with kept tables, then the platform's open plan written
-  as one UPDATE per table and direction, composite keys as row-value IN);
-  SVN update with a choice per conflicting file; file sync with
-  gitignore-like exclusion rules (`.svn/` always excluded); table conversion
-  with a one-click transfer template's script (the output is always copied
-  into the platform client's `assets`); the SVN diff review; the Cocos
-  Creator command-line build plus the client's `qa:release` guard (3.x
-  `--project`, exit codes 36/32/34; 2.4 `--path`); GM uploads (activity
-  table, client hot update and server, each set current; activities are
-  reloaded only without downtime); and the last page. With maintenance that
-  page is a live server console: schedule the window together with the hot
-  update's opening (both or neither), wait on a countdown while the GM
-  closes the servers by itself at the start time (an `auto` task: a refused
-  shutdown waits for a retry, one cut off by closing the workspace runs
-  again), compile and restart, then open by hand; a hot update that follows
+- **Release workspace** — the activity-rail Release entry (below one-click
+  table transfer) opens a lazily loaded workspace for every platform's
+  updates. A board on the left shows each platform as a note (state: not
+  scheduled / scheduled / updating / needs attention / done, progress, last
+  and planned update, the first issue such as a failed step, SVN conflicts,
+  files a sync missed, steps to run again or a missed start); clicking one
+  opens its update, whose steps unfold under its note. Each platform has at
+  most one update on its card, with its own progress, schedule and demo GM
+  clock, so several platforms run side by side; New update asks for the
+  platform and, when it still has an open update, whether to continue it or
+  abandon it (kept in the history). A finished update is written to the
+  history once and stays read-only on its card until the next update.
+  Header pages, opened from anywhere and returning to the update they were
+  opened from: the overview (what needs attention, open and scheduled
+  updates, open plans of the coming week, recent records, quick actions),
+  the history (every update with its steps, results, errors, warnings and
+  last log lines, every client build and SVN operation; filtered by platform
+  and kind, simulated entries marked Demo), open plans, client build, SVN and
+  platform settings. An update's brief (date, maintenance or no-downtime,
+  and which of database / client / server / activities it contains) decides
+  which steps apply. Then: one database page (overwrite sync with kept
+  tables chosen from a styled suggestion list; the overwrite backs the
+  platform database up first and its backup offers a confirmed restore that
+  resets the overwrite and what was built on it; then the open plan written
+  as one UPDATE per table and direction, composite keys as row-value IN,
+  rows the person leaves out skipped); SVN update with a choice per
+  conflicting file; file sync with gitignore-like exclusion rules
+  (`.svn/` always excluded) listed by kind, edited in place, and added by
+  typing or with the native file or folder dialog, which opens in the client
+  folder and only accepts paths inside a client folder of the sync (checked
+  after resolving `..` and links, anchored as `/name/`); table conversion
+  with a one-click transfer template whose settings show and can change
+  there, new templates made there too (the same store as the transfer
+  dialog), log kept open; the diff review on the shared SVN view (below)
+  over a simulated working copy; the Cocos build; GM uploads (activity table,
+  client hot update and server, each set current; activities are reloaded
+  only without downtime); and the last page. With maintenance that page is a
+  live server console: schedule the window together with the hot update's
+  opening (both or neither), wait on a countdown while the GM closes the
+  servers by itself at the start time (an `auto` task: a refused shutdown
+  waits for a retry, one cut off by closing the workspace runs again),
+  compile and restart, then open by hand; a hot update that follows
   maintenance opens with an early reopening. Without downtime the page only
-  sets the hot update's opening. Open plans (heroes, mounts, spirits, battle
-  pets and features across platforms, whose free-text notes such as
-  "10/28 開放", "10/28-11/30 開放", "11/30 關閉", "已開放", "暫不開放" are parsed
-  and judged for a date, unreadable notes never written) and platform
-  settings are tools beside the steps: open at any time, and leaving one
-  returns to the step the person was on. Every task runs through a driver
-  (`run(taskId, context, io)`); the only one today,
-  `releaseFlowDemoDriver.js`, simulates everything and touches no database,
-  file, SVN working copy, Cocos editor or GM, so the header shows a Demo
-  badge and confirmations say so; the demo can fast-forward the GM clock.
-  Real integrations replace it task by task. Demo content uses the jswz
-  client's real table, item, file and folder names (`newsg_4cfg`, `heroprop`,
-  `buildopenplatprop`, platforms 抖音 / TAP / 玩心 / TW); platform databases
-  and folders, the changes themselves, versions and GM replies are
+  sets the hot update's opening. Open plans are a memo the team keeps (no
+  table is read): entries (hero, mount, spirit, battle pet, feature or other;
+  name and optional ID) are added, edited and deleted, with every platform's
+  free-text note ("10/28 開放", "10/28-11/30 開放", "11/30 關閉", "已開放",
+  "暫不開放", a date picker writes the usual form) parsed and judged for a
+  date; entries with a category table and a complete ID are written,
+  others (and unreadable notes) are listed to do by hand. The client build
+  is real (backend below): the build step and the client build page share
+  the settings and checks (project engine from `package.json`
+  `creator.version` or 2.x `project.json`, editors found next to the project
+  or in Cocos Dashboard folders, platform per 2.4 / 3.x, exported build
+  configuration, output folder, a family mismatch blocks and a version
+  mismatch warns), confirm the project, versions, platform and output folder
+  (and an overwrite) before starting, stream the editor's output, run the
+  project's `qa-tests/QAReleaseGuard.mjs` on the output, and record the
+  build; the build page builds a platform's client (or another folder) on
+  its own and, when that platform's update has not reached its build step,
+  asks "目前尚未執行完整的版本更新流程，確定要直接打包客戶端嗎？". The SVN view
+  (after the Cairn client's: changes in conflict / changed / unversioned
+  groups with check boxes, a side-by-side or unified diff with line numbers,
+  in-line highlights and previous/next change, commit adding unversioned and
+  deleting missing files, confirmed revert, conflict resolution, log) runs
+  real svn on the SVN page and a simulated working copy on the diff step.
+  Every other step runs through a driver (`run(taskId, context, io)`): the
+  build step through `createReleaseBuildDriver`, the rest through
+  `releaseFlowDemoDriver.js`, which touches no database, file, working copy
+  or GM; the header badge, page chips, confirmations and history entries
+  say which is simulated (in the browser preview the mock backend simulates
+  the build and SVN too and says so). Real integrations replace the demo task
+  by task. Demo content uses the jswz client's real table, item, file and
+  folder names (`newsg_4cfg`, `heroprop`, `buildopenplatprop`, platforms
+  抖音 / TAP / 玩心 / TW); platform databases and folders, backups, the
+  changes themselves, versions, GM replies and the seeded history are
   simulated, and the client's server settings (`Config.ts` endpoints and
-  keys) are never copied into source. Progress, platforms, notes and rules
-  persist in `dbscout_release_flow_v2` (a v1 draft is left behind);
-  rerunning or editing the input of a finished task resets the tasks built
-  on it.
+  keys) are never copied into source. The workspace (platforms, memo,
+  rules, updates, view) persists in `dbscout_release_flow_v3` and the history
+  separately in `dbscout_release_history_v1`; a started v2 draft becomes an
+  update; rerunning or editing the input of a finished task resets the tasks
+  built on it.
 - **Config relations** — for game-config databases the workbench works out
   which config tables reference each other from three evidence sources:
   database column comments, a static scan of the bound game client's source
@@ -335,9 +377,12 @@ from UI):
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle
-- `releaseFlowState.js` — Release guide pages, tools, tasks (including the
-  automatic shutdown), dependencies, scope/mode applicability, invalidation
-  and restore of saved progress
+- `releaseFlowState.js` — One update's pages, tasks (including the
+  automatic shutdown and the database restore action), dependencies,
+  scope/mode applicability, invalidation and restore of saved tasks
+- `releaseWorkspaceState.js` — Release workspace: platforms, the open-plan
+  memo, rules, updates (one per platform), view, card states and issues,
+  history entries and their compaction, v2 migration and storage
 - `operationNotices.js` — Visible operation-feedback queue rendered by
   `OperationNoticeStack.vue` (bottom-right, below menus and dialogs): tone-based
   auto-dismiss, hover/focus pause, same-event coalescing and suppression of
@@ -370,18 +415,29 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
-- Release guide: `useReleaseFlow.js` — brief, platforms, notes and rules,
-  per-task input, logs, results and history, run/cancel/skip through the
-  driver, resets after input changes, and the GM server clock (injectable
-  `ticker`, demo fast-forward) that starts the shutdown; helpers in `utils/`:
+- Release workspace: `useReleaseWorkspace.js` — the workspace state and its
+  persistence, one live flow per update, cards, view and way back, creating,
+  continuing and abandoning updates, the history, the open-plan memo,
+  platform and build-target settings and the demo options;
+  `useReleaseFlow.js` (`createRunFlow`) — one update's brief, per-task input,
+  logs, results and events, run/cancel/skip through the driver, resets
+  after input changes, backup/restore, and its GM clock (injectable `ticker`,
+  per-update demo fast-forward) that starts the shutdown; `useCocosBuild.js`
+  — the real build backend, the build step's driver, `composeDrivers`, the
+  build confirmation and the build page's state; `useSvnWorkspace.js` — the
+  SVN view's state over a backend or demo source. Helpers in `utils/`:
   `releasePlanNotes.js` (note parsing, date judgement, plan diff and
-  per-table statements), `releaseFileRules.js` (exclusion rules),
-  `releaseServer.js` (server phases, maintenance stages, countdowns and
-  schedule times), `cocosBuildCommand.js` (Cocos command line and exit
-  codes), `releaseFlowDemo.js` / `releaseFlowDemoTables.js` /
-  `releaseFlowDemoDriver.js` (sample content, the config table catalogue and
-  the simulation) and `releaseFlowFormat.js`; copy in
-  `i18n/releaseFlowMessages.js` ([en, zh-CN, zh-TW] per key)
+  per-table statements), `releaseFileRules.js` (exclusion rules, rule kinds,
+  picked paths), `releaseServer.js` (server phases, maintenance stages,
+  countdowns and schedule times), `cocosBuildCommand.js` (Cocos options,
+  command line, platforms, output folders, checks and exit codes),
+  `unifiedDiff.js` (svn diff parsing, side-by-side rows and in-line
+  highlights), `releaseFlowDemo.js` / `releaseFlowDemoTables.js` /
+  `releaseFlowDemoDriver.js` / `releaseSvnDemo.js` / `releaseWorkspaceDemo.js`
+  (sample content, the config table catalogue, the simulation, the demo
+  working copy and the seeded history), `releaseFlowFormat.js` and
+  `releaseHistoryFormat.js`; copy in `i18n/releaseFlowMessages.js` and
+  `i18n/releaseWorkspaceMessages.js` ([en, zh-CN, zh-TW] per key)
 - Config relations: `useConfigRelations.js` — mirrors each scope's relation
   overview, refreshes on `config-relations-updated`, and serves the
   table/row lookups plus the per-revision cached scope graph;
@@ -463,7 +519,7 @@ from UI):
 `BackupCenterDialog.vue` (shell + history tab, with the
 `BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
 `TableTransferDialog.vue` (one-click table transfer),
-`ReleaseFlowDialog.vue` (release guide shell; its pages and parts are the other `Release*.vue` components),
+`ReleaseFlowDialog.vue` (release workspace shell with the `ReleasePlatformBoard.vue` board; `ReleaseRunView.vue` shows an update, the workspace pages and shared parts such as `ReleaseSplitDiff.vue`, `ReleaseSvnWorkspace.vue` and `ReleaseBuildPanel.vue` are the other `Release*.vue` components),
 `ConfigRelationsPanel.vue` (inspector relation page, composed of
 `ConfigRelationRowSection.vue` and `ConfigRelationTableSection.vue` under the
 shared `RelationSectionHead.vue`) /
@@ -509,11 +565,16 @@ Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
 lab, `DBSCOUT_RELATION_LAB_SIZE`, default 2000) and
 `node scripts/test-incoming-relations-browser.mjs` against a Vite dev server
 (`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
-Release guide regressions: `node --test src/workbench/useReleaseFlow.test.js
-src/workbench/releaseFlowState.test.js src/workbench/releaseFlowCopy.test.js`
-plus the `utils/release*.test.js` / `cocosBuildCommand.test.js` units, and
-`node scripts/test-release-flow-browser.mjs` against a Vite dev server
-(`DBSCOUT_RELEASE_TEST_URL`, default `http://127.0.0.1:1431`).
+Release workspace regressions: `node --test src/workbench/useReleaseFlow.test.js
+src/workbench/releaseFlowState.test.js src/workbench/releaseWorkspaceState.test.js
+src/workbench/releaseFlowCopy.test.js src/workbench/useCocosBuild.test.js
+src/workbench/useSvnWorkspace.test.js` plus the `utils/release*.test.js` /
+`cocosBuildCommand.test.js` / `unifiedDiff.test.js` units, `cargo test
+--manifest-path src-tauri/Cargo.toml --lib -- cocos_build svn_workspace
+release_paths` (the SVN round trip runs against a local repository when
+`svn`/`svnadmin` are installed), and `node scripts/test-release-flow-browser.mjs`
+against a Vite dev server (`DBSCOUT_RELEASE_TEST_URL`, default
+`http://127.0.0.1:1431`).
 The performance sampler is `node scripts/perf/grid-interaction.mjs --base <URL>
 --scenario schema-800x60 --label <name>`; build a production preview first.
 Large relation graphs: `node scripts/perf/relation-graph.mjs --base <URL>
@@ -531,6 +592,10 @@ natural order. Audit durability remains FULL.
 - `mockEventBus.js` — Emulates Tauri window events for mock mode
 - `mockConfigRelations.js` — Demo-mode config-relations index and review
   storage so the feature works in the browser without the Rust backend
+- `mockReleaseTools.js` — Browser-preview stand-ins for the release
+  workspace's real tools (exclusion picker, SVN working copies, Cocos
+  builds); answers are marked `simulated`, and tests choose the picked path
+  through `globalThis.__dbscoutMockPick`
 - `mockRelationLab.js` — the generated relation lab: `?relationLab=<tables>`
   (50–5000) adds a deterministic `relation_lab` database to the demo server,
   with hub tables, modules, list cells, conflicts and stale relations
@@ -600,6 +665,26 @@ The Rust backend is split by concern:
   `table_transfer_run`, `table_transfer_cancel`; progress via the
   `table-transfer-progress` event.
   `svn_updater::resolve_svn_exe` is shared (Tortoise first, bundled fallback).
+- **`release_paths.rs`** — `release_pick_exclusion`: the native file or
+  folder dialog for an exclusion rule, opening in the client folder; the
+  choice is classified after resolving `..` and links and refused outside the
+  sync's client folders or as a client folder itself.
+- **`svn_workspace.rs`** — The SVN page's working-copy commands
+  (`svn_wc_info`, `svn_wc_status`, `svn_wc_file_diff`, `svn_wc_commit`,
+  `svn_wc_revert`, `svn_wc_resolve`, `svn_wc_log`, `svn_wc_pick_folder`)
+  through `SvnClient::run_targets` (options before `--`, paths inside the
+  working copy only, `--internal-diff`, commit messages from a UTF-8 file;
+  unversioned choices are added and missing ones deleted before a commit).
+  XML output is read with `roxmltree`; errors read `code: detail`
+  (notWorkingCopy, outOfDate, locked, auth, network, conflict, failed).
+- **`cocos_build.rs`** — Cocos Creator command-line builds: project engine
+  version, build configurations, editors next to the project or in Cocos
+  Dashboard folders, one build at a time (`cocos_build_start` /
+  `cocos_build_cancel`, process tree stopped on cancel) with
+  `cocos-build-progress` lines, exit codes per 2.4 / 3.x, the output folder,
+  and the project's release guard run with Node.js; plus
+  `cocos_inspect_project`, `cocos_find_editors`, `cocos_output_status` and the
+  `cocos_pick_*` dialogs. `test_temp_dir.rs` is the shared test folder.
 - **`config_relations/`** — Config relations index: which config tables a row
   references and which tables reference it. `comments.rs` reads database
   column comments, `code_scan.rs` statically scans the bound game client's

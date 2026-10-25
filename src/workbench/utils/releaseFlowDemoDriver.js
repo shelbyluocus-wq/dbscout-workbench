@@ -15,6 +15,7 @@ import {
   DEMO_COCOS_FAILURE_LOG,
   DEMO_COCOS_LOG,
   DEMO_HOT_UPDATE,
+  DEMO_HOT_UPDATE_BYTES,
   DEMO_PROPS_COUNT,
   DEMO_QA_MARKERS,
   DEMO_REVISION,
@@ -57,14 +58,22 @@ async function steps(io, lines, totalMs, { from = 0, to = 1, tone = "" } = {}) {
   }
 }
 
+// The overwrite backs the platform database up first and never overwrites
+// without that backup; the backup is what a restore returns to.
 async function syncDatabase(context, io) {
   const { platform, syncPlan, now } = context;
-  const snapshot = joinWindowsPath("snapshots", platform.targetDatabase, `${timestamp(now()).replace(/[ -]/g, "")}.sql`);
+  const at = now();
+  const snapshot = joinWindowsPath("snapshots", platform.targetDatabase, `${timestamp(at).replace(/[ -]/g, "")}.sql`);
   io.log(`preflight ${platform.sourceDatabase} → ${platform.targetDatabase}: ${syncPlan.tables.length} tables, ${syncPlan.excluded.length} kept`);
   await io.wait(500);
-  io.log(`snapshot ${platform.targetDatabase} → ${snapshot}`);
+  io.log(`backup ${platform.targetDatabase} → ${snapshot}`);
+  io.progress(0.04);
+  await io.wait(600);
+  const backupTables = syncPlan.catalog.length;
+  const backupRows = syncPlan.rows + 1820;
+  io.log(`backup done · ${backupTables} tables, ${backupRows.toLocaleString("en-US")} rows`, "success");
   io.progress(0.08);
-  await io.wait(500);
+  await io.wait(300);
   await steps(
     io,
     chunks(syncPlan.tables, 12).map((batch) => `copy ${batch.map((table) => table.name).join(", ")}`),
@@ -79,7 +88,31 @@ async function syncDatabase(context, io) {
     excluded: syncPlan.excluded.length,
     rows: syncPlan.tables.reduce((sum, table) => sum + table.rows, 0),
     snapshot,
+    backup: {
+      id: `backup-${at.getTime().toString(36)}`,
+      at: at.toISOString(),
+      database: platform.targetDatabase,
+      tables: backupTables,
+      rows: backupRows,
+      path: snapshot,
+      simulated: true,
+    },
   };
+}
+
+async function restoreDatabase(context, io) {
+  const { backup, platform } = context;
+  if (!backup?.id) throw new ReleaseTaskError("noBackup");
+  io.log(`restore ${platform.targetDatabase} ← ${backup.path}`);
+  await steps(io, [
+    `lock ${platform.targetDatabase}`,
+    `drop and reload ${backup.tables} tables`,
+    `${backup.rows.toLocaleString("en-US")} rows loaded`,
+  ], 2200, { to: 0.9 });
+  await io.wait(300);
+  io.log(`verify ${backup.tables} tables against the backup: match`, "success");
+  io.progress(1);
+  return { backup, tables: backup.tables };
 }
 
 async function writePlans(context, io) {
@@ -138,10 +171,20 @@ async function syncFiles(context, io) {
   ];
   await steps(io, actions, 2600, { to: 0.96 });
   await io.wait(300);
-  io.log(`${files.copy.length} copied, ${files.remove.length} removed`, "success");
+  // The demo can leave two files out, as when the development client misses them.
+  const missingFiles = context.demo.missingFiles ? files.copy.slice(-2) : [];
+  for (const entry of missingFiles) io.log(`missing in ${platform.sourceClient}: ${entry.path} (skipped)`, "warning");
+  io.log(`${files.copy.length - missingFiles.length} copied, ${files.remove.length} removed`, missingFiles.length ? "warning" : "success");
   io.progress(1);
-  const count = (status) => files.copy.filter((entry) => entry.status === status).length;
-  return { added: count("A"), modified: count("M"), deleted: files.remove.length, excluded: files.excluded.length };
+  const copied = files.copy.filter((entry) => !missingFiles.includes(entry));
+  const count = (status) => copied.filter((entry) => entry.status === status).length;
+  return {
+    added: count("A"),
+    modified: count("M"),
+    deleted: files.remove.length,
+    excluded: files.excluded.length,
+    warnings: missingFiles.map((entry) => ({ code: "missing", path: entry.path })),
+  };
 }
 
 async function runTransfer(context, io) {
@@ -200,7 +243,7 @@ async function buildCocos(context, io) {
   return {
     exitCode: 36,
     outputDir: output,
-    sizeBytes: 187_365_376,
+    sizeBytes: DEMO_HOT_UPDATE_BYTES,
     files: 9630,
     qaChecked: 1286,
     qaFindings: 0,
@@ -223,13 +266,15 @@ function gmTasks(context) {
     "gm.activityCurrent": (io) => gmCall(io, ["set current activity version #318", "ok"], { version: 318 }),
     "gm.activityReload": (io) => gmCall(io, ["reload activities on all game servers", "12 activities reloaded"], { activities: 12 }, 1200),
     "gm.clientUpload": async (io) => {
-      io.log(`upload ${gmFiles.client} (${((build.sizeBytes || 0) / 1048576).toFixed(1)} MB)`);
+      // A real build reports no package size; the simulated upload uses its own.
+      const sizeBytes = build.sizeBytes || DEMO_HOT_UPDATE_BYTES;
+      io.log(`upload ${gmFiles.client} (${(sizeBytes / 1048576).toFixed(1)} MB)`);
       for (let percent = 10; percent <= 100; percent += 10) {
         await io.wait(320);
         io.progress(percent / 100);
       }
       io.log(`uploaded · hot update ${gmFiles.clientVersion}`, "success");
-      return { file: gmFiles.client, sizeBytes: build.sizeBytes || 0, version: gmFiles.clientVersion };
+      return { file: gmFiles.client, sizeBytes, version: gmFiles.clientVersion };
     },
     "gm.serverUpload": (io) => gmCall(io, [`upload ${gmFiles.server} (48.2 MB)`, "uploading … 100%", "uploaded · server version #207"], { file: gmFiles.server, version: 207 }, 1600),
     "gm.serverCurrent": (io) => gmCall(io, ["set current server version #207", "ok · applies on next restart"], { version: 207 }),
@@ -255,6 +300,7 @@ function gmTasks(context) {
 
 const TASK_RUNNERS = Object.freeze({
   "db.sync": syncDatabase,
+  "db.restore": restoreDatabase,
   "db.plans": writePlans,
   "client.svn": updateSvn,
   "client.svnResolve": resolveSvnConflicts,

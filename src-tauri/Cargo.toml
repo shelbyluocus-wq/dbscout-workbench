@@ -22,6 +22,7 @@ encoding_rs = "0.8"
 fontdb = "0.23"
 futures-util = "0.3"
 rfd = "0.17.2"
+roxmltree = "0.20"
 reqwest = { version = "0.13.3", features = ["json"] }
 rust_xlsxwriter = "0.96"
 serde = { version = "1", features = ["derive"] }

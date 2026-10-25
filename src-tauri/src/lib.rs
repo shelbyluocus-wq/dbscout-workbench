@@ -11,6 +11,7 @@ mod batch_import;
 mod clickhouse;
 mod mongodb;
 mod clipboard;
+mod cocos_build;
 mod commands;
 mod config_relations;
 mod control_server;
@@ -24,6 +25,7 @@ mod natural_sort;
 mod path_reveal;
 mod perf;
 mod perf_fixture;
+mod release_paths;
 mod replace;
 pub mod runtime_resources;
 pub mod schema_cache;
@@ -31,6 +33,7 @@ mod sql_console;
 mod sql_history;
 mod svn_updater;
 mod svn_client;
+mod svn_workspace;
 mod sync;
 mod sync_guard;
 mod sync_verification;
@@ -43,6 +46,8 @@ pub mod table_search;
 mod table_sessions;
 mod table_transfer;
 mod table_xlsx;
+#[cfg(test)]
+mod test_temp_dir;
 pub mod types;
 mod validation;
 mod window_frame;
@@ -307,6 +312,23 @@ pub fn run() {
             agent::artifact::agent_open_artifact,
             agent::artifact::agent_reveal_artifact,
             path_reveal::reveal_local_path,
+            release_paths::release_pick_exclusion,
+            svn_workspace::svn_wc_info,
+            svn_workspace::svn_wc_status,
+            svn_workspace::svn_wc_file_diff,
+            svn_workspace::svn_wc_commit,
+            svn_workspace::svn_wc_revert,
+            svn_workspace::svn_wc_resolve,
+            svn_workspace::svn_wc_log,
+            svn_workspace::svn_wc_pick_folder,
+            cocos_build::cocos_inspect_project,
+            cocos_build::cocos_find_editors,
+            cocos_build::cocos_output_status,
+            cocos_build::cocos_build_start,
+            cocos_build::cocos_build_cancel,
+            cocos_build::cocos_pick_editor,
+            cocos_build::cocos_pick_project,
+            cocos_build::cocos_pick_config,
             commands::agent_pick_project_directory,
             commands::agent_validate_project_directory,
             commands::get_account,

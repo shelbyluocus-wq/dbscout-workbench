@@ -1,17 +1,18 @@
 <script setup>
-// Where a platform's release goes: its databases, client folders, conversion
+// Where a platform's update goes: its databases, client folders, conversion
 // template and Cocos editor. Fields save when they lose focus, so typing never
-// resets finished steps keystroke by keystroke.
+// resets finished steps keystroke by keystroke. The build options themselves
+// are set on the client build page.
 import { computed } from "vue";
 import { t } from "../i18n/index.js";
 
 const props = defineProps({
-  flow: { type: Object, required: true },
+  workspace: { type: Object, required: true },
   platform: { type: Object, required: true },
 });
 
-const busy = computed(() => props.flow.busy.value);
-const templates = computed(() => props.flow.templates.value);
+const busy = computed(() => Boolean(props.workspace.flowOfPlatform(props.platform.id)?.busy.value));
+const templates = computed(() => props.workspace.templates.value);
 
 const GROUPS = Object.freeze([
   { id: "database", fields: [{ key: "sourceDatabase" }, { key: "targetDatabase" }] },
@@ -20,7 +21,7 @@ const GROUPS = Object.freeze([
 ]);
 
 function update(key, event) {
-  props.flow.updatePlatform(props.platform.id, { [key]: event.target.value });
+  props.workspace.updatePlatform(props.platform.id, { [key]: event.target.value });
 }
 </script>
 

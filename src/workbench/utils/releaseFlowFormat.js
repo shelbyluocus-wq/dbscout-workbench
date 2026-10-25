@@ -4,6 +4,9 @@ import { language, t } from "../i18n/index.js";
 export function formatReleaseDuration(ms, translate = t) {
   const seconds = Math.max(0, Math.round((Number(ms) || 0) / 1000));
   if (seconds < 60) return translate("releaseFlow.duration.seconds", { seconds });
+  if (seconds >= 3600) {
+    return translate("releaseFlow.duration.hours", { hours: Math.floor(seconds / 3600), minutes: Math.floor((seconds % 3600) / 60) });
+  }
   return translate("releaseFlow.duration.minutes", {
     minutes: Math.floor(seconds / 60),
     seconds: String(seconds % 60).padStart(2, "0"),
@@ -100,6 +103,64 @@ export function gmResultText(taskId, result = {}, translate = t) {
       return translate(key, { count: result.servers, version: result.version });
     default:
       return translate(key);
+  }
+}
+
+/** What a finished step did, in one line (summary page and history). */
+export function stepResultText(taskId, { status, result = {} } = {}, { cocosVersion = "" } = {}, translate = t) {
+  if (status === "skipped") return translate("releaseFlow.summary.skipped");
+  const value = result || {};
+  switch (taskId) {
+    case "db.sync":
+      return translate("releaseFlow.summary.db.sync", { tables: formatReleaseCount(value.tables), rows: formatReleaseCount(value.rows) });
+    case "db.restore":
+      return translate("releaseFlow.backup.restored", { time: formatDateTime(value.backup?.at) });
+    case "db.plans":
+      return translate("releaseFlow.summary.db.plans", { open: value.open ?? 0, close: value.close ?? 0 });
+    case "client.svn":
+      return translate("releaseFlow.summary.client.svn", { revision: value.revision, count: value.resolved || 0 });
+    case "client.sync":
+      return translate("releaseFlow.files.done", { added: value.added, modified: value.modified, deleted: value.deleted });
+    case "client.transfer":
+      return translate("releaseFlow.transfer.done", { count: value.copiedFiles });
+    case "client.diff":
+      return translate("releaseFlow.diff.done", { count: value.files });
+    case "build.cocos":
+      return translate("releaseFlow.summary.build", { version: value.engineVersion || cocosVersion, platform: value.platform || "android" });
+    default:
+      return gmResultText(taskId, value, translate);
+  }
+}
+
+/** "10/25 14:02", or "" for no time. */
+export function formatDateTime(timestamp, locale = language.locale.value) {
+  const value = typeof timestamp === "string" ? Date.parse(timestamp) : Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
+}
+
+/** "10/25 (Sat)" for a timestamp, for day headings. */
+export function formatDayOf(timestamp, locale = language.locale.value) {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(value));
+}
+
+/** What a platform card or the overview says about one issue of an update. */
+export function issueText(issue, translate = t) {
+  switch (issue?.kind) {
+    case "failed":
+      return translate("releaseFlow.issue.failed", { step: taskTitle(issue.taskId, translate) });
+    case "conflicts":
+      return translate("releaseFlow.issue.conflicts", { count: issue.count });
+    case "missing":
+      return translate("releaseFlow.issue.missing", { count: issue.count });
+    case "stale":
+      return translate("releaseFlow.issue.stale", { count: issue.count });
+    case "overdue":
+      return translate("releaseFlow.issue.overdue");
+    default:
+      return "";
   }
 }
 

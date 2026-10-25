@@ -5527,7 +5527,7 @@ onBeforeUnmount(() => {
 
     <ReleaseFlowDialog
       v-if="releaseFlowOpen"
-      :templates="tableTransfer.templates.value"
+      :transfer="tableTransfer"
       :exclusion-templates="databaseSync.exclusionTemplates.value"
       @close="releaseFlowOpen = false"
     />

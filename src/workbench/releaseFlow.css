@@ -10,10 +10,20 @@
   --wb-rf-page-x: 40px;
   --wb-rf-sunken: color-mix(in srgb, var(--wb-pane-header) 70%, transparent);
 
+  /* Diff colors after Cairn's, from the shared status tokens. */
+  --wb-rf-diff-added: color-mix(in srgb, var(--wb-success-surface) 80%, var(--wb-table-surface));
+  --wb-rf-diff-added-mark: color-mix(in srgb, var(--wb-success-text) 24%, var(--wb-success-surface));
+  --wb-rf-diff-removed: color-mix(in srgb, var(--wb-danger-surface) 80%, var(--wb-table-surface));
+  --wb-rf-diff-removed-mark: color-mix(in srgb, var(--wb-danger-text) 22%, var(--wb-danger-surface));
+  --wb-rf-diff-gutter: color-mix(in srgb, var(--wb-pane-header) 85%, transparent);
+  --wb-rf-diff-hunk: var(--wb-accent-soft);
+  --wb-rf-diff-empty: color-mix(in srgb, var(--wb-pane-header) 55%, var(--wb-table-surface));
+
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(1280px, calc(100vw - 32px));
-  height: min(880px, calc(100vh - 32px));
+  width: min(1440px, calc(100vw - 32px));
+  height: min(920px, calc(100vh - 32px));
   padding: 0;
   overflow: hidden;
   color: var(--wb-text);
@@ -40,27 +50,50 @@
   color: var(--wb-accent-control-text);
 }
 
-.wb-rf-heading {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.wb-rf-heading h2 {
-  margin: 0;
+.wb-rf-title {
+  margin: 0 8px 0 0;
   font-size: 15px;
   font-weight: 650;
   white-space: nowrap;
 }
 
-.wb-rf-brief {
+/* Workspace pages, one row in the header. */
+.wb-rf-nav {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
   overflow: hidden;
+}
+
+.wb-rf-nav-item {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.wb-rf-nav-item:hover:not(:disabled) {
+  border: none;
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
+.wb-rf-nav-item[aria-current="page"] {
+  background: var(--wb-accent-soft);
+  color: var(--wb-text);
+  font-weight: 650;
 }
 
 .wb-rf-header-actions {
@@ -143,18 +176,32 @@
   background: var(--wb-line);
 }
 
-/* Body: rail + page --------------------------------------------------------- */
+/* Body: platform board + page ---------------------------------------------- */
 .wb-rf-body {
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
   min-height: 0;
 }
 
 .wb-rf-main {
   display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-rf-run {
+  display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
+}
+
+.wb-rf-eyebrow {
+  margin: 0 0 -20px;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
 }
 
 .wb-rf-page {
@@ -773,6 +820,77 @@
   text-align: center;
 }
 
+/* Task outcome: progress while running, then one line (shared by the steps and the build page). */
+.wb-rf-task-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wb-rf-task-panel:empty {
+  display: none;
+}
+
+.wb-rf-task-running {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-rf-task-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 13px;
+}
+
+.wb-rf-task-line.is-success {
+  color: var(--wb-success-text);
+}
+
+.wb-rf-task-line.is-warning {
+  color: var(--wb-warning-text);
+}
+
+.wb-rf-task-line > strong {
+  color: var(--wb-text);
+  font-weight: 600;
+}
+
+.wb-rf-task-percent {
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-rf-task-outcome {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.wb-rf-task-outcome strong {
+  font-weight: 650;
+}
+
+.wb-rf-task-duration {
+  flex: none;
+  color: var(--wb-quiet-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-rf-log-toggle svg {
+  transition: transform var(--wb-duration-fast) ease;
+}
+
+.wb-rf-log-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-rf-spin {
     animation: none;
@@ -789,6 +907,10 @@
   }
 
   .wb-rf-body {
-    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-columns: 236px minmax(0, 1fr);
+  }
+
+  .wb-rf-nav-item span {
+    display: none;
   }
 }

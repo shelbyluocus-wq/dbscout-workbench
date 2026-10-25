@@ -1,6 +1,7 @@
 <script setup>
-// First page: which platform, which day, maintenance or not, and what this
-// release contains. The step rail adapts to these answers right away.
+// First page of an update: the platform it was created for, which day,
+// maintenance or not, and what this release contains. The steps under the
+// platform's card adapt to these answers right away.
 import { computed } from "vue";
 import { Check, Database, Gift, MonitorSmartphone, Server } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
@@ -11,11 +12,12 @@ import ReleasePageHead from "./ReleasePageHead.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
 
 const state = props.flow.state;
-const busy = computed(() => props.flow.busy.value);
+const busy = computed(() => props.flow.busy.value || props.flow.finished.value);
 const started = computed(() => state.brief.started);
 const today = localDateIso();
 const SCOPE_ICONS = { database: Database, client: MonitorSmartphone, server: Server, activity: Gift };
@@ -32,7 +34,7 @@ function scopeDisabled(scope) {
 </script>
 
 <template>
-  <ReleasePageHead page-id="overview" />
+  <ReleasePageHead page-id="brief" />
 
   <section class="wb-rf-group" aria-labelledby="wb-rf-platform-title">
     <div class="wb-rf-group-head">
@@ -41,24 +43,10 @@ function scopeDisabled(scope) {
         <button type="button" class="wb-rf-link" @click="emit('navigate', 'platforms')">{{ t('releaseFlow.overview.platformSettings') }}</button>
       </div>
     </div>
-    <div class="wb-rf-platforms" role="radiogroup" :aria-label="t('releaseFlow.overview.platform')">
-      <button
-        v-for="platform in state.platforms"
-        :key="platform.id"
-        type="button"
-        role="radio"
-        class="wb-rf-platform"
-        :aria-checked="platform.id === state.brief.platformId"
-        :disabled="busy || (started && platform.id !== state.brief.platformId)"
-        :title="started && platform.id !== state.brief.platformId ? t('releaseFlow.overview.platformLocked') : undefined"
-        @click="flow.setPlatform(platform.id)"
-      >
-        <span class="wb-rf-platform-name">
-          <strong>{{ platform.name }}</strong>
-          <Check v-if="platform.id === state.brief.platformId" :size="15" aria-hidden="true" />
-        </span>
-        <span class="wb-rf-code wb-rf-muted">{{ platform.targetDatabase }}</span>
-      </button>
+    <div class="wb-rf-platform-fixed">
+      <strong>{{ flow.platform.value.name }}</strong>
+      <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetDatabase }}</span>
+      <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetClient }}</span>
     </div>
   </section>
 
@@ -117,55 +105,27 @@ function scopeDisabled(scope) {
   </section>
 
   <label class="wb-rf-ready" :class="{ 'is-on': state.brief.prepared }">
-    <input type="checkbox" :checked="state.brief.prepared" :disabled="started" @change="flow.setPrepared($event.target.checked)" />
+    <input type="checkbox" :checked="state.brief.prepared" :disabled="started || flow.finished.value" @change="flow.setPrepared($event.target.checked)" />
     <span>{{ t('releaseFlow.overview.prepared') }}</span>
   </label>
 </template>
 
 <style scoped>
-.wb-rf-platforms {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.wb-rf-platform {
-  display: grid;
-  gap: 6px;
-  height: auto;
-  min-height: 0;
+.wb-rf-platform-fixed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
   padding: 16px 18px;
-  border: 1px solid var(--wb-border);
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
   border-radius: 12px;
   background: var(--wb-table-surface);
-  font-weight: 400;
-  text-align: left;
-}
-
-.wb-rf-platform:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
-  background: var(--wb-table-surface);
-}
-
-.wb-rf-platform[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--wb-accent) 65%, transparent);
   box-shadow: 0 0 0 3px var(--wb-accent-soft);
 }
 
-.wb-rf-platform-name {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--wb-text);
-}
-
-.wb-rf-platform-name strong {
+.wb-rf-platform-fixed strong {
   font-size: 16px;
   font-weight: 650;
-}
-
-.wb-rf-platform-name svg {
-  color: var(--wb-accent);
 }
 
 .wb-rf-overview-row {
@@ -238,11 +198,5 @@ function scopeDisabled(scope) {
 .wb-rf-ready input {
   margin: 0;
   accent-color: var(--wb-accent);
-}
-
-@media (max-width: 1180px) {
-  .wb-rf-platforms {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

@@ -72,3 +72,21 @@ export function cleanExclusionRules(rules) {
   }
   return result;
 }
+
+/** "folder" (ends with "/"), "pattern" (has * or ?) or "file". */
+export function exclusionRuleKind(rule) {
+  const value = normalizeExclusionRule(rule);
+  if (/[*?]/.test(value)) return "pattern";
+  return value.endsWith("/") ? "folder" : "file";
+}
+
+/**
+ * The rule for a file or folder chosen inside the client: anchored to the
+ * client folder, so it never matches a namesake deeper in the tree.
+ */
+export function ruleForPick(relative, kind) {
+  const path = normalizeExclusionRule(relative).replace(/^\/+|\/+$/g, "");
+  if (!path) return "";
+  const anchored = path.includes("/") ? path : `/${path}`;
+  return kind === "folder" ? `${anchored}/` : anchored;
+}

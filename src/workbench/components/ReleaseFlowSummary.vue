@@ -4,19 +4,19 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { Check, Copy, PartyPopper } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { RELEASE_PAGE_BY_ID, RELEASE_PHASES, RELEASE_TASKS, RELEASE_TASK_BY_ID, TASK_STATUS, taskApplies } from "../releaseFlowState.js";
+import { RELEASE_PAGE_BY_ID, RELEASE_PHASES, RELEASE_TASKS, RELEASE_TASK_BY_ID, TASK_STATUS, applicableTasks } from "../releaseFlowState.js";
 import {
-  formatReleaseCount,
   formatReleaseDate,
   formatReleaseDuration,
-  gmResultText,
   phaseTitle,
+  stepResultText,
   taskTitle,
 } from "../utils/releaseFlowFormat.js";
 import ReleaseStatusIcon from "./ReleaseStatusIcon.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
 
@@ -27,32 +27,12 @@ const copied = ref(false);
 let copiedTimer = null;
 onBeforeUnmount(() => clearTimeout(copiedTimer));
 
-const applicable = computed(() => RELEASE_TASKS.filter((definition) => taskApplies(definition, state.brief)));
+const applicable = computed(() => applicableTasks(state.brief));
 const remaining = computed(() => applicable.value.filter((definition) =>
   ![TASK_STATUS.DONE, TASK_STATUS.SKIPPED].includes(state.tasks[definition.id].status)));
 
 function resultLine(taskId) {
-  const task = state.tasks[taskId];
-  if (task.status === TASK_STATUS.SKIPPED) return t("releaseFlow.summary.skipped");
-  const result = task.result || {};
-  switch (taskId) {
-    case "db.sync":
-      return t("releaseFlow.summary.db.sync", { tables: formatReleaseCount(result.tables), rows: formatReleaseCount(result.rows) });
-    case "db.plans":
-      return t("releaseFlow.summary.db.plans", { open: result.open ?? 0, close: result.close ?? 0 });
-    case "client.svn":
-      return t("releaseFlow.summary.client.svn", { revision: result.revision, count: result.resolved || 0 });
-    case "client.sync":
-      return t("releaseFlow.files.done", { added: result.added, modified: result.modified, deleted: result.deleted });
-    case "client.transfer":
-      return t("releaseFlow.transfer.done", { count: result.copiedFiles });
-    case "client.diff":
-      return t("releaseFlow.diff.done", { count: result.files });
-    case "build.cocos":
-      return t("releaseFlow.summary.build", { version: platform.value.cocosVersion, hotUpdate: result.hotUpdate || "" });
-    default:
-      return gmResultText(taskId, result);
-  }
+  return stepResultText(taskId, state.tasks[taskId], { cocosVersion: platform.value.cocosVersion });
 }
 
 const phases = computed(() => RELEASE_PHASES.map((phase) => ({
@@ -63,7 +43,7 @@ const phases = computed(() => RELEASE_PHASES.map((phase) => ({
 })).filter((phase) => phase.tasks.length));
 
 const totalTime = computed(() => {
-  const started = state.history.find((entry) => entry.event === "started")?.at;
+  const started = state.events.find((entry) => entry.event === "started")?.at;
   const finished = Math.max(0, ...RELEASE_TASKS.map((definition) => state.tasks[definition.id].finishedAt || 0));
   return started && finished > started ? formatReleaseDuration(finished - started) : "";
 });

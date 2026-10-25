@@ -1,24 +1,34 @@
 <script setup>
 // Phase 2, step 3: run the platform's table conversion with a template from
-// the one-click table transfer. The template brings the conversion script;
-// the output is always copied into the platform client. Choosing a template
-// here remembers it for the platform.
-import { computed } from "vue";
-import { Check, FileSpreadsheet } from "lucide-vue-next";
+// the one-click table transfer. Templates are shared with that dialog: a
+// template made or changed here shows there, and the other way round. The
+// conversion's output is always copied into the platform client; choosing a
+// template here remembers it for the platform.
+import { computed, nextTick, ref } from "vue";
+import { Check, FileSpreadsheet, FileText, FolderOpen, FolderSearch, Plus } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
+  transfer: { type: Object, default: null },
 });
 defineEmits(["run", "rerun", "navigate"]);
 
 const platform = computed(() => props.flow.platform.value);
 const templates = computed(() => props.flow.templates.value);
 const selected = computed(() => props.flow.selectedTemplate.value);
-const busy = computed(() => props.flow.busy.value);
+const busy = computed(() => props.flow.busy.value || props.flow.finished.value);
+const transferBusy = computed(() => Boolean(props.transfer?.isRunning?.value));
 const task = computed(() => props.flow.state.tasks["client.transfer"]);
+const creating = ref(false);
+const newName = ref("");
+const nameError = ref("");
+const nameRef = ref(null);
+
+const STRATEGIES = Object.freeze(["theirs", "mine", "manual"]);
 
 function fileName(path) {
   return String(path || "").split(/[\\/]/).pop();
@@ -35,14 +45,35 @@ const STAGES = Object.freeze([
 function stageState(index) {
   if (task.value.status === "done") return "done";
   if (task.value.status !== "running") return "pending";
-  const fraction = props.flow.progress.fraction;
+  const fraction = props.flow.progress.fraction ?? 0;
   const current = STAGES.findIndex((stage) => fraction < stage.until);
   if (index < current) return "done";
   return index === current ? "running" : "pending";
 }
 
 function choose(template) {
-  props.flow.updatePlatform(platform.value.id, { transferTemplateId: template.id });
+  props.workspace?.updatePlatform(platform.value.id, { transferTemplateId: template.id });
+}
+
+function startCreate() {
+  creating.value = true;
+  newName.value = props.transfer?.suggestTemplateName?.(t("releaseFlow.transfer.newName", { platform: platform.value.name })) || "";
+  nameError.value = "";
+  void nextTick(() => nameRef.value?.select());
+}
+
+function create() {
+  const result = props.transfer?.addTemplate(newName.value);
+  if (!result || result.status !== "created") {
+    nameError.value = t(`releaseFlow.transfer.nameError.${result?.status || "busy"}`);
+    return;
+  }
+  creating.value = false;
+  choose(result.template);
+}
+
+function setStrategy(value) {
+  if (selected.value) props.transfer?.updateTemplate(selected.value.id, { conflictStrategy: value });
 }
 </script>
 
@@ -53,7 +84,27 @@ function choose(template) {
     <div class="wb-rf-group-head">
       <h4 id="wb-rf-transfer-templates">{{ t('releaseFlow.transfer.templates') }}</h4>
       <span class="wb-rf-count">{{ t('releaseFlow.transfer.templatesHint') }}</span>
+      <div class="wb-rf-group-tools">
+        <button v-if="transfer" type="button" class="wb-rf-btn is-small" data-release-new-template :disabled="busy || transferBusy" @click="startCreate">
+          <Plus :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.new') }}
+        </button>
+      </div>
     </div>
+    <form v-if="creating" class="wb-rf-inline-form wb-rf-template-new" @submit.prevent="create">
+      <input
+        ref="nameRef"
+        v-model="newName"
+        class="wb-rf-input"
+        maxlength="40"
+        :aria-label="t('releaseFlow.transfer.newNameLabel')"
+        :aria-invalid="Boolean(nameError)"
+        @input="nameError = ''"
+        @keydown.escape.stop.prevent="creating = false"
+      />
+      <button type="submit" class="wb-rf-btn is-small is-primary">{{ t('releaseFlow.transfer.create') }}</button>
+      <button type="button" class="wb-rf-btn is-small is-quiet" @click="creating = false">{{ t('releaseFlow.cancel') }}</button>
+      <span v-if="nameError" class="wb-rf-field-error" role="alert">{{ nameError }}</span>
+    </form>
     <div v-if="templates.length" class="wb-rf-template-list" role="radiogroup" :aria-label="t('releaseFlow.transfer.templates')">
       <button
         v-for="template in templates"
@@ -61,6 +112,7 @@ function choose(template) {
         type="button"
         role="radio"
         class="wb-rf-template"
+        :data-template-id="template.id"
         :aria-checked="template.id === selected?.id"
         :disabled="busy"
         @click="choose(template)"
@@ -75,7 +127,61 @@ function choose(template) {
       </button>
     </div>
     <p v-else class="wb-rf-empty">{{ t('releaseFlow.transfer.empty') }}</p>
-    <p class="wb-rf-hint">{{ t('releaseFlow.transfer.target') }} <span class="wb-rf-code">{{ assetsFolder }}</span></p>
+  </section>
+
+  <section v-if="selected" class="wb-rf-card wb-rf-template-detail" aria-labelledby="wb-rf-template-detail">
+    <div class="wb-rf-group-head">
+      <h4 id="wb-rf-template-detail">{{ t('releaseFlow.transfer.detail', { name: selected.name }) }}</h4>
+      <span v-if="selected.builtIn" class="wb-rf-chip is-quiet">{{ t('releaseFlow.transfer.builtIn') }}</span>
+    </div>
+    <dl class="wb-rf-facts is-rows">
+      <div class="wb-rf-fact">
+        <dt>{{ t('releaseFlow.transfer.script') }}</dt>
+        <dd>
+          <span class="wb-rf-code">{{ selected.scriptPath || t('releaseFlow.transfer.noScript') }}</span>
+          <span v-if="transfer" class="wb-rf-fact-actions">
+            <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickScript(selected.id)">
+              <FileText :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickScript') }}
+            </button>
+            <button v-if="selected.scriptPath" type="button" class="wb-rf-btn is-small is-quiet" @click="transfer.revealPath(selected.scriptPath)">
+              <FolderSearch :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.reveal') }}
+            </button>
+          </span>
+        </dd>
+      </div>
+      <div class="wb-rf-fact">
+        <dt>{{ t('releaseFlow.transfer.projectRoot') }}</dt>
+        <dd>
+          <span class="wb-rf-code">{{ selected.projectRoot || '—' }}</span>
+          <span v-if="transfer" class="wb-rf-fact-actions">
+            <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickProjectDir(selected.id)">
+              <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickProject') }}
+            </button>
+          </span>
+        </dd>
+      </div>
+      <div class="wb-rf-fact">
+        <dt>{{ t('releaseFlow.transfer.strategy') }}</dt>
+        <dd>
+          <div class="wb-rf-segmented" role="radiogroup" :aria-label="t('releaseFlow.transfer.strategy')">
+            <button
+              v-for="strategy in STRATEGIES"
+              :key="strategy"
+              type="button"
+              role="radio"
+              :aria-checked="selected.conflictStrategy === strategy"
+              :disabled="busy || transferBusy || !transfer"
+              @click="setStrategy(strategy)"
+            >{{ t(`releaseFlow.transfer.strategy.${strategy}`) }}</button>
+          </div>
+        </dd>
+      </div>
+      <div class="wb-rf-fact">
+        <dt>{{ t('releaseFlow.transfer.target') }}</dt>
+        <dd><span class="wb-rf-code">{{ assetsFolder }}</span></dd>
+      </div>
+    </dl>
+    <p class="wb-rf-hint">{{ t('releaseFlow.transfer.shared') }}</p>
   </section>
 
   <ol class="wb-rf-list wb-rf-stages" :aria-label="t('releaseFlow.transfer.stages')">
@@ -85,7 +191,7 @@ function choose(template) {
     </li>
   </ol>
 
-  <ReleaseTaskPanel :flow="flow" task-id="client.transfer">
+  <ReleaseTaskPanel :flow="flow" task-id="client.transfer" log-expanded>
     <template #done="{ result }">
       <strong>{{ t('releaseFlow.transfer.done', { count: result.copiedFiles }) }}</strong>
       <span class="wb-rf-code wb-rf-muted">{{ result.outputDir }}</span>
@@ -182,5 +288,41 @@ function choose(template) {
 
 .wb-rf-stage.is-done .wb-rf-stage-number {
   background: var(--wb-success-surface);
+}
+
+.wb-rf-template-new {
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: none;
+}
+
+.wb-rf-template-new input {
+  width: 260px;
+}
+
+.wb-rf-facts.is-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-rf-facts.is-rows .wb-rf-fact {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-rf-facts.is-rows dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  margin: 0;
+}
+
+.wb-rf-fact-actions {
+  display: inline-flex;
+  gap: 4px;
 }
 </style>

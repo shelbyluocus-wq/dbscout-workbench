@@ -1,20 +1,22 @@
 <script setup>
-// Phase 1: overwrite the platform database with the development one, then
-// apply the platform's open plan to it. The plan itself is edited in the
-// open-plans tool; this page only writes what the plan says for this day.
+// Phase 1: overwrite the platform database with the development one (after
+// backing it up, which a restore returns to), then write the open plan for
+// this day. The plan itself is the memo on the open plans page; this page
+// writes the entries that name a table row and lists the others.
 import { computed, ref } from "vue";
-import { ArrowDown, ArrowRight, ArrowUp, Database, Plus } from "lucide-vue-next";
+import { ArrowDown, ArrowRight, ArrowUp, Database, DatabaseBackup, Plus, RotateCcw } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { DEMO_PLAN_TABLES, planItemKeyLabel } from "../utils/releaseFlowDemo.js";
 import { formatPlanDate } from "../utils/releasePlanNotes.js";
-import { formatReleaseCount } from "../utils/releaseFlowFormat.js";
+import { formatDateTime, formatReleaseCount } from "../utils/releaseFlowFormat.js";
 import ReleaseChipList from "./ReleaseChipList.vue";
+import ReleaseCombobox from "./ReleaseCombobox.vue";
 import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleaseStatusIcon from "./ReleaseStatusIcon.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
+  workspace: { type: Object, default: null },
   exclusionTemplates: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
@@ -24,10 +26,14 @@ const platform = computed(() => props.flow.platform.value);
 const plan = computed(() => props.flow.syncPlan.value);
 const excluded = computed(() => props.flow.syncExclusions.value);
 const busy = computed(() => props.flow.busy.value);
+const locked = computed(() => busy.value || props.flow.finished.value);
 const draft = ref("");
-const planTablesKept = computed(() => DEMO_PLAN_TABLES.every((table) => excluded.value.includes(table)));
 const addable = computed(() => plan.value.catalog.filter((name) => !excluded.value.includes(name)));
 const templates = computed(() => props.exclusionTemplates.filter((template) => template?.tables?.length));
+
+const backup = computed(() => props.flow.backup.value);
+const restore = computed(() => state.tasks["db.restore"]);
+const syncDone = computed(() => state.tasks["db.sync"].status === "done");
 
 const groups = computed(() => props.flow.planGroups.value);
 const counts = computed(() => props.flow.planCounts.value);
@@ -35,6 +41,7 @@ const changes = computed(() => groups.value.flatMap((group) => group.rows
   .filter((row) => row.change === "open" || row.change === "close")
   .map((row) => ({ ...row, category: group.id }))));
 const unreadable = computed(() => groups.value.flatMap((group) => group.rows.filter((row) => row.change === "skip")));
+const reminders = computed(() => props.flow.planReminders.value);
 const statements = computed(() => props.flow.planSql.value);
 
 function status(taskId) {
@@ -42,20 +49,15 @@ function status(taskId) {
   return value === "idle" ? "pending" : value;
 }
 
-function addDraft() {
-  const name = draft.value.trim();
-  if (!name) return;
-  props.flow.setSyncExclusions([...excluded.value, name]);
+function add(name) {
+  const value = String(name ?? draft.value).trim();
+  if (!value) return;
+  props.flow.setSyncExclusions([...excluded.value, value]);
   draft.value = "";
 }
 
 function remove(name) {
   props.flow.setSyncExclusions(excluded.value.filter((table) => table !== name));
-}
-
-function togglePlanTables() {
-  const rest = excluded.value.filter((table) => !DEMO_PLAN_TABLES.includes(table));
-  props.flow.setSyncExclusions(planTablesKept.value ? rest : [...rest, ...DEMO_PLAN_TABLES]);
 }
 </script>
 
@@ -89,45 +91,70 @@ function togglePlanTables() {
         :items="excluded"
         :label="t('releaseFlow.database.keptTables')"
         :remove-label="(table) => t('releaseFlow.database.remove', { table })"
-        :disabled="busy"
+        :disabled="locked"
         @remove="remove"
       />
-      <form class="wb-rf-inline-form" @submit.prevent="addDraft">
-        <input
+      <form class="wb-rf-inline-form" @submit.prevent="add()">
+        <ReleaseCombobox
           v-model="draft"
-          class="wb-rf-input wb-rf-code"
-          list="wb-rf-sync-tables"
+          :options="addable"
           :placeholder="t('releaseFlow.database.addPlaceholder')"
-          :aria-label="t('releaseFlow.database.addPlaceholder')"
-          :disabled="busy"
-          spellcheck="false"
+          :empty-text="t('releaseFlow.database.noTable')"
+          :disabled="locked"
+          @pick="add"
         />
-        <datalist id="wb-rf-sync-tables">
-          <option v-for="name in addable" :key="name" :value="name" />
-        </datalist>
-        <button type="submit" class="wb-rf-btn is-small" :disabled="busy || !draft.trim()"><Plus :size="13" aria-hidden="true" />{{ t('releaseFlow.database.add') }}</button>
+        <button type="submit" class="wb-rf-btn is-small" :disabled="locked || !draft.trim()"><Plus :size="13" aria-hidden="true" />{{ t('releaseFlow.database.add') }}</button>
       </form>
-      <div class="wb-rf-exclusion-tools">
-        <label class="wb-rf-check">
-          <input type="checkbox" :checked="planTablesKept" :disabled="busy" @change="togglePlanTables" />
-          {{ t('releaseFlow.database.keepPlanTables') }}
-        </label>
+      <div v-if="templates.length" class="wb-rf-exclusion-tools">
         <button
           v-for="template in templates"
           :key="template.id"
           type="button"
           class="wb-rf-btn is-quiet is-small"
-          :disabled="busy"
+          :disabled="locked"
           @click="flow.setSyncExclusions([...excluded, ...template.tables])"
         >+ {{ template.name }}</button>
       </div>
     </div>
+    <p class="wb-rf-backup-line">
+      <DatabaseBackup :size="14" aria-hidden="true" />
+      <span>{{ t('releaseFlow.backup.before', { database: platform.targetDatabase }) }}</span>
+      <span class="wb-rf-chip is-quiet">{{ t('releaseFlow.backup.simulated') }}</span>
+    </p>
     <ReleaseTaskPanel :flow="flow" task-id="db.sync">
       <template #done="{ result }">
         <strong>{{ t('releaseFlow.database.syncDone', { tables: formatReleaseCount(result.tables) }) }}</strong>
-        <span class="wb-rf-muted">{{ t('releaseFlow.database.snapshot') }}</span>
+        <span v-if="result.backup" class="wb-rf-muted">{{ t('releaseFlow.backup.made', { time: formatDateTime(result.backup.at) }) }}</span>
       </template>
     </ReleaseTaskPanel>
+  </section>
+
+  <section class="wb-rf-card wb-rf-backup" aria-labelledby="wb-rf-db-backup">
+    <div class="wb-rf-group-head">
+      <ReleaseStatusIcon :status="restore.status === 'idle' ? (backup ? 'done' : 'pending') : status('db.restore')" :size="16" />
+      <h4 id="wb-rf-db-backup">{{ t('releaseFlow.backup.title') }}</h4>
+      <span v-if="backup" class="wb-rf-chip is-quiet" :title="t('releaseFlow.backup.simulatedHint')">{{ t('releaseFlow.backup.simulated') }}</span>
+    </div>
+    <template v-if="backup">
+      <dl class="wb-rf-facts">
+        <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.database') }}</dt><dd class="wb-rf-code">{{ backup.database }}</dd></div>
+        <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.at') }}</dt><dd>{{ formatDateTime(backup.at) }}</dd></div>
+        <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.content') }}</dt><dd>{{ t('releaseFlow.backup.size', { tables: formatReleaseCount(backup.tables), rows: formatReleaseCount(backup.rows) }) }}</dd></div>
+        <div class="wb-rf-fact is-wide"><dt>{{ t('releaseFlow.backup.file') }}</dt><dd class="wb-rf-code">{{ backup.path }}</dd></div>
+      </dl>
+      <div class="wb-rf-backup-actions">
+        <p class="wb-rf-hint">{{ t('releaseFlow.backup.restoreHint', { database: platform.targetDatabase }) }}</p>
+        <button type="button" class="wb-rf-btn wb-rf-danger-text" data-release-restore :disabled="Boolean(flow.blockerOf('db.restore'))" @click="emit('run', 'db.restore')">
+          <RotateCcw :size="14" aria-hidden="true" />{{ t('releaseFlow.backup.restore') }}
+        </button>
+      </div>
+    </template>
+    <p v-else-if="restore.status === 'done'" class="wb-rf-notice is-success" role="status">
+      {{ t('releaseFlow.backup.restoredNotice', { time: formatDateTime(restore.result?.backup?.at), database: platform.targetDatabase }) }}
+    </p>
+    <p v-else-if="syncDone" class="wb-rf-notice is-warning" role="status">{{ t('releaseFlow.backup.none') }}</p>
+    <p v-else class="wb-rf-hint">{{ t('releaseFlow.backup.later') }}</p>
+    <ReleaseTaskPanel v-if="restore.status === 'running' || restore.status === 'failed'" :flow="flow" task-id="db.restore" />
   </section>
 
   <section class="wb-rf-card" aria-labelledby="wb-rf-db-plans">
@@ -135,7 +162,7 @@ function togglePlanTables() {
       <ReleaseStatusIcon :status="status('db.plans')" :size="16" />
       <h4 id="wb-rf-db-plans">{{ t('releaseFlow.database.plans') }}</h4>
       <div class="wb-rf-group-tools">
-        <button type="button" class="wb-rf-link" @click="emit('navigate', 'plans')">
+        <button type="button" class="wb-rf-link" data-release-open-plans @click="emit('navigate', 'plans')">
           {{ t('releaseFlow.database.editPlans') }}<ArrowRight :size="13" aria-hidden="true" />
         </button>
       </div>
@@ -147,19 +174,29 @@ function togglePlanTables() {
       <strong v-if="!counts.close && !counts.open">{{ t('releaseFlow.database.noChange') }}</strong>
     </p>
     <ul v-if="changes.length" class="wb-rf-list wb-rf-changes">
-      <li v-for="row in changes" :key="row.item.id" :class="`is-${row.change}`">
+      <li v-for="row in changes" :key="row.item.id" :class="[`is-${row.change}`, { 'is-excluded': row.excluded }]">
+        <input
+          type="checkbox"
+          :checked="!row.excluded"
+          :disabled="locked"
+          :aria-label="t('releaseFlow.database.include', { item: row.item.name })"
+          @change="flow.setPlanSkip(row.item.id, !$event.target.checked)"
+        />
         <span class="wb-rf-change-mark">
           <ArrowUp v-if="row.change === 'open'" :size="13" aria-hidden="true" />
           <ArrowDown v-else :size="13" aria-hidden="true" />
         </span>
         <strong>{{ row.item.name }}</strong>
-        <span class="wb-rf-code wb-rf-muted">{{ planItemKeyLabel(row.item) }}</span>
+        <span class="wb-rf-code wb-rf-muted">{{ row.item.ref }}</span>
         <span class="wb-rf-muted">{{ t(`releaseFlow.plan.category.${row.category}`) }}</span>
         <span class="wb-rf-change-note">{{ row.note }}</span>
       </li>
     </ul>
     <p v-if="unreadable.length" class="wb-rf-hint">
       {{ t('releaseFlow.database.unreadable', { count: unreadable.length, items: unreadable.map((row) => row.item.name).join('、') }) }}
+    </p>
+    <p v-if="reminders.length" class="wb-rf-notice is-warning wb-rf-reminders" role="note">
+      {{ t('releaseFlow.database.reminders', { count: reminders.length, items: reminders.map((entry) => entry.name).join('、') }) }}
     </p>
     <details v-if="statements.length" class="wb-rf-sql">
       <summary>{{ t('releaseFlow.database.sql', { count: statements.length }) }}</summary>
@@ -185,9 +222,8 @@ function togglePlanTables() {
   max-width: 420px;
 }
 
-.wb-rf-inline-form input {
+.wb-rf-inline-form .wb-rf-combobox {
   flex: 1 1 auto;
-  height: 28px;
 }
 
 .wb-rf-exclusion-tools {
@@ -221,7 +257,7 @@ function togglePlanTables() {
 
 .wb-rf-changes li {
   display: grid;
-  grid-template-columns: 22px minmax(110px, auto) 70px 56px minmax(0, 1fr);
+  grid-template-columns: 16px 22px minmax(110px, auto) 70px 56px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-height: 38px;
@@ -246,6 +282,37 @@ function togglePlanTables() {
 
 .wb-rf-changes strong {
   font-weight: 600;
+}
+
+.wb-rf-changes li input {
+  margin: 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-rf-changes li.is-excluded > :not(input) {
+  opacity: 0.45;
+}
+
+.wb-rf-changes li.is-excluded strong {
+  text-decoration: line-through;
+}
+
+.wb-rf-backup-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
+}
+
+.wb-rf-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
 }
 
 .wb-rf-change-note {

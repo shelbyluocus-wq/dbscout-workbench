@@ -1,11 +1,12 @@
-// Guided release flow: pages, tasks and their dependencies, kept apart from
-// the UI. The brief (platform, update date, update mode and scope) decides
-// which tasks apply; a task can run once every applicable dependency is done
-// or skipped. Rerunning or changing the input of a finished task resets the
-// tasks that depend on it.
+// Guided release flow of one platform's update: pages, tasks and their
+// dependencies, kept apart from the UI. The brief (update date, update mode
+// and scope) decides which tasks apply; a task can run once every applicable
+// dependency is done or skipped. Rerunning or changing the input of a
+// finished task resets the tasks that depend on it. Several updates (one per
+// platform) live side by side in the release workspace
+// (releaseWorkspaceState.js).
 
-// v2 reshaped the pages (one database page, the live maintenance page) and
-// the demo content; a v1 draft is left behind rather than half-migrated.
+// The v2 single-flow draft; the v3 workspace migrates it into one update.
 export const RELEASE_FLOW_STORAGE_KEY = "dbscout_release_flow_v2";
 export const RELEASE_FLOW_SCHEMA = 2;
 export const RELEASE_PHASES = Object.freeze(["database", "client", "build", "gm"]);
@@ -20,19 +21,22 @@ export const TASK_STATUS = Object.freeze({
   SKIPPED: "skipped",
 });
 
-const MAX_LOG_LINES = 160;
+export const MAX_LOG_LINES = 160;
 const MAX_HISTORY = 120;
 
-function task(id, page, { scope = "", mode = "", deps = [], skippable = false, auto = false } = {}) {
-  return Object.freeze({ id, page, scope, mode, deps: Object.freeze(deps), skippable, auto });
+function task(id, page, { scope = "", mode = "", deps = [], skippable = false, auto = false, action = false } = {}) {
+  return Object.freeze({ id, page, scope, mode, deps: Object.freeze(deps), skippable, auto, action });
 }
 
 // Order is the order the guide offers them in. `scope` limits a task to
 // releases that include that content; `mode` to maintenance or hot updates.
 // An `auto` task is not started by a person: the shutdown runs when the
-// scheduled maintenance time arrives.
+// scheduled maintenance time arrives. An `action` is offered beside the steps
+// (restoring the database from the backup its overwrite made): it never
+// counts toward progress and nothing depends on it.
 export const RELEASE_TASKS = Object.freeze([
   task("db.sync", "database", { scope: "database" }),
+  task("db.restore", "database", { scope: "database", action: true }),
   task("db.plans", "database", { scope: "database", deps: ["db.sync"] }),
   task("client.svn", "clientSvn", { scope: "client" }),
   task("client.sync", "clientSync", { scope: "client", deps: ["client.svn"] }),
@@ -63,7 +67,7 @@ function page(id, phase) {
 }
 
 export const RELEASE_PAGES = Object.freeze([
-  page("overview", ""),
+  page("brief", ""),
   page("database", "database"),
   page("clientSvn", "client"),
   page("clientSync", "client"),
@@ -76,14 +80,6 @@ export const RELEASE_PAGES = Object.freeze([
 ]);
 
 export const RELEASE_PAGE_BY_ID = new Map(RELEASE_PAGES.map((entry) => [entry.id, entry]));
-
-// Tools sit beside the steps: open any time, never part of the step order,
-// and leaving one returns to the step the person was on.
-export const RELEASE_TOOLS = Object.freeze(["plans", "platforms"]);
-
-export function isReleaseTool(pageId) {
-  return RELEASE_TOOLS.includes(pageId);
-}
 
 function pad(value) {
   return String(value).padStart(2, "0");
@@ -102,9 +98,8 @@ export function defaultSchedule(dateIso) {
   };
 }
 
-export function createReleaseBrief(platformId = "", dateIso = localDateIso()) {
+export function createReleaseBrief(dateIso = localDateIso()) {
   return {
-    platformId,
     date: dateIso,
     mode: "maintenance",
     scope: { database: true, client: true, server: true, activity: true },
@@ -124,14 +119,20 @@ export function taskApplies(definition, brief) {
   return true;
 }
 
+/** The steps of this release: applicable tasks, without the side actions. */
 export function applicableTasks(brief) {
-  return RELEASE_TASKS.filter((definition) => taskApplies(definition, brief));
+  return RELEASE_TASKS.filter((definition) => !definition.action && taskApplies(definition, brief));
+}
+
+function stepApplies(id, brief) {
+  const definition = RELEASE_TASK_BY_ID.get(id);
+  return !definition?.action && taskApplies(definition, brief);
 }
 
 export function pageApplies(pageId, brief) {
-  if (pageId === "overview" || pageId === "summary" || isReleaseTool(pageId)) return true;
+  if (pageId === "brief" || pageId === "summary") return true;
   const entry = RELEASE_PAGE_BY_ID.get(pageId);
-  return Boolean(entry?.tasks.some((id) => taskApplies(RELEASE_TASK_BY_ID.get(id), brief)));
+  return Boolean(entry?.tasks.some((id) => stepApplies(id, brief)));
 }
 
 export function phaseApplies(phase, brief) {
@@ -223,13 +224,12 @@ export function normalizeTasks(tasks, brief) {
 }
 
 export function pageStatus(pageId, tasks, brief) {
-  if (isReleaseTool(pageId)) return "tool";
   const entry = RELEASE_PAGE_BY_ID.get(pageId);
   if (!entry || !pageApplies(pageId, brief)) return "notApplicable";
-  if (pageId === "overview") return brief.started ? "done" : "ready";
+  if (pageId === "brief") return brief.started ? "done" : "ready";
   if (pageId === "summary") return flowComplete(tasks, brief) ? "done" : "pending";
   const statuses = entry.tasks
-    .filter((id) => taskApplies(RELEASE_TASK_BY_ID.get(id), brief))
+    .filter((id) => stepApplies(id, brief))
     .map((id) => statusOf(tasks, id));
   if (statuses.includes(TASK_STATUS.RUNNING)) return "running";
   if (statuses.includes(TASK_STATUS.FAILED)) return "failed";
@@ -242,10 +242,7 @@ export function pageStatus(pageId, tasks, brief) {
 export function nextTaskOnPage(pageId, tasks, brief) {
   const entry = RELEASE_PAGE_BY_ID.get(pageId);
   if (!entry) return "";
-  return entry.tasks.find((id) => {
-    if (!taskApplies(RELEASE_TASK_BY_ID.get(id), brief)) return false;
-    return !settled(statusOf(tasks, id));
-  }) || "";
+  return entry.tasks.find((id) => stepApplies(id, brief) && !settled(statusOf(tasks, id))) || "";
 }
 
 export function flowProgress(tasks, brief) {
@@ -279,11 +276,11 @@ export function appendHistory(history, entry) {
   if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
 }
 
-function plainObject(value) {
+export function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 
-function restoreTask(saved) {
+export function restoreTask(saved) {
   const base = idleTaskState();
   if (!plainObject(saved)) return base;
   const status = Object.values(TASK_STATUS).includes(saved.status) ? saved.status : TASK_STATUS.IDLE;
@@ -306,7 +303,6 @@ function restoreTask(saved) {
 export function restoreBrief(saved, fallback) {
   const brief = { ...fallback, scope: { ...fallback.scope } };
   if (!plainObject(saved)) return brief;
-  if (typeof saved.platformId === "string" && saved.platformId) brief.platformId = saved.platformId;
   if (/^\d{4}-\d{2}-\d{2}$/.test(saved.date || "")) brief.date = saved.date;
   if (RELEASE_MODES.includes(saved.mode)) brief.mode = saved.mode;
   for (const scope of RELEASE_SCOPES) {
@@ -324,22 +320,4 @@ export function restoreTasks(saved, brief) {
   // Only a consistent dependency chain survives; never an isolated success.
   normalizeTasks(tasks, brief);
   return tasks;
-}
-
-export function readStoredFlow(storage) {
-  try {
-    const parsed = JSON.parse(storage?.getItem?.(RELEASE_FLOW_STORAGE_KEY) || "null");
-    return plainObject(parsed) && parsed.schema === RELEASE_FLOW_SCHEMA ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeStoredFlow(storage, snapshot) {
-  try {
-    storage?.setItem?.(RELEASE_FLOW_STORAGE_KEY, JSON.stringify({ ...snapshot, schema: RELEASE_FLOW_SCHEMA }));
-    return true;
-  } catch {
-    return false;
-  }
 }

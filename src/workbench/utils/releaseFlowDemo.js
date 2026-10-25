@@ -23,6 +23,8 @@ export const DEMO_BUNDLE_COUNT = 56;
 export const DEMO_PROPS_COUNT = 487;
 export const DEMO_REVISION = 52817;
 export const DEMO_HOT_UPDATE = Object.freeze({ previous: "1.023", next: "1.024" });
+// Size of the simulated hot-update package the GM step uploads.
+export const DEMO_HOT_UPDATE_BYTES = 187_365_376;
 export const DEMO_SERVERS = Object.freeze({ count: 4, online: 1284 });
 
 // heroprop holds heroes, pets, spirits and mounts by ID range; OpenFlag 0 keeps
@@ -135,6 +137,41 @@ export function createDemoNotes(dateIso, translate) {
   return notes;
 }
 
+// The open-plan memo groups its entries like the plan tables do, plus a free
+// group for anything else the team wants to remember.
+export const PLAN_MEMO_CATEGORIES = Object.freeze([...RELEASE_PLAN_CATEGORIES.map((category) => category.id), "other"]);
+
+/**
+ * The open-plan memo as first seeded: the items above with every platform's
+ * note in the current language. From then on the memo belongs to the person;
+ * nothing is read from a table again.
+ */
+export function createDemoPlanItems(dateIso, translate) {
+  const notes = createDemoNotes(dateIso, translate);
+  return RELEASE_PLAN_ITEMS.map((item) => ({
+    id: item.id,
+    category: item.category,
+    name: item.name,
+    ref: planItemKeyLabel(item),
+    devFlag: item.devFlag,
+    notes: { ...notes[item.id] },
+  }));
+}
+
+/**
+ * The database key a memo entry names, or null when it cannot be written:
+ * "other" entries, entries without an ID, or a feature without both its
+ * BuildID and Idx.
+ */
+export function planEntryKey(entry) {
+  const category = RELEASE_PLAN_CATEGORIES.find((candidate) => candidate.id === entry?.category);
+  if (!category) return null;
+  const numbers = String(entry.ref ?? "").match(/\d+/g) || [];
+  if (numbers.length !== category.keyColumns.length) return null;
+  if (numbers.length === 1) return Number(numbers[0]);
+  return Object.fromEntries(category.keyColumns.map((column, index) => [column, Number(numbers[index])]));
+}
+
 export function createDemoPlatforms() {
   return DEMO_PLATFORM_IDS.map((id) => ({
     id,
@@ -148,6 +185,10 @@ export function createDemoPlatforms() {
     cocosPath: DEMO_COCOS_PATH,
     buildPlatform: "android",
     buildConfig: "",
+    buildOutputName: "",
+    buildDebug: false,
+    buildMd5Cache: true,
+    buildQaGuard: true,
   }));
 }
 
@@ -162,10 +203,8 @@ export function demoDatabaseFlag(item, { synced, note, dateIso }) {
   return stateFlag(evaluatePlanRule(parsePlanNote(note, lastWeek), lastWeek).state) ?? 0;
 }
 
-// Tables each platform keeps for itself, and the open-plan tables a release
-// may keep too (heroprop holds every hero, so it is always overwritten).
+// Tables each platform keeps for itself.
 export const DEMO_SYNC_EXCLUSIONS = Object.freeze(["platspecfgtable", "conditionplatprop"]);
-export const DEMO_PLAN_TABLES = Object.freeze(["buildopenplatprop", "buildopenzoneprop", "delayopenzoneprop"]);
 
 // The client's own .gitignore, then files that look platform-specific: server
 // settings, hot-update manifests and the channel SDK.

@@ -1,75 +1,43 @@
-import { computed, reactive, ref, watch } from "vue";
+import { computed, reactive, watch } from "vue";
 import { language, t } from "../i18n/index.js";
 import {
   RELEASE_PAGES,
   RELEASE_SCOPES,
-  RELEASE_TOOLS,
   RELEASE_TASKS,
   RELEASE_TASK_BY_ID,
   TASK_STATUS,
   adjacentPage,
   appendHistory,
   appendTaskLog,
-  createReleaseBrief,
-  defaultSchedule,
   flowComplete,
   flowProgress,
   idleTaskState,
   invalidateTasks,
-  isReleaseTool,
-  localDateIso,
   normalizeTasks,
   pageApplies,
   pageStatus,
-  readStoredFlow,
-  restoreBrief,
-  restoreTasks,
   runningTaskId,
   taskApplies,
   taskBlocker,
-  writeStoredFlow,
 } from "../releaseFlowState.js";
-import { countPlanChanges, isIsoDate, planChanges, planStatements } from "../utils/releasePlanNotes.js";
+import { CONFLICT_CHOICES, RELEASE_SPEEDS, cleanTableNames, shiftDate } from "../releaseWorkspaceState.js";
+import { countPlanChanges, isIsoDate, parsePlanNote, planChanges, planStatements } from "../utils/releasePlanNotes.js";
 import {
   DEMO_CLIENT_CHANGES,
   DEMO_CONFIG_TABLES,
-  DEMO_DEFAULT_PLATFORM,
   DEMO_DIFF_FILES,
-  DEMO_FILE_EXCLUSIONS,
   DEMO_HOT_UPDATE,
   DEMO_SERVERS,
-  DEMO_SYNC_EXCLUSIONS,
   RELEASE_PLAN_CATEGORIES,
-  RELEASE_PLAN_ITEMS,
-  createDemoNotes,
-  createDemoPlatforms,
   demoDatabaseFlag,
+  planEntryKey,
 } from "../utils/releaseFlowDemo.js";
 import { localInputTime, onlinePlayers, serverPhase, suggestedWindow } from "../utils/releaseServer.js";
-import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
 import { cleanExclusionRules, excludingRule } from "../utils/releaseFileRules.js";
-import { cocosBuildCommand } from "../utils/cocosBuildCommand.js";
-import { createCoalescedTask } from "../utils/coalescedTask.js";
+import { cocosBuildCommand, cocosBuildOptions } from "../utils/cocosBuildCommand.js";
+import { formatDateTime } from "../utils/releaseFlowFormat.js";
 
-export const RELEASE_SPEEDS = Object.freeze({ normal: 1, fast: 0.35 });
-export const CONFLICT_CHOICES = Object.freeze(["theirs", "mine", "manual"]);
-const PLATFORM_FIELDS = Object.freeze([
-  "name", "sourceDatabase", "targetDatabase", "sourceClient", "targetClient",
-  "transferTemplateId", "cocosVersion", "cocosPath", "buildPlatform", "buildConfig",
-]);
-
-// Editing a platform field invalidates the first task that used it.
-const PLATFORM_FIELD_TASKS = Object.freeze({
-  sourceDatabase: "db.sync",
-  targetDatabase: "db.sync",
-  sourceClient: "client.sync",
-  targetClient: "client.svn",
-  transferTemplateId: "client.transfer",
-  cocosVersion: "build.cocos",
-  cocosPath: "build.cocos",
-  buildPlatform: "build.cocos",
-  buildConfig: "build.cocos",
-});
+export { CONFLICT_CHOICES, RELEASE_SPEEDS };
 
 function cancelledError() {
   const error = new Error("cancelled");
@@ -77,7 +45,7 @@ function cancelledError() {
   return error;
 }
 
-function abortableSleep(ms, signal) {
+export function abortableSleep(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(cancelledError());
@@ -95,162 +63,40 @@ function abortableSleep(ms, signal) {
   });
 }
 
-function everySecond(callback) {
-  const timer = setInterval(callback, 1000);
-  return () => clearInterval(timer);
-}
-
 function plain(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
-function cleanTableNames(values) {
-  const seen = new Set();
-  return (Array.isArray(values) ? values : [])
-    .map((value) => String(value ?? "").trim())
-    .filter((value) => value && !seen.has(value) && seen.add(value));
-}
-
-function shiftDate(value, fromIso, toIso) {
-  return typeof value === "string" && value.startsWith(fromIso) ? `${toIso}${value.slice(fromIso.length)}` : value;
-}
-
-function restorePlatforms(saved, fallback) {
-  if (!Array.isArray(saved)) return fallback;
-  return fallback.map((platform) => {
-    const stored = saved.find((entry) => entry?.id === platform.id);
-    if (!stored) return platform;
-    const next = { ...platform };
-    for (const field of PLATFORM_FIELDS) if (typeof stored[field] === "string") next[field] = stored[field];
-    return next;
-  });
-}
-
-function restoreNotes(saved, fallback) {
-  const notes = {};
-  for (const [itemId, byPlatform] of Object.entries(fallback)) {
-    notes[itemId] = {};
-    for (const [platformId, note] of Object.entries(byPlatform)) {
-      const stored = saved?.[itemId]?.[platformId];
-      notes[itemId][platformId] = typeof stored === "string" ? stored.slice(0, 200) : note;
-    }
-  }
-  return notes;
-}
-
-function restoreSchedule(saved, fallback) {
-  const schedule = { ...fallback };
-  const timePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-  for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) {
-    if (timePattern.test(saved?.[key] || "")) schedule[key] = saved[key];
-  }
-  if (typeof saved?.clientOpenFollowsMaintenance === "boolean") {
-    schedule.clientOpenFollowsMaintenance = saved.clientOpenFollowsMaintenance;
-  }
-  return schedule;
-}
-
-function restoreFlags(saved, platforms) {
-  const knownItems = new Set(RELEASE_PLAN_ITEMS.map((item) => item.id));
-  return Object.fromEntries(platforms.map((platform) => [
-    platform.id,
-    Object.fromEntries(Object.entries(saved?.[platform.id] || {})
-      .filter(([itemId, flag]) => knownItems.has(itemId) && (flag === 0 || flag === 1))),
-  ]));
-}
-
-function restorePerPlatform(saved, platforms, fallback, clean) {
-  return Object.fromEntries(platforms.map((platform) => [
-    platform.id,
-    Array.isArray(saved?.[platform.id]) ? clean(saved[platform.id]) : [...fallback],
-  ]));
-}
-
-/** A fresh or restored flow. Seeded content is written in the current language. */
-export function createReleaseFlowData({ stored = null, today = localDateIso(), translate = t } = {}) {
-  const platforms = restorePlatforms(stored?.platforms, createDemoPlatforms());
-  const fallbackBrief = createReleaseBrief(DEMO_DEFAULT_PLATFORM, today);
-  const brief = restoreBrief(stored?.brief, fallbackBrief);
-  if (!platforms.some((platform) => platform.id === brief.platformId)) brief.platformId = platforms[0].id;
-  const schedule = restoreSchedule(stored?.schedule, defaultSchedule(brief.date));
-  // An unstarted draft follows the calendar; a started release keeps its day.
-  if (!brief.started && brief.date < today) {
-    for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) schedule[key] = shiftDate(schedule[key], brief.date, today);
-    brief.date = today;
-  }
-  const choices = {};
-  for (const [path, choice] of Object.entries(stored?.conflictChoices || {})) {
-    if (CONFLICT_CHOICES.includes(choice)) choices[path] = choice;
-  }
-  const demo = stored?.demo || {};
-  return {
-    platforms,
-    notes: restoreNotes(stored?.notes, createDemoNotes(stored?.notesSeededOn || today, translate)),
-    notesSeededOn: isIsoDate(stored?.notesSeededOn) ? stored.notesSeededOn : today,
-    brief,
-    schedule,
-    syncExclusions: restorePerPlatform(stored?.syncExclusions, platforms, DEMO_SYNC_EXCLUSIONS, cleanTableNames),
-    fileExclusions: restorePerPlatform(stored?.fileExclusions, platforms, DEMO_FILE_EXCLUSIONS, cleanExclusionRules),
-    mirrorDeletes: stored?.mirrorDeletes !== false,
-    // Open flags the demo platform databases hold after plan writes, per
-    // platform. A real driver reads the database instead.
-    demoFlags: restoreFlags(stored?.demoFlags, platforms),
-    conflictChoices: choices,
-    tasks: restoreTasks(stored?.tasks, brief),
-    attempts: {},
-    history: Array.isArray(stored?.history)
-      ? stored.history
-        .filter((entry) => Number(entry?.at) && (RELEASE_TASK_BY_ID.has(entry.taskId) || (!entry.taskId && entry.event === "started")))
-        .slice(-120)
-      : [],
-    page: RELEASE_PAGES.some((entry) => entry.id === stored?.page) || isReleaseTool(stored?.page) ? stored.page : "overview",
-    // The step a tool was opened from, so leaving the tool returns there.
-    returnPage: RELEASE_PAGES.some((entry) => entry.id === stored?.returnPage) ? stored.returnPage : "overview",
-    planCategory: RELEASE_PLAN_CATEGORIES.some((entry) => entry.id === stored?.planCategory) ? stored.planCategory : "hero",
-    demo: {
-      conflicts: demo.conflicts !== false,
-      buildFailure: demo.buildFailure === true,
-      speed: Object.hasOwn(RELEASE_SPEEDS, demo.speed) ? demo.speed : "normal",
-      // Demo fast-forward: added to the real clock for the GM server side.
-      clockOffset: Number.isFinite(demo.clockOffset) ? demo.clockOffset : 0,
-    },
-  };
-}
-
-function snapshotOf(state) {
-  const { attempts, ...rest } = state;
-  return plain(rest);
-}
-
 /**
- * State and actions of the guided release workspace. Every task runs through
- * `driver` (the simulation by default); this composable prepares each task's
- * input, records its logs, result and history, and resets later work when an
- * earlier input changes.
+ * State and actions of one platform's update inside the release workspace.
+ * Every task runs through `driver`; this prepares each task's input, records
+ * its logs, result and events, and resets later work when an earlier input
+ * changes. Platforms, the open-plan memo, the rules and the demo options
+ * belong to the workspace and are shared by every update.
  */
-export function useReleaseFlow({
-  storage = globalThis.localStorage,
-  driver = createReleaseDemoDriver(),
-  templates = () => [],
+export function createRunFlow({
+  workspace,
+  run,
+  driver,
+  templates = computed(() => []),
   sleep = abortableSleep,
   now = () => new Date(),
-  // Drives the server clock; returns a function that stops it.
-  ticker = everySecond,
-} = {}) {
-  const today = localDateIso(now());
-  const state = reactive(createReleaseFlowData({ stored: readStoredFlow(storage), today }));
+  // The real time, ticking; each update's GM clock adds its own demo offset.
+  clock,
+  flush = () => {},
+  onSettled = () => {},
+}) {
+  const state = run;
   const progress = reactive({ taskId: "", fraction: 0 });
   let controller = null;
 
-  const persistence = createCoalescedTask(() => writeStoredFlow(storage, snapshotOf(state)), { delayMs: 300, maxWaitMs: 1500 });
-  const stopPersisting = watch(() => state, () => persistence.schedule(), { deep: true });
-
-  const platform = computed(() => state.platforms.find((entry) => entry.id === state.brief.platformId) || state.platforms[0]);
+  const platform = computed(() => workspace.platforms.find((entry) => entry.id === state.platformId) || workspace.platforms[0]);
   const runningTask = computed(() => runningTaskId(state.tasks));
   const busy = computed(() => Boolean(runningTask.value));
+  const finished = computed(() => state.outcome === "done");
   const progressSummary = computed(() => flowProgress(state.tasks, state.brief));
   const complete = computed(() => flowComplete(state.tasks, state.brief));
-  const templateList = computed(() => (typeof templates === "function" ? templates() : templates?.value || templates || []));
+  const templateList = computed(() => templates.value || []);
 
   const pages = computed(() => RELEASE_PAGES.map((entry) => ({
     ...entry,
@@ -259,7 +105,7 @@ export function useReleaseFlow({
   })));
 
   /* ── Database ── */
-  const syncExclusions = computed(() => state.syncExclusions[platform.value.id] || []);
+  const syncExclusions = computed(() => workspace.rules.syncExclusions[platform.value.id] || []);
   const syncPlan = computed(() => {
     const excluded = new Set(syncExclusions.value);
     const tables = DEMO_CONFIG_TABLES.filter((table) => !excluded.has(table.name));
@@ -271,27 +117,44 @@ export function useReleaseFlow({
     };
   });
 
-  function noteFor(item, platformId = platform.value.id) {
-    return state.notes[item.id]?.[platformId] ?? "";
+  function noteFor(entry, platformId = platform.value.id) {
+    return entry?.notes?.[platformId] ?? "";
   }
 
+  // The memo entries this update can write: a category with a plan table and
+  // an ID naming the row. Entries left out by the person stay listed but are
+  // not written.
   const planGroups = computed(() => {
     const excluded = new Set(syncExclusions.value);
-    const flags = state.demoFlags[platform.value.id] || {};
+    const flags = workspace.demoFlags[platform.value.id] || {};
     return RELEASE_PLAN_CATEGORIES.map((category) => {
       const synced = !excluded.has(category.table);
-      const rows = planChanges(
-        RELEASE_PLAN_ITEMS.filter((item) => item.category === category.id),
-        {
-          dateIso: state.brief.date,
-          noteFor: (item) => noteFor(item),
-          currentFor: (item) => flags[item.id]
-            ?? demoDatabaseFlag(item, { synced, note: noteFor(item), dateIso: state.brief.date }),
-        },
-      );
-      return { ...category, synced, rows, counts: countPlanChanges(rows) };
+      const entries = workspace.plans.items
+        .filter((entry) => entry.category === category.id)
+        .map((entry) => ({ entry, key: planEntryKey(entry) }))
+        .filter(({ key }) => key !== null)
+        .map(({ entry, key }) => ({ ...entry, key }));
+      const rows = planChanges(entries, {
+        dateIso: state.brief.date,
+        noteFor: (item) => noteFor(item),
+        currentFor: (item) => flags[item.id]
+          ?? demoDatabaseFlag(item, { synced, note: noteFor(item), dateIso: state.brief.date }),
+      }).map((row) => ({ ...row, excluded: state.planSkips[row.item.id] === true }));
+      return { ...category, synced, rows, counts: countPlanChanges(rows.filter((row) => !row.excluded)) };
     });
   });
+
+  // Memo entries whose note changes them on the update day but which name no
+  // table row (other topics, a missing ID): the page lists them to do by hand.
+  const planReminders = computed(() => workspace.plans.items.filter((entry) => {
+    if (planEntryKey(entry) !== null) return false;
+    const rule = parsePlanNote(noteFor(entry), state.brief.date);
+    return rule.kind === "window" && (rule.from === state.brief.date || rule.to === state.brief.date);
+  }));
+
+  const writtenGroups = computed(() => planGroups.value.map((group) => ({ ...group, rows: group.rows.filter((row) => !row.excluded) })));
+  const planCounts = computed(() => countPlanChanges(writtenGroups.value.flatMap((group) => group.rows)));
+  const planSql = computed(() => planStatements(writtenGroups.value));
 
   // What a finished task did to the demo platform database: an overwrite
   // brings development values back into synced tables, a plan write stores
@@ -299,11 +162,11 @@ export function useReleaseFlow({
   function applyDemoDatabase(taskId) {
     const written = {};
     if (taskId !== "db.sync" && taskId !== "db.plans") return written;
-    const flags = state.demoFlags[platform.value.id] || (state.demoFlags[platform.value.id] = {});
+    const flags = workspace.demoFlags[platform.value.id] || (workspace.demoFlags[platform.value.id] = {});
     for (const group of planGroups.value) {
       for (const row of group.rows) {
         if (taskId === "db.sync" && group.synced) delete flags[row.item.id];
-        if (taskId === "db.plans" && (row.change === "open" || row.change === "close")) {
+        if (taskId === "db.plans" && !row.excluded && (row.change === "open" || row.change === "close")) {
           written[row.item.id] = row.next;
         }
       }
@@ -311,11 +174,26 @@ export function useReleaseFlow({
     Object.assign(flags, written);
     return written;
   }
-  const planCounts = computed(() => countPlanChanges(planGroups.value.flatMap((group) => group.rows)));
-  const planSql = computed(() => planStatements(planGroups.value));
+
+  // The overwrite's backup; a restore is only offered when one was made.
+  const backup = computed(() => {
+    const sync = state.tasks["db.sync"];
+    return sync.status === TASK_STATUS.DONE && sync.result?.backup?.id ? sync.result.backup : null;
+  });
+
+  // What a restore undoes, for its confirmation.
+  const restoreImpact = computed(() => {
+    const target = backup.value;
+    if (!target) return [];
+    const lines = [t("releaseFlow.backup.impact.tables", { count: target.tables, time: formatDateTime(target.at) })];
+    const written = state.tasks["db.plans"].status === TASK_STATUS.DONE ? Object.keys(state.tasks["db.plans"].result?.written || {}).length : 0;
+    if (written) lines.push(t("releaseFlow.backup.impact.plans", { count: written }));
+    lines.push(t("releaseFlow.backup.impact.rerun"));
+    return lines;
+  });
 
   /* ── Client ── */
-  const fileRules = computed(() => state.fileExclusions[platform.value.id] || []);
+  const fileRules = computed(() => workspace.rules.fileExclusions[platform.value.id] || []);
   const fileSyncPlan = computed(() => {
     const copy = [];
     const remove = [];
@@ -325,7 +203,7 @@ export function useReleaseFlow({
       const rule = excludingRule(change.path, fileRules.value);
       if (rule) excluded.push({ ...change, rule });
       else if (change.status !== "D") copy.push(change);
-      else if (state.mirrorDeletes) remove.push(change);
+      else if (workspace.rules.mirrorDeletes) remove.push(change);
       else kept.push(change);
     }
     return { copy, remove, kept, excluded };
@@ -355,10 +233,8 @@ export function useReleaseFlow({
 
   /* ── Server clock ── */
   // The GM side keeps time: maintenance starts by itself when its time comes.
-  // The demo can move this clock forward instead of waiting.
-  const clock = ref(now().getTime());
-  const stopClock = ticker(() => (clock.value = now().getTime()));
-  const serverNow = computed(() => clock.value + state.demo.clockOffset);
+  // The demo can move this update's clock forward instead of waiting.
+  const serverNow = computed(() => clock.value + (state.clockOffset || 0));
   const phase = computed(() => serverPhase(state.tasks));
   const maintenanceStartAt = computed(() => localInputTime(state.schedule.maintenanceStart));
   const maintenanceEndAt = computed(() => localInputTime(state.schedule.maintenanceEnd));
@@ -376,27 +252,14 @@ export function useReleaseFlow({
     base: DEMO_SERVERS.online,
   }));
 
-  const cocosCommand = computed(() => cocosBuildCommand({
-    editorPath: platform.value.cocosPath,
-    projectPath: platform.value.targetClient,
-    version: platform.value.cocosVersion,
-    platform: platform.value.buildPlatform,
-    configPath: platform.value.buildConfig ? `${platform.value.targetClient}\\${platform.value.buildConfig}` : "",
-  }));
+  const buildOptions = computed(() => cocosBuildOptions(platform.value));
+  const cocosCommand = computed(() => cocosBuildCommand(buildOptions.value));
 
   /* ── Navigation ── */
   function go(pageId) {
-    if (isReleaseTool(pageId)) {
-      if (!isReleaseTool(state.page)) state.returnPage = state.page;
-      state.page = pageId;
-      return;
-    }
-    if (!RELEASE_PAGES.some((entry) => entry.id === pageId)) return;
+    if (!RELEASE_PAGES.some((entry) => entry.id === pageId)) return false;
     state.page = pageId;
-  }
-
-  function returnToFlow() {
-    go(state.returnPage || "overview");
+    return true;
   }
 
   function step(direction) {
@@ -407,18 +270,17 @@ export function useReleaseFlow({
   // Finished tasks that used a changed input are reset and marked stale, so
   // their pages say why they need to run again.
   function invalidate(roots) {
+    if (finished.value) return [];
     return invalidateTasks(state.tasks, roots);
   }
 
-  /* ── Brief ── */
-  function setPlatform(platformId) {
-    if (busy.value || state.brief.started || !state.platforms.some((entry) => entry.id === platformId)) return false;
-    state.brief.platformId = platformId;
-    return true;
+  function editable() {
+    return !busy.value && !finished.value;
   }
 
+  /* ── Brief ── */
   function setDate(dateIso) {
-    if (busy.value || !isIsoDate(dateIso) || dateIso === state.brief.date) return false;
+    if (!editable() || !isIsoDate(dateIso) || dateIso === state.brief.date) return false;
     const previous = state.brief.date;
     state.brief.date = dateIso;
     for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) {
@@ -429,7 +291,7 @@ export function useReleaseFlow({
   }
 
   function setMode(mode) {
-    if (busy.value || mode === state.brief.mode || !["maintenance", "hot"].includes(mode)) return false;
+    if (!editable() || mode === state.brief.mode || !["maintenance", "hot"].includes(mode)) return false;
     state.brief.mode = mode;
     if (mode === "hot") state.brief.scope.server = false;
     normalizeTasks(state.tasks, state.brief);
@@ -439,7 +301,7 @@ export function useReleaseFlow({
   }
 
   function setScope(scope, enabled) {
-    if (busy.value || !RELEASE_SCOPES.includes(scope)) return false;
+    if (!editable() || !RELEASE_SCOPES.includes(scope)) return false;
     if (scope === "server" && enabled && state.brief.mode === "hot") return false;
     state.brief.scope[scope] = Boolean(enabled);
     normalizeTasks(state.tasks, state.brief);
@@ -447,57 +309,36 @@ export function useReleaseFlow({
   }
 
   function setPrepared(value) {
+    if (state.brief.started) return;
     state.brief.prepared = Boolean(value);
   }
 
   const canStart = computed(() =>
     !state.brief.started && state.brief.prepared && RELEASE_SCOPES.some((scope) => state.brief.scope[scope]));
 
+  function record(taskId, event) {
+    const entry = { at: now().getTime(), taskId, event };
+    // GM steps also keep the server's time, which the demo can fast-forward.
+    if (taskId.startsWith("gm.")) entry.serverAt = serverNow.value;
+    appendHistory(state.events, entry);
+  }
+
   function start() {
     if (!canStart.value) return false;
     ensureFutureSchedule();
     state.brief.started = true;
-    appendHistory(state.history, { at: now().getTime(), taskId: "", event: "started" });
+    state.startedAt = now().getTime();
+    appendHistory(state.events, { at: state.startedAt, taskId: "", event: "started" });
     step(1);
     return true;
   }
 
-  /** Begin a new release: keep platforms, notes and exclusions, drop progress. */
-  function restart({ resetDemoData = false } = {}) {
-    if (busy.value) return false;
-    const keep = resetDemoData ? null : snapshotOf(state);
-    const fresh = createReleaseFlowData({
-      stored: keep && {
-        ...keep,
-        brief: { platformId: keep.brief.platformId },
-        tasks: {},
-        history: [],
-        conflictChoices: {},
-        page: "overview",
-        returnPage: "overview",
-        schedule: null,
-        demo: { ...keep.demo, clockOffset: 0 },
-      },
-      today: localDateIso(now()),
-    });
-    Object.assign(state, fresh);
-    return true;
-  }
-
   /* ── Inputs ── */
-  function setNote(itemId, platformId, text) {
-    if (!state.notes[itemId] || !state.platforms.some((entry) => entry.id === platformId)) return;
-    const value = String(text ?? "").slice(0, 200);
-    if (state.notes[itemId][platformId] === value) return;
-    state.notes[itemId][platformId] = value;
-    if (platformId === platform.value.id) invalidate(["db.plans"]);
-  }
-
   function setSyncExclusions(tables) {
-    if (busy.value) return;
+    if (!editable()) return;
     const next = cleanTableNames(tables);
     if (next.join("\u001f") === syncExclusions.value.join("\u001f")) return;
-    state.syncExclusions[platform.value.id] = next;
+    workspace.rules.syncExclusions[platform.value.id] = next;
     invalidate(["db.sync"]);
   }
 
@@ -506,22 +347,30 @@ export function useReleaseFlow({
     setSyncExclusions(current.includes(table) ? current.filter((name) => name !== table) : [...current, table]);
   }
 
+  function setPlanSkip(itemId, skipped) {
+    if (!editable() || Boolean(state.planSkips[itemId]) === Boolean(skipped)) return;
+    if (skipped) state.planSkips[itemId] = true;
+    else delete state.planSkips[itemId];
+    invalidate(["db.plans"]);
+  }
+
   function setFileRules(rules) {
-    if (busy.value) return;
+    if (!editable()) return false;
     const next = cleanExclusionRules(rules);
-    if (next.join("\u001f") === fileRules.value.join("\u001f")) return;
-    state.fileExclusions[platform.value.id] = next;
+    if (next.join("\u001f") === fileRules.value.join("\u001f")) return false;
+    workspace.rules.fileExclusions[platform.value.id] = next;
     invalidate(["client.sync"]);
+    return true;
   }
 
   function setMirrorDeletes(value) {
-    if (busy.value || state.mirrorDeletes === Boolean(value)) return;
-    state.mirrorDeletes = Boolean(value);
+    if (!editable() || workspace.rules.mirrorDeletes === Boolean(value)) return;
+    workspace.rules.mirrorDeletes = Boolean(value);
     invalidate(["client.sync"]);
   }
 
   function setConflictChoice(path, choice) {
-    if (busy.value || !CONFLICT_CHOICES.includes(choice)) return;
+    if (!editable() || !CONFLICT_CHOICES.includes(choice)) return;
     state.conflictChoices[path] = choice;
   }
 
@@ -529,20 +378,8 @@ export function useReleaseFlow({
     for (const conflict of svnConflicts.value) setConflictChoice(conflict.path, choice);
   }
 
-  function updatePlatform(platformId, patch = {}) {
-    const target = state.platforms.find((entry) => entry.id === platformId);
-    if (!target || busy.value) return;
-    const roots = [];
-    for (const field of PLATFORM_FIELDS) {
-      if (!Object.hasOwn(patch, field) || typeof patch[field] !== "string" || patch[field] === target[field]) continue;
-      target[field] = field === "name" ? patch[field].slice(0, 40) : patch[field].trim();
-      if (platformId === platform.value.id && PLATFORM_FIELD_TASKS[field]) roots.push(PLATFORM_FIELD_TASKS[field]);
-    }
-    if (roots.length) invalidate(roots);
-  }
-
   function setSchedule(patch = {}) {
-    if (busy.value) return;
+    if (!editable()) return;
     const before = { ...state.schedule };
     for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) {
       if (typeof patch[key] === "string" && patch[key]) state.schedule[key] = patch[key];
@@ -581,9 +418,9 @@ export function useReleaseFlow({
   }
 
   function suggestSchedule() {
-    if (busy.value) return false;
-    const { start, end } = suggestedWindow(serverNow.value);
-    setSchedule({ maintenanceStart: start, maintenanceEnd: end });
+    if (!editable()) return false;
+    const { start: from, end } = suggestedWindow(serverNow.value);
+    setSchedule({ maintenanceStart: from, maintenanceEnd: end });
     return true;
   }
 
@@ -607,7 +444,7 @@ export function useReleaseFlow({
 
   /** Before the servers close, a schedule can still be withdrawn. */
   function cancelSchedule() {
-    if (busy.value || phase.value !== "scheduled") return false;
+    if (!editable() || phase.value !== "scheduled") return false;
     invalidateTasks(state.tasks, ["gm.maintenance", "gm.clientOpen"]);
     record("gm.maintenance", "cancelled");
     return true;
@@ -631,28 +468,19 @@ export function useReleaseFlow({
   /** Demo only: jump the server clock to the start of maintenance. */
   function fastForward() {
     if (phase.value !== "scheduled") return Promise.resolve(false);
-    state.demo.clockOffset += Math.max(0, maintenanceStartAt.value - serverNow.value);
+    state.clockOffset = (state.clockOffset || 0) + Math.max(0, maintenanceStartAt.value - serverNow.value);
     return maybeAutoShutdown();
   }
 
   const stopAutoShutdown = watch([serverNow, phase, busy], () => void maybeAutoShutdown());
 
-  function setPlanCategory(category) {
-    if (RELEASE_PLAN_CATEGORIES.some((entry) => entry.id === category)) state.planCategory = category;
-  }
-
-  function setDemoOption(key, value) {
-    if (key === "speed") {
-      if (Object.hasOwn(RELEASE_SPEEDS, value)) state.demo.speed = value;
-      return;
-    }
-    if (key === "conflicts" || key === "buildFailure") state.demo[key] = Boolean(value);
-  }
-
   /* ── Running tasks ── */
+  const attempts = {};
+
   function contextFor(taskId) {
     return {
       taskId,
+      runId: state.id,
       brief: plain(state.brief),
       platform: plain(platform.value),
       schedule: plain(state.schedule),
@@ -661,31 +489,29 @@ export function useReleaseFlow({
       files: plain(fileSyncPlan.value),
       template: plain(selectedTemplate.value),
       diff: diffFiles,
+      build: plain(buildOptions.value),
       cocos: { command: plain(cocosCommand.value) },
       gmFiles: { ...gmFiles.value },
+      backup: plain(backup.value),
       results: Object.fromEntries(RELEASE_TASKS.map((definition) => [definition.id, plain(state.tasks[definition.id].result)])),
-      demo: { ...state.demo },
-      attempt: state.attempts[taskId] || 1,
+      demo: { ...workspace.demo },
+      attempt: attempts[taskId] || 1,
       now,
       serverNow: () => serverNow.value,
     };
   }
 
-  function record(taskId, event) {
-    const entry = { at: now().getTime(), taskId, event };
-    // GM steps also keep the server's time, which the demo can fast-forward.
-    if (taskId.startsWith("gm.")) entry.serverAt = serverNow.value;
-    appendHistory(state.history, entry);
-  }
-
   function createIo(entry, taskId, signal) {
-    const factor = RELEASE_SPEEDS[state.demo.speed] ?? 1;
+    const factor = RELEASE_SPEEDS[workspace.demo.speed] ?? 1;
     return {
-      log(text, tone = "") {
-        appendTaskLog(entry, text, tone);
+      signal,
+      log(line, tone = "") {
+        appendTaskLog(entry, line, tone);
       },
+      // A fraction from 0 to 1, or null while the tool reports no progress.
       progress(fraction) {
-        if (progress.taskId === taskId) progress.fraction = Math.max(0, Math.min(1, Number(fraction) || 0));
+        if (progress.taskId !== taskId) return;
+        progress.fraction = fraction === null ? null : Math.max(0, Math.min(1, Number(fraction) || 0));
       },
       wait(ms) {
         return sleep(ms * factor, signal);
@@ -720,27 +546,52 @@ export function useReleaseFlow({
       } else {
         entry.status = TASK_STATUS.FAILED;
         entry.error = String(error?.code || error?.message || error || "failed");
-        if (Number.isFinite(error?.exitCode)) entry.result = { exitCode: error.exitCode };
+        // A tool that failed may still say why (exit code, output folder, findings).
+        if (error?.result) entry.result = plain(error.result);
+        else if (Number.isFinite(error?.exitCode)) entry.result = { exitCode: error.exitCode };
         record(taskId, TASK_STATUS.FAILED);
       }
       return false;
     } finally {
       if (controller === current) controller = null;
       progress.taskId = "";
-      persistence.flush();
+      flush();
+      onSettled(state);
     }
   }
 
+  function blockerOf(taskId) {
+    if (finished.value) return "finished";
+    const blocker = taskBlocker(taskId, state.tasks, state.brief);
+    if (blocker || taskId !== "db.restore") return blocker;
+    return backup.value ? "" : "noBackup";
+  }
+
   async function runTask(taskId) {
-    if (taskBlocker(taskId, state.tasks, state.brief)) return false;
+    if (blockerOf(taskId)) return false;
     if (state.tasks[taskId].status !== TASK_STATUS.IDLE) {
       // Rerunning finished work makes everything built on it out of date.
       invalidateTasks(state.tasks, [taskId], { includeRoots: false });
     }
     if (taskId === "client.svn") state.conflictChoices = {};
-    state.attempts[taskId] = (state.attempts[taskId] || 0) + 1;
+    // A new overwrite makes an earlier restore history.
+    if (taskId === "db.sync") state.tasks["db.restore"] = idleTaskState();
+    // New client content means a new working copy to review.
+    if (["client.svn", "client.sync", "client.transfer"].includes(taskId)) {
+      state.svnDemo = { committed: [], reverted: [], revision: state.svnDemo?.revision || 0, commits: state.svnDemo?.commits || [] };
+    }
+    attempts[taskId] = (attempts[taskId] || 0) + 1;
     return perform(taskId, taskId, {
       finish(entry, result) {
+        if (taskId === "db.restore") {
+          entry.result = result;
+          entry.status = TASK_STATUS.DONE;
+          // The platform database is back to its state before the overwrite:
+          // the overwrite and everything built on it has to run again.
+          invalidateTasks(state.tasks, ["db.sync"]);
+          workspace.demoFlags[platform.value.id] = {};
+          return;
+        }
         const written = applyDemoDatabase(taskId);
         entry.result = taskId === "db.plans" ? { ...result, written } : result;
         entry.status = taskId === "client.svn" && result.conflicts?.length ? TASK_STATUS.ATTENTION : TASK_STATUS.DONE;
@@ -751,7 +602,7 @@ export function useReleaseFlow({
   const conflictsReady = computed(() => svnConflicts.value.length > 0 && svnConflicts.value.every((conflict) => conflict.choice));
 
   async function resolveConflicts() {
-    if (busy.value || !conflictsPending.value || !conflictsReady.value) return false;
+    if (!editable() || !conflictsPending.value || !conflictsReady.value) return false;
     const conflicts = plain(svnConflicts.value);
     const previous = plain(state.tasks["client.svn"].result);
     return perform("client.svn", "client.svnResolve", {
@@ -766,10 +617,11 @@ export function useReleaseFlow({
 
   function skipTask(taskId) {
     const definition = RELEASE_TASK_BY_ID.get(taskId);
-    if (!definition?.skippable || taskBlocker(taskId, state.tasks, state.brief)) return false;
+    if (!definition?.skippable || blockerOf(taskId)) return false;
     invalidateTasks(state.tasks, [taskId], { includeRoots: false });
     state.tasks[taskId] = { ...idleTaskState(), status: TASK_STATUS.SKIPPED, finishedAt: now().getTime() };
     record(taskId, TASK_STATUS.SKIPPED);
+    onSettled(state);
     return true;
   }
 
@@ -781,30 +633,26 @@ export function useReleaseFlow({
     return state.tasks[taskId];
   }
 
-  function blockerOf(taskId) {
-    return taskBlocker(taskId, state.tasks, state.brief);
-  }
-
   function applies(taskId) {
     return taskApplies(RELEASE_TASK_BY_ID.get(taskId), state.brief);
   }
 
   function dispose() {
     controller?.abort();
-    stopClock();
     stopAutoShutdown();
-    stopPersisting();
-    persistence.flush();
   }
 
   return {
+    id: state.id,
     state,
+    workspace,
     progress,
     locale: language.locale,
     platform,
     pages,
     runningTask,
     busy,
+    finished,
     progressSummary,
     complete,
     canStart,
@@ -814,6 +662,9 @@ export function useReleaseFlow({
     planGroups,
     planCounts,
     planSql,
+    planReminders,
+    backup,
+    restoreImpact,
     fileRules,
     fileSyncPlan,
     svnConflicts,
@@ -821,6 +672,7 @@ export function useReleaseFlow({
     conflictsReady,
     selectedTemplate,
     diffFiles,
+    buildOptions,
     cocosCommand,
     gmFiles,
     scheduleProblem,
@@ -833,33 +685,27 @@ export function useReleaseFlow({
     maintenanceEndAt,
     openedAt,
     clientOpenAt,
-    tools: RELEASE_TOOLS,
     noteFor,
     go,
-    returnToFlow,
     step,
-    setPlatform,
+    invalidate,
     setDate,
     setMode,
     setScope,
     setPrepared,
     start,
-    restart,
-    setNote,
     setSyncExclusions,
     toggleSyncExclusion,
+    setPlanSkip,
     setFileRules,
     setMirrorDeletes,
     setConflictChoice,
     setAllConflictChoices,
-    updatePlatform,
     setSchedule,
     suggestSchedule,
     scheduleMaintenance,
     cancelSchedule,
     fastForward,
-    setPlanCategory,
-    setDemoOption,
     runTask,
     resolveConflicts,
     skipTask,
