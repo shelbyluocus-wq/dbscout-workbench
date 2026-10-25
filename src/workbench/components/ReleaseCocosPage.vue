@@ -1,11 +1,13 @@
 <script setup>
 // Phase 3: build the platform client with Cocos Creator's command-line
-// publishing, so nobody has to open the editor and click Build by hand.
+// publishing, then run the client's own release guard on the output, so
+// nobody has to open the editor and click Build by hand.
 import { computed, onBeforeUnmount, ref } from "vue";
 import { Check, Copy, Lightbulb } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { DEMO_BUILD_OUTPUT } from "../utils/releaseFlowDemo.js";
 import { cocosMajorVersion, describeCocosExit } from "../utils/cocosBuildCommand.js";
-import { formatReleaseBytes, formatReleaseCount } from "../utils/releaseFlowFormat.js";
+import { formatReleaseCount } from "../utils/releaseFlowFormat.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
@@ -24,8 +26,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 const facts = computed(() => [
   { label: t("releaseFlow.cocos.version"), value: `Cocos Creator ${platform.value.cocosVersion}` },
   { label: t("releaseFlow.cocos.platform"), value: platform.value.buildPlatform },
-  { label: t("releaseFlow.cocos.project"), value: platform.value.targetClient },
-  { label: t("releaseFlow.cocos.config"), value: platform.value.buildConfig || t("releaseFlow.cocos.noConfig") },
+  { label: t("releaseFlow.cocos.output"), value: DEMO_BUILD_OUTPUT },
 ]);
 
 async function copyCommand() {
@@ -48,77 +49,61 @@ function exitText(result, error) {
 </script>
 
 <template>
-  <div>
-    <ReleasePageHead page-id="build" />
+  <ReleasePageHead page-id="build" />
 
-    <div class="wb-rf-stack">
-      <dl class="wb-rf-facts">
-        <div v-for="fact in facts" :key="fact.label" class="wb-rf-fact">
-          <dt>{{ fact.label }}</dt>
-          <dd class="wb-rf-code">{{ fact.value }}</dd>
-        </div>
-      </dl>
-
-      <section class="wb-rf-section" aria-labelledby="wb-rf-cocos-command">
-        <div class="wb-rf-section-head">
-          <h4 id="wb-rf-cocos-command">{{ t('releaseFlow.cocos.command') }}</h4>
-          <div class="wb-rf-section-tools">
-            <button type="button" class="wb-rf-ghost wb-rf-copy" @click="copyCommand">
-              <Check v-if="copied" :size="13" aria-hidden="true" />
-              <Copy v-else :size="13" aria-hidden="true" />
-              {{ t(copied ? 'releaseFlow.cocos.copied' : 'releaseFlow.cocos.copy') }}
-            </button>
-          </div>
-        </div>
-        <pre class="wb-rf-log wb-rf-command">{{ command.display }}</pre>
-        <p class="wb-rf-hint">{{ t(legacy ? 'releaseFlow.cocos.commandHintLegacy' : 'releaseFlow.cocos.commandHint') }}</p>
-      </section>
-
-      <details class="wb-rf-section wb-rf-research" open>
-        <summary>
-          <Lightbulb :size="14" aria-hidden="true" />
-          <strong>{{ t('releaseFlow.cocos.research') }}</strong>
-          <span class="wb-rf-muted">{{ t('releaseFlow.cocos.researchSummary') }}</span>
-        </summary>
-        <ul>
-          <li>{{ t('releaseFlow.cocos.research.supported') }}</li>
-          <li>{{ t('releaseFlow.cocos.research.flags') }}</li>
-          <li>{{ t('releaseFlow.cocos.research.exitCodes') }}</li>
-          <li>{{ t('releaseFlow.cocos.research.desktop') }}</li>
-        </ul>
-        <p class="wb-rf-hint">{{ t('releaseFlow.cocos.research.source') }}</p>
-      </details>
-
-      <ReleaseTaskPanel :flow="flow" task-id="build.cocos">
-        <template #done="{ result }">
-          <strong>{{ t('releaseFlow.cocos.done', { code: result.exitCode }) }}</strong>
-          <span class="wb-rf-code">{{ result.outputDir }}</span>
-          <span>{{ t('releaseFlow.cocos.doneSize', { size: formatReleaseBytes(result.sizeBytes), files: formatReleaseCount(result.files) }) }}</span>
-        </template>
-        <template #failed="{ result, error }">
-          <span>{{ exitText(result, error) }}</span>
-        </template>
-      </ReleaseTaskPanel>
+  <dl class="wb-rf-facts">
+    <div v-for="fact in facts" :key="fact.label" class="wb-rf-fact">
+      <dt>{{ fact.label }}</dt>
+      <dd class="wb-rf-code">{{ fact.value }}</dd>
     </div>
-  </div>
+  </dl>
+
+  <section class="wb-rf-group" aria-labelledby="wb-rf-cocos-command">
+    <div class="wb-rf-group-head">
+      <h4 id="wb-rf-cocos-command">{{ t('releaseFlow.cocos.command') }}</h4>
+      <div class="wb-rf-group-tools">
+        <button type="button" class="wb-rf-btn is-quiet is-small" @click="copyCommand">
+          <Check v-if="copied" :size="13" aria-hidden="true" />
+          <Copy v-else :size="13" aria-hidden="true" />
+          {{ t(copied ? 'releaseFlow.cocos.copied' : 'releaseFlow.cocos.copy') }}
+        </button>
+      </div>
+    </div>
+    <pre class="wb-rf-log wb-rf-command">{{ command.display }}</pre>
+    <details class="wb-rf-research">
+      <summary><Lightbulb :size="14" aria-hidden="true" />{{ t('releaseFlow.cocos.research') }}</summary>
+      <ul>
+        <li>{{ t('releaseFlow.cocos.research.supported') }}</li>
+        <li>{{ t(legacy ? 'releaseFlow.cocos.research.legacy' : 'releaseFlow.cocos.research.exitCodes') }}</li>
+        <li>{{ t('releaseFlow.cocos.research.guard') }}</li>
+        <li>{{ t('releaseFlow.cocos.research.desktop') }}</li>
+      </ul>
+    </details>
+  </section>
+
+  <ReleaseTaskPanel :flow="flow" task-id="build.cocos">
+    <template #done="{ result }">
+      <strong>{{ t('releaseFlow.cocos.done', { code: result.exitCode }) }}</strong>
+      <span>{{ t('releaseFlow.cocos.qaPassed', { count: formatReleaseCount(result.qaChecked) }) }}</span>
+      <span>{{ t('releaseFlow.cocos.hotUpdate', { version: result.hotUpdate }) }}</span>
+    </template>
+    <template #failed="{ result, error }">
+      <span>{{ exitText(result, error) }}</span>
+    </template>
+  </ReleaseTaskPanel>
 </template>
 
 <style scoped>
 .wb-rf-facts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 40px;
   margin: 0;
 }
 
 .wb-rf-fact {
   display: grid;
   gap: 4px;
-  min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--wb-border);
-  border-radius: 10px;
-  background: var(--wb-table-surface);
 }
 
 .wb-rf-fact dt {
@@ -128,17 +113,8 @@ function exitText(result, error) {
 
 .wb-rf-fact dd {
   margin: 0;
-  overflow: hidden;
-  color: var(--wb-text);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-rf-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .wb-rf-command {
@@ -149,8 +125,10 @@ function exitText(result, error) {
 .wb-rf-research summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 6px;
+  width: fit-content;
+  color: var(--wb-secondary-text);
+  font-size: 12.5px;
   cursor: pointer;
 }
 
@@ -158,22 +136,13 @@ function exitText(result, error) {
   color: var(--wb-warning-text);
 }
 
-.wb-rf-research > .wb-rf-hint {
-  margin-top: 4px;
-}
-
 .wb-rf-research ul {
   display: grid;
   gap: 6px;
-  margin: 4px 0 0;
-  padding-left: 22px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: var(--wb-secondary-text);
   font-size: 12.5px;
   line-height: 1.65;
-}
-
-@media (max-width: 1180px) {
-  .wb-rf-facts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

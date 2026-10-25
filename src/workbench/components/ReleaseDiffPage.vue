@@ -38,72 +38,66 @@ function onListKeydown(event) {
 </script>
 
 <template>
-  <div>
-    <ReleasePageHead page-id="clientDiff" />
+  <ReleasePageHead page-id="clientDiff" />
 
-    <div class="wb-rf-stack">
-      <div class="wb-rf-stats">
-        <div class="wb-rf-stat"><strong>{{ files.length }}</strong><span>{{ t('releaseFlow.diff.files') }}</span></div>
-        <div class="wb-rf-stat"><strong>{{ counts.modified }}</strong><span>{{ t('releaseFlow.files.modified') }}</span></div>
-        <div class="wb-rf-stat is-success"><strong>{{ counts.added }}</strong><span>{{ t('releaseFlow.files.added') }}</span></div>
-        <div class="wb-rf-stat is-warning"><strong>{{ counts.deleted }}</strong><span>{{ t('releaseFlow.files.deleted') }}</span></div>
-      </div>
+  <div class="wb-rf-stats">
+    <div class="wb-rf-stat"><strong>{{ files.length }}</strong><span>{{ t('releaseFlow.diff.files') }}</span></div>
+    <div class="wb-rf-stat"><strong>{{ counts.modified }}</strong><span>{{ t('releaseFlow.files.modified') }}</span></div>
+    <div class="wb-rf-stat is-success"><strong>{{ counts.added }}</strong><span>{{ t('releaseFlow.files.added') }}</span></div>
+    <div class="wb-rf-stat is-warning"><strong>{{ counts.deleted }}</strong><span>{{ t('releaseFlow.files.deleted') }}</span></div>
+  </div>
 
-      <div class="wb-rf-diff">
-        <ul class="wb-rf-list wb-rf-diff-files" role="listbox" :aria-label="t('releaseFlow.diff.files')" @keydown="onListKeydown">
-          <li v-for="file in files" :key="file.path">
-            <button
-              type="button"
-              role="option"
-              class="wb-rf-diff-file"
-              :data-diff-path="file.path"
-              :aria-selected="file.path === selected.path"
-              :tabindex="file.path === selected.path ? 0 : -1"
-              @click="selectedPath = file.path"
-            >
-              <span class="wb-rf-diff-status" :class="`is-${file.status}`">{{ file.status }}</span>
-              <span class="wb-rf-code wb-rf-diff-name">
-                <strong>{{ file.path.split('/').pop() }}</strong>
-                <small>{{ file.path.split('/').slice(0, -1).join('/') }}</small>
-              </span>
-              <span class="wb-rf-diff-delta">
-                <span v-if="file.added" class="is-add">+{{ file.added }}</span>
-                <span v-if="file.removed" class="is-remove">−{{ file.removed }}</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-        <div class="wb-rf-diff-view">
-          <div class="wb-rf-diff-head wb-rf-code">{{ selected.path }}</div>
-          <p v-if="selected.binary" class="wb-rf-empty">{{ t('releaseFlow.diff.binary') }}</p>
-          <pre v-else class="wb-rf-diff-lines" tabindex="0" :aria-label="t('releaseFlow.diff.content', { path: selected.path })"><span
-            v-for="(line, index) in selected.lines"
-            :key="index"
-            class="wb-rf-diff-line"
-            :class="`is-${lineKind(line)}`"
-          >{{ line }}</span></pre>
-        </div>
-      </div>
-
-      <p class="wb-rf-hint">{{ t('releaseFlow.diff.hint') }}</p>
-
-      <ReleaseTaskPanel :flow="flow" task-id="client.diff" :show-log="false">
-        <template #done="{ result }">
-          <strong>{{ t('releaseFlow.diff.done', { count: result.files }) }}</strong>
-        </template>
-      </ReleaseTaskPanel>
+  <div class="wb-rf-diff">
+    <ul class="wb-rf-list wb-rf-diff-files" role="listbox" :aria-label="t('releaseFlow.diff.files')" @keydown="onListKeydown">
+      <li v-for="file in files" :key="file.path">
+        <button
+          type="button"
+          role="option"
+          class="wb-rf-diff-file"
+          :data-diff-path="file.path"
+          :aria-selected="file.path === selected.path"
+          :tabindex="file.path === selected.path ? 0 : -1"
+          @click="selectedPath = file.path"
+        >
+          <span class="wb-rf-diff-status" :class="`is-${file.status}`">{{ file.status }}</span>
+          <span class="wb-rf-code wb-rf-diff-name">
+            <strong>{{ file.path.split('/').pop() }}</strong>
+            <small>{{ file.path.split('/').slice(0, -1).join('/') }}</small>
+          </span>
+          <span class="wb-rf-diff-delta">
+            <span v-if="file.added" class="is-add">+{{ file.added }}</span>
+            <span v-if="file.removed" class="is-remove">−{{ file.removed }}</span>
+          </span>
+        </button>
+      </li>
+    </ul>
+    <div class="wb-rf-diff-view">
+      <div class="wb-rf-diff-head wb-rf-code">{{ selected.path }}</div>
+      <p v-if="selected.binary" class="wb-rf-empty">{{ t('releaseFlow.diff.binary') }}</p>
+      <pre v-else class="wb-rf-diff-lines" tabindex="0" :aria-label="t('releaseFlow.diff.content', { path: selected.path })"><span
+        v-for="(line, index) in selected.lines"
+        :key="index"
+        class="wb-rf-diff-line"
+        :class="`is-${lineKind(line)}`"
+      >{{ line }}</span></pre>
     </div>
   </div>
+
+  <ReleaseTaskPanel :flow="flow" task-id="client.diff" :show-log="false">
+    <template #done="{ result }">
+      <strong>{{ t('releaseFlow.diff.done', { count: result.files }) }}</strong>
+    </template>
+      </ReleaseTaskPanel>
 </template>
 
 <style scoped>
 .wb-rf-diff {
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 2fr);
-  min-height: 380px;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 2fr);
+  min-height: 400px;
   overflow: hidden;
   border: 1px solid var(--wb-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--wb-table-surface);
 }
 

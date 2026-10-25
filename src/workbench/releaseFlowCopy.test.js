@@ -5,9 +5,10 @@ import en from "./i18n/en.js";
 import zhCN from "./i18n/zhCN.js";
 import zhTW from "./i18n/zhTW.js";
 import { releaseFlowEn } from "./i18n/releaseFlowMessages.js";
-import { RELEASE_MODES, RELEASE_PAGES, RELEASE_PHASES, RELEASE_SCOPES, RELEASE_TASKS, TASK_STATUS } from "./releaseFlowState.js";
+import { RELEASE_MODES, RELEASE_PAGES, RELEASE_PHASES, RELEASE_SCOPES, RELEASE_TASKS, RELEASE_TOOLS } from "./releaseFlowState.js";
 import { CONFLICT_CHOICES, RELEASE_SPEEDS } from "./composables/useReleaseFlow.js";
-import { DEMO_PLATFORM_IDS, RELEASE_PLAN_CATEGORIES } from "./utils/releaseFlowDemo.js";
+import { RELEASE_PLAN_CATEGORIES } from "./utils/releaseFlowDemo.js";
+import { MAINTENANCE_STAGES, SERVER_PHASES } from "./utils/releaseServer.js";
 
 const root = new URL("./", import.meta.url);
 const SOURCES = [
@@ -24,32 +25,38 @@ function dynamicKeys() {
   const add = (prefix, values, suffixes = [""]) => {
     for (const value of values) for (const suffix of suffixes) keys.push(`releaseFlow.${prefix}${value}${suffix}`);
   };
-  add("page.", RELEASE_PAGES.map((entry) => entry.id), [".title"]);
-  add("page.", RELEASE_PAGES.filter((entry) => entry.id !== "summary").map((entry) => entry.id), [".description"]);
+  const pages = [...RELEASE_PAGES.map((entry) => entry.id).filter((id) => id !== "gmServer"), ...RELEASE_TOOLS];
+  // Tasks the server page drives itself rather than through a task card.
+  const scheduled = new Set(["gm.maintenance", "gm.clientOpen", "gm.shutdown"]);
+  const gmTasks = RELEASE_TASKS.map((entry) => entry.id).filter((id) => id.startsWith("gm."));
+  add("page.", pages, [".title"]);
+  add("page.", pages.filter((id) => id !== "summary"), [".description"]);
+  add("page.gmServer.", ["title.", "description."], RELEASE_MODES);
   add("task.", RELEASE_TASKS.map((entry) => entry.id), [".title"]);
   add("task.", RELEASE_TASKS.filter((entry) => entry.id !== "db.plans").map((entry) => entry.id), [".run"]);
   add("task.", RELEASE_TASKS.filter((entry) => entry.skippable).map((entry) => entry.id), [".skipHint"]);
-  add("task.", RELEASE_TASKS.filter((entry) => entry.id.startsWith("gm.")).map((entry) => entry.id), [".hint", ".done"]);
+  add("task.", gmTasks, [".done"]);
+  add("task.", gmTasks.filter((id) => !scheduled.has(id)), [".hint"]);
   add("phase.", RELEASE_PHASES);
   add("mode.", RELEASE_MODES);
   add("overview.modeHint.", RELEASE_MODES);
-  add("scope.", RELEASE_SCOPES, ["", ".hint"]);
+  add("scope.", RELEASE_SCOPES);
   add("rail.state.", ["done", "skipped", "running", "failed", "attention", "pending", "notApplicable"]);
   add("demo.speed.", Object.keys(RELEASE_SPEEDS));
-  add("demo.platform.", DEMO_PLATFORM_IDS);
   add("plan.category.", RELEASE_PLAN_CATEGORIES.map((entry) => entry.id));
-  add("plan.rule.", ["open", "closed", "always", "never", "empty", "unknown"]);
-  add("plan.verdict.", ["open", "always", "opensToday", "ended", "never", "closed", "unknown", "empty"]);
-  add("plan.write.", ["open", "close"]);
   add("svn.choice.", CONFLICT_CHOICES);
-  add("files.filter.", ["all", "copy", "excluded"]);
+  add("files.filter.", ["copy", "excluded"]);
   add("files.status.", ["A", "M", "D"]);
-  add("transfer.stage.", ["script", "locate", "copy"], ["", ".hint"]);
+  add("transfer.stage.", ["script", "locate", "copy"]);
   add("cocos.exit.", ["success", "invalidOptions", "buildError", "unknown"]);
-  add("gm.group.", ["activity", "client", "server", "launch"]);
-  add("schedule.problem.", ["endBeforeStart", "clientBeforeEnd"]);
-  add("summary.event.", [TASK_STATUS.DONE, TASK_STATUS.ATTENTION, TASK_STATUS.FAILED, TASK_STATUS.SKIPPED]);
-  add("platformEditor.", ["name", "sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "cocosVersion", "cocosPath", "buildPlatform", "buildConfig"]);
+  add("gm.group.", ["activity", "client", "server"]);
+  add("schedule.problem.", ["endBeforeStart", "clientBeforeEnd", "startPassed"]);
+  add("server.phase.", SERVER_PHASES);
+  add("server.headline.", SERVER_PHASES);
+  add("server.stage.", MAINTENANCE_STAGES.map((stage) => stage.id));
+  add("server.footer.", ["maintenance", "readyToOpen"]);
+  add("platformEditor.", ["sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "cocosVersion", "buildPlatform", "cocosPath"]);
+  add("platformEditor.group.", ["database", "client", "build"]);
   add("error.", ["interrupted", "buildFailed", "failed", "unknownTask"]);
   return keys;
 }

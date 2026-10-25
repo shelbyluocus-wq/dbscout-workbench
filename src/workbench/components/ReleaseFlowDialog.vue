@@ -1,9 +1,10 @@
 <script setup>
 // Guided release workspace: one place that walks a release from the database
-// overwrite through the client copy, the Cocos build and the GM operations.
+// overwrite through the client copy, the Cocos build and the GM operations,
+// with the open plans and platform settings as tools beside the steps.
 // Progress is kept on this device, so the workspace can be closed and resumed.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowLeft, ArrowRight, FlaskConical, Rocket, SlidersHorizontal, X } from "lucide-vue-next";
+import { ArrowLeft, ArrowRight, FlaskConical, LoaderCircle, Rocket, SlidersHorizontal, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -14,22 +15,25 @@ import {
   TASK_STATUS,
   adjacentPage,
   dependentsOf,
+  isReleaseTool,
   missingDependencies,
   nextTaskOnPage,
 } from "../releaseFlowState.js";
+import { formatCountdown } from "../utils/releaseServer.js";
 import { formatReleaseDate, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
 import ReleaseFlowRail from "./ReleaseFlowRail.vue";
 import ReleaseFlowOverview from "./ReleaseFlowOverview.vue";
-import ReleaseDatabaseSyncPage from "./ReleaseDatabaseSyncPage.vue";
-import ReleasePlanBoard from "./ReleasePlanBoard.vue";
+import ReleaseDatabasePage from "./ReleaseDatabasePage.vue";
 import ReleaseSvnPage from "./ReleaseSvnPage.vue";
 import ReleaseFileSyncPage from "./ReleaseFileSyncPage.vue";
 import ReleaseTransferPage from "./ReleaseTransferPage.vue";
 import ReleaseDiffPage from "./ReleaseDiffPage.vue";
 import ReleaseCocosPage from "./ReleaseCocosPage.vue";
 import ReleaseGmTasksPage from "./ReleaseGmTasksPage.vue";
-import ReleaseGmSchedulePage from "./ReleaseGmSchedulePage.vue";
+import ReleaseServerPage from "./ReleaseServerPage.vue";
 import ReleaseFlowSummary from "./ReleaseFlowSummary.vue";
+import ReleasePlanBoard from "./ReleasePlanBoard.vue";
+import ReleasePlatformsPage from "./ReleasePlatformsPage.vue";
 import "../releaseFlow.css";
 
 const props = defineProps({
@@ -55,31 +59,28 @@ onBeforeUnmount(() => flow.dispose());
 
 const PAGE_COMPONENTS = {
   overview: ReleaseFlowOverview,
-  dbSync: ReleaseDatabaseSyncPage,
-  dbPlans: ReleasePlanBoard,
+  database: ReleaseDatabasePage,
   clientSvn: ReleaseSvnPage,
   clientSync: ReleaseFileSyncPage,
   clientTransfer: ReleaseTransferPage,
   clientDiff: ReleaseDiffPage,
   build: ReleaseCocosPage,
   gmUpload: ReleaseGmTasksPage,
-  gmSchedule: ReleaseGmSchedulePage,
-  gmLaunch: ReleaseGmTasksPage,
+  gmServer: ReleaseServerPage,
   summary: ReleaseFlowSummary,
+  plans: ReleasePlanBoard,
+  platforms: ReleasePlatformsPage,
 };
+// Pages built around wide tables or two columns get more room.
+const WIDE_PAGES = new Set(["plans", "clientSync", "clientDiff", "platforms"]);
 
 const pageComponent = computed(() => PAGE_COMPONENTS[state.page] || ReleaseFlowOverview);
 const pageProps = computed(() => {
-  if (state.page === "dbSync") return { flow, exclusionTemplates: props.exclusionTemplates };
-  if (state.page === "gmUpload" || state.page === "gmLaunch") return { flow, pageId: state.page };
+  if (state.page === "database") return { flow, exclusionTemplates: props.exclusionTemplates };
   return { flow };
 });
-
-const briefText = computed(() => [
-  flow.platform.value.name,
-  formatReleaseDate(state.brief.date),
-  t(`releaseFlow.mode.${state.brief.mode}`),
-].join(" · "));
+const isTool = computed(() => isReleaseTool(state.page));
+const mode = computed(() => state.brief.mode);
 
 function focusPageHeading() {
   pageRef.value?.querySelector("h3")?.focus({ preventScroll: true });
@@ -99,10 +100,6 @@ watch(
 // workspace never lands in a date picker by accident.
 onMounted(() => void nextTick(focusPageHeading));
 
-function navigate(pageId) {
-  flow.go(pageId);
-}
-
 /* ── Footer: the one next action of the current page ── */
 const CONFIRMED_TASKS = new Set(["db.sync", "gm.restart", "gm.open"]);
 
@@ -116,14 +113,85 @@ function blockerText(taskId, blocker) {
   return "";
 }
 
+function runLabel(taskId) {
+  if (taskId === "db.plans") {
+    const { open, close } = flow.planCounts.value;
+    return open + close ? t("releaseFlow.task.db.plans.runCount", { count: open + close }) : t("releaseFlow.task.db.plans.runNone");
+  }
+  return t(`releaseFlow.task.${taskId}.run`);
+}
+
+function nextStep(pageId) {
+  const nextPage = adjacentPage(pageId, state.brief, 1);
+  return {
+    status: nextPage === "summary"
+      ? t("releaseFlow.footer.doneLast")
+      : t("releaseFlow.footer.doneNext", { step: pageTitle(nextPage, mode.value) }),
+    primary: { label: t(nextPage === "summary" ? "releaseFlow.footer.toSummary" : "releaseFlow.footer.next"), action: "next" },
+  };
+}
+
+function runningFooter() {
+  return {
+    status: t("releaseFlow.footer.running", { step: taskTitle(flow.runningTask.value) }),
+    running: true,
+    primary: { label: t("releaseFlow.footer.runningButton"), disabled: true },
+  };
+}
+
+// The maintenance page follows the server rather than a task list: schedule,
+// wait for the time, restart during maintenance, then open.
+function serverFooter() {
+  const phase = flow.serverPhase.value;
+  if (phase === "running") {
+    // The maintenance window and the hot update's opening are handed over together.
+    const blockedTask = flow.scheduleBlocker.value;
+    const blocker = blockedTask ? flow.blockerOf(blockedTask) : "";
+    const problem = flow.scheduleProblem.value;
+    const blocking = problem === "endBeforeStart" || problem === "startPassed";
+    return {
+      status: blockerText(blockedTask, blocker) || (problem ? t(`releaseFlow.schedule.problem.${problem}`) : t("releaseFlow.server.footer.schedule")),
+      tone: blocking ? "warning" : "",
+      primary: { label: t("releaseFlow.server.action.schedule"), action: "schedule", disabled: Boolean(blocker) || blocking },
+    };
+  }
+  if (phase === "scheduled" && flow.shutdownRefused.value) {
+    return {
+      status: releaseErrorText(state.tasks["gm.shutdown"].error),
+      tone: "danger",
+      primary: { label: t("releaseFlow.footer.retry"), action: "run", taskId: "gm.shutdown", disabled: Boolean(flow.blockerOf("gm.shutdown")) },
+    };
+  }
+  if (phase === "scheduled") {
+    const left = formatCountdown(flow.maintenanceStartAt.value - flow.serverNow.value);
+    return {
+      status: t("releaseFlow.server.footer.waiting", { time: left }),
+      primary: { label: t("releaseFlow.server.action.waiting"), disabled: true },
+    };
+  }
+  if (phase === "maintenance" || phase === "readyToOpen") {
+    const taskId = phase === "maintenance" ? "gm.restart" : "gm.open";
+    const blocker = flow.blockerOf(taskId);
+    const failed = state.tasks[taskId].status === TASK_STATUS.FAILED;
+    return {
+      status: blockerText(taskId, blocker) || (failed ? releaseErrorText(state.tasks[taskId].error) : t(`releaseFlow.server.footer.${phase}`)),
+      tone: failed ? "danger" : "",
+      primary: { label: taskTitle(taskId), action: "run", taskId, disabled: Boolean(blocker) },
+    };
+  }
+  return nextStep("gmServer");
+}
+
 const footer = computed(() => {
   const pageId = state.page;
-  const nextPage = adjacentPage(pageId, state.brief, 1);
-  const nextLabel = nextPage === "summary"
-    ? t("releaseFlow.footer.toSummary")
-    : t("releaseFlow.footer.next", { step: pageTitle(nextPage) });
+  if (isTool.value) {
+    return {
+      status: t("releaseFlow.footer.toolHint"),
+      primary: { label: t("releaseFlow.footer.back", { step: pageTitle(state.returnPage, mode.value) }), action: "return" },
+    };
+  }
   if (pageId === "overview") {
-    if (state.brief.started) return { status: t("releaseFlow.footer.started"), primary: { label: nextLabel, action: "next" } };
+    if (state.brief.started) return { ...nextStep("overview"), status: t("releaseFlow.footer.started") };
     return {
       status: flow.canStart.value ? t("releaseFlow.footer.ready") : t("releaseFlow.footer.confirmFirst"),
       primary: { label: t("releaseFlow.footer.start"), action: "start", disabled: !flow.canStart.value },
@@ -135,16 +203,8 @@ const footer = computed(() => {
       primary: { label: t("releaseFlow.footer.newRelease"), action: "restart", disabled: busy.value },
     };
   }
-  const page = RELEASE_PAGE_BY_ID.get(pageId);
-  const tasks = page.tasks.filter((id) => flow.applies(id));
-  const running = flow.runningTask.value;
-  if (running) {
-    return {
-      status: t("releaseFlow.footer.running", { step: taskTitle(running) }),
-      running: true,
-      primary: { label: t("releaseFlow.footer.runningButton"), disabled: true },
-    };
-  }
+  if (flow.runningTask.value) return runningFooter();
+  if (pageId === "gmServer" && mode.value === "maintenance") return serverFooter();
   if (pageId === "clientSvn" && flow.conflictsPending.value) {
     const pending = flow.svnConflicts.value.filter((conflict) => !conflict.choice).length;
     return {
@@ -153,29 +213,26 @@ const footer = computed(() => {
       primary: { label: t("releaseFlow.footer.resolve"), action: "resolve", disabled: pending > 0 },
     };
   }
+  const page = RELEASE_PAGE_BY_ID.get(pageId);
+  const tasks = page.tasks.filter((id) => flow.applies(id));
   const nextTask = nextTaskOnPage(pageId, state.tasks, state.brief);
   if (!nextTask) {
     const rerun = tasks.length === 1 && state.tasks[tasks[0]].status === TASK_STATUS.DONE ? tasks[0] : "";
-    return {
-      status: t("releaseFlow.footer.pageDone"),
-      tone: "success",
-      primary: { label: nextLabel, action: "next" },
-      rerun,
-    };
+    return { ...nextStep(pageId), tone: "success", rerun };
   }
   const blocker = flow.blockerOf(nextTask);
   const failed = state.tasks[nextTask].status === TASK_STATUS.FAILED;
   const definition = RELEASE_TASK_BY_ID.get(nextTask);
   // GM pages list operations as cards; the button names the one it runs.
-  const multiple = tasks.length > 1;
+  const named = page.phase === "gm" && tasks.length > 1;
   let status = blockerText(nextTask, blocker);
   if (!status && failed) status = releaseErrorText(state.tasks[nextTask].error);
-  if (!status && multiple) {
+  if (!status && tasks.length > 1) {
     const settled = tasks.filter((id) => [TASK_STATUS.DONE, TASK_STATUS.SKIPPED].includes(state.tasks[id].status)).length;
     status = t("releaseFlow.footer.pageProgress", { done: settled, total: tasks.length });
   }
   let label = failed ? t("releaseFlow.footer.retry") : runLabel(nextTask);
-  if (page.phase === "gm") label = failed ? t("releaseFlow.footer.retryStep", { step: taskTitle(nextTask) }) : taskTitle(nextTask);
+  if (named && !failed) label = taskTitle(nextTask);
   return {
     status,
     tone: failed ? "danger" : "",
@@ -183,14 +240,6 @@ const footer = computed(() => {
     skip: definition.skippable && !blocker ? nextTask : "",
   };
 });
-
-function runLabel(taskId) {
-  if (taskId === "db.plans") {
-    const { open, close } = flow.planCounts.value;
-    return open + close ? t("releaseFlow.task.db.plans.runCount", { count: open + close }) : t("releaseFlow.task.db.plans.runNone");
-  }
-  return t(`releaseFlow.task.${taskId}.run`);
-}
 
 async function withConfirm(options) {
   confirming.value = true;
@@ -210,7 +259,6 @@ function confirmOptions(taskId) {
         source: platform.sourceDatabase,
         target: platform.targetDatabase,
         tables: flow.syncPlan.value.tables.length,
-        excluded: flow.syncPlan.value.excluded.length,
       }),
       confirmText: t("releaseFlow.confirm.sync.action"),
       danger: true,
@@ -272,12 +320,14 @@ function primaryAction() {
   if (!action || action.disabled) return;
   if (action.action === "start") flow.start();
   else if (action.action === "next") flow.step(1);
+  else if (action.action === "return") flow.returnToFlow();
   else if (action.action === "run") void runTask(action.taskId);
   else if (action.action === "resolve") void flow.resolveConflicts();
+  else if (action.action === "schedule") void flow.scheduleMaintenance();
   else if (action.action === "restart") void restart();
 }
 
-const previousPage = computed(() => adjacentPage(state.page, state.brief, -1));
+const previousPage = computed(() => (isTool.value ? "" : adjacentPage(state.page, state.brief, -1)));
 
 /* ── Demo options ── */
 function toggleMenu() {
@@ -319,10 +369,14 @@ function onDialogPointerDown(event) {
       @pointerdown="onDialogPointerDown"
     >
       <header class="wb-rf-header">
-        <span class="wb-rf-brand" aria-hidden="true"><Rocket :size="17" /></span>
+        <span class="wb-rf-brand" aria-hidden="true"><Rocket :size="16" /></span>
         <div class="wb-rf-heading">
           <h2 id="wb-rf-title">{{ t('releaseFlow.title') }}</h2>
-          <span id="wb-rf-brief" class="wb-rf-brief">{{ briefText }}</span>
+          <div id="wb-rf-brief" class="wb-rf-brief">
+            <span class="wb-rf-chip is-accent">{{ flow.platform.value.name }}</span>
+            <span class="wb-rf-chip">{{ formatReleaseDate(state.brief.date) }}</span>
+            <span class="wb-rf-chip">{{ t(`releaseFlow.mode.${state.brief.mode}`) }}</span>
+          </div>
         </div>
         <div class="wb-rf-header-actions">
           <span class="wb-rf-demo-badge" :title="t('releaseFlow.demo.badgeHint')">
@@ -331,7 +385,7 @@ function onDialogPointerDown(event) {
           <button
             ref="menuButtonRef"
             type="button"
-            class="wb-rf-icon-btn"
+            class="wb-rf-btn is-quiet"
             aria-haspopup="true"
             aria-controls="wb-rf-demo-menu"
             :aria-expanded="menuOpen"
@@ -371,14 +425,15 @@ function onDialogPointerDown(event) {
                 >{{ t(`releaseFlow.demo.speed.${speed}`) }}</button>
               </div>
             </div>
+            <p class="wb-rf-menu-title">{{ t('releaseFlow.demo.dataSource') }}</p>
             <div class="wb-rf-menu-divider" />
-            <button type="button" class="wb-rf-menu-action" :disabled="busy" @click="restart({ resetDemoData: true })">
+            <button type="button" class="wb-rf-btn is-quiet wb-rf-menu-reset" :disabled="busy" @click="restart({ resetDemoData: true })">
               {{ t('releaseFlow.demo.reset') }}
             </button>
           </div>
           <button
             type="button"
-            class="wb-rf-icon-btn wb-rf-close"
+            class="wb-rf-btn is-quiet wb-rf-close"
             :disabled="busy"
             :title="busy ? t('releaseFlow.closeBusy') : t('releaseFlow.close')"
             :aria-label="t('releaseFlow.close')"
@@ -390,42 +445,48 @@ function onDialogPointerDown(event) {
       </header>
 
       <div class="wb-rf-body">
-        <ReleaseFlowRail :flow="flow" @navigate="navigate" />
+        <ReleaseFlowRail :flow="flow" @navigate="flow.go" />
         <div class="wb-rf-main">
           <div ref="pageRef" class="wb-rf-page" :data-release-current="state.page">
-            <component
-              :is="pageComponent"
-              :key="state.page"
-              v-bind="pageProps"
-              @run="runTask"
-              @rerun="rerunTask"
-              @navigate="navigate"
-            />
+            <div class="wb-rf-page-inner" :class="{ 'is-wide': WIDE_PAGES.has(state.page) }">
+              <component
+                :is="pageComponent"
+                :key="state.page"
+                v-bind="pageProps"
+                @run="runTask"
+                @rerun="rerunTask"
+                @navigate="flow.go"
+              />
+            </div>
           </div>
           <footer class="wb-rf-footer">
+            <button v-if="previousPage" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="flow.step(-1)">
+              <ArrowLeft :size="14" aria-hidden="true" />{{ t('releaseFlow.footer.previous') }}
+            </button>
             <div class="wb-rf-footer-status" :data-tone="footer.tone || undefined" aria-live="polite">
               <span>{{ footer.status }}</span>
             </div>
-            <button v-if="footer.running" type="button" class="wb-rf-ghost" @click="flow.cancel()">{{ t('releaseFlow.footer.stop') }}</button>
-            <button v-if="footer.rerun" type="button" class="wb-rf-ghost" :disabled="busy" @click="rerunTask(footer.rerun)">
-              {{ t('releaseFlow.footer.rerun') }}
-            </button>
-            <button v-if="footer.skip" type="button" class="wb-rf-ghost" :disabled="busy" @click="skipTask(footer.skip)">
-              {{ t('releaseFlow.footer.skip') }}
-            </button>
-            <button v-if="previousPage" type="button" :disabled="busy" @click="flow.step(-1)">
-              <ArrowLeft :size="13" aria-hidden="true" /> {{ t('releaseFlow.footer.previous') }}
-            </button>
-            <button
-              type="button"
-              class="wb-dialog-primary"
-              data-release-primary
-              :disabled="footer.primary.disabled"
-              @click="primaryAction"
-            >
-              {{ footer.primary.label }}
-              <ArrowRight v-if="footer.primary.action === 'next'" :size="13" aria-hidden="true" />
-            </button>
+            <div class="wb-rf-footer-actions">
+              <button v-if="footer.running" type="button" class="wb-rf-btn is-quiet" @click="flow.cancel()">{{ t('releaseFlow.footer.stop') }}</button>
+              <button v-if="footer.rerun" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="rerunTask(footer.rerun)">
+                {{ t('releaseFlow.footer.rerun') }}
+              </button>
+              <button v-if="footer.skip" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="skipTask(footer.skip)">
+                {{ t('releaseFlow.footer.skip') }}
+              </button>
+              <button
+                type="button"
+                class="wb-rf-btn is-primary is-large"
+                data-release-primary
+                :disabled="footer.primary.disabled"
+                @click="primaryAction"
+              >
+                <LoaderCircle v-if="footer.running" :size="15" class="wb-rf-spin" aria-hidden="true" />
+                <ArrowLeft v-if="footer.primary.action === 'return'" :size="15" aria-hidden="true" />
+                <span>{{ footer.primary.label }}</span>
+                <ArrowRight v-if="footer.primary.action === 'next'" :size="15" aria-hidden="true" />
+              </button>
+            </div>
           </footer>
         </div>
       </div>
@@ -434,13 +495,13 @@ function onDialogPointerDown(event) {
 </template>
 
 <style scoped>
-.wb-rf-footer-status[data-tone="success"] { color: var(--wb-success-text); }
-.wb-rf-footer-status[data-tone="warning"] { color: var(--wb-warning-text); }
-.wb-rf-footer-status[data-tone="danger"] { color: var(--wb-danger); }
+.wb-rf-close {
+  width: 34px;
+  padding: 0;
+}
 
-.wb-rf-footer button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.wb-rf-menu-reset {
+  justify-content: flex-start;
+  color: var(--wb-danger);
 }
 </style>

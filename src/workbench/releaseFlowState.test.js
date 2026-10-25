@@ -11,8 +11,10 @@ import {
   flowProgress,
   idleTaskState,
   invalidateTasks,
+  isReleaseTool,
   missingDependencies,
   nextTaskOnPage,
+  pageApplies,
   pageStatus,
   restoreBrief,
   restoreTasks,
@@ -32,29 +34,39 @@ function startedBrief(patch = {}) {
 test("a maintenance release with everything in scope runs every task except the hot-update reload", () => {
   const ids = applicableTasks(startedBrief()).map((definition) => definition.id);
   assert.ok(!ids.includes("gm.activityReload"));
-  assert.ok(ids.includes("gm.restart") && ids.includes("gm.open") && ids.includes("gm.maintenance"));
+  for (const id of ["gm.maintenance", "gm.shutdown", "gm.restart", "gm.open"]) assert.ok(ids.includes(id), id);
   assert.equal(ids.length, RELEASE_TASKS.length - 1);
+});
+
+test("the shutdown is the only task nobody starts: it follows the scheduled maintenance", () => {
+  assert.deepEqual(RELEASE_TASKS.filter((definition) => definition.auto).map((definition) => definition.id), ["gm.shutdown"]);
+  const brief = startedBrief();
+  assert.equal(taskBlocker("gm.shutdown", tasksWith(), brief), "dependency");
+  assert.equal(taskBlocker("gm.shutdown", tasksWith({ "gm.maintenance": "done" }), brief), "");
+  assert.equal(taskBlocker("gm.restart", tasksWith({ "gm.maintenance": "done" }), brief), "dependency");
 });
 
 test("a no-downtime release reloads activities and skips maintenance, restart and server", () => {
   const brief = startedBrief({ mode: "hot", scope: { database: true, client: true, server: false, activity: true } });
   const ids = applicableTasks(brief).map((definition) => definition.id);
   assert.ok(ids.includes("gm.activityReload"));
-  for (const id of ["gm.maintenance", "gm.restart", "gm.open", "gm.serverUpload", "gm.serverCurrent"]) assert.ok(!ids.includes(id), id);
+  for (const id of ["gm.maintenance", "gm.shutdown", "gm.restart", "gm.open", "gm.serverUpload", "gm.serverCurrent"]) assert.ok(!ids.includes(id), id);
   assert.deepEqual(
     applicablePages(brief).map((entry) => entry.id),
-    ["overview", "dbSync", "dbPlans", "clientSvn", "clientSync", "clientTransfer", "clientDiff", "build", "gmUpload", "gmSchedule", "summary"],
+    ["overview", "database", "clientSvn", "clientSync", "clientTransfer", "clientDiff", "build", "gmUpload", "gmServer", "summary"],
   );
+  // Without the client there is nothing to open later, so no server page.
+  assert.equal(pageApplies("gmServer", { ...brief, scope: { ...brief.scope, client: false } }), false);
 });
 
 test("content left out of the release removes its pages", () => {
   const brief = startedBrief({ scope: { database: false, client: false, server: true, activity: false } });
   assert.deepEqual(
     applicablePages(brief).map((entry) => entry.id),
-    ["overview", "gmUpload", "gmSchedule", "gmLaunch", "summary"],
+    ["overview", "gmUpload", "gmServer", "summary"],
   );
   assert.equal(adjacentPage("overview", brief, 1), "gmUpload");
-  assert.equal(adjacentPage("gmLaunch", brief, 1), "summary");
+  assert.equal(adjacentPage("gmServer", brief, 1), "summary");
 });
 
 test("a task waits for its applicable dependencies and the start of the release", () => {
@@ -63,10 +75,10 @@ test("a task waits for its applicable dependencies and the start of the release"
   assert.equal(taskBlocker("db.sync", tasks, { ...brief, started: false }), "notStarted");
   assert.equal(taskBlocker("db.sync", tasks, brief), "");
   assert.equal(taskBlocker("db.plans", tasks, brief), "dependency");
-  assert.deepEqual(missingDependencies("gm.restart", tasks, brief), ["db.plans", "gm.activityCurrent", "gm.serverCurrent", "gm.maintenance"]);
+  assert.deepEqual(missingDependencies("gm.restart", tasks, brief), ["db.plans", "gm.activityCurrent", "gm.serverCurrent", "gm.shutdown"]);
   // Dependencies outside the release do not block.
   const serverOnly = startedBrief({ scope: { database: false, client: false, server: true, activity: false } });
-  assert.deepEqual(missingDependencies("gm.restart", tasks, serverOnly), ["gm.serverCurrent", "gm.maintenance"]);
+  assert.deepEqual(missingDependencies("gm.restart", tasks, serverOnly), ["gm.serverCurrent", "gm.shutdown"]);
   tasks["db.sync"].status = TASK_STATUS.RUNNING;
   assert.equal(taskBlocker("client.svn", tasks, brief), "busy");
   assert.equal(taskBlocker("db.sync", tasks, brief), "running");
@@ -98,11 +110,23 @@ test("page status summarises its applicable tasks", () => {
   assert.equal(pageStatus("gmUpload", tasksWith({ "gm.activityUpload": "done" }), brief), "partial");
   assert.equal(pageStatus("clientSvn", tasksWith({ "client.svn": "attention" }), brief), "attention");
   assert.equal(pageStatus("clientTransfer", tasksWith({ "client.transfer": "skipped" }), brief), "skipped");
-  assert.equal(pageStatus("gmLaunch", tasksWith(), { ...brief, mode: "hot" }), "notApplicable");
+  assert.equal(pageStatus("gmServer", tasksWith(), { ...brief, mode: "hot", scope: { ...brief.scope, client: false } }), "notApplicable");
+  assert.equal(pageStatus("gmServer", tasksWith({ "gm.maintenance": "done" }), brief), "partial");
   assert.equal(nextTaskOnPage("gmUpload", tasksWith({ "gm.activityUpload": "done" }), brief), "gm.activityCurrent");
   const done = tasksWith(Object.fromEntries(RELEASE_TASKS.map((definition) => [definition.id, "done"])));
-  assert.deepEqual(flowProgress(done, brief), { done: 16, total: 16 });
+  assert.deepEqual(flowProgress(done, brief), { done: 17, total: 17 });
   assert.equal(pageStatus("summary", done, brief), "done");
+});
+
+test("tools sit beside the steps: always open, never counted", () => {
+  const brief = startedBrief();
+  for (const id of ["plans", "platforms"]) {
+    assert.equal(isReleaseTool(id), true);
+    assert.equal(pageApplies(id, brief), true);
+    assert.equal(pageStatus(id, tasksWith(), brief), "tool");
+  }
+  assert.equal(isReleaseTool("database"), false);
+  assert.ok(!applicablePages(brief).some((entry) => isReleaseTool(entry.id)));
 });
 
 test("restored progress never keeps a running task or an unsupported success", () => {

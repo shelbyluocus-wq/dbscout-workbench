@@ -4,8 +4,10 @@
 // or skipped. Rerunning or changing the input of a finished task resets the
 // tasks that depend on it.
 
-export const RELEASE_FLOW_STORAGE_KEY = "dbscout_release_flow_v1";
-export const RELEASE_FLOW_SCHEMA = 1;
+// v2 reshaped the pages (one database page, the live maintenance page) and
+// the demo content; a v1 draft is left behind rather than half-migrated.
+export const RELEASE_FLOW_STORAGE_KEY = "dbscout_release_flow_v2";
+export const RELEASE_FLOW_SCHEMA = 2;
 export const RELEASE_PHASES = Object.freeze(["database", "client", "build", "gm"]);
 export const RELEASE_SCOPES = Object.freeze(["database", "client", "server", "activity"]);
 export const RELEASE_MODES = Object.freeze(["maintenance", "hot"]);
@@ -21,15 +23,17 @@ export const TASK_STATUS = Object.freeze({
 const MAX_LOG_LINES = 160;
 const MAX_HISTORY = 120;
 
-function task(id, page, { scope = "", mode = "", deps = [], skippable = false } = {}) {
-  return Object.freeze({ id, page, scope, mode, deps: Object.freeze(deps), skippable });
+function task(id, page, { scope = "", mode = "", deps = [], skippable = false, auto = false } = {}) {
+  return Object.freeze({ id, page, scope, mode, deps: Object.freeze(deps), skippable, auto });
 }
 
 // Order is the order the guide offers them in. `scope` limits a task to
 // releases that include that content; `mode` to maintenance or hot updates.
+// An `auto` task is not started by a person: the shutdown runs when the
+// scheduled maintenance time arrives.
 export const RELEASE_TASKS = Object.freeze([
-  task("db.sync", "dbSync", { scope: "database" }),
-  task("db.plans", "dbPlans", { scope: "database", deps: ["db.sync"] }),
+  task("db.sync", "database", { scope: "database" }),
+  task("db.plans", "database", { scope: "database", deps: ["db.sync"] }),
   task("client.svn", "clientSvn", { scope: "client" }),
   task("client.sync", "clientSync", { scope: "client", deps: ["client.svn"] }),
   task("client.transfer", "clientTransfer", { scope: "client", deps: ["client.sync"], skippable: true }),
@@ -41,13 +45,14 @@ export const RELEASE_TASKS = Object.freeze([
   task("gm.clientUpload", "gmUpload", { scope: "client", deps: ["build.cocos"] }),
   task("gm.serverUpload", "gmUpload", { scope: "server", mode: "maintenance" }),
   task("gm.serverCurrent", "gmUpload", { scope: "server", mode: "maintenance", deps: ["gm.serverUpload"] }),
-  task("gm.maintenance", "gmSchedule", { mode: "maintenance" }),
-  task("gm.clientOpen", "gmSchedule", { scope: "client", deps: ["gm.clientUpload"] }),
-  task("gm.restart", "gmLaunch", {
+  task("gm.maintenance", "gmServer", { mode: "maintenance" }),
+  task("gm.clientOpen", "gmServer", { scope: "client", deps: ["gm.clientUpload"] }),
+  task("gm.shutdown", "gmServer", { mode: "maintenance", deps: ["gm.maintenance"], auto: true }),
+  task("gm.restart", "gmServer", {
     mode: "maintenance",
-    deps: ["db.plans", "gm.activityCurrent", "gm.serverCurrent", "gm.maintenance"],
+    deps: ["db.plans", "gm.activityCurrent", "gm.serverCurrent", "gm.shutdown"],
   }),
-  task("gm.open", "gmLaunch", { mode: "maintenance", deps: ["gm.restart", "gm.clientOpen"] }),
+  task("gm.open", "gmServer", { mode: "maintenance", deps: ["gm.restart", "gm.clientOpen"] }),
 ]);
 
 export const RELEASE_TASK_BY_ID = new Map(RELEASE_TASKS.map((entry) => [entry.id, entry]));
@@ -59,20 +64,26 @@ function page(id, phase) {
 
 export const RELEASE_PAGES = Object.freeze([
   page("overview", ""),
-  page("dbSync", "database"),
-  page("dbPlans", "database"),
+  page("database", "database"),
   page("clientSvn", "client"),
   page("clientSync", "client"),
   page("clientTransfer", "client"),
   page("clientDiff", "client"),
   page("build", "build"),
   page("gmUpload", "gm"),
-  page("gmSchedule", "gm"),
-  page("gmLaunch", "gm"),
+  page("gmServer", "gm"),
   page("summary", ""),
 ]);
 
 export const RELEASE_PAGE_BY_ID = new Map(RELEASE_PAGES.map((entry) => [entry.id, entry]));
+
+// Tools sit beside the steps: open any time, never part of the step order,
+// and leaving one returns to the step the person was on.
+export const RELEASE_TOOLS = Object.freeze(["plans", "platforms"]);
+
+export function isReleaseTool(pageId) {
+  return RELEASE_TOOLS.includes(pageId);
+}
 
 function pad(value) {
   return String(value).padStart(2, "0");
@@ -118,7 +129,7 @@ export function applicableTasks(brief) {
 }
 
 export function pageApplies(pageId, brief) {
-  if (pageId === "overview" || pageId === "summary") return true;
+  if (pageId === "overview" || pageId === "summary" || isReleaseTool(pageId)) return true;
   const entry = RELEASE_PAGE_BY_ID.get(pageId);
   return Boolean(entry?.tasks.some((id) => taskApplies(RELEASE_TASK_BY_ID.get(id), brief)));
 }
@@ -212,6 +223,7 @@ export function normalizeTasks(tasks, brief) {
 }
 
 export function pageStatus(pageId, tasks, brief) {
+  if (isReleaseTool(pageId)) return "tool";
   const entry = RELEASE_PAGE_BY_ID.get(pageId);
   if (!entry || !pageApplies(pageId, brief)) return "notApplicable";
   if (pageId === "overview") return brief.started ? "done" : "ready";

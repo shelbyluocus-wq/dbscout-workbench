@@ -110,26 +110,42 @@ capabilities:
   table transfer) opens a lazily loaded workspace that walks one platform's
   release in order. The brief (platform, update date, maintenance or
   no-downtime, and which of database / client / server / activities the
-  release contains) decides which steps apply. Then: overwrite sync with
-  table exclusions (saved sync exclusion templates can be applied); open
-  plans for heroes, mounts, spirits, battle pets and features, compared
-  across platforms, whose free-text notes ("10/28 開放", "10/28-11/30 開放",
-  "11/30 關閉", "已開放", "暫不開放") are parsed, judged for the update date and
-  written as one UPDATE per direction, unreadable notes never written; SVN
-  update with a choice per conflicting file; file sync with gitignore-like
-  exclusion rules (`.svn/` always excluded); table conversion with a
-  one-click transfer template; the SVN diff review; the Cocos Creator
-  command-line build (3.x `--project`, exit codes 36/32/34; 2.4 `--path`);
-  and the GM steps (upload the activity table, client and server and set
-  them current, reload activities only without downtime, maintenance window
-  and client update time, compile and restart, then open the servers).
-  Every task runs through a driver (`run(taskId, context, io)`); the only
-  one today, `releaseFlowDemoDriver.js`, simulates everything and touches no
-  database, file, SVN working copy, Cocos editor or GM, so the header shows
-  a Demo badge and confirmations say so. Real integrations replace it task
-  by task. Progress, platforms, notes and rules persist in
-  `dbscout_release_flow_v1`; rerunning or editing the input of a finished
-  task resets the tasks built on it.
+  release contains) decides which steps apply. Then: one database page
+  (overwrite sync with kept tables, then the platform's open plan written
+  as one UPDATE per table and direction, composite keys as row-value IN);
+  SVN update with a choice per conflicting file; file sync with
+  gitignore-like exclusion rules (`.svn/` always excluded); table conversion
+  with a one-click transfer template's script (the output is always copied
+  into the platform client's `assets`); the SVN diff review; the Cocos
+  Creator command-line build plus the client's `qa:release` guard (3.x
+  `--project`, exit codes 36/32/34; 2.4 `--path`); GM uploads (activity
+  table, client hot update and server, each set current; activities are
+  reloaded only without downtime); and the last page. With maintenance that
+  page is a live server console: schedule the window together with the hot
+  update's opening (both or neither), wait on a countdown while the GM
+  closes the servers by itself at the start time (an `auto` task: a refused
+  shutdown waits for a retry, one cut off by closing the workspace runs
+  again), compile and restart, then open by hand; a hot update that follows
+  maintenance opens with an early reopening. Without downtime the page only
+  sets the hot update's opening. Open plans (heroes, mounts, spirits, battle
+  pets and features across platforms, whose free-text notes such as
+  "10/28 開放", "10/28-11/30 開放", "11/30 關閉", "已開放", "暫不開放" are parsed
+  and judged for a date, unreadable notes never written) and platform
+  settings are tools beside the steps: open at any time, and leaving one
+  returns to the step the person was on. Every task runs through a driver
+  (`run(taskId, context, io)`); the only one today,
+  `releaseFlowDemoDriver.js`, simulates everything and touches no database,
+  file, SVN working copy, Cocos editor or GM, so the header shows a Demo
+  badge and confirmations say so; the demo can fast-forward the GM clock.
+  Real integrations replace it task by task. Demo content uses the jswz
+  client's real table, item, file and folder names (`newsg_4cfg`, `heroprop`,
+  `buildopenplatprop`, platforms 抖音 / TAP / 玩心 / TW); platform databases
+  and folders, the changes themselves, versions and GM replies are
+  simulated, and the client's server settings (`Config.ts` endpoints and
+  keys) are never copied into source. Progress, platforms, notes and rules
+  persist in `dbscout_release_flow_v2` (a v1 draft is left behind);
+  rerunning or editing the input of a finished task resets the tasks built
+  on it.
 - **Config relations** — for game-config databases the workbench works out
   which config tables reference each other from three evidence sources:
   database column comments, a static scan of the bound game client's source
@@ -333,8 +349,9 @@ from UI):
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle
-- `releaseFlowState.js` — Release guide pages, tasks, dependencies,
-  scope/mode applicability, invalidation and restore of saved progress
+- `releaseFlowState.js` — Release guide pages, tools, tasks (including the
+  automatic shutdown), dependencies, scope/mode applicability, invalidation
+  and restore of saved progress
 - `operationNotices.js` — Visible operation-feedback queue rendered by
   `OperationNoticeStack.vue` (bottom-right, below menus and dialogs): tone-based
   auto-dismiss, hover/focus pause, same-event coalescing and suppression of
@@ -369,12 +386,15 @@ from UI):
   (localStorage), run/cancel state, `table-transfer-progress` event log
 - Release guide: `useReleaseFlow.js` — brief, platforms, notes and rules,
   per-task input, logs, results and history, run/cancel/skip through the
-  driver, and resets after input changes; helpers in `utils/`:
+  driver, resets after input changes, and the GM server clock (injectable
+  `ticker`, demo fast-forward) that starts the shutdown; helpers in `utils/`:
   `releasePlanNotes.js` (note parsing, date judgement, plan diff and
-  statements), `releaseFileRules.js` (exclusion rules),
-  `cocosBuildCommand.js` (Cocos command line and exit codes),
-  `releaseFlowDemo.js` / `releaseFlowDemoDriver.js` (sample content and the
-  simulation) and `releaseFlowFormat.js`; copy in
+  per-table statements), `releaseFileRules.js` (exclusion rules),
+  `releaseServer.js` (server phases, maintenance stages, countdowns and
+  schedule times), `cocosBuildCommand.js` (Cocos command line and exit
+  codes), `releaseFlowDemo.js` / `releaseFlowDemoTables.js` /
+  `releaseFlowDemoDriver.js` (sample content, the config table catalogue and
+  the simulation) and `releaseFlowFormat.js`; copy in
   `i18n/releaseFlowMessages.js` ([en, zh-CN, zh-TW] per key)
 - Config relations: `useConfigRelations.js` — mirrors each scope's relation
   overview, refreshes on `config-relations-updated`, and serves the

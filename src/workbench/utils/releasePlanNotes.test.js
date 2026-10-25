@@ -86,6 +86,21 @@ test("statements quote identifiers and non-numeric keys", () => {
   ]);
 });
 
+test("groups sharing a table write together, and composite keys compare as row values", () => {
+  const heroes = [{ item: { key: 1062 }, change: "close" }, { item: { key: 1061 }, change: "open" }];
+  const mounts = [{ item: { key: 6517 }, change: "close" }];
+  const features = [{ item: { key: { BuildID: 197, Idx: 100 } }, change: "close" }, { item: { key: { BuildID: 134, Idx: 100 } }, change: "close" }];
+  assert.deepEqual(planStatements([
+    { table: "heroprop", keyColumns: ["ID"], flagColumn: "OpenFlag", rows: heroes },
+    { table: "heroprop", keyColumns: ["ID"], flagColumn: "OpenFlag", rows: mounts },
+    { table: "buildopenplatprop", keyColumns: ["BuildID", "Idx"], flagColumn: "IsOpen", rows: features },
+  ]), [
+    "UPDATE `heroprop` SET `OpenFlag` = 1 WHERE `ID` IN (1061);",
+    "UPDATE `heroprop` SET `OpenFlag` = 0 WHERE `ID` IN (1062, 6517);",
+    "UPDATE `buildopenplatprop` SET `IsOpen` = 0 WHERE (`BuildID`, `Idx`) IN ((197, 100), (134, 100));",
+  ]);
+});
+
 test("date helpers stay on calendar days", () => {
   assert.equal(addDays("2026-12-31", 1), "2027-01-01");
   assert.equal(addDays("2026-03-01", -1), "2026-02-28");

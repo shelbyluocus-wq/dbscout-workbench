@@ -35,10 +35,18 @@ function dateFromIso(iso) {
 }
 
 /** "2026/10/24 (Sat)" style, following the interface language. */
-export function formatReleaseDate(iso, locale = language.locale.value) {
+function formatIsoDate(iso, options, locale) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return "";
-  return new Intl.DateTimeFormat(locale, { year: "numeric", month: "numeric", day: "numeric", weekday: "short" })
-    .format(dateFromIso(iso));
+  return new Intl.DateTimeFormat(locale, options).format(dateFromIso(iso));
+}
+
+export function formatReleaseDate(iso, locale = language.locale.value) {
+  return formatIsoDate(iso, { year: "numeric", month: "numeric", day: "numeric", weekday: "short" }, locale);
+}
+
+/** The weekday alone, beside a date picker that already shows the date. */
+export function formatReleaseWeekday(iso, locale = language.locale.value) {
+  return formatIsoDate(iso, { weekday: "short" }, locale);
 }
 
 /**
@@ -84,6 +92,8 @@ export function gmResultText(taskId, result = {}, translate = t) {
       return translate(key, { file: result.file, size: formatReleaseBytes(result.sizeBytes), version: result.version });
     case "gm.maintenance":
       return translate(key, { window: formatReleaseRange(result.start, result.end) });
+    case "gm.shutdown":
+      return translate(key, { count: formatReleaseCount(result.players), time: formatClockTime(Date.parse(result.at)) });
     case "gm.clientOpen":
       return translate(key, { version: result.version, at: formatReleaseTime(result.at) });
     case "gm.restart":
@@ -102,7 +112,9 @@ export function taskTitle(taskId, translate = t) {
   return translate(`releaseFlow.task.${taskId}.title`);
 }
 
-export function pageTitle(pageId, translate = t) {
+/** A page's title; the last GM page is named by the update mode. */
+export function pageTitle(pageId, mode = "", translate = t) {
+  if (pageId === "gmServer") return translate(`releaseFlow.page.gmServer.title.${mode || "maintenance"}`);
   return translate(`releaseFlow.page.${pageId}.title`);
 }
 

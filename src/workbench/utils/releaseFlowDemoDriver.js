@@ -11,11 +11,18 @@
 // task by task with the same contract.
 
 import {
+  DEMO_BUILD_OUTPUT,
   DEMO_COCOS_FAILURE_LOG,
   DEMO_COCOS_LOG,
+  DEMO_HOT_UPDATE,
+  DEMO_PROPS_COUNT,
+  DEMO_QA_MARKERS,
   DEMO_REVISION,
+  DEMO_SERVERS,
   DEMO_SVN_UPDATES,
+  DEMO_TRANSFER_SCRIPT,
   DEMO_TRANSFER_SHEETS,
+  DEMO_WORKSPACE,
 } from "./releaseFlowDemo.js";
 
 export class ReleaseTaskError extends Error {
@@ -35,6 +42,12 @@ function joinWindowsPath(...parts) {
   return parts.filter(Boolean).join("\\").replace(/\\{2,}/g, "\\");
 }
 
+function chunks(list, size) {
+  const result = [];
+  for (let index = 0; index < list.length; index += size) result.push(list.slice(index, index + size));
+  return result;
+}
+
 async function steps(io, lines, totalMs, { from = 0, to = 1, tone = "" } = {}) {
   const pause = lines.length ? totalMs / lines.length : 0;
   for (const [index, line] of lines.entries()) {
@@ -47,16 +60,14 @@ async function steps(io, lines, totalMs, { from = 0, to = 1, tone = "" } = {}) {
 async function syncDatabase(context, io) {
   const { platform, syncPlan, now } = context;
   const snapshot = joinWindowsPath("snapshots", platform.targetDatabase, `${timestamp(now()).replace(/[ -]/g, "")}.sql`);
-  io.log(`preflight ${platform.sourceDatabase} → ${platform.targetDatabase}: ${syncPlan.tables.length} tables, ${syncPlan.excluded.length} excluded`);
+  io.log(`preflight ${platform.sourceDatabase} → ${platform.targetDatabase}: ${syncPlan.tables.length} tables, ${syncPlan.excluded.length} kept`);
   await io.wait(500);
   io.log(`snapshot ${platform.targetDatabase} → ${snapshot}`);
   io.progress(0.08);
-  await io.wait(600);
-  const batches = [];
-  for (let index = 0; index < syncPlan.tables.length; index += 4) batches.push(syncPlan.tables.slice(index, index + 4));
+  await io.wait(500);
   await steps(
     io,
-    batches.map((batch) => `copy ${batch.map((table) => `${table.name} (${table.rows})`).join(", ")}`),
+    chunks(syncPlan.tables, 12).map((batch) => `copy ${batch.map((table) => table.name).join(", ")}`),
     2800,
     { from: 0.1, to: 0.9 },
   );
@@ -135,15 +146,19 @@ async function syncFiles(context, io) {
 
 async function runTransfer(context, io) {
   const { platform, template, now } = context;
-  const script = template?.scriptPath || `${template?.name || "conversion"}.bat`;
-  const output = joinWindowsPath("D:\\Versions\\tools\\output", timestamp(now()));
+  const script = template?.scriptPath || DEMO_TRANSFER_SCRIPT;
+  const output = joinWindowsPath(DEMO_WORKSPACE, "tool\\生成配置\\output", platform.targetDatabase, timestamp(now()));
   io.log(`> "${script}"`);
-  await steps(io, DEMO_TRANSFER_SHEETS.map((sheet) => `export ${sheet}.xlsx → props/${sheet}.json … ok`), 2600, { to: 0.7 });
+  await steps(io, [
+    ...DEMO_TRANSFER_SHEETS.map((sheet) => `export ${sheet} → props/${sheet}.json … ok`),
+    `export ${DEMO_PROPS_COUNT - DEMO_TRANSFER_SHEETS.length} more sheets … ok`,
+    "write src/props/propDataDefine.ts, propKeyFile.ts, propLstFile.ts",
+  ], 2600, { to: 0.7 });
   await io.wait(400);
   io.log(`output package: ${output}`);
   io.progress(0.8);
   await io.wait(600);
-  const copiedFiles = DEMO_TRANSFER_SHEETS.length * 2 + 22;
+  const copiedFiles = DEMO_PROPS_COUNT + 3;
   io.log(`copy ${copiedFiles} files → ${joinWindowsPath(platform.targetClient, "assets")}`, "success");
   io.progress(1);
   return { template: template?.name || "", outputDir: output, copiedFiles };
@@ -159,28 +174,37 @@ async function confirmDiff(context, io) {
 
 async function buildCocos(context, io) {
   const { platform, cocos, demo, attempt } = context;
+  const output = joinWindowsPath(platform.targetClient, DEMO_BUILD_OUTPUT);
   io.log(`> ${cocos.command.display}`);
-  const fill = (line) => line
-    .replace("{version}", platform.cocosVersion)
-    .replace("{project}", platform.targetClient)
-    .replace("{config}", platform.buildConfig);
+  const fill = (line) => line.replace("{version}", platform.cocosVersion).replace("{project}", platform.targetClient);
   if (demo.buildFailure && attempt === 1) {
-    await steps(io, DEMO_COCOS_LOG.slice(0, 8).map(([line]) => fill(line)), 2600, { to: 0.55 });
-    for (const line of DEMO_COCOS_FAILURE_LOG.slice(1)) io.log(line, "error");
+    await steps(io, DEMO_COCOS_LOG.slice(0, 7).map(([line]) => fill(line)), 2400, { to: 0.5 });
+    for (const line of DEMO_COCOS_FAILURE_LOG) io.log(line, "error");
     throw new ReleaseTaskError("buildFailed", "Cocos build failed", { exitCode: 34 });
   }
-  const pause = 4800 / DEMO_COCOS_LOG.length;
+  const pause = 4200 / DEMO_COCOS_LOG.length;
   for (const [line, progress] of DEMO_COCOS_LOG) {
     await io.wait(pause);
-    io.log(fill(line), progress === 1 ? "success" : "");
+    io.log(fill(line));
     io.progress(progress);
   }
   io.log("exit code 36", "success");
+  // The client's own release guard: the build must not ship QA tooling.
+  io.log(`> npm run qa:release -- "${joinWindowsPath(output, "data")}"`);
+  await io.wait(700);
+  io.log(`{ "checked": 1286, "findings": [] }  · no ${DEMO_QA_MARKERS.join(", ")} …`, "success");
+  io.progress(0.97);
+  await io.wait(400);
+  io.log(`hot update ${DEMO_HOT_UPDATE.next}: project.manifest, version.manifest`, "success");
+  io.progress(1);
   return {
     exitCode: 36,
-    outputDir: joinWindowsPath(platform.targetClient, "build", platform.buildPlatform),
-    sizeBytes: 33_974_272,
-    files: 1286,
+    outputDir: output,
+    sizeBytes: 187_365_376,
+    files: 9630,
+    qaChecked: 1286,
+    qaFindings: 0,
+    hotUpdate: DEMO_HOT_UPDATE.next,
   };
 }
 
@@ -192,34 +216,40 @@ async function gmCall(io, lines, result, totalMs = 900) {
 
 function gmTasks(context) {
   const { schedule, results, gmFiles } = context;
-  const { activity: activityFile, server: serverFile, client: clientFile, clientVersion } = gmFiles;
   const build = results["build.cocos"] || {};
+  const at = () => new Date(context.serverNow()).toISOString();
   return {
-    "gm.activityUpload": (io) => gmCall(io, [`upload ${activityFile} (182 KB)`, "uploaded · activity version #318"], { file: activityFile, version: 318 }),
+    "gm.activityUpload": (io) => gmCall(io, [`upload ${gmFiles.activity} (182 KB)`, "uploaded · activity version #318"], { file: gmFiles.activity, version: 318 }),
     "gm.activityCurrent": (io) => gmCall(io, ["set current activity version #318", "ok"], { version: 318 }),
-    "gm.activityReload": (io) => gmCall(io, ["reload activities on all game servers", "game-1 … ok", "game-2 … ok", "12 activities reloaded"], { activities: 12 }, 1400),
+    "gm.activityReload": (io) => gmCall(io, ["reload activities on all game servers", "12 activities reloaded"], { activities: 12 }, 1200),
     "gm.clientUpload": async (io) => {
-      io.log(`upload ${clientFile} (${((build.sizeBytes || 0) / 1048576).toFixed(1)} MB)`);
+      io.log(`upload ${gmFiles.client} (${((build.sizeBytes || 0) / 1048576).toFixed(1)} MB)`);
       for (let percent = 10; percent <= 100; percent += 10) {
         await io.wait(320);
         io.progress(percent / 100);
       }
-      io.log(`uploaded · client version ${clientVersion}`, "success");
-      return { file: clientFile, sizeBytes: build.sizeBytes || 0, version: clientVersion };
+      io.log(`uploaded · hot update ${gmFiles.clientVersion}`, "success");
+      return { file: gmFiles.client, sizeBytes: build.sizeBytes || 0, version: gmFiles.clientVersion };
     },
-    "gm.serverUpload": (io) => gmCall(io, [`upload ${serverFile} (48.2 MB)`, "uploading … 50%", "uploading … 100%", "uploaded · server version #207"], { file: serverFile, version: 207 }, 1800),
+    "gm.serverUpload": (io) => gmCall(io, [`upload ${gmFiles.server} (48.2 MB)`, "uploading … 100%", "uploaded · server version #207"], { file: gmFiles.server, version: 207 }, 1600),
     "gm.serverCurrent": (io) => gmCall(io, ["set current server version #207", "ok · applies on next restart"], { version: 207 }),
     "gm.maintenance": (io) => gmCall(io, [`schedule maintenance ${schedule.maintenanceStart} → ${schedule.maintenanceEnd}`, "ok"], { start: schedule.maintenanceStart, end: schedule.maintenanceEnd }),
-    "gm.clientOpen": (io) => gmCall(io, [`schedule client update ${clientVersion} at ${schedule.clientOpenAt}`, "ok"], { at: schedule.clientOpenAt, version: clientVersion }),
+    "gm.clientOpen": (io) => gmCall(io, [`schedule hot update ${gmFiles.clientVersion} at ${schedule.clientOpenAt}`, "ok"], { at: schedule.clientOpenAt, version: gmFiles.clientVersion }),
+    "gm.shutdown": (io) => gmCall(io, [
+      "maintenance time reached",
+      "broadcast: servers close for maintenance",
+      `disconnect ${DEMO_SERVERS.online.toLocaleString("en-US")} players`,
+      `stop game servers 1–${DEMO_SERVERS.count}`,
+      "servers closed · maintenance mode",
+    ], { players: DEMO_SERVERS.online, at: at() }, 2600),
     "gm.restart": (io) => gmCall(io, [
       "compile server #207",
       "compile ok · 0 warnings",
-      "stop game-1 … game-4",
-      "start game-1 … game-4",
-      "load activity version #318",
-      "4 / 4 servers healthy",
-    ], { servers: 4, version: 207 }, 4200),
-    "gm.open": (io) => gmCall(io, ["end maintenance and open servers", "4 / 4 servers accept logins"], { at: context.now().toISOString() }, 1100),
+      "apply server version #207, activity version #318",
+      `start game servers 1–${DEMO_SERVERS.count} (closed to players)`,
+      `${DEMO_SERVERS.count} / ${DEMO_SERVERS.count} servers healthy`,
+    ], { servers: DEMO_SERVERS.count, version: 207 }, 4000),
+    "gm.open": (io) => gmCall(io, ["end maintenance, open servers", `${DEMO_SERVERS.count} / ${DEMO_SERVERS.count} servers accept logins`], { at: at() }, 1100),
   };
 }
 

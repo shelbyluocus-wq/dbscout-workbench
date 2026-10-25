@@ -1,93 +1,117 @@
-// Sample content for the release-flow demo: three platforms, the open plans
-// of five content kinds, and what SVN, the file copy, table conversion, the
-// diff and a Cocos build would report. Item names follow the interface
-// language; seeded notes and platform names become the user's own data once
-// saved. Dates are relative to the update date so the demo always looks
-// current.
+// Sample content for the release demo, grounded in the 決勝2 client (jswz,
+// Cocos Creator 3.8.8, Android) and its config database. Read from the
+// project: table and column names, item IDs, names and development open
+// flags, platform names (buildopenplatprop), the working-copy layout under
+// chengxu, the conversion script name, the build output, the QA release
+// guard and the hot-update version format. Simulated: each platform's own
+// database and folder, revisions, diffs, versions, GM replies and server
+// numbers. Dates are relative to the update day so the demo stays current.
 
 import { addDays, evaluatePlanRule, formatPlanDate, parsePlanNote, stateFlag } from "./releasePlanNotes.js";
-import { defaultCocosEditorPath } from "./cocosBuildCommand.js";
+import { DEMO_CONFIG_TABLES } from "./releaseFlowDemoTables.js";
 
-export const DEMO_SOURCE_DATABASE = "game_config_dev";
-export const DEMO_SOURCE_CLIENT = "D:\\client\\jswz";
+export { DEMO_CONFIG_TABLES };
+
+export const DEMO_SOURCE_DATABASE = "newsg_4cfg";
+export const DEMO_WORKSPACE = "D:\\jswz\\chengxu";
+export const DEMO_SOURCE_CLIENT = `${DEMO_WORKSPACE}\\client\\jswz`;
 export const DEMO_COCOS_VERSION = "3.8.8";
-export const DEMO_REVISION = 48213;
+export const DEMO_COCOS_PATH = `${DEMO_WORKSPACE}\\client\\creator3.8\\CocosCreator.exe`;
+export const DEMO_TRANSFER_SCRIPT = `${DEMO_WORKSPACE}\\tool\\生成配置\\1-生成全部配置-客户端\\4区生成全部配置.bat`;
+export const DEMO_BUILD_OUTPUT = "build\\android";
+export const DEMO_BUNDLE_COUNT = 56;
+export const DEMO_PROPS_COUNT = 487;
+export const DEMO_REVISION = 52817;
+export const DEMO_HOT_UPDATE = Object.freeze({ previous: "1.023", next: "1.024" });
+export const DEMO_SERVERS = Object.freeze({ count: 4, online: 1284 });
 
-// Each kind of planned content maps to the table and switch column a write
-// updates. The key column identifies the row.
+// heroprop holds heroes, pets, spirits and mounts by ID range; OpenFlag 0 keeps
+// one closed. Features open per platform in buildopenplatprop.IsOpen.
 export const RELEASE_PLAN_CATEGORIES = Object.freeze([
-  Object.freeze({ id: "hero", table: "hero", keyColumn: "ID", flagColumn: "IsOpen" }),
-  Object.freeze({ id: "mount", table: "mount", keyColumn: "ID", flagColumn: "IsOpen" }),
-  Object.freeze({ id: "spirit", table: "spirit", keyColumn: "ID", flagColumn: "IsOpen" }),
-  Object.freeze({ id: "pet", table: "battle_pet", keyColumn: "ID", flagColumn: "IsOpen" }),
-  Object.freeze({ id: "feature", table: "function_open", keyColumn: "ID", flagColumn: "IsOpen" }),
+  Object.freeze({ id: "hero", table: "heroprop", keyColumns: Object.freeze(["ID"]), flagColumn: "OpenFlag" }),
+  Object.freeze({ id: "mount", table: "heroprop", keyColumns: Object.freeze(["ID"]), flagColumn: "OpenFlag" }),
+  Object.freeze({ id: "spirit", table: "heroprop", keyColumns: Object.freeze(["ID"]), flagColumn: "OpenFlag" }),
+  Object.freeze({ id: "pet", table: "heroprop", keyColumns: Object.freeze(["ID"]), flagColumn: "OpenFlag" }),
+  Object.freeze({ id: "feature", table: "buildopenplatprop", keyColumns: Object.freeze(["BuildID", "Idx"]), flagColumn: "IsOpen" }),
 ]);
 
-const LOCALE_INDEX = Object.freeze({ en: 0, "zh-CN": 1, "zh-TW": 2 });
+// Platform names as buildopenplatprop lists them.
+export const DEMO_PLATFORM_IDS = Object.freeze(["douyin", "tap", "wanxin", "tw"]);
+export const DEMO_DEFAULT_PLATFORM = "tw";
+const PLATFORM_NAMES = Object.freeze({ douyin: "抖音", tap: "TAP", wanxin: "玩心", tw: "TW" });
 
-// [key, [en, zh-CN, zh-TW], seeds for cn / tw / sea]. A seed is ["o", day]
-// (opens), ["r", from, to] (open range), ["c", day] (closes), "A" (already
-// open), "N" (not yet), "?" (a note the parser cannot read) or "" (no note).
+// [key, name, development flag, seeds for 抖音 / TAP / 玩心 / TW]. A seed is
+// ["o", day] (opens), ["r", from, to] (open range), ["c", day] (closes),
+// "A" (already open), "N" (not yet), "?" (a note the parser cannot read) or
+// "" (no note).
 const PLAN_ITEMS = Object.freeze({
   hero: [
-    [1012, ["Ember Valkyrie", "赤焰·炎姬", "赤焰·炎姬"], [["o", -40], ["o", -12], ["o", 5]]],
-    [1013, ["Frost Kite", "霜翎·雪鸢", "霜翎·雪鳶"], [["o", -20], ["o", 0], "N"]],
-    [1014, ["Iron Warden", "玄甲·镇岳", "玄甲·鎮岳"], ["A", "A", "A"]],
-    [1015, ["Azure Phoenix", "青鸾", "青鸞"], [["o", -3], ["o", 4], "N"]],
-    [1016, ["Yaksha", "夜叉", "夜叉"], [["o", 0], ["o", 11], ["o", 25]]],
-    [1017, ["Thunder Monk", "雷音", "雷音"], [["r", -60, -30], ["r", -7, 20], "A"]],
-    [1018, ["Bai Ze", "白泽", "白澤"], ["N", "N", "N"]],
-    [1019, ["Nine Tails", "九尾", "九尾"], [["o", 14], "?", ""]],
+    [1059, "光铸战神", 1, ["A", "A", "A", "A"]],
+    [1060, "魂劫先知", 1, ["A", "A", ["o", -14], "A"]],
+    [1061, "红龙女王", 1, [["o", -21], ["o", -21], ["o", -7], ["o", 0]]],
+    [1062, "闪耀羽月", 1, [["o", -14], ["o", -14], ["o", 0], ["o", 7]]],
+    [1063, "月夜星光", 1, [["o", -7], ["o", -7], ["o", 7], ["o", 14]]],
+    [1065, "永夜魅影", 0, [["o", 7], ["o", 7], "N", "N"]],
+    [1066, "星灵圣曦", 0, [["o", 21], ["o", 21], "N", "N"]],
+    [1075, "暮光青铜", 0, ["N", "N", "N", "N"]],
   ],
   mount: [
-    [2001, ["Snowtread Steed", "踏雪乌骓", "踏雪烏騅"], ["A", "A", "A"]],
-    [2002, ["Red Hare", "赤兔", "赤兔"], [["o", -5], ["o", 0], ["o", 9]]],
-    [2003, ["Black Tortoise", "玄龟", "玄龜"], [["o", 2], ["o", 2], "N"]],
-    [2004, ["Cloud Qilin", "云麒麟", "雲麒麟"], ["A", ["o", -30], ["o", -2]]],
-    [2005, ["Feilian", "飞廉", "飛廉"], ["N", "N", "N"]],
+    [6503, "晶盾战犀", 1, ["A", "A", "A", "A"]],
+    [6504, "圣霜灵犀", 1, ["A", "A", "A", "A"]],
+    [6505, "不死无敌", 1, [["o", -10], ["o", -10], ["o", 3], ["o", 0]]],
+    [6506, "圣独角兽", 1, [["o", -10], ["o", -10], ["o", 3], ["o", 0]]],
+    [6517, "狂雷狮鹫", 1, [["o", -3], ["o", -3], ["o", 14], ["o", 14]]],
+    [6605, "虚空梦魇", 0, [["o", 14], ["o", 14], "N", "N"]],
+    [6606, "天穹星骓", 0, ["?", "", "N", "N"]],
   ],
   spirit: [
-    [3001, ["Zhulong", "烛龙", "燭龍"], ["A", ["o", -21], ["o", -1]]],
-    [3002, ["Goumang", "句芒", "句芒"], [["o", -14], ["o", -3], ["o", 6]]],
-    [3003, ["Zhurong", "祝融", "祝融"], [["o", 0], ["o", 7], "N"]],
-    [3004, ["Gonggong", "共工", "共工"], [["r", -10, 10], ["r", 0, 13], ["r", 3, 17]]],
-    [3005, ["Houtu", "后土", "后土"], ["N", "N", "N"]],
+    [5503, "帝王镜影", 1, ["A", "A", "A", "A"]],
+    [5505, "大地镜影", 1, [["o", -12], ["o", -12], ["o", -5], ["o", -5]]],
+    [5511, "雷霆镜影", 1, [["o", -5], ["o", -5], ["o", 9], ["o", 9]]],
+    [5517, "炎魔镜影", 1, [["o", 2], ["o", 2], "N", "N"]],
+    [5605, "无限大地", 0, [["o", 28], ["o", 28], "N", "N"]],
+    [5611, "愤怒雷霆", 0, ["N", "N", "N", "?"]],
   ],
   pet: [
-    [4001, ["Fire Fox", "火狐", "火狐"], ["A", "A", "A"]],
-    [4002, ["Storm Hawk", "雷鹰", "雷鷹"], [["o", -8], ["o", -1], ["o", 12]]],
-    [4003, ["Stone Sprite", "石灵", "石靈"], [["o", 3], ["o", 3], ["o", 3]]],
-    [4004, ["Ice Moth", "冰蝶", "冰蝶"], [["o", -2], ["o", 6], "N"]],
-    [4005, ["Ink Qilin", "墨麟", "墨麟"], ["N", ["o", 30], "N"]],
+    [5401, "生命灵主", 1, ["A", "A", "A", "A"]],
+    [5402, "灵魂灵主", 1, ["A", "A", "A", "A"]],
+    [5411, "闪电灵主", 1, [["o", -20], ["o", -20], ["o", -6], ["o", -6]]],
+    [5412, "风息灵主", 1, [["o", -20], ["o", -20], ["o", 0], ["o", 0]]],
+    [5417, "烈焰灵主", 1, [["o", -4], ["o", -4], ["o", 11], ["o", 11]]],
+    [5418, "纯水灵主", 1, [["o", -4], ["o", -4], ["o", 11], ["o", 11]]],
+    [5400, "隐士灵主-SSR", 0, ["N", "N", "N", "N"]],
   ],
   feature: [
-    [5001, ["Cross-server arena", "跨服竞技", "跨服競技"], [["o", -30], ["o", 0], ["o", 14]]],
-    [5002, ["Guild war", "公会战", "公會戰"], ["A", "A", "A"]],
-    [5003, ["Ladder", "天梯", "天梯"], [["o", -7], ["o", 7], ["o", 21]]],
-    [5004, ["Treasure vault", "宝物收藏", "寶物收藏"], [["o", -60], ["o", -1], ["o", -1]]],
-    [5005, ["Limited shop", "限时商店", "限時商店"], [["r", -3, 3], ["r", 0, 6], ["r", 0, 6]]],
-    [5006, ["Mentorship", "师徒系统", "師徒系統"], [["c", -10], ["c", 0], "A"]],
-    [5007, ["Marriage", "婚姻系统", "婚姻系統"], ["N", "N", "N"]],
+    [{ BuildID: 10, Idx: 100 }, "养成积分", 0, ["N", "N", "N", "N"]],
+    [{ BuildID: 81, Idx: 100 }, "坐骑重生", 0, ["N", "N", "N", ["o", 7]]],
+    [{ BuildID: 82, Idx: 100 }, "战宠重生", 0, ["N", "N", "N", "N"]],
+    [{ BuildID: 83, Idx: 100 }, "祭灵重生", 1, ["A", "A", "A", "A"]],
+    [{ BuildID: 117, Idx: 100 }, "装备强化", 1, ["A", "A", "A", "A"]],
+    [{ BuildID: 134, Idx: 100 }, "玩具强化", 1, ["N", "N", "N", "N"]],
+    [{ BuildID: 197, Idx: 100 }, "高阶恶魔入侵", 1, ["N", "N", "N", "N"]],
   ],
 });
 
-export const DEMO_PLATFORM_IDS = Object.freeze(["cn", "tw", "sea"]);
-export const DEMO_DEFAULT_PLATFORM = "tw";
+function itemId(category, key) {
+  return `${category}-${typeof key === "object" ? Object.values(key).join("-") : key}`;
+}
 
 export const RELEASE_PLAN_ITEMS = Object.freeze(
   RELEASE_PLAN_CATEGORIES.flatMap((category) =>
-    PLAN_ITEMS[category.id].map(([key, names, seeds]) => Object.freeze({
-      id: `${category.id}-${key}`,
+    PLAN_ITEMS[category.id].map(([key, name, devFlag, seeds]) => Object.freeze({
+      id: itemId(category.id, key),
       category: category.id,
-      key,
-      names: Object.freeze(names),
+      key: typeof key === "object" ? Object.freeze(key) : key,
+      name,
+      devFlag,
       seeds: Object.freeze(Object.fromEntries(DEMO_PLATFORM_IDS.map((platform, index) => [platform, seeds[index]]))),
     })),
   ),
 );
 
-export function planItemName(item, locale) {
-  return item.names[LOCALE_INDEX[locale] ?? 0] || item.names[0];
+/** "1061", or "117 · 100" for a composite key. */
+export function planItemKeyLabel(item) {
+  return typeof item.key === "object" ? Object.values(item.key).join(" · ") : String(item.key);
 }
 
 function seedNote(seed, dateIso, translate) {
@@ -111,108 +135,97 @@ export function createDemoNotes(dateIso, translate) {
   return notes;
 }
 
-export function createDemoPlatforms(translate) {
+export function createDemoPlatforms() {
   return DEMO_PLATFORM_IDS.map((id) => ({
     id,
-    name: translate(`releaseFlow.demo.platform.${id}`),
+    name: PLATFORM_NAMES[id],
     sourceDatabase: DEMO_SOURCE_DATABASE,
-    targetDatabase: `game_config_${id}`,
+    targetDatabase: `newsg_${id}_cfg`,
     sourceClient: DEMO_SOURCE_CLIENT,
-    targetClient: `D:\\release\\${id}\\client`,
+    targetClient: `D:\\jswz\\release\\${id}\\jswz`,
     transferTemplateId: "juesheng-2",
     cocosVersion: DEMO_COCOS_VERSION,
-    cocosPath: defaultCocosEditorPath(DEMO_COCOS_VERSION),
-    buildPlatform: "web-mobile",
-    buildConfig: "build-config\\web-mobile.json",
+    cocosPath: DEMO_COCOS_PATH,
+    buildPlatform: "android",
+    buildConfig: "",
   }));
 }
 
 /**
- * The flag a demo database holds before this release. Development opens
- * everything for testing; a platform still reflects last week's plan.
+ * The flag a platform database holds before the plan is written. A synced
+ * table carries the development value; a kept table still reflects the
+ * platform's plan as of last week.
  */
 export function demoDatabaseFlag(item, { synced, note, dateIso }) {
-  if (synced) return 1;
+  if (synced) return item.devFlag;
   const lastWeek = addDays(dateIso, -7);
   return stateFlag(evaluatePlanRule(parsePlanNote(note, lastWeek), lastWeek).state) ?? 0;
 }
 
-// Tables of the development config database, with row counts.
-export const DEMO_SYNC_TABLES = Object.freeze([
-  ["hero", 36], ["hero_star", 288], ["hero_skill", 412], ["hero_fetter", 96], ["mount", 24],
-  ["mount_star", 120], ["spirit", 30], ["spirit_level", 600], ["battle_pet", 28], ["battle_pet_skill", 140],
-  ["function_open", 64], ["item", 3812], ["equip", 1204], ["equip_suit", 88], ["skill", 2406],
-  ["buff", 1130], ["monster", 2870], ["stage", 960], ["drop_table", 4215], ["reward", 6034],
-  ["activity", 186], ["activity_reward", 2488], ["activity_rank", 312], ["shop", 420], ["shop_goods", 2960],
-  ["recharge", 48], ["vip", 16], ["guild", 40], ["guild_war", 32], ["quest", 1544],
-  ["achievement", 820], ["title", 130], ["mail_template", 96], ["notice", 24], ["localization", 18230],
-  ["version_info", 1], ["server_config", 12], ["platform_settings", 8], ["channel_config", 14], ["gm_whitelist", 30],
-].map(([name, rows]) => Object.freeze({ name, rows })));
+// Tables each platform keeps for itself, and the open-plan tables a release
+// may keep too (heroprop holds every hero, so it is always overwritten).
+export const DEMO_SYNC_EXCLUSIONS = Object.freeze(["platspecfgtable", "conditionplatprop"]);
+export const DEMO_PLAN_TABLES = Object.freeze(["buildopenplatprop", "buildopenzoneprop", "delayopenzoneprop"]);
 
-export const DEMO_SYNC_EXCLUSIONS = Object.freeze(["platform_settings", "channel_config", "gm_whitelist"]);
-
-export const DEMO_FILE_EXCLUSIONS = Object.freeze([
-  "library/",
-  "temp/",
-  "local/",
-  "build/",
-  "profiles/",
-  "settings/",
-  "assets/resources/channel/",
-  "assets/script/config/ChannelConfig.ts",
+// The client's own .gitignore, then files that look platform-specific: server
+// settings, hot-update manifests and the channel SDK.
+export const DEMO_PROJECT_IGNORES = Object.freeze([
+  "library/", "temp/", "local/", "build/", "output/", "outputs/", "tmp/",
+  "profiles/", "native/", ".creator/", "extensions/", "keystore/", "node_modules/",
 ]);
+export const DEMO_PLATFORM_FILES = Object.freeze([
+  "assets/config/Config.ts",
+  "assets/resources/project.manifest",
+  "assets/resources/version.manifest",
+  "assets/src/channelSdk/channel/",
+]);
+export const DEMO_FILE_EXCLUSIONS = Object.freeze([...DEMO_PROJECT_IGNORES, ...DEMO_PLATFORM_FILES]);
 
 // What the development client changes compared with a platform client.
 export const DEMO_CLIENT_CHANGES = Object.freeze([
-  ["A", "assets/script/activity/LanternFestival.ts"],
-  ["A", "assets/script/activity/LanternFestival.ts.meta"],
-  ["M", "assets/script/hero/HeroView.ts"],
-  ["M", "assets/script/hero/HeroStarPanel.ts"],
-  ["M", "assets/script/ui/shop/ShopPanel.ts"],
-  ["M", "assets/script/battle/BattleController.ts"],
-  ["M", "assets/script/net/Protocol.ts"],
-  ["M", "assets/script/config/ChannelConfig.ts"],
-  ["A", "assets/resources/prefab/activity/LanternPanel.prefab"],
-  ["A", "assets/resources/prefab/activity/LanternPanel.prefab.meta"],
-  ["M", "assets/resources/prefab/ui/HeroPanel.prefab"],
-  ["A", "assets/resources/texture/hero/h1015.png"],
-  ["A", "assets/resources/texture/hero/h1015.png.meta"],
-  ["A", "assets/resources/spine/hero/h1015/h1015.skel"],
-  ["A", "assets/resources/spine/hero/h1015/h1015.atlas"],
-  ["A", "assets/resources/audio/bgm/lantern.mp3"],
-  ["D", "assets/resources/texture/activity/banner_0930.png"],
-  ["D", "assets/resources/texture/activity/banner_0930.png.meta"],
-  ["M", "assets/resources/channel/tw/sdk.json"],
-  ["M", "assets/resources/channel/sea/sdk.json"],
+  ["M", "assets/src/modules/hero/HeroMgr.ts"],
+  ["M", "assets/src/modules/mount/MountMgr.ts"],
+  ["M", "assets/src/modules/pet/PetMgr.ts"],
+  ["M", "assets/src/modules/altar/AltarMgr.ts"],
+  ["M", "assets/src/modules/activity/ActivityMgr.ts"],
+  ["M", "assets/bundles/sacSpirit/prefab/sacSpiritArtifactUI.prefab"],
+  ["M", "assets/bundles/sacSpirit/prefab/sacSpiritCultivateScene.prefab"],
+  ["A", "assets/bundles/activity/P5/npc_1034.png"],
+  ["A", "assets/bundles/activity/P5/npc_1034.png.meta"],
+  ["D", "assets/bundles/activity/P0/4.png"],
+  ["D", "assets/bundles/activity/P0/4.png.meta"],
   ["M", "settings/v2/packages/builder.json"],
-  ["M", "settings/v2/packages/project.json"],
-  ["M", "profiles/v2/packages/scene.json"],
+  ["M", "project/android/engine/android/app/build.gradle"],
+  ["M", "assets/src/channelSdk/channel/DgSdk.ts"],
+  ["M", "assets/config/Config.ts"],
+  ["M", "assets/resources/project.manifest"],
+  ["M", "assets/resources/version.manifest"],
   ["M", "library/imports/3a/3a1f0c2e.json"],
   ["M", "temp/asset-db/assets.json"],
-  ["M", "build/web-mobile/index.html"],
+  ["M", "build/android/data/main.js"],
+  ["M", "profiles/v2/packages/scene.json"],
   ["M", ".svn/wc.db"],
-  ["M", "package.json"],
 ].map(([status, path]) => Object.freeze({ status, path })));
 
-// `svn update` on the platform client. The last two entries conflict when the
-// demo asks for conflicts.
+// `svn update` on the platform client; the two platform-specific files
+// conflict when the demo asks for conflicts.
 export const DEMO_SVN_UPDATES = Object.freeze([
+  ["U", "assets\\props\\props\\heroprop.json"],
+  ["U", "assets\\props\\props\\delayopenzoneprop.json"],
+  ["U", "assets\\props\\propsH5\\props.bin"],
   ["U", "assets\\src\\props\\propDataDefine.ts"],
-  ["U", "assets\\props\\hero.json"],
-  ["U", "assets\\props\\activity.json"],
-  ["U", "assets\\script\\ui\\shop\\ShopPanel.ts"],
-  ["A", "assets\\resources\\texture\\activity\\banner_1024.png"],
-  ["A", "assets\\resources\\texture\\activity\\banner_1024.png.meta"],
-  ["U", "assets\\resources\\prefab\\ui\\ActivityPanel.prefab"],
-  ["D", "assets\\resources\\texture\\activity\\banner_0930.png"],
-  ["C", "assets\\script\\config\\ChannelConfig.ts"],
-  ["C", "assets\\resources\\i18n\\zh_TW.json"],
+  ["U", "assets\\src\\modules\\mount\\MountMgr.ts"],
+  ["U", "assets\\bundles\\sacSpirit\\prefab\\sacSpiritCultivateScene.prefab"],
+  ["A", "assets\\bundles\\activity\\P5\\npc_1033.png"],
+  ["A", "assets\\bundles\\activity\\P5\\npc_1033.png.meta"],
+  ["C", "assets\\config\\Config.ts"],
+  ["C", "assets\\resources\\version.manifest"],
 ].map(([action, path]) => Object.freeze({ action, path })));
 
-// Config sheets a conversion script exports into the client.
+// Config sheets named in the conversion log (it exports all of them).
 export const DEMO_TRANSFER_SHEETS = Object.freeze([
-  "hero", "hero_star", "mount", "spirit", "battle_pet", "function_open",
-  "item", "activity", "activity_reward", "shop_goods", "reward", "localization",
+  "heroprop", "delayopenzoneprop", "buildopenplatprop", "buildopenzoneprop", "mountstarprop",
+  "petstarprop", "sacspiritstarprop", "altardrawprop", "giftoptionalprop", "achievementprop",
 ]);
 
 function hunk(text) {
@@ -223,157 +236,92 @@ function hunk(text) {
 // lines; the viewer says so.
 export const DEMO_DIFF_FILES = Object.freeze([
   {
-    status: "M", path: "assets/props/hero.json", added: 6, removed: 2,
+    status: "M", path: "assets/props/props/heroprop.json", added: 1, removed: 1,
     lines: hunk(`
-    @@ -118,5 +118,8 @@
-         "1015": {
-           "ID": 1015,
-    -      "Quality": 4,
-    +      "Quality": 5,
-    +      "SkillIDs": [101501, 101502, 101503],
-    +      "SkinID": 21015,
-    +      "ShowInGallery": 1,
-           "IsOpen": 1
-         },
+    @@ -2002,7 +2002,7 @@
+         "PosiDesc": "后排范围法师。主动烈焰冲击在命中多个目标时追加伤害，被动连续落下三波陨石雨；觉醒使主动技附加持续伤害，专武进一步追加并强化巨型陨石。",
+         "BakDesc": "希格德希尔是守护生命与秩序的红龙女王。巨龙黄昏中，龙族叛徒以古神低语撕裂守护契约，她被重伤囚禁数百年，却仍在封印中压住足以焚毁大陆的龙怒，不让族人因复仇向凡俗世界开战。脱困后，她的力量已被虚空污染，只能沉入圣所，以长眠一点点净化伤痕。即便无法展翼，希格德希尔仍通过残存契约守护世界树与众生，等待有一天重新飞上天空，而不是把天空烧成灰烬。",
+         "MapPingID": 0,
+    -    "OpenFlag": 0,
+    +    "OpenFlag": 1,
+         "Star": 5,
+         "ClipItemID": 21061,
+         "Quality": 5,
     `),
   },
   {
-    status: "M", path: "assets/props/activity.json", added: 38, removed: 12,
+    status: "M", path: "assets/props/props/buildopenplatprop.json", added: 1, removed: 1,
     lines: hunk(`
-    @@ -402,12 +402,16 @@
-         "3204": {
-    -      "Name": "中秋祈福",
-    -      "StartTime": "2026-09-30 05:00",
-    -      "EndTime": "2026-10-07 23:59",
-    +      "Name": "灯会祈愿",
-    +      "StartTime": "2026-10-24 12:00",
-    +      "EndTime": "2026-11-06 23:59",
-    +      "PanelPrefab": "activity/LanternPanel",
-    +      "RewardGroup": 3204,
-           "RankType": 2,
-    -      "Banner": "banner_0930"
-    +      "Banner": "banner_1024"
-         },
+    @@ -113,7 +113,7 @@
+         "BuildID": 197,
+         "Idx": 100,
+         "Name": "高阶恶魔入侵",
+    -    "IsOpen": 1,
+    +    "IsOpen": 0,
+         "Plat1": "",
+         "Plat2": "",
+         "Plat3": "",
     `),
   },
   {
-    status: "A", path: "assets/props/lantern_festival.json", added: 64, removed: 0,
+    status: "M", path: "assets/props/props/delayopenzoneprop.json", added: 7, removed: 0,
     lines: hunk(`
-    @@ -0,0 +1,8 @@
-    +{
-    +  "1": { "ID": 1, "Stage": 1, "Need": 10, "RewardID": 320401 },
-    +  "2": { "ID": 2, "Stage": 2, "Need": 30, "RewardID": 320402 },
-    +  "3": { "ID": 3, "Stage": 3, "Need": 60, "RewardID": 320403 },
-    +  "4": { "ID": 4, "Stage": 4, "Need": 100, "RewardID": 320404 },
-    +  "5": { "ID": 5, "Stage": 5, "Need": 160, "RewardID": 320405 },
-    +  "6": { "ID": 6, "Stage": 6, "Need": 240, "RewardID": 320406 }
-    +}
+    @@ -19,6 +19,13 @@
+         "EndZone": 9999,
+         "AfterDay": 9,
+         "Group": 1005
+    +  },
+    +  {
+    +    "ID": 1064,
+    +    "StartZone": 1,
+    +    "EndZone": 9999,
+    +    "AfterDay": 9,
+    +    "Group": 1005
+       },
+       {
+         "ID": 1065,
     `),
   },
   {
-    status: "M", path: "assets/props/function_open.json", added: 3, removed: 3,
+    status: "M", path: "assets/src/modules/hero/HeroMgr.ts", added: 1, removed: 1,
     lines: hunk(`
-    @@ -41,9 +41,9 @@
-         "5001": {
-           "ID": 5001,
-           "Name": "跨服竞技",
-    -      "OpenLevel": 60,
-    -      "OpenServerDay": 30,
-    -      "Icon": "fn_arena"
-    +      "OpenLevel": 55,
-    +      "OpenServerDay": 21,
-    +      "Icon": "fn_arena_cross"
-         },
+    @@ -177,7 +177,7 @@
+             let heroprops: heropropData[] = g_PropMgr.getProp(__Prop__.heroprop) as any;
+             for (let i = 0; i < heroprops.length; i++) {
+                 const prop = heroprops[i];
+    -            if(this.getIsHeroID(prop.ID) && !prop.IsNpc){
+    +            if(this.getIsHeroID(prop.ID) && prop.OpenFlag && !prop.IsNpc){
+                     if (this._ownedHeros.has(prop.ID)) {
+                         continue;
+                     }
     `),
   },
-  {
-    status: "M", path: "assets/src/props/propDataDefine.ts", added: 18, removed: 0,
-    lines: hunk(`
-    @@ -886,6 +886,24 @@ export namespace PropData {
-         export interface activity {
-             ID: number;
-             Name: string;
-    +        PanelPrefab: string;
-    +        RewardGroup: number;
-         }
-    +
-    +    export interface lantern_festival {
-    +        ID: number;
-    +        Stage: number;
-    +        Need: number;
-    +        RewardID: number;
-    +    }
-    `),
-  },
-  {
-    status: "M", path: "assets/script/hero/HeroView.ts", added: 21, removed: 7,
-    lines: hunk(`
-    @@ -64,11 +64,17 @@ export class HeroView extends Component {
-         private refreshQuality(hero: PropData.hero) {
-    -        this.qualityFrame.spriteFrame = this.frames[hero.Quality - 1];
-    -        this.starNode.active = hero.Quality >= 4;
-    +        const frame = this.frames[Math.min(hero.Quality, this.frames.length) - 1];
-    +        this.qualityFrame.spriteFrame = frame;
-    +        this.starNode.active = hero.Quality >= 4;
-    +        this.skinButton.active = hero.SkinID > 0;
-    +        this.galleryTag.active = hero.ShowInGallery === 1;
-         }
-    `),
-  },
-  {
-    status: "M", path: "assets/script/ui/shop/ShopPanel.ts", added: 9, removed: 4,
-    lines: hunk(`
-    @@ -132,8 +132,13 @@ export class ShopPanel extends Component {
-    -    private readonly tabs = [ShopTab.Normal, ShopTab.Guild, ShopTab.Arena];
-    +    private readonly tabs = [ShopTab.Normal, ShopTab.Guild, ShopTab.Arena, ShopTab.Limited];
-         onEnable() {
-    -        this.selectTab(this.tabs[0]);
-    +        const limited = PropMgr.isFunctionOpen(5005);
-    +        this.limitedTab.active = limited;
-    +        this.selectTab(limited ? ShopTab.Limited : this.tabs[0]);
-         }
-    `),
-  },
-  {
-    status: "A", path: "assets/script/activity/LanternFestival.ts", added: 142, removed: 0,
-    lines: hunk(`
-    @@ -0,0 +1,9 @@
-    +import { _decorator, Component, Label } from "cc";
-    +const { ccclass, property } = _decorator;
-    +
-    +@ccclass("LanternFestival")
-    +export class LanternFestival extends Component {
-    +    @property(Label) progressLabel: Label = null!;
-    +
-    +    start() { this.refresh(); }
-    +}
-    `),
-  },
-  { status: "A", path: "assets/resources/texture/hero/h1015.png", added: 0, removed: 0, binary: true, lines: [] },
-  { status: "D", path: "assets/resources/texture/activity/banner_0930.png", added: 0, removed: 0, binary: true, lines: [] },
+  { status: "M", path: "assets/props/propsH5/props.bin", added: 0, removed: 0, binary: true, lines: [] },
+  { status: "A", path: "assets/bundles/activity/P5/npc_1034.png", added: 0, removed: 0, binary: true, lines: [] },
+  { status: "D", path: "assets/bundles/activity/P0/4.png", added: 0, removed: 0, binary: true, lines: [] },
 ].map((file) => Object.freeze(file)));
 
-// Lines a Cocos Creator 3.x command-line build prints, with the build
+// What a Cocos Creator 3.x command-line Android build prints, with the
 // progress reached after each line.
 export const DEMO_COCOS_LOG = Object.freeze([
   ["Cocos Creator {version} · command-line build", 0.02],
-  ["Open project: {project}", 0.04],
-  ["Load build options: {config}", 0.06],
-  ["Start building with platform=web-mobile, debug=false, md5Cache=true", 0.08],
-  ["[Build] Query asset bundles: main, resources, internal", 0.12],
-  ["[Build] Compile scripts (TypeScript → JavaScript) …", 0.2],
-  ["[Build] Compile scripts done in 21.6s", 0.34],
-  ["[Build] Pack assets 412 / 1286", 0.46],
-  ["[Build] Pack assets 896 / 1286", 0.58],
-  ["[Build] Pack assets 1286 / 1286", 0.68],
-  ["[Build] Compress textures (astc / webp) …", 0.78],
-  ["[Build] Generate settings.json and md5 cache", 0.86],
-  ["[Build] Write build/web-mobile", 0.94],
-  ["Build success in 128.4s", 1],
+  ["Open project: {project}", 0.05],
+  ["Start building with platform=android, debug=false, md5Cache=true", 0.08],
+  [`[Build] Query ${DEMO_BUNDLE_COUNT} asset bundles: main, resources, internal, activity, sacSpirit …`, 0.14],
+  ["[Build] Compile scripts (TypeScript → JavaScript) …", 0.24],
+  ["[Build] Compile scripts done", 0.38],
+  ["[Build] Pack assets 4,212 / 9,630", 0.5],
+  ["[Build] Pack assets 9,630 / 9,630", 0.64],
+  ["[Build] Compress textures (astc_6x6) …", 0.74],
+  ["[Build] Write build/android/data", 0.84],
+  ["[Build] Generate build/android/proj/cfg.cmake", 0.9],
+  ["Build success", 0.93],
 ]);
 
 export const DEMO_COCOS_FAILURE_LOG = Object.freeze([
-  "[Build] Pack assets 896 / 1286",
-  "[Error] Asset db://assets/resources/prefab/activity/LanternPanel.prefab references a missing script",
+  "[Error] Asset db://assets/bundles/sacSpirit/prefab/sacSpiritArtifactUI.prefab references a missing script",
   "[Error] Build failed: 1 error(s)",
 ]);
+
+// The client's release guard (npm run qa:release) looks for these markers.
+export const DEMO_QA_MARKERS = Object.freeze(["JSWZQAToolkit", "JSWZErrorReporter", "qa-bridge.json", "com/jswz/qa/QAMemoryBridge"]);

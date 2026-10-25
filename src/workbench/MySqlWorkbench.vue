@@ -933,6 +933,9 @@ const releaseFlowOpen = ref(false);
 
 function openReleaseFlow() {
   releaseFlowOpen.value = true;
+  // The conversion step shows each template's script; find the built-in
+  // ones in the background, as the table transfer dialog does.
+  void tableTransfer.discoverAndFill();
 }
 
 // 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，

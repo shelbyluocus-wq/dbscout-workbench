@@ -36,6 +36,7 @@ const blockerText = computed(() => {
 });
 
 const buttonLabel = computed(() => {
+  if (running.value) return t("releaseFlow.footer.runningButton");
   if (task.value.status === "done") return t("releaseFlow.gm.again");
   if (task.value.status === "failed") return t("releaseFlow.footer.retry");
   return t(`releaseFlow.task.${props.taskId}.run`);
@@ -48,27 +49,27 @@ function act() {
 
 <template>
   <li ref="cardRef" class="wb-rf-gm-task" :class="`is-${status}`" :data-release-task="taskId">
-    <ReleaseStatusIcon :status="status" :size="16" />
+    <ReleaseStatusIcon :status="status" :size="17" />
     <div class="wb-rf-gm-body">
       <strong>{{ taskTitle(taskId) }}</strong>
-      <p class="wb-rf-hint">{{ t(`releaseFlow.task.${taskId}.hint`) }}</p>
-      <span v-if="detail && task.status !== 'done'" class="wb-rf-chip wb-rf-code">{{ detail }}</span>
+      <span v-if="task.status === 'done'" class="wb-rf-gm-result">{{ gmResultText(taskId, task.result || {}) }}</span>
+      <span v-else-if="task.status === 'failed'" class="wb-rf-gm-error" role="alert">{{ releaseErrorText(task.error) }}</span>
+      <span v-else-if="task.stale" class="wb-rf-gm-stale">{{ t('releaseFlow.task.stale') }}</span>
+      <span v-else-if="blockerText" class="wb-rf-muted">{{ blockerText }}</span>
+      <span v-else-if="detail" class="wb-rf-code wb-rf-muted">{{ detail }}</span>
+      <span v-else class="wb-rf-muted">{{ t(`releaseFlow.task.${taskId}.hint`) }}</span>
       <div v-if="running" class="wb-rf-progress" role="progressbar" :aria-valuenow="Math.round(fraction * 100)" aria-valuemin="0" aria-valuemax="100" :aria-label="taskTitle(taskId)">
         <span :style="{ transform: `scaleX(${fraction})` }" />
       </div>
-      <p v-if="task.status === 'done'" class="wb-rf-gm-result">{{ gmResultText(taskId, task.result || {}) }}</p>
-      <p v-else-if="task.status === 'failed'" class="wb-rf-gm-error" role="alert">{{ releaseErrorText(task.error) }}</p>
-      <p v-else-if="task.stale" class="wb-rf-gm-stale">{{ t('releaseFlow.task.stale') }}</p>
-      <p v-else-if="blockerText" class="wb-rf-muted wb-rf-gm-blocked">{{ blockerText }}</p>
     </div>
     <button
       type="button"
-      class="wb-rf-gm-action"
-      :class="{ 'wb-dialog-primary': next && !blocker && task.status !== 'done' }"
+      class="wb-rf-btn"
+      :class="{ 'is-primary': next && !blocker && task.status !== 'done', 'is-quiet': task.status === 'done' }"
       :disabled="Boolean(blocker)"
       @click="act"
     >
-      {{ running ? t('releaseFlow.footer.runningButton') : buttonLabel }}
+      {{ buttonLabel }}
     </button>
   </li>
 </template>
@@ -77,16 +78,13 @@ function act() {
 .wb-rf-gm-task {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px;
-  padding: 13px 14px;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 16px 12px 18px;
   border: 1px solid var(--wb-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--wb-table-surface);
-}
-
-.wb-rf-gm-task > .wb-rf-status {
-  margin-top: 1px;
 }
 
 .wb-rf-gm-task.is-running {
@@ -99,28 +97,24 @@ function act() {
 
 .wb-rf-gm-body {
   display: grid;
-  justify-items: start;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
+  font-size: 12.5px;
 }
 
 .wb-rf-gm-body > strong {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 
-.wb-rf-gm-body .wb-rf-progress {
-  justify-self: stretch;
-  margin-top: 4px;
+.wb-rf-gm-body > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.wb-rf-gm-result,
-.wb-rf-gm-error,
-.wb-rf-gm-stale,
-.wb-rf-gm-blocked {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.55;
+.wb-rf-gm-body .wb-rf-progress {
+  margin-top: 6px;
 }
 
 .wb-rf-gm-result {
@@ -135,9 +129,7 @@ function act() {
   color: var(--wb-warning-text);
 }
 
-.wb-rf-gm-action {
-  min-width: 112px;
-  min-height: 30px;
-  white-space: nowrap;
+.wb-rf-gm-task > .wb-rf-btn {
+  min-width: 108px;
 }
 </style>

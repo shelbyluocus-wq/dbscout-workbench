@@ -163,15 +163,34 @@ function sqlValue(value) {
   return /^-?\d+$/.test(String(value)) ? String(value) : `'${String(value).replace(/'/g, "''")}'`;
 }
 
-/** The statements a write would run: one UPDATE per table and target flag. */
+function keyTuple(key, columns) {
+  if (columns.length === 1) return sqlValue(typeof key === "object" ? key[columns[0]] : key);
+  return `(${columns.map((column) => sqlValue(key[column])).join(", ")})`;
+}
+
+/**
+ * The statements a write would run: one UPDATE per table, switch column and
+ * target flag, so groups sharing a table (heroes and mounts in heroprop)
+ * write together. A composite key compares as a row value.
+ */
 export function planStatements(groups) {
+  const merged = new Map();
+  for (const { table, keyColumn, keyColumns, flagColumn, rows } of groups) {
+    const columns = keyColumns ? [...keyColumns] : [keyColumn];
+    const id = [table, columns.join(","), flagColumn].join("\u001f");
+    if (!merged.has(id)) merged.set(id, { table, columns, flagColumn, rows: [] });
+    merged.get(id).rows.push(...rows);
+  }
   const statements = [];
-  for (const { table, keyColumn, flagColumn, rows } of groups) {
+  for (const { table, columns, flagColumn, rows } of merged.values()) {
+    const target = columns.length === 1
+      ? sqlIdentifier(columns[0])
+      : `(${columns.map(sqlIdentifier).join(", ")})`;
     for (const [change, flag] of [[PLAN_CHANGE.OPEN, 1], [PLAN_CHANGE.CLOSE, 0]]) {
-      const keys = rows.filter((row) => row.change === change).map((row) => sqlValue(row.item.key));
+      const keys = rows.filter((row) => row.change === change).map((row) => keyTuple(row.item.key, columns));
       if (!keys.length) continue;
       statements.push(
-        `UPDATE ${sqlIdentifier(table)} SET ${sqlIdentifier(flagColumn)} = ${flag} WHERE ${sqlIdentifier(keyColumn)} IN (${keys.join(", ")});`,
+        `UPDATE ${sqlIdentifier(table)} SET ${sqlIdentifier(flagColumn)} = ${flag} WHERE ${target} IN (${keys.join(", ")});`,
       );
     }
   }

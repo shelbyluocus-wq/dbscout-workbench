@@ -1,8 +1,9 @@
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { language, t } from "../i18n/index.js";
 import {
   RELEASE_PAGES,
   RELEASE_SCOPES,
+  RELEASE_TOOLS,
   RELEASE_TASKS,
   RELEASE_TASK_BY_ID,
   TASK_STATUS,
@@ -15,6 +16,7 @@ import {
   flowProgress,
   idleTaskState,
   invalidateTasks,
+  isReleaseTool,
   localDateIso,
   normalizeTasks,
   pageApplies,
@@ -30,17 +32,20 @@ import {
 import { countPlanChanges, isIsoDate, planChanges, planStatements } from "../utils/releasePlanNotes.js";
 import {
   DEMO_CLIENT_CHANGES,
+  DEMO_CONFIG_TABLES,
   DEMO_DEFAULT_PLATFORM,
   DEMO_DIFF_FILES,
   DEMO_FILE_EXCLUSIONS,
+  DEMO_HOT_UPDATE,
+  DEMO_SERVERS,
   DEMO_SYNC_EXCLUSIONS,
-  DEMO_SYNC_TABLES,
   RELEASE_PLAN_CATEGORIES,
   RELEASE_PLAN_ITEMS,
   createDemoNotes,
   createDemoPlatforms,
   demoDatabaseFlag,
 } from "../utils/releaseFlowDemo.js";
+import { localInputTime, onlinePlayers, serverPhase, suggestedWindow } from "../utils/releaseServer.js";
 import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
 import { cleanExclusionRules, excludingRule } from "../utils/releaseFileRules.js";
 import { cocosBuildCommand } from "../utils/cocosBuildCommand.js";
@@ -88,6 +93,11 @@ function abortableSleep(ms, signal) {
     }
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function everySecond(callback) {
+  const timer = setInterval(callback, 1000);
+  return () => clearInterval(timer);
 }
 
 function plain(value) {
@@ -158,7 +168,7 @@ function restorePerPlatform(saved, platforms, fallback, clean) {
 
 /** A fresh or restored flow. Seeded content is written in the current language. */
 export function createReleaseFlowData({ stored = null, today = localDateIso(), translate = t } = {}) {
-  const platforms = restorePlatforms(stored?.platforms, createDemoPlatforms(translate));
+  const platforms = restorePlatforms(stored?.platforms, createDemoPlatforms());
   const fallbackBrief = createReleaseBrief(DEMO_DEFAULT_PLATFORM, today);
   const brief = restoreBrief(stored?.brief, fallbackBrief);
   if (!platforms.some((platform) => platform.id === brief.platformId)) brief.platformId = platforms[0].id;
@@ -193,13 +203,16 @@ export function createReleaseFlowData({ stored = null, today = localDateIso(), t
         .filter((entry) => Number(entry?.at) && (RELEASE_TASK_BY_ID.has(entry.taskId) || (!entry.taskId && entry.event === "started")))
         .slice(-120)
       : [],
-    page: RELEASE_PAGES.some((entry) => entry.id === stored?.page) ? stored.page : "overview",
+    page: RELEASE_PAGES.some((entry) => entry.id === stored?.page) || isReleaseTool(stored?.page) ? stored.page : "overview",
+    // The step a tool was opened from, so leaving the tool returns there.
+    returnPage: RELEASE_PAGES.some((entry) => entry.id === stored?.returnPage) ? stored.returnPage : "overview",
     planCategory: RELEASE_PLAN_CATEGORIES.some((entry) => entry.id === stored?.planCategory) ? stored.planCategory : "hero",
-    comparePlatforms: stored?.comparePlatforms !== false,
     demo: {
       conflicts: demo.conflicts !== false,
       buildFailure: demo.buildFailure === true,
       speed: Object.hasOwn(RELEASE_SPEEDS, demo.speed) ? demo.speed : "normal",
+      // Demo fast-forward: added to the real clock for the GM server side.
+      clockOffset: Number.isFinite(demo.clockOffset) ? demo.clockOffset : 0,
     },
   };
 }
@@ -221,6 +234,8 @@ export function useReleaseFlow({
   templates = () => [],
   sleep = abortableSleep,
   now = () => new Date(),
+  // Drives the server clock; returns a function that stops it.
+  ticker = everySecond,
 } = {}) {
   const today = localDateIso(now());
   const state = reactive(createReleaseFlowData({ stored: readStoredFlow(storage), today }));
@@ -247,12 +262,12 @@ export function useReleaseFlow({
   const syncExclusions = computed(() => state.syncExclusions[platform.value.id] || []);
   const syncPlan = computed(() => {
     const excluded = new Set(syncExclusions.value);
-    const tables = DEMO_SYNC_TABLES.filter((table) => !excluded.has(table.name));
+    const tables = DEMO_CONFIG_TABLES.filter((table) => !excluded.has(table.name));
     return {
       tables,
-      excluded: DEMO_SYNC_TABLES.filter((table) => excluded.has(table.name)).map((table) => table.name),
+      excluded: DEMO_CONFIG_TABLES.filter((table) => excluded.has(table.name)).map((table) => table.name),
       rows: tables.reduce((sum, table) => sum + table.rows, 0),
-      catalog: DEMO_SYNC_TABLES.map((table) => table.name),
+      catalog: DEMO_CONFIG_TABLES.map((table) => table.name),
     };
   });
 
@@ -332,11 +347,34 @@ export function useReleaseFlow({
     const day = state.brief.date.replace(/-/g, "");
     return {
       activity: `activity_${day}.xlsx`,
-      server: `server_${platform.value.id}_${day}.zip`,
-      client: `client_${platform.value.id}_${platform.value.buildPlatform}_${day}.zip`,
-      clientVersion: `1.8.6.${day.slice(4)}`,
+      server: `gameserver_${day}.zip`,
+      client: `jswz_hotupdate_${DEMO_HOT_UPDATE.next}.zip`,
+      clientVersion: DEMO_HOT_UPDATE.next,
     };
   });
+
+  /* ── Server clock ── */
+  // The GM side keeps time: maintenance starts by itself when its time comes.
+  // The demo can move this clock forward instead of waiting.
+  const clock = ref(now().getTime());
+  const stopClock = ticker(() => (clock.value = now().getTime()));
+  const serverNow = computed(() => clock.value + state.demo.clockOffset);
+  const phase = computed(() => serverPhase(state.tasks));
+  const maintenanceStartAt = computed(() => localInputTime(state.schedule.maintenanceStart));
+  const maintenanceEndAt = computed(() => localInputTime(state.schedule.maintenanceEnd));
+  const openedAt = computed(() => Date.parse(state.tasks["gm.open"].result?.at || "") || 0);
+  // A hot update that follows the end of maintenance opens with the servers
+  // when they reopen early.
+  const clientOpenAt = computed(() => {
+    const planned = localInputTime(state.schedule.clientOpenAt);
+    const early = state.schedule.clientOpenFollowsMaintenance && openedAt.value && openedAt.value < planned;
+    return early ? openedAt.value : planned;
+  });
+  const players = computed(() => onlinePlayers(phase.value, {
+    now: serverNow.value,
+    openedAt: openedAt.value,
+    base: DEMO_SERVERS.online,
+  }));
 
   const cocosCommand = computed(() => cocosBuildCommand({
     editorPath: platform.value.cocosPath,
@@ -348,8 +386,17 @@ export function useReleaseFlow({
 
   /* ── Navigation ── */
   function go(pageId) {
+    if (isReleaseTool(pageId)) {
+      if (!isReleaseTool(state.page)) state.returnPage = state.page;
+      state.page = pageId;
+      return;
+    }
     if (!RELEASE_PAGES.some((entry) => entry.id === pageId)) return;
     state.page = pageId;
+  }
+
+  function returnToFlow() {
+    go(state.returnPage || "overview");
   }
 
   function step(direction) {
@@ -386,6 +433,8 @@ export function useReleaseFlow({
     state.brief.mode = mode;
     if (mode === "hot") state.brief.scope.server = false;
     normalizeTasks(state.tasks, state.brief);
+    // Back to maintenance, a following hot update lines up with its end again.
+    setSchedule({});
     return true;
   }
 
@@ -406,6 +455,7 @@ export function useReleaseFlow({
 
   function start() {
     if (!canStart.value) return false;
+    ensureFutureSchedule();
     state.brief.started = true;
     appendHistory(state.history, { at: now().getTime(), taskId: "", event: "started" });
     step(1);
@@ -417,7 +467,17 @@ export function useReleaseFlow({
     if (busy.value) return false;
     const keep = resetDemoData ? null : snapshotOf(state);
     const fresh = createReleaseFlowData({
-      stored: keep && { ...keep, brief: { platformId: keep.brief.platformId }, tasks: {}, history: [], conflictChoices: {}, page: "overview", schedule: null },
+      stored: keep && {
+        ...keep,
+        brief: { platformId: keep.brief.platformId },
+        tasks: {},
+        history: [],
+        conflictChoices: {},
+        page: "overview",
+        returnPage: "overview",
+        schedule: null,
+        demo: { ...keep.demo, clockOffset: 0 },
+      },
       today: localDateIso(now()),
     });
     Object.assign(state, fresh);
@@ -490,7 +550,10 @@ export function useReleaseFlow({
     if (typeof patch.clientOpenFollowsMaintenance === "boolean") {
       state.schedule.clientOpenFollowsMaintenance = patch.clientOpenFollowsMaintenance;
     }
-    if (state.schedule.clientOpenFollowsMaintenance) state.schedule.clientOpenAt = state.schedule.maintenanceEnd;
+    // Only a maintenance has an end to follow; without downtime the time is the person's.
+    if (state.brief.mode === "maintenance" && state.schedule.clientOpenFollowsMaintenance) {
+      state.schedule.clientOpenAt = state.schedule.maintenanceEnd;
+    }
     const roots = [];
     if (before.maintenanceStart !== state.schedule.maintenanceStart || before.maintenanceEnd !== state.schedule.maintenanceEnd) {
       roots.push("gm.maintenance");
@@ -500,18 +563,82 @@ export function useReleaseFlow({
   }
 
   const scheduleProblem = computed(() => {
-    const { maintenanceStart, maintenanceEnd, clientOpenAt } = state.schedule;
-    if (state.brief.mode === "maintenance" && maintenanceEnd <= maintenanceStart) return "endBeforeStart";
-    if (state.brief.mode === "maintenance" && state.brief.scope.client && clientOpenAt < maintenanceEnd) return "clientBeforeEnd";
+    const { maintenanceStart, maintenanceEnd, clientOpenAt: openAt } = state.schedule;
+    const maintenance = state.brief.mode === "maintenance";
+    if (maintenance && maintenanceEnd <= maintenanceStart) return "endBeforeStart";
+    if (maintenance && state.tasks["gm.maintenance"].status === TASK_STATUS.IDLE && maintenanceStartAt.value <= serverNow.value) {
+      return "startPassed";
+    }
+    if (maintenance && state.brief.scope.client && openAt < maintenanceEnd) return "clientBeforeEnd";
     return "";
   });
 
-  function setPlanCategory(category) {
-    if (RELEASE_PLAN_CATEGORIES.some((entry) => entry.id === category)) state.planCategory = category;
+  /** Move a schedule that already lies in the past to a quarter hour from now. */
+  function ensureFutureSchedule() {
+    if (state.tasks["gm.maintenance"].status !== TASK_STATUS.IDLE) return false;
+    if (maintenanceStartAt.value > serverNow.value) return false;
+    return suggestSchedule();
   }
 
-  function setComparePlatforms(value) {
-    state.comparePlatforms = Boolean(value);
+  function suggestSchedule() {
+    if (busy.value) return false;
+    const { start, end } = suggestedWindow(serverNow.value);
+    setSchedule({ maintenanceStart: start, maintenanceEnd: end });
+    return true;
+  }
+
+  /**
+   * Hand the schedule to the GM: the maintenance window, then (with a client
+   * in the release) when the hot update opens. Both are handed over or
+   * neither, so the hot update never misses its opening time.
+   */
+  const SCHEDULE_TASKS = Object.freeze(["gm.maintenance", "gm.clientOpen"]);
+  const scheduleBlocker = computed(() => SCHEDULE_TASKS.find((id) => applies(id) && blockerOf(id)) || "");
+
+  async function scheduleMaintenance() {
+    const ids = SCHEDULE_TASKS.filter((id) => applies(id) && state.tasks[id].status !== TASK_STATUS.DONE);
+    if (!ids.length || scheduleBlocker.value) return false;
+    if (scheduleProblem.value === "endBeforeStart" || scheduleProblem.value === "startPassed") return false;
+    for (const id of ids) {
+      if (!(await runTask(id))) return false;
+    }
+    return true;
+  }
+
+  /** Before the servers close, a schedule can still be withdrawn. */
+  function cancelSchedule() {
+    if (busy.value || phase.value !== "scheduled") return false;
+    invalidateTasks(state.tasks, ["gm.maintenance", "gm.clientOpen"]);
+    record("gm.maintenance", "cancelled");
+    return true;
+  }
+
+  // A shutdown the GM refused waits for a person to retry it; one cut off by
+  // closing the workspace simply runs again.
+  const shutdownRefused = computed(() => {
+    const shutdown = state.tasks["gm.shutdown"];
+    return shutdown.status === TASK_STATUS.FAILED && shutdown.error !== "interrupted";
+  });
+
+  // The shutdown is the GM's, not a click: it runs once the clock passes the
+  // scheduled start, wherever the person is in the workspace.
+  function maybeAutoShutdown() {
+    if (phase.value !== "scheduled" || shutdownRefused.value || busy.value || !applies("gm.shutdown")) return Promise.resolve(false);
+    if (serverNow.value < maintenanceStartAt.value) return Promise.resolve(false);
+    return runTask("gm.shutdown");
+  }
+
+  /** Demo only: jump the server clock to the start of maintenance. */
+  function fastForward() {
+    if (phase.value !== "scheduled") return Promise.resolve(false);
+    state.demo.clockOffset += Math.max(0, maintenanceStartAt.value - serverNow.value);
+    return maybeAutoShutdown();
+  }
+
+  const stopAutoShutdown = watch([serverNow, phase, busy], () => void maybeAutoShutdown());
+
+  function setPlanCategory(category) {
+    if (RELEASE_PLAN_CATEGORIES.some((entry) => entry.id === category)) state.planCategory = category;
   }
 
   function setDemoOption(key, value) {
@@ -540,11 +667,15 @@ export function useReleaseFlow({
       demo: { ...state.demo },
       attempt: state.attempts[taskId] || 1,
       now,
+      serverNow: () => serverNow.value,
     };
   }
 
   function record(taskId, event) {
-    appendHistory(state.history, { at: now().getTime(), taskId, event });
+    const entry = { at: now().getTime(), taskId, event };
+    // GM steps also keep the server's time, which the demo can fast-forward.
+    if (taskId.startsWith("gm.")) entry.serverAt = serverNow.value;
+    appendHistory(state.history, entry);
   }
 
   function createIo(entry, taskId, signal) {
@@ -660,6 +791,8 @@ export function useReleaseFlow({
 
   function dispose() {
     controller?.abort();
+    stopClock();
+    stopAutoShutdown();
     stopPersisting();
     persistence.flush();
   }
@@ -691,8 +824,19 @@ export function useReleaseFlow({
     cocosCommand,
     gmFiles,
     scheduleProblem,
+    scheduleBlocker,
+    serverNow,
+    serverPhase: phase,
+    shutdownRefused,
+    players,
+    maintenanceStartAt,
+    maintenanceEndAt,
+    openedAt,
+    clientOpenAt,
+    tools: RELEASE_TOOLS,
     noteFor,
     go,
+    returnToFlow,
     step,
     setPlatform,
     setDate,
@@ -710,8 +854,11 @@ export function useReleaseFlow({
     setAllConflictChoices,
     updatePlatform,
     setSchedule,
+    suggestSchedule,
+    scheduleMaintenance,
+    cancelSchedule,
+    fastForward,
     setPlanCategory,
-    setComparePlatforms,
     setDemoOption,
     runTask,
     resolveConflicts,
