@@ -4,6 +4,7 @@
 import { computed, inject } from "vue";
 import { Plus } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { cocosPlatformChoices } from "../utils/cocosBuildCommand.js";
 import { formatDateTime } from "../utils/releaseFlowFormat.js";
 import ReleaseHistoryList from "./ReleaseHistoryList.vue";
 import ReleaseSectionHead from "./ReleaseSectionHead.vue";
@@ -17,6 +18,12 @@ const platformId = computed(() => props.workspace.view.platformId);
 const platform = computed(() => props.workspace.platformById(platformId.value));
 const card = computed(() => props.workspace.cards.value.find((entry) => entry.platformId === platformId.value));
 const entries = computed(() => props.workspace.historyFor(platformId.value));
+const buildPlatformLabel = computed(() => {
+  const current = platform.value;
+  if (!current) return "";
+  const id = current.buildPlatform || "";
+  return cocosPlatformChoices(current.cocosVersion).find((item) => item.value === id)?.label || id;
+});
 
 function openHistory(entryId) {
   props.workspace.ui.historyEntryId = entryId;
@@ -40,7 +47,7 @@ function openHistory(entryId) {
   <dl v-if="platform" class="wb-rf-facts">
     <div class="wb-rf-fact"><dt>{{ t('releaseFlow.platformEditor.targetDatabase') }}</dt><dd class="wb-rf-code">{{ platform.targetDatabase }}</dd></div>
     <div class="wb-rf-fact"><dt>{{ t('releaseFlow.platformEditor.targetClient') }}</dt><dd class="wb-rf-code">{{ platform.targetClient }}</dd></div>
-    <div class="wb-rf-fact"><dt>{{ t('releaseFlow.cocos.version') }}</dt><dd class="wb-rf-code">{{ platform.cocosVersion }} · {{ platform.buildPlatform }}</dd></div>
+    <div class="wb-rf-fact"><dt>{{ t('releaseFlow.cocos.version') }}</dt><dd class="wb-rf-code">{{ platform.cocosVersion }} · {{ buildPlatformLabel }}</dd></div>
   </dl>
 
   <section class="wb-rf-group" aria-labelledby="wb-rf-platform-history">

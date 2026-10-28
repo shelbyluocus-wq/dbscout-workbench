@@ -9,19 +9,59 @@
 
 export const COCOS_EXIT = Object.freeze({ SUCCESS: 36, INVALID_OPTIONS: 32, BUILD_ERROR: 34 });
 
-// Common publish targets per major version; any other platform id Cocos
-// knows can be typed in. Native targets need the platform SDKs set up in
-// the editor's preferences.
-export const COCOS_PLATFORMS = Object.freeze({
+// Publish targets as the editor's Build panel lists them: the label is the
+// name on that page, the value is the platform id the command line expects.
+// Any other id Cocos knows can still be typed in. Native targets need the
+// platform SDKs set up in the editor's preferences.
+const COCOS_PLATFORM_CHOICES = Object.freeze({
   3: Object.freeze([
-    "android", "ios", "windows", "mac", "web-mobile", "web-desktop",
-    "wechatgame", "bytedance-mini-game", "alipay-mini-game", "huawei-quick-game",
-    "oppo-mini-game", "vivo-mini-game", "xiaomi-quick-game",
+    ["web-mobile", "Web Mobile"],
+    ["web-desktop", "Web Desktop"],
+    ["android", "Android"],
+    ["ios", "iOS"],
+    ["mac", "Mac"],
+    ["windows", "Windows"],
+    ["wechatgame", "微信小游戏"],
+    ["alipay-mini-game", "支付宝小游戏"],
+    ["taobao-mini-game", "淘宝小游戏"],
+    ["bytedance-mini-game", "抖音小游戏"],
+    ["xiaomi-quick-game", "小米快游戏"],
+    ["huawei-quick-game", "华为快游戏"],
+    ["oppo-mini-game", "OPPO 小游戏"],
+    ["vivo-mini-game", "vivo 小游戏"],
+    ["honor-mini-game", "荣耀小游戏"],
   ]),
   2: Object.freeze([
-    "android", "ios", "win32", "mac", "web-mobile", "web-desktop",
-    "wechatgame", "baidugame", "alipay", "qgame", "quickgame", "huawei", "fb-instant-games",
+    ["ios", "iOS"],
+    ["mac", "Mac"],
+    ["baidugame", "百度小游戏"],
+    ["baidugame-subcontext", "百度小游戏开放数据域"],
+    ["xiaomi", "小米快游戏"],
+    ["link-sure", "连尚小游戏"],
+    ["qtt", "趣头条小游戏"],
+    ["harmonyos-next", "HarmonyOS Next"],
+    ["taobao-minigame", "淘宝小游戏"],
+    ["web-mobile", "Web Mobile"],
+    ["web-desktop", "Web Desktop"],
+    ["fb-instant-games", "Facebook Instant Games"],
+    ["android", "Android"],
+    ["huawei-agc", "HUAWEI AppGallery Connect"],
+    ["android-instant", "Android Instant"],
+    ["alipay", "支付宝小游戏"],
+    ["bytedance", "字节跳动小游戏"],
+    ["bytedance-subcontext", "字节跳动小游戏开放数据域"],
+    ["huawei", "华为快游戏"],
+    ["quickgame", "OPPO 小游戏"],
+    ["qgame", "vivo 小游戏"],
+    ["honor-minigame", "荣耀小游戏"],
+    ["wechatgame", "微信小游戏"],
+    ["wechatgame-subcontext", "微信小游戏开放数据域"],
+    ["win32", "Windows"],
   ]),
+});
+export const COCOS_PLATFORMS = Object.freeze({
+  3: Object.freeze(COCOS_PLATFORM_CHOICES[3].map(([value]) => value)),
+  2: Object.freeze(COCOS_PLATFORM_CHOICES[2].map(([value]) => value)),
 });
 const NATIVE_PLATFORMS = Object.freeze({
   3: new Set(["android", "ios", "windows", "mac", "ohos", "openharmony"]),
@@ -43,6 +83,44 @@ export function cocosFamily(version) {
 
 export function cocosPlatformsFor(version) {
   return COCOS_PLATFORMS[cocosFamily(version) || 3];
+}
+
+/** { value, label } in the same order as that version's Build panel. */
+export function cocosPlatformChoices(version) {
+  return COCOS_PLATFORM_CHOICES[cocosFamily(version) || 3].map(([value, label]) => ({ value, label }));
+}
+
+/** A typed Build-panel name or a platform id, as the id the command line uses. */
+export function cocosPlatformValue(version, text) {
+  const raw = String(text ?? "").trim();
+  const choice = cocosPlatformChoices(version).find((item) => item.value === raw || item.label.toLowerCase() === raw.toLowerCase());
+  return choice ? choice.value : raw;
+}
+
+function versionRank(version) {
+  return String(version).split(".").map((part) => Number.parseInt(part, 10) || 0);
+}
+
+/** Installed editor versions, oldest first, one entry when several copies match. */
+export function cocosVersionChoices(editors) {
+  const seen = new Set();
+  const versions = [];
+  for (const editor of editors || []) {
+    const version = String(editor?.version || "").trim();
+    if (!version || seen.has(version)) continue;
+    seen.add(version);
+    versions.push(version);
+  }
+  return versions.sort((left, right) => {
+    const a = versionRank(left);
+    const b = versionRank(right);
+    const length = Math.max(a.length, b.length);
+    for (let index = 0; index < length; index += 1) {
+      const diff = (a[index] || 0) - (b[index] || 0);
+      if (diff) return diff;
+    }
+    return 0;
+  });
 }
 
 export function isNativeCocosPlatform(version, platform) {

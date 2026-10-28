@@ -144,8 +144,9 @@ capabilities:
   others (and unreadable notes) are listed to do by hand. The client build
   is real (backend below): the build step and the client build page share
   the settings and checks (project engine from `package.json`
-  `creator.version` or 2.x `project.json`, editors found next to the project
-  or in Cocos Dashboard folders, platform per 2.4 / 3.x, exported build
+  `creator.version` or 2.x `project.json`, editors found next to the project,
+  in Cocos Dashboard folders, or in the Dashboard's installed-editor list,
+  platform per 2.4 / 3.x, exported build
   configuration, output folder, a family mismatch blocks and a version
   mismatch warns), confirm the project, versions, platform and output folder
   (and an overwrite) before starting, stream the editor's output, run the
@@ -678,8 +679,8 @@ The Rust backend is split by concern:
   XML output is read with `roxmltree`; errors read `code: detail`
   (notWorkingCopy, outOfDate, locked, auth, network, conflict, failed).
 - **`cocos_build.rs`** — Cocos Creator command-line builds: project engine
-  version, build configurations, editors next to the project or in Cocos
-  Dashboard folders, one build at a time (`cocos_build_start` /
+  version, build configurations, editors next to the project, in Cocos
+  Dashboard folders, or in the Dashboard's installed-editor list, one build at a time (`cocos_build_start` /
   `cocos_build_cancel`, process tree stopped on cancel) with
   `cocos-build-progress` lines, exit codes per 2.4 / 3.x, the output folder,
   and the project's release guard run with Node.js; plus

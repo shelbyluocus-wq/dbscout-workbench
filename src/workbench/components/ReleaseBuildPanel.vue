@@ -4,10 +4,10 @@
 // version, the editor (found ones offered), the platform, an exported build
 // configuration, the output folder, and what stops or warns about the build
 // before it starts. The command line it will run is shown for reference.
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Check, CircleAlert, Copy, FileJson, FolderOpen, RefreshCw, TriangleAlert } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { cocosBuildCommand, cocosFamily, cocosPlatformsFor, isNativeCocosPlatform } from "../utils/cocosBuildCommand.js";
+import { cocosBuildCommand, cocosFamily, cocosPlatformChoices, cocosPlatformValue, cocosVersionChoices, isNativeCocosPlatform } from "../utils/cocosBuildCommand.js";
 import ReleaseCombobox from "./ReleaseCombobox.vue";
 
 const props = defineProps({
@@ -21,11 +21,19 @@ const options = computed(() => props.tool.options.value);
 const target = computed(() => props.tool.target.value || {});
 const engine = computed(() => props.tool.engineVersion.value);
 const family = computed(() => cocosFamily(engine.value || options.value.version) || 3);
-const platforms = computed(() => cocosPlatformsFor(engine.value || options.value.version));
+const platforms = computed(() => cocosPlatformChoices(engine.value || options.value.version));
+const versions = computed(() => cocosVersionChoices(state.editors));
 const problems = computed(() => props.tool.problems.value);
 const command = computed(() => cocosBuildCommand({ ...options.value, version: engine.value || options.value.version }));
 const output = computed(() => state.output);
-const platformDraft = ref(options.value.platform);
+const platformDraft = ref("");
+const versionDraft = ref("");
+watch(() => options.value.platform, (value) => {
+  platformDraft.value = String(value || "");
+}, { immediate: true });
+watch(() => target.value.cocosVersion, (value) => {
+  versionDraft.value = String(value || "");
+}, { immediate: true });
 const copied = ref(false);
 let copiedTimer = null;
 onBeforeUnmount(() => clearTimeout(copiedTimer));
@@ -49,8 +57,20 @@ function useEditor(editor) {
 }
 
 function setPlatform(value) {
-  platformDraft.value = value;
-  field("buildPlatform", String(value || "").trim());
+  const platform = cocosPlatformValue(engine.value || options.value.version, value ?? platformDraft.value);
+  platformDraft.value = platform;
+  field("buildPlatform", platform);
+}
+
+function setVersion(value) {
+  const version = String(value ?? versionDraft.value ?? "").trim();
+  versionDraft.value = version;
+  const matches = state.editors.filter((item) => item.version === version);
+  const current = String(target.value.cocosPath || "");
+  const kept = matches.find((item) => item.path === current);
+  if (kept) field("cocosVersion", version);
+  else if (matches.length === 1) props.tool.update({ cocosPath: matches[0].path, cocosVersion: matches[0].version || version });
+  else field("cocosVersion", version);
 }
 
 async function copyCommand() {
@@ -129,10 +149,17 @@ function problemText(problem) {
           </button>
         </div>
       </div>
-      <label class="wb-rf-field">
+      <div class="wb-rf-field">
         {{ t('releaseFlow.build.version') }}
-        <input class="wb-rf-code" :value="target.cocosVersion" :disabled="disabled" spellcheck="false" @change="field('cocosVersion', $event.target.value)" />
-      </label>
+        <ReleaseCombobox
+          v-model="versionDraft"
+          :options="versions"
+          :label="t('releaseFlow.build.version')"
+          :disabled="disabled"
+          @pick="setVersion"
+          @focusout="setVersion(versionDraft)"
+        />
+      </div>
       <div class="wb-rf-field">
         {{ t('releaseFlow.build.platform') }}
         <ReleaseCombobox

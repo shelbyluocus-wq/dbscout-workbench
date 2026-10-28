@@ -1,6 +1,7 @@
 //! Cocos Creator command-line builds for the release workspace. It reads a
 //! client project's engine version, finds installed editors (Cocos Dashboard
-//! folders and editor folders next to the project), and runs one build at a
+//! folders, the Dashboard's installed-editor list, and editor folders next to
+//! the project), and runs one build at a
 //! time with live log lines on `cocos-build-progress`, then the project's
 //! release guard (`qa-tests/QAReleaseGuard.mjs`) on the output when asked.
 //! 3.x and 2.4 take different arguments ("Publish from the Command Line");
@@ -66,7 +67,7 @@ pub struct CocosInspectRequest {
 pub struct CocosEditor {
     pub version: String,
     pub path: String,
-    /// "dashboard" (installed by Cocos Dashboard) or "nearby" (next to the project).
+    /// "dashboard" (a Dashboard folder or its installed-editor list) or "nearby".
     pub source: String,
 }
 
@@ -233,6 +234,40 @@ fn version_named(path: &Path) -> String {
     path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// Editors recorded by Cocos Dashboard in `~/.Cocos/profiles/editor.json`.
+/// The engine bundled with the executable wins over the version Dashboard wrote
+/// down, and a record whose file is gone is skipped.
+pub fn editors_from_dashboard_profile(profile: &Path) -> Vec<CocosEditor> {
+    let mut found = Vec::new();
+    let Some(groups) = read_json(profile).and_then(|json| json.get("editor")?.as_object().cloned()) else {
+        return found;
+    };
+    for entries in groups.values() {
+        let Some(list) = entries.as_array() else { continue };
+        for entry in list {
+            let Some(file) = entry.get("file").and_then(Value::as_str).map(str::trim).filter(|file| !file.is_empty()) else {
+                continue;
+            };
+            let path = PathBuf::from(file);
+            if !path.is_file() {
+                continue;
+            }
+            let recorded = entry.get("version").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            let mut version = editor_version(&path);
+            if version.is_empty() {
+                version = recorded;
+            }
+            found.push(CocosEditor { version, path: path.to_string_lossy().into_owned(), source: "dashboard".into() });
+        }
+    }
+    found
+}
+
+fn dashboard_profile_path() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".Cocos").join("profiles").join("editor.json"))
+}
+
 /// Editors in folders that hold one version each (Cocos Dashboard's layout).
 fn versioned_editors(root: &Path, binaries: &[&str], source: &str, found: &mut Vec<CocosEditor>) {
     let Ok(entries) = std::fs::read_dir(root) else { return };
@@ -293,6 +328,9 @@ pub fn find_editors(project: &str) -> Vec<CocosEditor> {
         for root in ["/Applications/Cocos/Creator", "/Applications/CocosCreator/Creator"] {
             versioned_editors(Path::new(root), binaries, "dashboard", &mut found);
         }
+    }
+    if let Some(profile) = dashboard_profile_path() {
+        found.extend(editors_from_dashboard_profile(&profile));
     }
     let mut seen = std::collections::HashSet::new();
     found.retain(|editor| seen.insert(editor.path.to_lowercase()));
@@ -842,6 +880,35 @@ mod tests {
         configured.project_path = project.to_string_lossy().into_owned();
         configured.config_path = project.join("build-config/android.json").to_string_lossy().into_owned();
         assert_eq!(output_dir(&configured), project.join("build").join("android-tw"));
+    }
+
+    #[test]
+    fn the_dashboard_profile_lists_editors_it_installed_elsewhere() {
+        let temp = TempDir::create("cocos-profile");
+        let modern = temp.path().join("creator3.8");
+        std::fs::create_dir_all(modern.join("resources/resources/3d/engine")).unwrap();
+        std::fs::write(modern.join("CocosCreator.exe"), "").unwrap();
+        std::fs::write(modern.join("resources/resources/3d/engine/package.json"), r#"{"version":"3.8.8"}"#).unwrap();
+        let legacy = temp.path().join("creator2");
+        std::fs::create_dir_all(legacy.join("resources/engine")).unwrap();
+        std::fs::write(legacy.join("CocosCreator.exe"), "").unwrap();
+        std::fs::write(legacy.join("resources/engine/package.json"), r#"{"version":"2.4.15"}"#).unwrap();
+        let profile = serde_json::json!({
+            "editor": {
+                "Creator": [{ "version": "2.4.13", "file": legacy.join("CocosCreator.exe"), "state": "success" }],
+                "Creator3D": [{ "version": "3.8.8", "file": modern.join("CocosCreator.exe") }],
+                "persona": [{ "version": "1.0.0", "file": temp.path().join("missing").join("CocosCreator.exe") }]
+            }
+        });
+        let profile_path = temp.path().join("editor.json");
+        std::fs::write(&profile_path, profile.to_string()).unwrap();
+
+        let editors = editors_from_dashboard_profile(&profile_path);
+        let mut versions: Vec<_> = editors.iter().map(|editor| editor.version.as_str()).collect();
+        versions.sort();
+        assert_eq!(versions, vec!["2.4.15", "3.8.8"]);
+        assert!(editors.iter().all(|editor| editor.source == "dashboard"));
+        assert!(editors_from_dashboard_profile(&temp.path().join("absent.json")).is_empty());
     }
 
     #[test]

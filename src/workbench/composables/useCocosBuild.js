@@ -198,11 +198,23 @@ export function useCocosBuildTool({
       state.project = project;
       state.editors = Array.isArray(editors) ? editors : [];
       state.output = output;
+      adoptInstalledEditor(state.editors);
     } catch (error) {
       if (ticket === inspection) state.error = String(error?.message || error);
     } finally {
       if (ticket === inspection) state.inspecting = false;
     }
+  }
+
+  // A saved editor that is not on this machine is replaced when exactly one
+  // installed copy has that version. Several copies stay put so the person picks.
+  function adoptInstalledEditor(editors) {
+    if (state.project?.editorExists !== false) return;
+    const version = options.value.version;
+    const current = options.value.editorPath;
+    const matches = editors.filter((editor) => editor.version === version && editor.path && editor.path !== current);
+    if (matches.length !== 1) return;
+    update({ cocosPath: matches[0].path, cocosVersion: matches[0].version });
   }
 
   // Fresh facts whenever the target or its paths change.

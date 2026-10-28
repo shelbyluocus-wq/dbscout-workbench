@@ -166,3 +166,27 @@ test("the build page builds its target, reports its facts and records the build"
   assert.equal(platform.buildPlatform, "ios");
   tool.dispose();
 });
+
+test("a missing editor is replaced by the single installed copy of that version", async () => {
+  const platform = {
+    id: "tw", name: "TW", targetClient: "D:\\missing\\jswz", cocosPath: "D:\\missing\\CocosCreator.exe", cocosVersion: "3.8.8",
+    buildPlatform: "android", buildConfig: "", buildOutputName: "", buildDebug: false, buildMd5Cache: true, buildQaGuard: true,
+  };
+  const workspace = {
+    state: { build: { targetId: "tw" } },
+    buildTarget: () => platform,
+    updateBuildTarget: (id, patch) => Object.assign(platform, patch),
+    platformById: () => platform,
+  };
+  const backend = fakeBackend({ project: { exists: false, editorExists: false } });
+  backend.findEditors = async () => [
+    { version: "2.4.15", path: "D:\\creator_2.4.3\\CocosCreator.exe", source: "dashboard" },
+    { version: "3.8.8", path: "D:\\client2\\creator3.8\\CocosCreator.exe", source: "dashboard" },
+  ];
+  const tool = useCocosBuildTool({ workspace, backend, now: () => 1 });
+  await settle();
+  await settle();
+  assert.equal(platform.cocosPath, "D:\\client2\\creator3.8\\CocosCreator.exe");
+  assert.equal(platform.cocosVersion, "3.8.8");
+  tool.dispose();
+});

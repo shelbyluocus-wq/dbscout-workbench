@@ -7,7 +7,10 @@ import {
   cocosFamily,
   cocosMajorVersion,
   cocosOutputDir,
+  cocosPlatformChoices,
   cocosPlatformsFor,
+  cocosPlatformValue,
+  cocosVersionChoices,
   defaultCocosEditorPath,
   describeCocosExit,
   isNativeCocosPlatform,
@@ -77,12 +80,38 @@ test("a platform's settings become build options; a relative configuration follo
   assert.deepEqual(cocosBuildCommand(options).args.slice(2), ["--build", `configPath=${options.configPath};outputName=android-tw`]);
 });
 
+test("installed editors become a version list, oldest first", () => {
+  assert.deepEqual(
+    cocosVersionChoices([
+      { version: "3.8.8", path: "D:\\client2\\creator3.8\\CocosCreator.exe" },
+      { version: "2.4.15", path: "D:\\creator_2.4.3\\CocosCreator.exe" },
+      { version: "3.8.8", path: "D:\\other\\CocosCreator.exe" },
+      { version: "  ", path: "D:\\blank\\CocosCreator.exe" },
+    ]),
+    ["2.4.15", "3.8.8"],
+  );
+  assert.deepEqual(cocosVersionChoices(null), []);
+});
+
 test("3.x and 2.4 have their own platforms, native targets and output folders", () => {
   assert.equal(cocosFamily("3.8.8"), 3);
   assert.equal(cocosFamily("2.4.13"), 2);
   assert.equal(cocosFamily("x"), 0);
   assert.ok(cocosPlatformsFor("3.8.8").includes("windows"));
   assert.ok(cocosPlatformsFor("2.4.13").includes("win32"));
+  const creator2 = cocosPlatformChoices("2.4.15");
+  assert.deepEqual(
+    creator2.slice(7, 14).map((item) => item.label),
+    ["HarmonyOS Next", "淘宝小游戏", "Web Mobile", "Web Desktop", "Facebook Instant Games", "Android", "HUAWEI AppGallery Connect"],
+  );
+  assert.equal(creator2.at(-1).label, "Windows");
+  assert.equal(creator2.find((item) => item.label === "微信小游戏").value, "wechatgame");
+  assert.equal(creator2.find((item) => item.label === "OPPO 小游戏").value, "quickgame");
+  assert.equal(creator2.find((item) => item.label === "vivo 小游戏").value, "qgame");
+  assert.equal(creator2.find((item) => item.label === "华为快游戏").value, "huawei");
+  assert.equal(cocosPlatformValue("2.4.15", "Windows"), "win32");
+  assert.equal(cocosPlatformValue("2.4.15", "win32"), "win32");
+  assert.equal(cocosPlatformChoices("3.8.8").find((item) => item.value === "windows").label, "Windows");
   assert.equal(isNativeCocosPlatform("3.8.8", "android"), true);
   assert.equal(isNativeCocosPlatform("2.4.13", "web-mobile"), false);
   assert.equal(cocosOutputDir({ projectPath: "D:\\tw\\jswz", version: "3.8.8", platform: "android" }), "D:\\tw\\jswz\\build\\android");
