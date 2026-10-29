@@ -396,6 +396,27 @@ try {
 
   await dragBetween(
     page,
+    firstInsertRow.locator('td[data-column-index="1"]'),
+    secondInsertRow.locator('td[data-column-index="2"]'),
+  );
+  await waitForCellSelection(page, ["1:1", "1:2", "2:1", "2:2"]);
+  await page.keyboard.type("same_value");
+  await page.keyboard.press("Enter");
+  await waitForValues(firstInsertRow, [1, 2], ["same_value", "same_value"]);
+  await waitForValues(secondInsertRow, [1, 2], ["same_value", "same_value"]);
+  assert.equal(await page.locator("tr.wb-insert-row").count(), 2, "Enter must keep both rows as drafts");
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(firstInsertRow, [1, 2], ["", ""]);
+  await waitForValues(secondInsertRow, [1, 2], ["", ""]);
+  await page.keyboard.press(redoShortcut);
+  await waitForValues(firstInsertRow, [1, 2], ["same_value", "same_value"]);
+  await waitForValues(secondInsertRow, [1, 2], ["same_value", "same_value"]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForValues(firstInsertRow, [1, 2], ["", ""]);
+  await waitForValues(secondInsertRow, [1, 2], ["", ""]);
+
+  await dragBetween(
+    page,
     secondInsertRow.locator('td[data-column-index="2"]'),
     firstInsertRow.locator('td[data-column-index="1"]'),
   );

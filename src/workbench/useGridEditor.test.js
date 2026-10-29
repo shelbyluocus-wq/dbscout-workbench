@@ -870,6 +870,94 @@ test("typing into a multi-cell range saves the value to every selected cell with
   }]);
 });
 
+test("Enter fills a multi-row insert selection without saving rows and supports undo/redo", async () => {
+  const { editor, tab, editState, invokeCalls } = createEditor();
+  const drafts = editor.insertDraftsAbove(tab, 1, 2);
+  const first = { __insertRowId: drafts[0].id };
+  const last = { __insertRowId: drafts[1].id };
+  editor.startRangeSelection(tab, first, "name", 1, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, last, "level", 2, 1);
+  editor.finishRangeSelection();
+  const historyBefore = editState.undoStack.length;
+
+  await editor.handleGridKeydown({ key: "x", preventDefault() {} });
+  editor.updateEditDraft("same value");
+  await editor.handleGridKeydown({ key: "Enter", preventDefault() {} });
+
+  for (const draft of drafts) {
+    assert.deepEqual(editor.getInsertDraft(tab, draft.id), { name: "same value", level: "same value" });
+  }
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(editor.getVisibleInsertRows(tab).length, 2);
+  assert.equal(editState.undoStack.length, historyBefore + 1);
+  const entry = editState.undoStack.at(-1);
+  assert.equal(entry.cellCount, 4);
+  editor.applyInsertDraftHistoryEntry(entry, "undo");
+  for (const draft of drafts) assert.deepEqual(editor.getInsertDraft(tab, draft.id), {});
+  editor.applyInsertDraftHistoryEntry(entry, "redo");
+  for (const draft of drafts) {
+    assert.deepEqual(editor.getInsertDraft(tab, draft.id), { name: "same value", level: "same value" });
+  }
+});
+
+for (const startsOnInsert of [false, true]) {
+  test(`typing fills a mixed saved/draft selection starting on ${startsOnInsert ? "insert" : "saved"} cells`, async () => {
+    const { editor, tab, editState, invokeCalls } = createEditor();
+    const draft = editor.insertDraftAbove(tab, 1);
+    const insert = { __insertRowId: draft.id };
+    const start = startsOnInsert ? insert : tab.rows[0];
+    const end = startsOnInsert ? tab.rows[0] : insert;
+    editor.startRangeSelection(tab, start, "name", startsOnInsert ? 1 : 0, 0, { button: 0, preventDefault() {} });
+    editor.extendRangeSelection(tab, end, "level", startsOnInsert ? 0 : 1, 1);
+    editor.finishRangeSelection();
+    await editor.handleGridKeydown({ key: "x", preventDefault() {} });
+    await editor.finishEditing();
+
+    assert.deepEqual(editor.getInsertDraft(tab, draft.id), { name: "x", level: "x" });
+    assert.equal(tab.rows[0].name, "x");
+    assert.equal(tab.rows[0].level, "x");
+    assert.equal(tab.rows[1].name, "Bob");
+    assert.equal(updatedCellCount(invokeCalls), 2);
+    assert.equal(invokeCalls.some(({ command }) => command === "insert_row"), false);
+    const entry = editState.undoStack.at(-1);
+    assert.equal(entry.kind, "history-composite");
+    assert.ok(entry.entries.some((child) => child.kind === "insert-draft-batch"));
+  });
+}
+
+test("typing into sparse insert cells leaves unselected cells unchanged", async () => {
+  const { editor, tab, invokeCalls } = createEditor();
+  const draft = editor.insertDraftAbove(tab, 1);
+  editor.updateInsertDraft(tab, draft.id, "level", "keep");
+  const row = { __insertRowId: draft.id };
+  editor.startRangeSelection(tab, row, "name", 1, 0, { button: 0, preventDefault() {} });
+  editor.finishRangeSelection();
+  editor.startRangeSelection(tab, row, "guild", 1, 2, { button: 0, ctrlKey: true, preventDefault() {} });
+  editor.finishRangeSelection();
+  await editor.handleGridKeydown({ key: "x", preventDefault() {} });
+  await editor.finishEditing();
+  assert.deepEqual(editor.getInsertDraft(tab, draft.id), { name: "x", level: "keep", guild: "x" });
+  assert.equal(invokeCalls.length, 0);
+});
+
+test("a failed mixed-range edit restores insert drafts and records no edit history", async () => {
+  const { editor, tab, editState } = createEditor({
+    invokeWorkbench() { throw new Error("write failed"); },
+  });
+  const draft = editor.insertDraftAbove(tab, 1);
+  editor.updateInsertDraft(tab, draft.id, "name", "keep");
+  editor.startRangeSelection(tab, tab.rows[0], "name", 0, 0, { button: 0, preventDefault() {} });
+  editor.extendRangeSelection(tab, { __insertRowId: draft.id }, "level", 1, 1);
+  editor.finishRangeSelection();
+  const historyBefore = editState.undoStack.length;
+  await editor.handleGridKeydown({ key: "x", preventDefault() {} });
+  await editor.finishEditing();
+  assert.deepEqual(editor.getInsertDraft(tab, draft.id), { name: "keep" });
+  assert.equal(tab.rows[0].name, "Alice");
+  assert.equal(tab.rows[0].level, "10");
+  assert.equal(editState.undoStack.length, historyBefore);
+});
+
 test("multi-cell save emits only one failure reminder when some cells fail", async () => {
   const { editor, tab, saveFeedback } = createEditor({
     invokeWorkbench(command) {

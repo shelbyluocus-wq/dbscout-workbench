@@ -2366,6 +2366,11 @@ export function useGridEditor(
       // 保存仍走 Ctrl+S / 失焦 / 文本面板提交链路。
       const rowId = insertRowIdFromKey(tab, rowKey);
       if (dirty || draft !== insertDraftValue(tab, rowKey, column)) {
+        if (rangeAtCommit?.tabId === tab.id && isMultiCellRange(rangeAtCommit)) {
+          const result = commitValueToSelectedRange(tab, rangeAtCommit, draft);
+          if (!options.skipRefocus) nextTick(() => focusPrimedEditorNow({ force: true }));
+          return result;
+        }
         const beforeRows = captureInsertDraftState(tab);
         updateInsertDraft(tab, rowId, column, draft);
         recordInsertDraftHistory(tab, beforeRows, { label: "编辑新增行", cellCount: 1 });
@@ -2388,21 +2393,58 @@ export function useGridEditor(
     return commitResult;
   }
 
-  function selectedRangeEdits(tab, range, value) {
-    if (!tab || !range || range.tabId !== tab.id) return [];
+  async function commitValueToSelectedRange(tab, range, value) {
     const edits = [];
-    for (const { entry, column } of selectedGridCells(tab, range)) {
+    const draftEdits = [];
+    for (const { entry, column, columnIndex } of selectedGridCells(tab, range)) {
+      if (entry.type === "insert") {
+        if (rejectInsertRowMutationWhileSaving(tab, entry.insertRow.id)) {
+          return { ok: false, reason: "新增行正在保存" };
+        }
+        draftEdits.push({ row: entry.insertRow, column, columnIndex });
+        continue;
+      }
       if (entry.type !== "data" || !entry.row) continue;
       edits.push({ row: entry.row, column, value });
     }
-    return edits;
-  }
-
-  function commitValueToSelectedRange(tab, range, value) {
-    return commitCellBatch(tab, selectedRangeEdits(tab, range, value), {
+    const batchOptions = {
       successMessage: (count) => `已保存 ${count} 个单元格`,
       failureLabel: "批量保存",
+    };
+    if (!draftEdits.length) return commitCellBatch(tab, edits, batchOptions);
+
+    const beforeRows = captureInsertDraftState(tab);
+    const undoTransaction = createUndoTransaction(editState, {
+      tableName: tabScopeKey(tab), tabId: tab.id, label: "批量编辑单元格",
     });
+    const historyOperation = beginHistoryOperation(editState, tabScopeKey(tab));
+    let afterRows = null;
+    let keepDrafts = false;
+    try {
+      // Fill drafts immediately, but never insert rows on Enter. A mixed range
+      // shares one undo transaction and rolls drafts back if saved-cell writes fail.
+      for (const { row, column, columnIndex } of draftEdits) {
+        applyInsertDraftValue(tab, row, column, value, { updateSelection: false, columnIndex });
+      }
+      refreshInsertDraftPrimaryKeyFeedback(tab);
+      afterRows = captureInsertDraftState(tab);
+      const batch = edits.length
+        ? await commitCellBatch(tab, edits, { ...batchOptions, undoTransaction, historyOperation })
+        : { ok: true, successCount: 0, failureCount: 0, results: [] };
+      if (!batch.results?.some((result) => result && !result.ok)) {
+        keepDrafts = true;
+        recordInsertDraftHistory(tab, beforeRows, {
+          label: "编辑新增行", cellCount: draftEdits.length, undoTransaction, afterRows,
+        });
+      }
+      return batch;
+    } finally {
+      if (!keepDrafts && afterRows) {
+        rollbackInsertDraftPaste(tab, beforeRows, afterRows, undoTransaction.mutationTurn?.id);
+      }
+      commitUndoTransaction(editState, undoTransaction);
+      finishHistoryOperation(editState, historyOperation);
+    }
   }
 
   // 单个新增行草稿格的值替换（查找替换"替换当前"用），带独立历史记录。
