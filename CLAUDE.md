@@ -126,10 +126,15 @@ capabilities:
   and kind, simulated entries marked Demo), open plans, client build, SVN and
   platform settings. An update's brief (date, maintenance or no-downtime,
   and which of database / client / server / activities it contains) decides
-  which steps apply. Then: one database page (overwrite sync with kept
+  which steps apply. The GM steps follow the jswz GM's own flows (source in
+  a separate GM repository; every platform's live servers have their own
+  GM). Then: one database page (overwrite sync into the platform's intranet
+  relay database, never the live one, with kept
   tables chosen from a styled suggestion list; the overwrite backs the
-  platform database up first and its backup offers a confirmed restore that
-  resets the overwrite and what was built on it; then the open plan written
+  relay database up first and its backup offers a confirmed restore that
+  resets the overwrite and what was built on it, while a change already
+  applied on the platform is rolled back there with the previous config
+  version; then the open plan written
   as one UPDATE per table and direction, composite keys as row-value IN,
   rows the person leaves out skipped); SVN update with a choice per
   conflicting file; file sync with gitignore-like exclusion rules
@@ -140,16 +145,33 @@ capabilities:
   with a one-click transfer template whose settings show and can change
   there, new templates made there too (the same store as the transfer
   dialog), log kept open; the diff review on the shared SVN view (below)
-  over a simulated working copy; the Cocos build; GM uploads (activity table,
-  client hot update and server, each set current; activities are reloaded
-  only without downtime); and the last page. With maintenance that page is a
-  live server console: schedule the window together with the hot update's
-  opening (both or neither), wait on a countdown while the GM closes the
-  servers by itself at the start time (an `auto` task: a refused shutdown
-  waits for a retry, one cut off by closing the workspace runs again),
-  compile and restart, then open by hand; a hot update that follows
-  maintenance opens with an early reopening. Without downtime the page only
-  sets the hot update's opening. Open plans are a memo the team keeps (no
+  over a simulated working copy; the Cocos build; GM preparation while the
+  servers run (a config version the company GM packs from the relay
+  database and sends to the platform's GM; the activity table uploaded and
+  scheduled as the next version; the hot update uploaded to the company GM,
+  confirmed and synced, named `ver_<platform>_<version>.zip`; the server
+  version the company GM builds from SVN and syncs; activities are reloaded
+  only without downtime), all of which the pre-maintenance waits for, as
+  the GM's maintenance checklist does; and the last page. With maintenance
+  that page is a live server console: schedule the pre-maintenance together
+  with the hot update's opening (both or neither), wait on a countdown while
+  the monitors close the servers by themselves at the start time (an `auto`
+  task that only watches the zones: one not finished waits for a retry, one
+  cut off by closing the workspace runs again), apply the server version
+  and the config version (confirmed), start the zones still closed to
+  players and check them, then open; a hot update that follows maintenance
+  opens with an early reopening. Without downtime the page applies the
+  config version, has the servers read it again and sets the hot update's
+  opening. One-click mode runs a whole update by itself: the brief's panel
+  holds the times and the rules for what it meets (SVN conflicts, files the
+  sync missed, a conversion that still fails, the diff review, unreadable
+  plan notes, the config apply, a passed maintenance start, opening the
+  servers; retries and their delay), shared by every platform; the run
+  pauses where a rule says stop or a step fails past its retries (build
+  checks, the release guard and failed zone checks always stop; the
+  servers are never opened then), a bar above the page shows what it does,
+  why it paused and its log, cards tag it, and it goes on where it was
+  when the workspace opens again. Open plans are a memo the team keeps (no
   table is read): entries (hero, mount, spirit, battle pet, feature or other;
   name and optional ID) are added, edited and deleted, with every platform's
   free-text note ("10/28 開放", "10/28-11/30 開放", "11/30 關閉", "已開放",
@@ -395,6 +417,9 @@ from UI):
 - `releaseFlowState.js` — One update's pages, tasks (including the
   automatic shutdown and the database restore action), dependencies,
   scope/mode applicability, invalidation and restore of saved tasks
+- `releaseAutopilotState.js` — One-click mode: its rules (choices,
+  defaults, restore), an update's one-click state and log, and the decision
+  of what a run does next
 - `releaseWorkspaceState.js` — Release workspace: platforms, the open-plan
   memo, rules, updates (one per platform), view, card states and issues,
   history entries and their compaction, v2 migration and storage
@@ -437,7 +462,10 @@ from UI):
   `useReleaseFlow.js` (`createRunFlow`) — one update's brief, per-task input,
   logs, results and events, run/cancel/skip through the driver, resets
   after input changes, backup/restore, and its GM clock (injectable `ticker`,
-  per-update demo fast-forward) that starts the shutdown; `useCocosBuild.js`
+  per-update demo fast-forward) that starts the shutdown;
+  `useReleaseAutopilot.js` (`createAutopilot`) — the one-click runner that
+  drives a flow through its own actions, retries, pauses and resumes;
+  `useCocosBuild.js`
   — the real build backend, the build step's driver, `composeDrivers`, the
   build confirmation and the build page's state; `useSvnWorkspace.js` — the
   SVN view's state over a backend or demo source. Helpers in `utils/`:
@@ -582,7 +610,7 @@ lab, `DBSCOUT_RELATION_LAB_SIZE`, default 2000) and
 (`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
 Release workspace regressions: `node --test src/workbench/useReleaseFlow.test.js
 src/workbench/releaseFlowState.test.js src/workbench/releaseWorkspaceState.test.js
-src/workbench/releaseFlowCopy.test.js src/workbench/useCocosBuild.test.js
+src/workbench/releaseAutopilotState.test.js src/workbench/releaseFlowCopy.test.js src/workbench/useCocosBuild.test.js
 src/workbench/useSvnWorkspace.test.js` plus the `utils/release*.test.js` /
 `cocosBuildCommand.test.js` / `unifiedDiff.test.js` units, `cargo test
 --manifest-path src-tauri/Cargo.toml --lib -- cocos_build svn_workspace

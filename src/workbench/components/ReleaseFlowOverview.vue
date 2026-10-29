@@ -1,13 +1,15 @@
 <script setup>
 // First page of an update: the platform it was created for, which day,
 // maintenance or not, and what this release contains. The steps under the
-// platform's card adapt to these answers right away.
+// platform's card adapt to these answers right away. The one-click panel
+// sets the times and the rules a one-click run follows.
 import { computed } from "vue";
 import { Check, Database, Gift, MonitorSmartphone, Server } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { RELEASE_MODES, RELEASE_SCOPES, localDateIso } from "../releaseFlowState.js";
 import { addDays } from "../utils/releasePlanNotes.js";
 import { formatReleaseWeekday } from "../utils/releaseFlowFormat.js";
+import ReleaseAutopilotPanel from "./ReleaseAutopilotPanel.vue";
 import ReleasePageHead from "./ReleasePageHead.vue";
 
 const props = defineProps({
@@ -108,6 +110,8 @@ function scopeDisabled(scope) {
     <input type="checkbox" :checked="state.brief.prepared" :disabled="started || flow.finished.value" @change="flow.setPrepared($event.target.checked)" />
     <span>{{ t('releaseFlow.overview.prepared') }}</span>
   </label>
+
+  <ReleaseAutopilotPanel v-if="workspace && !flow.finished.value" :flow="flow" :workspace="workspace" />
 </template>
 
 <style scoped>

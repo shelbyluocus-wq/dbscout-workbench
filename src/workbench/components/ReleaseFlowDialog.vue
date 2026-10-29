@@ -7,6 +7,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { CalendarCheck2, FolderGit2, History, LayoutDashboard, Package, Rocket, Server, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useReleaseWorkspace } from "../composables/useReleaseWorkspace.js";
 import { composeDrivers, createReleaseBuildDriver } from "../composables/useCocosBuild.js";
@@ -59,7 +60,22 @@ provide("releaseNewUpdate", (platformId = "") => {
 // Confirmations and the new-update dialog are layers above the workspace and
 // take Escape first.
 const busy = computed(() => workspace.anyBusy.value);
-useEscClose(() => true, () => emit("close"), () => busy.value, { dialogRef });
+const { confirm } = useConfirm();
+
+// Updates in one-click mode only go on while the workspace is open; they
+// pick up where they were when it opens again.
+async function requestClose() {
+  const running = workspace.autopilotRuns.value.length;
+  if (running && !(await confirm({
+    title: t("releaseFlow.autopilot.close.title"),
+    message: t("releaseFlow.autopilot.close.message", { count: running }),
+    confirmText: t("releaseFlow.autopilot.close.action"),
+    cancelText: t("releaseFlow.cancel"),
+  }))) return;
+  emit("close");
+}
+
+useEscClose(() => true, () => void requestClose(), () => busy.value, { dialogRef });
 
 const NAV = Object.freeze([
   { id: "home", icon: LayoutDashboard },
@@ -141,7 +157,7 @@ onMounted(() => void nextTick(focusHeading));
             :disabled="busy"
             :title="busy ? t('releaseFlow.closeBusy') : t('releaseFlow.close')"
             :aria-label="t('releaseFlow.close')"
-            @click="emit('close')"
+            @click="requestClose"
           >
             <X :size="17" aria-hidden="true" />
           </button>

@@ -26,6 +26,16 @@ export const DEMO_HOT_UPDATE = Object.freeze({ previous: "1.023", next: "1.024" 
 // Size of the simulated hot-update package the GM step uploads.
 export const DEMO_HOT_UPDATE_BYTES = 187_365_376;
 export const DEMO_SERVERS = Object.freeze({ count: 4, online: 1284 });
+// Version numbers and sizes the simulated GM hands out.
+export const DEMO_GM = Object.freeze({
+  configVersion: 42,
+  configBytes: 12_996_608,
+  activityVersion: 318,
+  serverVersion: 207,
+  serverRevision: 52_418,
+  serverBytes: 50_541_363,
+  checklist: 8,
+});
 
 // heroprop holds heroes, pets, spirits and mounts by ID range; OpenFlag 0 keeps
 // one closed. Features open per platform in buildopenplatprop.IsOpen.

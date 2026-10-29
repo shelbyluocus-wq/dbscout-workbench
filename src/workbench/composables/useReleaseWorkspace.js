@@ -21,6 +21,12 @@ import {
   writeStoredHistory,
   writeStoredWorkspace,
 } from "../releaseWorkspaceState.js";
+import {
+  AUTOPILOT_RETRIES,
+  AUTOPILOT_RETRY_DELAYS,
+  AUTOPILOT_RULE_BY_ID,
+  defaultAutopilotRules,
+} from "../releaseAutopilotState.js";
 import { createDemoHistory, createDemoRuns } from "../utils/releaseWorkspaceDemo.js";
 import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
 import { createCoalescedTask } from "../utils/coalescedTask.js";
@@ -169,6 +175,8 @@ export function useReleaseWorkspace({
     return [...flows.values()];
   });
   const anyBusy = computed(() => flowList.value.some((flow) => flow.busy.value));
+  // Updates in one-click mode only go on while the workspace is open.
+  const autopilotRuns = computed(() => flowList.value.filter((flow) => flow.autopilot.active.value));
 
   const cards = computed(() => workspace.platforms.map((platform) => platformCard(platform, {
     run: runOf(platform.id),
@@ -370,7 +378,26 @@ export function useReleaseWorkspace({
       if (Object.hasOwn(RELEASE_SPEEDS, value)) workspace.demo.speed = value;
       return;
     }
-    if (["conflicts", "buildFailure", "missingFiles"].includes(key)) workspace.demo[key] = Boolean(value);
+    if (["conflicts", "buildFailure", "missingFiles", "gmNetwork", "shutdownSlow"].includes(key)) workspace.demo[key] = Boolean(value);
+  }
+
+  /* ── One-click mode ── */
+  /** Change how one-click mode handles a problem; every platform shares the rules. */
+  function setAutopilotRule(ruleId, value) {
+    const rule = AUTOPILOT_RULE_BY_ID.get(ruleId);
+    if (rule) {
+      if (!rule.choices.includes(value)) return false;
+    } else if (ruleId === "retries") {
+      if (!AUTOPILOT_RETRIES.includes(value)) return false;
+    } else if (ruleId !== "retryDelay" || !AUTOPILOT_RETRY_DELAYS.includes(value)) {
+      return false;
+    }
+    workspace.autopilot[ruleId] = value;
+    return true;
+  }
+
+  function resetAutopilotRules() {
+    Object.assign(workspace.autopilot, defaultAutopilotRules());
   }
 
   /** Back to the demo as first opened: seeded updates, history and memo. */
@@ -437,6 +464,7 @@ export function useReleaseWorkspace({
     currentFlow,
     flows: flowList,
     anyBusy,
+    autopilotRuns,
     clock,
     templates: templateList,
     flowFor,
@@ -460,6 +488,8 @@ export function useReleaseWorkspace({
     historyFor,
     clearDemoHistory,
     setDemoOption,
+    setAutopilotRule,
+    resetAutopilotRules,
     resetDemo,
     setSvnPath,
     setBuildTarget,

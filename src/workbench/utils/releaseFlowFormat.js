@@ -1,5 +1,6 @@
 // Display helpers shared by the release workspace components.
 import { language, t } from "../i18n/index.js";
+import { AUTOPILOT_RULES } from "../releaseAutopilotState.js";
 
 export function formatReleaseDuration(ms, translate = t) {
   const seconds = Math.max(0, Math.round((Number(ms) || 0) / 1000));
@@ -82,25 +83,36 @@ export function formatClockTime(timestamp, locale = language.locale.value) {
 /** What a finished GM operation reported, as one sentence. */
 export function gmResultText(taskId, result = {}, translate = t) {
   const key = `releaseFlow.task.${taskId}.done`;
+  const value = result || {};
   switch (taskId) {
+    case "gm.configPack":
+      return translate(key, { version: value.version, tables: formatReleaseCount(value.tables), size: formatReleaseBytes(value.sizeBytes) });
+    case "gm.configApply":
+      return translate(key, { version: value.version, backup: value.backup });
+    case "gm.configReload":
+    case "gm.serverApply":
+      return translate(key, { count: value.servers ?? value.hosts, version: value.version });
     case "gm.activityUpload":
-    case "gm.serverUpload":
-      return translate(key, { file: result.file, version: result.version });
+    case "gm.serverBuild":
+      return translate(key, { file: value.file, version: value.version, revision: value.revision });
     case "gm.activityCurrent":
-    case "gm.serverCurrent":
-      return translate(key, { version: result.version });
+      return translate(key, { version: value.version, date: value.date ? formatReleaseDate(value.date) : "" });
+    case "gm.serverPush":
+    case "gm.clientPull":
+    case "gm.clientPush":
+      return translate(key, { version: value.version });
     case "gm.activityReload":
-      return translate(key, { count: result.activities });
+      return translate(key, { count: value.activities });
     case "gm.clientUpload":
-      return translate(key, { file: result.file, size: formatReleaseBytes(result.sizeBytes), version: result.version });
+      return translate(key, { file: value.file, size: formatReleaseBytes(value.sizeBytes), version: value.version });
     case "gm.maintenance":
-      return translate(key, { window: formatReleaseRange(result.start, result.end) });
+      return translate(key, { window: formatReleaseRange(value.start, value.end) });
     case "gm.shutdown":
-      return translate(key, { count: formatReleaseCount(result.players), time: formatClockTime(Date.parse(result.at)) });
+      return translate(key, { count: formatReleaseCount(value.players), time: value.at ? formatClockTime(Date.parse(value.at)) : "" });
     case "gm.clientOpen":
-      return translate(key, { version: result.version, at: formatReleaseTime(result.at) });
+      return translate(key, { version: value.version, at: formatReleaseTime(value.at) });
     case "gm.restart":
-      return translate(key, { count: result.servers, version: result.version });
+      return translate(key, { count: value.servers, version: value.version });
     default:
       return translate(key);
   }
@@ -159,9 +171,30 @@ export function issueText(issue, translate = t) {
       return translate("releaseFlow.issue.stale", { count: issue.count });
     case "overdue":
       return translate("releaseFlow.issue.overdue");
+    case "autoPaused":
+      return translate("releaseFlow.issue.autoPaused", { reason: autopilotReasonText(issue.reason, issue.taskId, translate) });
     default:
       return "";
   }
+}
+
+/** Why one-click mode stopped, in a few words. */
+export function autopilotReasonText(reason, taskId = "", translate = t) {
+  const key = `releaseFlow.autopilot.reason.${reason || "stopped"}`;
+  const text = translate(key, { step: taskId ? taskTitle(taskId, translate) : "" });
+  return text === key ? translate("releaseFlow.autopilot.reason.stopped") : text;
+}
+
+/** How one-click mode handles problems, one line per rule (its confirmation and panel). */
+export function autopilotRuleSummary(rules, translate = t) {
+  const lines = AUTOPILOT_RULES.map(({ id, choices }) => translate("releaseFlow.autopilot.summaryLine", {
+    rule: translate(`releaseFlow.autopilot.rule.${id}`),
+    choice: translate(`releaseFlow.autopilot.choice.${id}.${choices.includes(rules?.[id]) ? rules[id] : choices[0]}`),
+  }));
+  lines.unshift(rules?.retries
+    ? translate("releaseFlow.autopilot.retrySummary", { count: rules.retries, seconds: rules.retryDelay })
+    : translate("releaseFlow.autopilot.noRetrySummary"));
+  return lines;
 }
 
 /** Smooth scrolling unless the person asked for reduced motion. */

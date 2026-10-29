@@ -1,9 +1,10 @@
 <script setup>
 // One update on screen: the page of its current step and the footer with the
 // one next action. Steps that are simulated say so in their confirmations;
-// the build step runs Cocos Creator for real.
+// the build step runs Cocos Creator for real. In one-click mode the bar above
+// the page follows the run and the footer only offers to pause it.
 import { computed, inject } from "vue";
-import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-vue-next";
+import { ArrowLeft, ArrowRight, LoaderCircle, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { cocosBuildConfirmOptions, createCocosBackend } from "../composables/useCocosBuild.js";
@@ -19,7 +20,8 @@ import {
   nextTaskOnPage,
 } from "../releaseFlowState.js";
 import { formatCountdown } from "../utils/releaseServer.js";
-import { formatReleaseDate, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
+import { autopilotRuleSummary, formatReleaseCount, formatReleaseDate, formatReleaseRange, formatReleaseTime, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
+import ReleaseAutopilotBar from "./ReleaseAutopilotBar.vue";
 import ReleaseFlowOverview from "./ReleaseFlowOverview.vue";
 import ReleaseDatabasePage from "./ReleaseDatabasePage.vue";
 import ReleaseSvnPage from "./ReleaseSvnPage.vue";
@@ -58,7 +60,7 @@ const PAGE_COMPONENTS = {
 const WIDE_PAGES = new Set(["clientSync", "clientDiff", "build"]);
 // Real operations, so their confirmations carry no demo note.
 const REAL_TASKS = new Set(["build.cocos"]);
-const CONFIRMED_TASKS = new Set(["db.sync", "db.restore", "gm.restart", "gm.open"]);
+const CONFIRMED_TASKS = new Set(["db.sync", "db.restore", "gm.configApply", "gm.restart", "gm.open"]);
 
 const pageComponent = computed(() => PAGE_COMPONENTS[state.page] || ReleaseFlowOverview);
 const pageProps = computed(() => {
@@ -141,7 +143,8 @@ function serverFooter() {
     };
   }
   if (phase === "maintenance" || phase === "readyToOpen") {
-    const taskId = phase === "maintenance" ? "gm.restart" : "gm.open";
+    // Apply what the GM has ready, start the zones, then open them.
+    const taskId = nextTaskOnPage("gmServer", state.tasks, state.brief) || "gm.open";
     const blocker = flow.blockerOf(taskId);
     const failed = state.tasks[taskId].status === TASK_STATUS.FAILED;
     return {
@@ -153,9 +156,22 @@ function serverFooter() {
   return nextStep("gmServer");
 }
 
+const autopilot = props.flow.autopilot;
+const autoActive = computed(() => autopilot.active.value);
+// One-click mode can take over an open update from wherever it is.
+const autoOffered = computed(() => !props.flow.finished.value && !autoActive.value && autopilot.status.value !== "paused"
+  && (state.brief.started || props.flow.canStart.value));
+
 const footer = computed(() => {
   const flow = props.flow;
   const pageId = state.page;
+  if (autoActive.value) {
+    if (flow.runningTask.value) return runningFooter();
+    return {
+      status: t("releaseFlow.autopilot.footer"),
+      primary: { label: t("releaseFlow.autopilot.runningButton"), disabled: true },
+    };
+  }
   if (flow.finished.value) {
     // A finished update shows its result first; a new update starts from there.
     return {
@@ -246,6 +262,15 @@ function confirmOptions(taskId) {
       danger: true,
     };
   }
+  if (taskId === "gm.configApply") {
+    const pack = state.tasks["gm.configPack"].result || {};
+    return {
+      title: t("releaseFlow.confirm.configApply.title", { platform: target.name, version: pack.version || "" }),
+      message: t("releaseFlow.confirm.configApply.message", { platform: target.name, version: pack.version || "", tables: formatReleaseCount(pack.tables) }),
+      confirmText: t("releaseFlow.confirm.configApply.action"),
+      danger: true,
+    };
+  }
   if (taskId === "gm.restart") {
     return {
       title: t("releaseFlow.confirm.restart.title"),
@@ -273,6 +298,8 @@ async function confirmBuild() {
 }
 
 async function runTask(taskId) {
+  // In one-click mode the run decides; pause it to act by hand.
+  if (autoActive.value) return;
   if (CONFIRMED_TASKS.has(taskId) && !(await withConfirm(taskId, confirmOptions(taskId)))) return;
   if (taskId === "build.cocos" && !(await confirmBuild())) return;
   await props.flow.runTask(taskId);
@@ -290,6 +317,7 @@ async function rerunTask(taskId) {
 }
 
 async function skipTask(taskId) {
+  if (autoActive.value) return;
   if (!(await withConfirm(taskId, {
     title: t("releaseFlow.confirm.skip.title", { step: taskTitle(taskId) }),
     message: t(`releaseFlow.task.${taskId}.skipHint`),
@@ -302,6 +330,36 @@ function navigate(target) {
   // Workspace pages (open plans, the build page, …) open beside the update.
   if (!props.flow.go(target)) props.workspace.openSection(target);
 }
+
+/* ── One-click mode ── */
+function autopilotItems() {
+  const items = [];
+  if (state.brief.mode === "maintenance") {
+    items.push(t("releaseFlow.autopilot.confirm.window", { window: formatReleaseRange(state.schedule.maintenanceStart, state.schedule.maintenanceEnd) }));
+  }
+  if (props.flow.applies("gm.clientOpen")) {
+    items.push(t("releaseFlow.autopilot.confirm.clientOpen", { time: formatReleaseTime(state.schedule.clientOpenAt) }));
+  }
+  return [...items, ...autopilotRuleSummary(props.workspace.state.autopilot)];
+}
+
+async function startAutopilot() {
+  if (!autoOffered.value) return;
+  if (!(await withConfirm("", {
+    title: t("releaseFlow.autopilot.confirm.title", { platform: platform.value.name }),
+    message: t(state.brief.started ? "releaseFlow.autopilot.confirm.messageRest" : "releaseFlow.autopilot.confirm.message", {
+      count: progressLeft.value,
+    }),
+    items: autopilotItems(),
+    confirmText: t("releaseFlow.autopilot.confirm.action"),
+  }))) return;
+  autopilot.start();
+}
+
+const progressLeft = computed(() => {
+  const { done, total } = props.flow.progressSummary.value;
+  return Math.max(0, total - done);
+});
 
 function primaryAction() {
   const action = footer.value.primary;
@@ -323,6 +381,7 @@ const previousPage = computed(() => adjacentPage(state.page, state.brief, -1));
     <div class="wb-rf-page" data-release-scroll :data-release-current="state.page">
       <div class="wb-rf-page-inner" :class="{ 'is-wide': WIDE_PAGES.has(state.page) }">
         <p class="wb-rf-eyebrow">{{ eyebrow }}</p>
+        <ReleaseAutopilotBar v-if="autopilot.status.value !== 'off'" :flow="flow" :workspace="workspace" />
         <component
           :is="pageComponent"
           :key="state.page"
@@ -342,6 +401,12 @@ const previousPage = computed(() => adjacentPage(state.page, state.brief, -1));
       </div>
       <div class="wb-rf-footer-actions">
         <button v-if="footer.running" type="button" class="wb-rf-btn is-quiet" @click="flow.cancel()">{{ t('releaseFlow.footer.stop') }}</button>
+        <button v-if="autoActive && !footer.running" type="button" class="wb-rf-btn is-quiet" data-release-auto-pause @click="autopilot.pause()">
+          {{ t('releaseFlow.autopilot.pause') }}
+        </button>
+        <button v-if="autoOffered" type="button" class="wb-rf-btn" data-release-auto-start :disabled="busy" @click="startAutopilot">
+          <Zap :size="14" aria-hidden="true" />{{ t(state.brief.started ? 'releaseFlow.autopilot.startRest' : 'releaseFlow.autopilot.start') }}
+        </button>
         <button v-if="footer.rerun" type="button" class="wb-rf-btn is-quiet" :disabled="busy" @click="rerunTask(footer.rerun)">
           {{ t('releaseFlow.footer.rerun') }}
         </button>

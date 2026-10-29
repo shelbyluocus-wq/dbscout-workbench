@@ -3,7 +3,7 @@
 // it was last updated and when the next update is planned, and the first
 // thing that needs attention. The open update's steps unfold under it.
 import { computed } from "vue";
-import { CircleAlert, TriangleAlert } from "lucide-vue-next";
+import { CircleAlert, TriangleAlert, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatDateTime, issueText } from "../utils/releaseFlowFormat.js";
 
@@ -25,6 +25,7 @@ const moreIssues = computed(() => Math.max(0, props.card.issues.length - 1));
 const label = computed(() => [
   props.card.name,
   t(`releaseFlow.card.status.${props.card.status}`),
+  props.card.autopilot ? t("releaseFlow.card.autopilot") : "",
   showProgress.value ? t("releaseFlow.card.progress", props.card.progress) : "",
   issue.value ? issueText(issue.value) : "",
 ].filter(Boolean).join(" · "));
@@ -35,7 +36,12 @@ const label = computed(() => [
     <button type="button" class="wb-rf-note-head" :aria-current="selected ? 'true' : undefined" :aria-label="label" @click="emit('open', card.platformId)">
       <span class="wb-rf-note-title">
         <strong>{{ card.name }}</strong>
-        <span class="wb-rf-note-state">{{ t(`releaseFlow.card.status.${card.status}`) }}</span>
+        <span class="wb-rf-note-tags">
+          <span v-if="card.autopilot" class="wb-rf-note-auto" :title="t('releaseFlow.card.autopilot')">
+            <Zap :size="11" aria-hidden="true" />{{ t('releaseFlow.card.autopilotShort') }}
+          </span>
+          <span class="wb-rf-note-state">{{ t(`releaseFlow.card.status.${card.status}`) }}</span>
+        </span>
       </span>
       <span v-if="showProgress" class="wb-rf-note-progress">
         <span class="wb-rf-progress" aria-hidden="true"><span :style="progressStyle" /></span>

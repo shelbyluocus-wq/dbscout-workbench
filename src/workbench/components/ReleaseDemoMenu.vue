@@ -103,6 +103,14 @@ async function reset() {
         <input type="checkbox" :checked="demo.buildFailure" @change="workspace.setDemoOption('buildFailure', $event.target.checked)" />
         {{ t('releaseFlow.demo.buildFailure') }}
       </label>
+      <label>
+        <input type="checkbox" :checked="demo.gmNetwork" @change="workspace.setDemoOption('gmNetwork', $event.target.checked)" />
+        {{ t('releaseFlow.demo.gmNetwork') }}
+      </label>
+      <label>
+        <input type="checkbox" :checked="demo.shutdownSlow" @change="workspace.setDemoOption('shutdownSlow', $event.target.checked)" />
+        {{ t('releaseFlow.demo.shutdownSlow') }}
+      </label>
       <div class="wb-rf-menu-row">
         <span>{{ t('releaseFlow.demo.speed') }}</span>
         <div class="wb-rf-segmented" role="radiogroup" :aria-label="t('releaseFlow.demo.speed')">

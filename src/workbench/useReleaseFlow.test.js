@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { useReleaseWorkspace } from "./composables/useReleaseWorkspace.js";
-import { RELEASE_FLOW_SCHEMA, RELEASE_FLOW_STORAGE_KEY } from "./releaseFlowState.js";
+import { RELEASE_FLOW_SCHEMA, RELEASE_FLOW_STORAGE_KEY, missingDependencies } from "./releaseFlowState.js";
 import { RELEASE_HISTORY_STORAGE_KEY, RELEASE_WORKSPACE_SCHEMA, RELEASE_WORKSPACE_STORAGE_KEY } from "./releaseWorkspaceState.js";
 import { createReleaseDemoDriver } from "./utils/releaseFlowDemoDriver.js";
 
@@ -73,7 +73,11 @@ async function runAll(flow, ids) {
 const SERVER_ONLY = { database: false, client: false, server: true, activity: false };
 const ACTIVITY_ONLY = { database: false, client: false, server: false, activity: true };
 const CLIENT_TASKS = ["client.sync", "client.transfer", "client.diff", "build.cocos"];
-const UPLOADS = ["gm.activityUpload", "gm.activityCurrent", "gm.clientUpload", "gm.serverUpload", "gm.serverCurrent"];
+const UPLOADS = [
+  "gm.configPack", "gm.activityUpload", "gm.activityCurrent",
+  "gm.clientUpload", "gm.clientPull", "gm.clientPush", "gm.serverBuild", "gm.serverPush",
+];
+const SERVER_PREP = ["gm.serverBuild", "gm.serverPush"];
 
 function startWith(flow, scope) {
   for (const [name, enabled] of Object.entries(scope)) flow.setScope(name, enabled);
@@ -135,8 +139,11 @@ test("a maintenance update runs from the brief to the reopened servers and lands
   await runAll(flow, [...CLIENT_TASKS, ...UPLOADS]);
   const build = flow.state.tasks["build.cocos"].result;
   assert.deepEqual([build.exitCode, build.hotUpdate, build.qaFindings], [36, "1.024", 0]);
-  assert.equal(flow.state.tasks["gm.clientUpload"].result.file, "jswz_hotupdate_1.024.zip");
-  assert.equal(flow.state.tasks["gm.activityUpload"].result.file, "activity_20261024.xlsx");
+  // Files are named the way the GM expects them.
+  assert.equal(flow.state.tasks["gm.clientUpload"].result.file, "ver_tw_1.024.zip");
+  assert.equal(flow.state.tasks["gm.activityUpload"].result.file, "tw_activity_20261024.xlsx");
+  assert.equal(flow.state.tasks["gm.serverBuild"].result.file, "servver_tw_207.zip");
+  assert.equal(flow.state.tasks["gm.configPack"].result.source, "newsg_tw_cfg", "the GM packs the relay database this update wrote");
 
   // The GM keeps the time: the servers close by themselves at 10:00.
   assert.equal(flow.serverPhase.value, "running");
@@ -153,13 +160,17 @@ test("a maintenance update runs from the brief to the reopened servers and lands
   const closed = flow.state.events.find((entry) => entry.taskId === "gm.shutdown" && entry.event === "done");
   assert.equal(closed.serverAt, new Date(2026, 9, 24, 10, 0).getTime());
 
+  // During the downtime only what the GM has ready is applied.
+  assert.equal(flow.blockerOf("gm.restart"), "dependency");
+  await runAll(flow, ["gm.serverApply", "gm.configApply"]);
+  assert.equal(flow.serverPhase.value, "maintenance");
   await runAll(flow, ["gm.restart"]);
   assert.equal(flow.serverPhase.value, "readyToOpen");
   await runAll(flow, ["gm.open"]);
   assert.equal(flow.serverPhase.value, "restored");
   assert.equal(flow.clientOpenAt.value, new Date(2026, 9, 24, 10, 0).getTime(), "the hot update opens with the early reopening");
   assert.equal(flow.complete.value, true);
-  assert.deepEqual(flow.progressSummary.value, { done: 17, total: 17 });
+  assert.deepEqual(flow.progressSummary.value, { done: 22, total: 22 });
 
   // A finished update is kept in the history once and becomes read-only.
   assert.equal(flow.finished.value, true);
@@ -168,7 +179,7 @@ test("a maintenance update runs from the brief to the reopened servers and lands
   const [record] = workspace.history.value;
   assert.deepEqual(
     [record.kind, record.platformId, record.outcome, record.demo, record.stats.done, record.stats.total],
-    ["release", "tw", "done", true, 17, 17],
+    ["release", "tw", "done", true, 22, 22],
   );
   assert.equal(record.steps.find((step) => step.taskId === "db.sync").result.backup.database, "newsg_tw_cfg");
   assert.equal(workspace.cards.value.find((card) => card.platformId === "tw").status, "done");
@@ -190,6 +201,8 @@ test("updates of different platforms keep their own progress and their own clock
   assert.equal(workspace.view.runId, douyin.id, "a new update opens on screen");
   startWith(tw, SERVER_ONLY);
   startWith(douyin, SERVER_ONLY);
+  await runAll(tw, SERVER_PREP);
+  await runAll(douyin, SERVER_PREP);
   douyin.setSchedule({ maintenanceStart: "2026-10-24T11:00", maintenanceEnd: "2026-10-24T12:00" });
   await tw.scheduleMaintenance();
   await douyin.scheduleMaintenance();
@@ -206,7 +219,7 @@ test("updates of different platforms keep their own progress and their own clock
   assert.equal(tw.state.clockOffset, 0);
 
   const cards = Object.fromEntries(workspace.cards.value.map((card) => [card.platformId, card]));
-  assert.deepEqual([cards.tw.status, cards.tw.progress.done, cards.tw.progress.total], ["active", 2, 6]);
+  assert.deepEqual([cards.tw.status, cards.tw.progress.done, cards.tw.progress.total], ["active", 4, 7]);
   assert.equal(cards.douyin.runId, douyin.id);
   assert.equal(cards.wanxin.status, "idle");
   assert.equal(workspace.openPlatform("tw"), true);
@@ -226,7 +239,7 @@ test("a platform keeps one open update: a new one continues it, or replaces it o
 
   const second = newUpdate(workspace, "tap");
   startWith(second, SERVER_ONLY);
-  await runAll(second, ["gm.serverUpload"]);
+  await runAll(second, ["gm.serverBuild"]);
   assert.equal(workspace.abandonUpdate(second.id), true);
   const [abandoned] = workspace.history.value;
   assert.deepEqual([abandoned.outcome, abandoned.platformId, abandoned.stats.done], ["abandoned", "tap", 1]);
@@ -320,7 +333,7 @@ test("an overwrite backs up first; a restore returns to that backup and resets t
   assert.equal(flow.state.tasks["db.plans"].status, "idle");
   assert.equal(flow.backup.value, null);
   assert.equal(flow.blockerOf("db.restore"), "noBackup", "a restore is offered once per backup");
-  assert.deepEqual(flow.progressSummary.value, { done: 0, total: 17 });
+  assert.deepEqual(flow.progressSummary.value, { done: 0, total: 22 });
   await runAll(flow, ["db.sync"]);
   assert.equal(flow.state.tasks["db.restore"].status, "idle", "a new overwrite makes a new backup");
 });
@@ -396,6 +409,7 @@ test("a refused shutdown waits for a retry; an interrupted one runs again", asyn
   const workspace = createWorkspace(t, { clock, driver });
   const flow = newUpdate(workspace);
   startWith(flow, SERVER_ONLY);
+  await runAll(flow, SERVER_PREP);
   await flow.scheduleMaintenance();
   await clock.advance(30 * 60000);
   assert.equal(flow.state.tasks["gm.shutdown"].status, "failed");
@@ -414,7 +428,12 @@ test("a refused shutdown waits for a retry; an interrupted one runs again", asyn
         platformId: "tw",
         createdAt: START.getTime(),
         brief: { date: "2026-10-24", mode: "maintenance", scope: SERVER_ONLY, prepared: true, started: true },
-        tasks: { "gm.maintenance": { status: "done", result: {} }, "gm.shutdown": { status: "running" } },
+        tasks: {
+          "gm.serverBuild": { status: "done", result: {} },
+          "gm.serverPush": { status: "done", result: {} },
+          "gm.maintenance": { status: "done", result: {} },
+          "gm.shutdown": { status: "running" },
+        },
       }],
       view: { section: "run", runId: "run-saved" },
     }),
@@ -431,9 +450,11 @@ test("a refused shutdown waits for a retry; an interrupted one runs again", asyn
 test("the maintenance window and the hot update's opening are scheduled together", async (t) => {
   const workspace = createWorkspace(t);
   const flow = newUpdate(workspace);
-  flow.setPrepared(true);
-  flow.start();
-  assert.equal(flow.scheduleBlocker.value, "gm.clientOpen");
+  startWith(flow, { database: false, client: true, server: true, activity: false });
+  await runAll(flow, SERVER_PREP);
+  // The GM takes the pre-maintenance once everything is prepared, the hot update too.
+  assert.equal(flow.scheduleBlocker.value, "gm.maintenance");
+  assert.deepEqual(missingDependencies("gm.maintenance", flow.state.tasks, flow.state.brief), ["gm.clientPush"]);
   assert.equal(await flow.scheduleMaintenance(), false, "the hot update needs its package first");
   assert.equal(flow.state.tasks["gm.maintenance"].status, "idle", "nothing is half scheduled");
   flow.setScope("client", false);
@@ -446,6 +467,7 @@ test("a schedule can be withdrawn before the servers close, and the demo can ski
   const workspace = createWorkspace(t);
   const flow = newUpdate(workspace);
   startWith(flow, SERVER_ONLY);
+  await runAll(flow, SERVER_PREP);
   await flow.scheduleMaintenance();
   assert.equal(flow.cancelSchedule(), true);
   assert.equal(flow.serverPhase.value, "running");
@@ -458,7 +480,7 @@ test("a schedule can be withdrawn before the servers close, and the demo can ski
   assert.equal(flow.state.clockOffset, 30 * 60000);
   assert.equal(flow.cancelSchedule(), false, "closed servers cannot be unscheduled");
   // The next update of the platform starts on the real clock again.
-  await runAll(flow, ["gm.serverUpload", "gm.serverCurrent", "gm.restart", "gm.open"]);
+  await runAll(flow, ["gm.serverApply", "gm.restart", "gm.open"]);
   assert.equal(flow.finished.value, true);
   const next = newUpdate(workspace, "tw");
   assert.equal(next.state.clockOffset, 0);
@@ -604,12 +626,12 @@ test("without downtime the hot update opens when the person says", (t) => {
 test("changing the date shifts the schedule and resets date-bound work", async (t) => {
   const workspace = createWorkspace(t);
   const flow = newUpdate(workspace);
-  flow.setPrepared(true);
-  flow.start();
-  await runAll(flow, ["db.sync", "db.plans", "gm.maintenance"]);
+  startWith(flow, { database: true, client: false, server: false, activity: false });
+  await runAll(flow, ["db.sync", "db.plans", "gm.configPack", "gm.maintenance"]);
   assert.equal(flow.setDate("2026-10-31"), true);
   assert.equal(flow.state.schedule.maintenanceStart, "2026-10-31T10:00");
   assert.equal(flow.state.tasks["db.plans"].status, "idle");
+  assert.equal(flow.state.tasks["gm.configPack"].status, "idle", "the packed version holds the old plan");
   assert.equal(flow.state.tasks["gm.maintenance"].status, "idle");
   assert.equal(flow.state.tasks["db.sync"].status, "done");
   flow.setSchedule({ maintenanceEnd: "2026-10-31T13:00" });
@@ -624,7 +646,7 @@ test("a v2 draft becomes an update of its platform and its notes seed the memo",
     [RELEASE_FLOW_STORAGE_KEY]: JSON.stringify({
       schema: RELEASE_FLOW_SCHEMA,
       brief: { platformId: "douyin", date: "2026-10-23", mode: "maintenance", scope: SERVER_ONLY, prepared: true, started: true },
-      tasks: { "gm.serverUpload": { status: "done", result: { file: "x.zip", version: 207 } } },
+      tasks: { "gm.serverBuild": { status: "done", result: { file: "x.zip", version: 207 } } },
       notes: { "hero-1062": { douyin: "11/1 開放" } },
       page: "overview",
       history: [{ at: START.getTime() - 3600000, taskId: "", event: "started" }],
@@ -635,7 +657,7 @@ test("a v2 draft becomes an update of its platform and its notes seed the memo",
   const run = workspace.runOf("douyin");
   assert.equal(run.brief.date, "2026-10-23", "a started update keeps its day");
   assert.equal(run.page, "brief");
-  assert.equal(run.tasks["gm.serverUpload"].status, "done");
+  assert.equal(run.tasks["gm.serverBuild"].status, "done");
   assert.equal(run.clockOffset, 5000);
   assert.deepEqual([workspace.view.section, workspace.view.runId], ["run", run.id]);
   assert.equal(workspace.state.plans.items.find((entry) => entry.id === "hero-1062").notes.douyin, "11/1 開放");
@@ -663,4 +685,172 @@ test("an unstarted draft follows the calendar; a started update keeps its day", 
   assert.equal(draft.schedule.maintenanceStart, "2026-10-24T10:00");
   const started = createWorkspace(t, { storage: stored(true) }).runOf("douyin");
   assert.equal(started.brief.date, "2026-10-20");
+});
+
+/* ── One-click mode ── */
+
+// One-click mode moves on through promises; wait until it rests.
+async function until(predicate, what) {
+  for (let round = 0; round < 400; round += 1) {
+    if (predicate()) return;
+    await settle();
+  }
+  throw new Error(`never: ${what}`);
+}
+
+const waitingForMaintenance = (flow) => () => flow.autopilot.next.value.reason === "maintenance";
+
+test("one-click mode runs a whole maintenance update by its rules, waiting for the GM's shutdown", async (t) => {
+  const storage = memoryStorage();
+  const clock = manualClock();
+  const workspace = createWorkspace(t, { storage, clock });
+  assert.equal(workspace.setAutopilotRule("svnConflicts", "theirs"), true);
+  assert.equal(workspace.setAutopilotRule("svnConflicts", "maybe"), false);
+  const flow = newUpdate(workspace);
+  assert.equal(flow.autopilot.start(), false, "the files must be confirmed first");
+  flow.setPrepared(true);
+  assert.equal(flow.autopilot.start(), true);
+  assert.equal(workspace.cards.value.find((card) => card.platformId === "tw").autopilot, true);
+
+  // Everything the GM can prepare is done, then the run waits for maintenance.
+  await until(() => flow.autopilot.next.value.reason === "maintenance", "waiting for maintenance");
+  assert.equal(flow.state.brief.started, true);
+  assert.equal(flow.state.tasks["client.svn"].status, "done");
+  assert.deepEqual(flow.state.tasks["client.svn"].result.choices, ["theirs", "theirs"]);
+  for (const id of UPLOADS) assert.equal(flow.state.tasks[id].status, "done", id);
+  assert.equal(flow.serverPhase.value, "scheduled");
+  assert.equal(flow.state.page, "gmServer", "the run shows the step it is on");
+  assert.ok(flow.state.autopilot.log.some((entry) => entry.kind === "resolved"));
+
+  // 10:00 on the GM clock: the servers close, and the run goes on to the end.
+  await clock.advance(30 * 60000);
+  await until(() => flow.state.autopilot.status === "done", "the run finishes");
+  assert.equal(flow.finished.value, true);
+  assert.equal(flow.serverPhase.value, "restored");
+  assert.deepEqual(flow.progressSummary.value, { done: 22, total: 22 });
+  assert.equal(workspace.history.value[0].outcome, "done");
+  assert.equal(workspace.cards.value.find((card) => card.platformId === "tw").autopilot, false);
+});
+
+test("one-click mode pauses where a rule says so and goes on once the person lets it", async (t) => {
+  const workspace = createWorkspace(t);
+  workspace.setAutopilotRule("diffReview", "stop");
+  const flow = newUpdate(workspace);
+  startWith(flow, { database: false, client: true, server: false, activity: false });
+  flow.autopilot.start();
+  // SVN conflicts stop by default.
+  await until(() => flow.autopilot.status.value === "paused", "paused at the conflicts");
+  assert.deepEqual([flow.state.autopilot.reason, flow.state.autopilot.taskId], ["conflicts", "client.svn"]);
+  const card = workspace.cards.value.find((entry) => entry.platformId === "tw");
+  assert.deepEqual([card.status, card.issues[0].kind], ["attention", "autoPaused"]);
+  // The person settles the conflicts by hand and lets the run go on.
+  flow.setAllConflictChoices("mine");
+  assert.equal(await flow.resolveConflicts(), true);
+  assert.equal(flow.autopilot.resume(), true);
+  await until(() => flow.autopilot.status.value === "paused", "paused before the review");
+  assert.deepEqual([flow.state.autopilot.reason, flow.state.autopilot.taskId], ["review", "client.diff"]);
+  assert.equal(flow.state.tasks["client.diff"].status, "idle", "nothing is reviewed without the person");
+  flow.autopilot.resume();
+  await until(() => flow.state.tasks["build.cocos"].status === "done", "past the review");
+  // The hot update is prepared in the GM, then the run waits for the maintenance it scheduled.
+  await until(waitingForMaintenance(flow), "waiting for maintenance");
+  assert.deepEqual([flow.autopilot.status.value, flow.state.tasks["gm.clientOpen"].status], ["running", "done"]);
+});
+
+test("a failing step is retried by the rules, then waits for the person", async (t) => {
+  const demo = createReleaseDemoDriver();
+  let failures = 2;
+  const driver = {
+    run(taskId, context, io) {
+      if (taskId === "gm.serverBuild" && failures > 0) {
+        failures -= 1;
+        return Promise.reject(Object.assign(new Error("svn"), { code: "failed" }));
+      }
+      return demo.run(taskId, context, io);
+    },
+  };
+  const delays = [];
+  const sleep = (ms, signal) => {
+    delays.push(ms);
+    return immediate(ms, signal);
+  };
+  const workspace = createWorkspace(t, { driver, sleep });
+  workspace.setAutopilotRule("retries", 1);
+  workspace.setAutopilotRule("retryDelay", 60);
+  const flow = newUpdate(workspace);
+  startWith(flow, SERVER_ONLY);
+  flow.autopilot.start();
+  await until(() => flow.autopilot.status.value === "paused", "paused after the retry");
+  assert.deepEqual([flow.state.autopilot.reason, flow.state.autopilot.taskId], ["failed", "gm.serverBuild"]);
+  assert.equal(failures, 0, "one try and one retry");
+  assert.ok(delays.includes(60000), "the retry waits as long as the rules say");
+  assert.equal(workspace.cards.value.find((card) => card.platformId === "tw").issues[0].kind, "autoPaused");
+  // Continuing gives the step its retries again.
+  flow.autopilot.resume();
+  await until(() => flow.state.tasks["gm.serverBuild"].status === "done", "the build succeeds");
+  assert.ok(flow.state.autopilot.log.filter((entry) => entry.kind === "retry").length >= 1);
+});
+
+test("the demo's dropped upload is retried by itself", async (t) => {
+  const workspace = createWorkspace(t);
+  workspace.setDemoOption("gmNetwork", true);
+  workspace.setAutopilotRule("svnConflicts", "theirs");
+  const flow = newUpdate(workspace);
+  startWith(flow, { database: false, client: true, server: false, activity: false });
+  flow.autopilot.start();
+  await until(() => flow.state.tasks["gm.clientPush"].status === "done", "the hot update is synced");
+  assert.ok(flow.state.tasks["gm.clientUpload"].logs.length > 0);
+  assert.deepEqual(flow.state.autopilot.log.filter((entry) => entry.kind === "retry").map((entry) => entry.taskId), ["gm.clientUpload"]);
+});
+
+test("a maintenance start that passed stops one-click mode, or moves on when the rules allow it", async (t) => {
+  const clock = manualClock(new Date(2026, 9, 24, 10, 32));
+  const workspace = createWorkspace(t, { clock });
+  const flow = newUpdate(workspace);
+  startWith(flow, SERVER_ONLY);
+  flow.setSchedule({ maintenanceStart: "2026-10-24T10:30" });
+  flow.autopilot.start();
+  await until(() => flow.autopilot.status.value === "paused", "paused at the late start");
+  assert.equal(flow.state.autopilot.reason, "lateStart");
+  assert.equal(flow.state.tasks["gm.maintenance"].status, "idle");
+  workspace.setAutopilotRule("lateStart", "postpone");
+  flow.autopilot.resume();
+  await until(waitingForMaintenance(flow), "scheduled");
+  assert.equal(flow.serverPhase.value, "scheduled");
+  assert.equal(flow.state.schedule.maintenanceStart, "2026-10-24T10:50");
+  assert.ok(flow.state.autopilot.log.some((entry) => entry.kind === "postponed"));
+});
+
+test("pausing, stopping and leaving one-click mode hand the update back to the person", async (t) => {
+  const workspace = createWorkspace(t);
+  const flow = newUpdate(workspace);
+  startWith(flow, SERVER_ONLY);
+  flow.autopilot.start();
+  await until(waitingForMaintenance(flow), "waiting for maintenance");
+  // Stopping a step (here: while nothing runs) pauses the run instead of restarting it.
+  flow.cancel();
+  assert.deepEqual([flow.autopilot.status.value, flow.state.autopilot.reason], ["paused", "stopped"]);
+  assert.equal(flow.autopilot.stop(), true);
+  assert.equal(flow.autopilot.status.value, "off");
+  assert.equal(flow.autopilot.resume(), false);
+  assert.equal(workspace.autopilotRuns.value.length, 0);
+});
+
+test("one-click mode goes on where it was when the workspace opens again", async (t) => {
+  const storage = memoryStorage();
+  const clock = manualClock();
+  const first = createWorkspace(t, { storage, clock });
+  const flow = newUpdate(first);
+  startWith(flow, SERVER_ONLY);
+  flow.autopilot.start();
+  await until(() => flow.autopilot.next.value.reason === "maintenance", "waiting for maintenance");
+  assert.equal(first.autopilotRuns.value.length, 1);
+  first.dispose();
+
+  const reopened = createWorkspace(t, { storage, clock });
+  const again = reopened.flowFor(flow.id);
+  assert.equal(again.autopilot.status.value, "running");
+  await clock.advance(30 * 60000);
+  await until(() => again.autopilot.status.value === "done", "finished after reopening");
+  assert.equal(again.finished.value, true);
 });

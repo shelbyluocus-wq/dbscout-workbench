@@ -1,9 +1,10 @@
 <script setup>
-// Phase 4, uploads: the activity table, the client hot update and the
-// server, each made current separately. Without downtime the activities are
-// reloaded here instead of at the restart.
+// Phase 4, preparing in the GM while the servers still run: the config
+// version packed from the relay database, the activity table, the client hot
+// update (uploaded, confirmed, synced) and the server version the company GM
+// builds and syncs. Without downtime the activities are reloaded here.
 import { computed } from "vue";
-import { Gift, MonitorSmartphone, Server } from "lucide-vue-next";
+import { Database, Gift, MonitorSmartphone, Server } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatReleaseBytes } from "../utils/releaseFlowFormat.js";
 import ReleaseGmTaskList from "./ReleaseGmTaskList.vue";
@@ -19,9 +20,10 @@ const state = props.flow.state;
 const hot = computed(() => state.brief.mode === "hot");
 
 const groups = computed(() => [
+  { id: "config", icon: Database, tasks: ["gm.configPack"] },
   { id: "activity", icon: Gift, tasks: ["gm.activityUpload", "gm.activityCurrent", "gm.activityReload"] },
-  { id: "client", icon: MonitorSmartphone, tasks: ["gm.clientUpload"] },
-  { id: "server", icon: Server, tasks: ["gm.serverUpload", "gm.serverCurrent"] },
+  { id: "client", icon: MonitorSmartphone, tasks: ["gm.clientUpload", "gm.clientPull", "gm.clientPush"] },
+  { id: "server", icon: Server, tasks: ["gm.serverBuild", "gm.serverPush"] },
 ]
   .map((group) => ({ ...group, tasks: group.tasks.filter((id) => props.flow.applies(id)) }))
   .filter((group) => group.tasks.length));
@@ -30,9 +32,11 @@ const groups = computed(() => [
 const details = computed(() => {
   const files = props.flow.gmFiles.value;
   const build = state.tasks["build.cocos"].result;
+  const platform = props.flow.platform.value;
   return {
+    "gm.configPack": t("releaseFlow.gm.packRoute", { database: platform.targetDatabase, platform: platform.name }),
     "gm.activityUpload": files.activity,
-    "gm.serverUpload": files.server,
+    "gm.serverBuild": files.server,
     "gm.clientUpload": build?.sizeBytes ? `${files.client} · ${formatReleaseBytes(build.sizeBytes)}` : files.client,
   };
 });

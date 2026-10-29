@@ -26,6 +26,7 @@ import {
   DEMO_CLIENT_CHANGES,
   DEMO_CONFIG_TABLES,
   DEMO_DIFF_FILES,
+  DEMO_GM,
   DEMO_HOT_UPDATE,
   DEMO_SERVERS,
   RELEASE_PLAN_CATEGORIES,
@@ -36,6 +37,7 @@ import { localInputTime, onlinePlayers, serverPhase, suggestedWindow } from "../
 import { cleanExclusionRules, excludingRule } from "../utils/releaseFileRules.js";
 import { cocosBuildCommand, cocosBuildOptions } from "../utils/cocosBuildCommand.js";
 import { formatDateTime } from "../utils/releaseFlowFormat.js";
+import { createAutopilot } from "./useReleaseAutopilot.js";
 
 export { CONFLICT_CHOICES, RELEASE_SPEEDS };
 
@@ -152,6 +154,10 @@ export function createRunFlow({
     return rule.kind === "window" && (rule.from === state.brief.date || rule.to === state.brief.date);
   }));
 
+  // Notes the plan write leaves to a person: unreadable ones and reminders.
+  const planNotesLeft = computed(() => planGroups.value
+    .reduce((sum, group) => sum + group.rows.filter((row) => row.change === "skip").length, 0) + planReminders.value.length);
+
   const writtenGroups = computed(() => planGroups.value.map((group) => ({ ...group, rows: group.rows.filter((row) => !row.excluded) })));
   const planCounts = computed(() => countPlanChanges(writtenGroups.value.flatMap((group) => group.rows)));
   const planSql = computed(() => planStatements(writtenGroups.value));
@@ -221,12 +227,16 @@ export function createRunFlow({
   const diffFiles = DEMO_DIFF_FILES;
 
   /* ── GM ── */
+  // File names follow the GM's conventions: the activity table is named
+  // "platform_comment.xlsx", a hot update "ver_platform_version.zip" and a
+  // server version "servver_platform_version.zip".
   const gmFiles = computed(() => {
     const day = state.brief.date.replace(/-/g, "");
+    const id = platform.value.id;
     return {
-      activity: `activity_${day}.xlsx`,
-      server: `gameserver_${day}.zip`,
-      client: `jswz_hotupdate_${DEMO_HOT_UPDATE.next}.zip`,
+      activity: `${id}_activity_${day}.xlsx`,
+      server: `servver_${id}_${DEMO_GM.serverVersion}.zip`,
+      client: `ver_${id}_${DEMO_HOT_UPDATE.next}.zip`,
       clientVersion: DEMO_HOT_UPDATE.next,
     };
   });
@@ -626,6 +636,8 @@ export function createRunFlow({
   }
 
   function cancel() {
+    // Stopping a step also stops one-click mode, or it would run it again.
+    autopilot?.pause("stopped", runningTask.value);
     controller?.abort();
   }
 
@@ -638,11 +650,13 @@ export function createRunFlow({
   }
 
   function dispose() {
+    autopilot?.dispose();
     controller?.abort();
     stopAutoShutdown();
   }
 
-  return {
+  let autopilot = null;
+  const api = {
     id: state.id,
     state,
     workspace,
@@ -663,6 +677,7 @@ export function createRunFlow({
     planCounts,
     planSql,
     planReminders,
+    planNotesLeft,
     backup,
     restoreImpact,
     fileRules,
@@ -715,4 +730,13 @@ export function createRunFlow({
     applies,
     dispose,
   };
+  autopilot = createAutopilot({
+    flow: api,
+    rules: () => workspace.autopilot,
+    sleep,
+    speed: () => RELEASE_SPEEDS[workspace.demo.speed] ?? 1,
+    now,
+  });
+  api.autopilot = autopilot;
+  return api;
 }

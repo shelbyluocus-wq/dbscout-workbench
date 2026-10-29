@@ -1,8 +1,10 @@
 <script setup>
 // Phase 4, the last stage. With downtime it follows the servers live:
-// schedule the maintenance, wait for it (the servers close by themselves at
-// the set time), compile and restart during maintenance, then open them by
-// hand. Without downtime it only sets when the client hot update opens.
+// schedule the pre-maintenance, wait for it (the monitors close the servers
+// by themselves at the set time; this page only watches), then apply what
+// the GM has ready, start the zones still closed to players, check them and
+// open. Without downtime it applies the config version, has the servers
+// read it again and sets when the client hot update opens.
 import { computed } from "vue";
 import { Clock3, FastForward, FlaskConical, Server, Users } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
@@ -11,6 +13,7 @@ import { MAINTENANCE_STAGES, formatCountdown, stageIndex, toLocalInput } from ".
 import { formatClockTime, formatReleaseCount, formatReleaseRange, formatReleaseTime, taskTitle } from "../utils/releaseFlowFormat.js";
 import ReleaseGmTaskList from "./ReleaseGmTaskList.vue";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseScheduleFields from "./ReleaseScheduleFields.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
@@ -25,7 +28,6 @@ const maintenance = computed(() => mode.value === "maintenance");
 const busy = computed(() => props.flow.busy.value);
 const phase = computed(() => props.flow.serverPhase.value);
 const now = computed(() => props.flow.serverNow.value);
-const problem = computed(() => props.flow.scheduleProblem.value);
 const clientInRelease = computed(() => props.flow.applies("gm.clientOpen"));
 const current = computed(() => stageIndex(phase.value));
 const shutdownAt = computed(() => Date.parse(state.tasks["gm.shutdown"].result?.at || "") || 0);
@@ -33,6 +35,10 @@ const openedAt = props.flow.openedAt;
 const inMaintenance = computed(() => ["maintenance", "restarting", "readyToOpen", "opening"].includes(phase.value));
 const overrun = computed(() => inMaintenance.value && now.value > props.flow.maintenanceEndAt.value);
 const windowText = computed(() => formatReleaseRange(state.schedule.maintenanceStart, state.schedule.maintenanceEnd));
+// The work of the maintenance window, and what a no-downtime update applies.
+const workTasks = computed(() => ["gm.serverApply", "gm.configApply", "gm.restart", "gm.open"].filter((id) => props.flow.applies(id)));
+const hotTasks = computed(() => ["gm.configApply", "gm.configReload"].filter((id) => props.flow.applies(id)));
+const SERVER_EVENTS = new Set(["gm.maintenance", "gm.clientOpen", "gm.shutdown", "gm.serverApply", "gm.configApply", "gm.restart", "gm.open"]);
 
 const PHASE_TONES = Object.freeze({
   running: "is-live",
@@ -83,14 +89,10 @@ function stageTime(stage) {
 
 // The server's own timeline, in server time.
 const events = computed(() => state.events
-  .filter((entry) => entry.taskId?.startsWith("gm.") && ["gm.maintenance", "gm.clientOpen", "gm.shutdown", "gm.restart", "gm.open"].includes(entry.taskId))
+  .filter((entry) => SERVER_EVENTS.has(entry.taskId))
   .filter((entry) => entry.event === "done" || entry.event === "cancelled")
   .slice(-8)
   .reverse());
-
-function update(key, event) {
-  props.flow.setSchedule({ [key]: event.target.value });
-}
 </script>
 
 <template>
@@ -132,35 +134,7 @@ function update(key, event) {
           <button type="button" class="wb-rf-btn is-quiet is-small" :disabled="busy" @click="flow.suggestSchedule()">{{ t('releaseFlow.server.suggest') }}</button>
         </div>
       </div>
-      <div class="wb-rf-schedule-fields">
-        <label class="wb-rf-field">
-          {{ t('releaseFlow.schedule.start') }}
-          <input type="datetime-local" :value="state.schedule.maintenanceStart" :disabled="busy" @change="update('maintenanceStart', $event)" />
-        </label>
-        <label class="wb-rf-field">
-          {{ t('releaseFlow.schedule.end') }}
-          <input type="datetime-local" :value="state.schedule.maintenanceEnd" :disabled="busy" @change="update('maintenanceEnd', $event)" />
-        </label>
-        <label v-if="clientInRelease" class="wb-rf-field">
-          {{ t('releaseFlow.schedule.clientOpen') }}
-          <input
-            type="datetime-local"
-            :value="state.schedule.clientOpenAt"
-            :disabled="busy || state.schedule.clientOpenFollowsMaintenance"
-            @change="update('clientOpenAt', $event)"
-          />
-        </label>
-      </div>
-      <label v-if="clientInRelease" class="wb-rf-check">
-        <input
-          type="checkbox"
-          :checked="state.schedule.clientOpenFollowsMaintenance"
-          :disabled="busy"
-          @change="flow.setSchedule({ clientOpenFollowsMaintenance: $event.target.checked })"
-        />
-        {{ t('releaseFlow.schedule.follow') }}
-      </label>
-      <p v-if="problem" class="wb-rf-hint wb-rf-problem">{{ t(`releaseFlow.schedule.problem.${problem}`) }}</p>
+      <ReleaseScheduleFields :flow="flow" :disabled="busy" />
     </section>
 
     <ReleaseTaskPanel v-else-if="phase === 'scheduled' && flow.shutdownRefused.value" :flow="flow" task-id="gm.shutdown" />
@@ -185,7 +159,7 @@ function update(key, event) {
       <ReleaseGmTaskList
         :flow="flow"
         page-id="gmServer"
-        :tasks="['gm.restart', 'gm.open']"
+        :tasks="workTasks"
         @run="emit('run', $event)"
         @rerun="emit('rerun', $event)"
       />
@@ -214,13 +188,18 @@ function update(key, event) {
         </div>
       </div>
     </section>
+    <section v-if="hotTasks.length" class="wb-rf-group" aria-labelledby="wb-rf-hot-work">
+      <div class="wb-rf-group-head"><h4 id="wb-rf-hot-work">{{ t('releaseFlow.server.hotWork') }}</h4></div>
+      <ReleaseGmTaskList
+        :flow="flow"
+        page-id="gmServer"
+        :tasks="hotTasks"
+        @run="emit('run', $event)"
+        @rerun="emit('rerun', $event)"
+      />
+    </section>
     <section v-if="clientInRelease" class="wb-rf-card">
-      <div class="wb-rf-schedule-fields">
-        <label class="wb-rf-field">
-          {{ t('releaseFlow.schedule.clientOpen') }}
-          <input type="datetime-local" :value="state.schedule.clientOpenAt" :disabled="busy" @change="update('clientOpenAt', $event)" />
-        </label>
-      </div>
+      <ReleaseScheduleFields :flow="flow" :disabled="busy" />
       <p class="wb-rf-hint">{{ clientUpdate }}</p>
     </section>
   </template>
@@ -390,16 +369,6 @@ function update(key, event) {
   color: var(--wb-quiet-text);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
-}
-
-.wb-rf-schedule-fields {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.wb-rf-problem {
-  color: var(--wb-warning-text);
 }
 
 .wb-rf-waiting .wb-rf-btn {

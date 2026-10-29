@@ -154,7 +154,7 @@ test("a history entry keeps every step with its result, error, warnings and last
   assert.equal(entry.steps.find((step) => step.taskId === "gm.open").status, "failed", "a step cut off is not shown as running");
   const sync = entry.steps.find((step) => step.taskId === "client.sync");
   assert.deepEqual([sync.logs.length, sync.logs[0].text], [40, "line 20"]);
-  assert.deepEqual(entry.stats, { done: 16, total: 17, failed: 1, warnings: 2 });
+  assert.deepEqual(entry.stats, { done: 21, total: 22, failed: 1, warnings: 2 });
   assert.deepEqual([entry.kind, entry.outcome, entry.platformName, entry.finishedAt], ["release", "abandoned", "TW", 99]);
 });
 

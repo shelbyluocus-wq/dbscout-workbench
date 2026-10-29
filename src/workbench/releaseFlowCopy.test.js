@@ -8,6 +8,7 @@ import { releaseFlowEn } from "./i18n/releaseFlowMessages.js";
 import { RELEASE_MODES, RELEASE_PAGES, RELEASE_PHASES, RELEASE_SCOPES, RELEASE_TASKS } from "./releaseFlowState.js";
 import { CONFLICT_CHOICES, RELEASE_SPEEDS } from "./composables/useReleaseFlow.js";
 import { HISTORY_KINDS, HISTORY_OUTCOMES } from "./releaseWorkspaceState.js";
+import { AUTOPILOT_GROUPS, AUTOPILOT_LOG_KINDS, AUTOPILOT_RULES } from "./releaseAutopilotState.js";
 import { PLAN_MEMO_CATEGORIES } from "./utils/releaseFlowDemo.js";
 import { MAINTENANCE_STAGES, SERVER_PHASES } from "./utils/releaseServer.js";
 
@@ -54,7 +55,7 @@ function dynamicKeys() {
   add("files.status.", ["A", "M", "D"]);
   add("transfer.stage.", ["script", "locate", "copy"]);
   add("cocos.exit.", ["success", "invalidOptions", "buildError", "unknown"]);
-  add("gm.group.", ["activity", "client", "server"]);
+  add("gm.group.", ["config", "activity", "client", "server"]);
   add("schedule.problem.", ["endBeforeStart", "clientBeforeEnd", "startPassed"]);
   add("server.phase.", SERVER_PHASES);
   add("server.headline.", SERVER_PHASES);
@@ -62,7 +63,14 @@ function dynamicKeys() {
   add("server.footer.", ["maintenance", "readyToOpen"]);
   add("platformEditor.", ["sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "cocosVersion", "buildPlatform", "cocosPath"]);
   add("platformEditor.group.", ["database", "client", "build"]);
-  add("error.", ["interrupted", "buildFailed", "failed", "unknownTask", "qaFindings", "noBackup"]);
+  add("error.", ["interrupted", "buildFailed", "failed", "unknownTask", "qaFindings", "noBackup", "gmNetwork", "shutdownIncomplete"]);
+  // One-click mode: its rules and choices, why it pauses, its log.
+  add("autopilot.rule.", AUTOPILOT_RULES.map((rule) => rule.id));
+  for (const rule of AUTOPILOT_RULES) add(`autopilot.choice.${rule.id}.`, rule.choices);
+  add("autopilot.group.", [...AUTOPILOT_GROUPS, "failures"]);
+  add("autopilot.status.", ["running", "paused", "done"]);
+  add("autopilot.reason.", ["notReady", "conflicts", "missingFiles", "failed", "blocked", "review", "planNotes", "configApply", "lateStart", "schedule", "open", "stopped"]);
+  add("autopilot.log.", AUTOPILOT_LOG_KINDS);
   // The workspace around the updates: navigation, cards, history and tools.
   add("nav.", ["home", "history", "plans", "build", "svn", "platforms"]);
   add("card.status.", ["idle", "pending", "active", "attention", "done"]);

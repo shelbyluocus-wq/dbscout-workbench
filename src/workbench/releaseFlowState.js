@@ -34,6 +34,15 @@ function task(id, page, { scope = "", mode = "", deps = [], skippable = false, a
 // scheduled maintenance time arrives. An `action` is offered beside the steps
 // (restoring the database from the backup its overwrite made): it never
 // counts toward progress and nothing depends on it.
+//
+// The GM steps follow the GM's own flows. The database is the platform's
+// intranet relay database; the GM packs a config version from it, which the
+// platform's own GM applies. The company GM builds the server version from
+// SVN and syncs it to the platform's GM; a hot update reaches the company GM,
+// is confirmed there and synced. Everything that can be prepared while the
+// servers run is done before the maintenance is scheduled (the GM only
+// accepts a pre-maintenance once its maintenance checklist is complete), so
+// the downtime only applies what is ready, starts and opens.
 export const RELEASE_TASKS = Object.freeze([
   task("db.sync", "database", { scope: "database" }),
   task("db.restore", "database", { scope: "database", action: true }),
@@ -43,18 +52,27 @@ export const RELEASE_TASKS = Object.freeze([
   task("client.transfer", "clientTransfer", { scope: "client", deps: ["client.sync"], skippable: true }),
   task("client.diff", "clientDiff", { scope: "client", deps: ["client.transfer"] }),
   task("build.cocos", "build", { scope: "client", deps: ["client.diff"] }),
+  task("gm.configPack", "gmUpload", { scope: "database", deps: ["db.plans"] }),
   task("gm.activityUpload", "gmUpload", { scope: "activity" }),
   task("gm.activityCurrent", "gmUpload", { scope: "activity", deps: ["gm.activityUpload"] }),
   task("gm.activityReload", "gmUpload", { scope: "activity", mode: "hot", deps: ["gm.activityCurrent"] }),
   task("gm.clientUpload", "gmUpload", { scope: "client", deps: ["build.cocos"] }),
-  task("gm.serverUpload", "gmUpload", { scope: "server", mode: "maintenance" }),
-  task("gm.serverCurrent", "gmUpload", { scope: "server", mode: "maintenance", deps: ["gm.serverUpload"] }),
-  task("gm.maintenance", "gmServer", { mode: "maintenance" }),
-  task("gm.clientOpen", "gmServer", { scope: "client", deps: ["gm.clientUpload"] }),
+  task("gm.clientPull", "gmUpload", { scope: "client", deps: ["gm.clientUpload"] }),
+  task("gm.clientPush", "gmUpload", { scope: "client", deps: ["gm.clientPull"] }),
+  task("gm.serverBuild", "gmUpload", { scope: "server", mode: "maintenance" }),
+  task("gm.serverPush", "gmUpload", { scope: "server", mode: "maintenance", deps: ["gm.serverBuild"] }),
+  task("gm.maintenance", "gmServer", {
+    mode: "maintenance",
+    deps: ["gm.configPack", "gm.activityCurrent", "gm.clientPush", "gm.serverPush"],
+  }),
+  task("gm.clientOpen", "gmServer", { scope: "client", deps: ["gm.clientPush"] }),
   task("gm.shutdown", "gmServer", { mode: "maintenance", deps: ["gm.maintenance"], auto: true }),
+  task("gm.serverApply", "gmServer", { scope: "server", mode: "maintenance", deps: ["gm.serverPush", "gm.shutdown"] }),
+  task("gm.configApply", "gmServer", { scope: "database", deps: ["gm.configPack", "gm.shutdown"] }),
+  task("gm.configReload", "gmServer", { scope: "database", mode: "hot", deps: ["gm.configApply"] }),
   task("gm.restart", "gmServer", {
     mode: "maintenance",
-    deps: ["db.plans", "gm.activityCurrent", "gm.serverCurrent", "gm.shutdown"],
+    deps: ["gm.shutdown", "gm.serverApply", "gm.configApply", "gm.activityCurrent"],
   }),
   task("gm.open", "gmServer", { mode: "maintenance", deps: ["gm.restart", "gm.clientOpen"] }),
 ]);

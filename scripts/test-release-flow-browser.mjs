@@ -3,8 +3,9 @@
 // reopened servers (backup and restore, the open-plan memo, picked exclusion
 // rules, a template made on the transfer step, the side-by-side diff with a
 // commit, the build confirmation), the history, continuing and abandoning
-// updates, the standalone build and SVN pages, reopening, English copy and
-// light/dark rendering. Run against a Vite dev server:
+// updates, the standalone build and SVN pages, reopening, English copy,
+// light/dark rendering, and a one-click run of a whole update by its rules.
+// Run against a Vite dev server:
 //   DBSCOUT_RELEASE_TEST_URL=http://127.0.0.1:1431 node scripts/test-release-flow-browser.mjs
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
@@ -214,14 +215,27 @@ try {
     await assertFits('build');
     await primary.click();
 
+    // Everything the GM can prepare is ready before the maintenance is scheduled.
+    assert.equal(await current(), 'gmUpload');
+    assert.equal(await page.locator('[data-release-task]').count(), 8, 'config, activity, hot update and server');
     await finishPage();
     await primary.click();
     assert.equal(await current(), 'gmServer');
     await primary.click();
     await page.locator('button', { hasText: '快轉到維護時間' }).click();
     await settle();
+    // During the downtime: apply the server and config versions, start the zones, open.
+    assert.deepEqual(
+      await page.locator('[data-release-task]').evaluateAll((cards) => cards.map((card) => card.dataset.releaseTask)),
+      ['gm.serverApply', 'gm.configApply', 'gm.restart', 'gm.open'],
+    );
     await primary.click();
-    await confirm();
+    await settle();
+    await primary.click();
+    await confirm({ expect: /配置版本 #42/ });
+    await settle();
+    await primary.click();
+    await confirm({ expect: /玩家仍無法進入/ });
     await settle();
     await primary.click();
     await confirm();
@@ -236,7 +250,7 @@ try {
     await page.locator('.wb-rf-nav [data-release-section="history"]').click();
     const newest = page.locator('.wb-rf-history-days .wb-rf-history-row').first();
     assert.match(await newest.textContent(), /TW/);
-    assert.match(await page.locator('.wb-rf-history-detail').textContent(), /完成 17\/17 步/);
+    assert.match(await page.locator('.wb-rf-history-detail').textContent(), /完成 22\/22 步/);
     assert.match(await page.locator('.wb-rf-history-detail').textContent(), /缺少：/, 'warnings are kept with the step');
     await assertFits('history');
     await shot('history');
@@ -284,6 +298,47 @@ try {
     assert.equal(await current(), 'summary', 'the finished update is still there');
     await card('tap').locator('.wb-rf-note-head').click();
     assert.equal(await current(), 'brief');
+    await context.close();
+  }
+
+  // One-click mode: rules set on the brief, then the whole update by itself.
+  {
+    const { context, page } = await openWorkbench();
+    const { primary, card, confirm, assertFits, shot } = helpers(page);
+    await openWorkspace(page);
+    await page.locator('button[aria-controls="wb-rf-demo-menu"]').click();
+    await page.locator('#wb-rf-demo-menu [role="radio"]').nth(1).click();
+    await page.locator('#wb-rf-demo-menu label', { hasText: '第一次上傳熱更新中斷' }).locator('input').check();
+    await page.keyboard.press('Escape');
+
+    // 玩心 already has an update scheduled; open it from its card.
+    await card('wanxin').locator('.wb-rf-note-head').click();
+    const panel = page.locator('[data-release-autopilot-panel]');
+    await panel.waitFor();
+    await panel.locator('[data-release-rule="svnConflicts"] [role="radio"]', { hasText: '以雲端為準' }).click();
+    await panel.locator('[role="radio"]', { hasText: '10 秒' }).click();
+    await page.locator('.wb-rf-ready input').check();
+    await assertFits('one-click brief');
+    await shot('autopilot-brief');
+    assert.equal(await primary.textContent().then((text) => text.trim()), '開始更新', 'the manual start stays the main action');
+    await page.locator('[data-release-auto-start]').click();
+    await confirm({ expect: /SVN 更新遇到衝突：以雲端為準/ });
+
+    const bar = page.locator('[data-release-autopilot]');
+    await bar.waitFor();
+    assert.match(await card('wanxin').textContent(), /一鍵/);
+    assert.equal(await primary.isDisabled(), true, 'nothing to click while it runs');
+    await page.waitForFunction(() => /等待維護開始/.test(document.querySelector('[data-release-autopilot-detail]')?.textContent || ''), null, { timeout: 120_000 });
+    assert.equal(await page.locator('[data-release-current]').getAttribute('data-release-current'), 'gmServer', 'the run shows the step it is on');
+    await shot('autopilot-waiting');
+    await bar.locator('button', { hasText: '快轉到維護時間' }).click();
+    await page.waitForFunction(() => document.querySelector('[data-release-autopilot]')?.dataset.status === 'done', null, { timeout: 60_000 });
+    assert.match(await card('wanxin').textContent(), /已完成/);
+    await bar.locator('button', { hasText: '紀錄' }).click();
+    const log = await bar.locator('.wb-rf-auto-log').textContent();
+    assert.match(log, /自動處理 2 個 SVN 衝突/);
+    assert.match(log, /上傳熱更新包：第 1 次重試/);
+    await shot('autopilot-done');
     await context.close();
   }
 

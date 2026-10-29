@@ -22,6 +22,7 @@ import {
   restoreBrief,
   restoreTasks,
 } from "./releaseFlowState.js";
+import { idleAutopilot, restoreAutopilot, restoreAutopilotRules } from "./releaseAutopilotState.js";
 import { cleanExclusionRules } from "./utils/releaseFileRules.js";
 import { isIsoDate } from "./utils/releasePlanNotes.js";
 import { localInputTime } from "./utils/releaseServer.js";
@@ -182,6 +183,8 @@ function restoreDemo(saved) {
     conflicts: demo.conflicts !== false,
     buildFailure: demo.buildFailure === true,
     missingFiles: demo.missingFiles === true,
+    gmNetwork: demo.gmNetwork === true,
+    shutdownSlow: demo.shutdownSlow === true,
     speed: Object.hasOwn(RELEASE_SPEEDS, demo.speed) ? demo.speed : "normal",
   };
 }
@@ -218,6 +221,8 @@ export function createRun({ id = createRunId(), platformId, today = localDateIso
     svnDemo: { committed: [], reverted: [], revision: 0, commits: [] },
     // Demo fast-forward of this update's GM clock, added to the real time.
     clockOffset: 0,
+    // One-click mode of this update (releaseAutopilotState.js).
+    autopilot: idleAutopilot(),
     demo: true,
   };
 }
@@ -262,6 +267,9 @@ export function restoreRun(saved, { platforms, today }) {
   for (const [itemId, skipped] of Object.entries(saved.planSkips || {})) if (skipped === true) skips[itemId] = true;
   const tasks = restoreTasks(saved.tasks, brief);
   const done = saved.outcome === "done" && flowComplete(tasks, brief);
+  const autopilot = restoreAutopilot(saved.autopilot);
+  // A finished update has nothing left for one-click mode to do.
+  if (done && autopilot.status !== "off") Object.assign(autopilot, { status: "done", reason: "", taskId: "" });
   return {
     ...fallback,
     startedAt: Number(saved.startedAt) || 0,
@@ -283,6 +291,7 @@ export function restoreRun(saved, { platforms, today }) {
         : [],
     },
     clockOffset: Number.isFinite(saved.clockOffset) ? saved.clockOffset : 0,
+    autopilot,
     demo: saved.demo !== false,
   };
 }
@@ -341,6 +350,8 @@ export function createWorkspaceData({ stored = null, legacy = null, today = loca
         : platforms[0]?.id || "custom",
       custom: restoreBuildTarget(base?.build?.custom),
     },
+    // How one-click mode handles problems, shared by every platform.
+    autopilot: restoreAutopilotRules(base?.autopilot),
     demo: restoreDemo(base?.demo),
   };
 }
@@ -433,13 +444,18 @@ export function plannedTime(run) {
 }
 
 /**
- * What needs a person's attention, most severe first: failed steps, SVN
+ * What needs a person's attention, most severe first: a paused one-click
+ * run, failed steps, SVN
  * conflicts waiting for a choice, files a sync could not find, steps to run
  * again after an input changed, and a planned time that passed unstarted.
  */
 export function runIssues(run, { now = Date.now() } = {}) {
   if (!run || run.outcome === "done") return [];
   const issues = [];
+  // One-click mode waiting for the person comes first: nothing moves until they answer.
+  if (run.autopilot?.status === "paused") {
+    issues.push({ kind: "autoPaused", tone: "warning", taskId: run.autopilot.taskId, reason: run.autopilot.reason });
+  }
   for (const definition of RELEASE_TASKS) {
     const task = run.tasks[definition.id];
     if (task?.status === TASK_STATUS.FAILED) issues.push({ kind: "failed", tone: "danger", taskId: definition.id, error: task.error });
@@ -492,6 +508,8 @@ export function platformCard(platform, { run = null, history = [], now = Date.no
     lastUpdate: run?.outcome === "done" ? run.finishedAt : last?.finishedAt || 0,
     plannedAt: run && run.outcome !== "done" ? plannedTime(run) : 0,
     mode: run?.brief.mode || "",
+    // Running by itself in one-click mode (a paused run is an issue instead).
+    autopilot: run?.autopilot?.status === "running",
     issues: runIssues(run, { now }),
   };
 }
