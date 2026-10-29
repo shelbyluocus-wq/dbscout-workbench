@@ -400,7 +400,9 @@ function revealActiveTable() {
 }
 
 function onConnectionClick(connectionId) {
-  if (toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;
+  const connection = props.connections.find((item) => item.id === connectionId);
+  if (connection?.connected && props.databases.length > 0 &&
+      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;
   revealConnection(treeState, connectionId);
   emit("select-connection", connectionId);
 }

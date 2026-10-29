@@ -406,6 +406,107 @@ test("selecting a saved disconnected connection asks for password when restore f
   assert.match(conn.connDialog.error, /重新输入密码/);
 });
 
+test("startup reports a saved connection failure without querying a placeholder runtime id", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([{ host: "127.0.0.1", port: "3309", username: "root" }]),
+  });
+  const calls = [];
+  const conn = useConnection(createWorkspaceState(), async (command) => {
+    calls.push(command);
+    if (command === "list_connections") return [];
+    if (command === "restore_connection") throw new Error("connection refused");
+    assert.fail(`unexpected command: ${command}`);
+  });
+  try {
+    await conn.loadConnections();
+    assert.equal(conn.connections.value[0].connected, false);
+    assert.deepEqual(conn.databases.value, []);
+    assert.match(conn.statusText.value, /connection refused/);
+    assert.equal(conn.statusError.value, true);
+    assert.equal(calls.includes("list_databases"), false);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("refreshing a disconnected saved connection restores it before listing databases", async () => {
+  const saved = { kind: "mysql", host: "127.0.0.1", port: "3309", username: "root", password: "secret" };
+  installLocalStorage({ dbscout_connections: JSON.stringify([saved]) });
+  let restored = false;
+  const conn = useConnection(createWorkspaceState(), async (command, payload = {}) => {
+    if (command === "restore_connection") { restored = true; return ["analytics"]; }
+    if (command === "list_connections") return [{ ...saved, id: "mysql-1", connected: true }];
+    if (command === "list_databases") {
+      assert.equal(restored, true);
+      assert.equal(payload.connectionId, "mysql-1");
+      return ["analytics"];
+    }
+    if (command === "select_database") return { tables: [] };
+    return [];
+  });
+  const id = "saved-mysql:127.0.0.1:3309:root";
+  conn.connections.value = [{ ...saved, id, connected: false, saved: true }];
+  conn.selectedConnectionId.value = id;
+  try {
+    assert.deepEqual(await conn.refreshDatabases({ connectionId: id }), ["analytics"]);
+    assert.equal(conn.selectedConnectionId.value, "mysql-1");
+    assert.equal(conn.selectedDatabase.value, "analytics");
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("startup retries a transient missing LAN route and restores the saved database", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([{ host: "127.0.0.1", port: "3309", username: "root" }]),
+  });
+  let attempts = 0;
+  const conn = useConnection(createWorkspaceState(), async (command) => {
+    if (command === "restore_connection") {
+      if (++attempts < 3) throw new Error("No route to host (os error 65)");
+      return ["analytics"];
+    }
+    if (command === "list_connections") return attempts < 3 ? [] : [{ id: "mysql-1", connected: true }];
+    if (command === "list_databases") return ["analytics"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  });
+  try {
+    await conn.loadConnections();
+    assert.equal(attempts, 3);
+    assert.equal(conn.selectedConnectionId.value, "mysql-1");
+    assert.equal(conn.selectedDatabase.value, "analytics");
+    assert.equal(conn.connDialog.open, false);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("startup bounds LAN route retries and never retries authentication failures", async () => {
+  for (const [message, expectedAttempts] of [["No route to host (os error 65)", 3], ["Access denied", 1]]) {
+    installLocalStorage({
+      dbscout_connections: JSON.stringify([{ host: "127.0.0.1", port: "3309", username: "root" }]),
+    });
+    let attempts = 0;
+    const conn = useConnection(createWorkspaceState(), async (command) => {
+      if (command === "list_connections") return [];
+      if (command === "restore_connection") {
+        attempts += 1;
+        throw new Error(message);
+      }
+      assert.fail(`unexpected command: ${command}`);
+    });
+    try {
+      await conn.loadConnections();
+      assert.equal(attempts, expectedAttempts);
+      assert.equal(conn.connections.value[0].connected, false);
+      assert.equal(conn.statusText.value, message);
+    } finally {
+      conn.dispose();
+    }
+  }
+});
+
 test("submitConnDialog deduplicates saved localStorage entries", async () => {
   const store = installLocalStorage({
     dbscout_connections: JSON.stringify([{ host: "127.0.0.1", port: "3307", username: "root", password: "old" }]),

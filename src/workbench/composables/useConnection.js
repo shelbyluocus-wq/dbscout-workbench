@@ -213,6 +213,20 @@ function formatConnectionTestError(error) {
   return "连接测试失败：请检查连接参数后重试";
 }
 
+async function restoreRuntimeConnection(invokeWorkbench, payload) {
+  const retryDelays = [250, 750];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await invokeWorkbench("restore_connection", payload);
+    } catch (error) {
+      // macOS can briefly reject LAN routes while registering a cold app launch.
+      const message = String(error?.message || error || "");
+      if (attempt >= retryDelays.length || !/no route to host|network is unreachable|host is unreachable/i.test(message)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+    }
+  }
+}
+
 
 export function useConnection(workspace, invokeWorkbench, { schemaMetadata: providedSchemaMetadata = null } = {}) {
   // A forced read follows a schema edit. Older background/jump reads must
@@ -335,6 +349,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   async function refreshDatabases({ connectionId } = {}) {
     const resolvedConnectionId = String(connectionId || selectedConnectionId.value || "").trim();
     if (!resolvedConnectionId) return [];
+    const connection = connectionById(resolvedConnectionId);
+    if (connection?.saved && !connection.connected) {
+      await selectConnection(resolvedConnectionId);
+      if (connDialog.open || !connectionById(selectedConnectionId.value)?.connected) return [];
+      return [...databases.value];
+    }
     const dbList = await measureAsync(
       "database.list",
       () => invokeWorkbench("list_databases", { connectionId: resolvedConnectionId }),
@@ -497,6 +517,11 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return;
     }
     selectedConnectionId.value = selectedConnection.id;
+    if (!selectedConnection.connected && selectedConnection.saved) {
+      databases.value = [];
+      setStatus(selectedConnection.restoreError || "请重新输入密码以恢复连接", { error: true });
+      return;
+    }
     try {
       // The restore that just connected already read this server's database
       // list; reuse it instead of a second identical round trip.
@@ -513,8 +538,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           ),
       );
       markPerf("database.loaded", { connectionId: selectedConnection.id, count: databases.value.length });
-    } catch {
+    } catch (error) {
       databases.value = [];
+      setStatus(`切换连接失败：${String(error)}`, { error: true });
+      return;
     }
 
     let targetDatabase;
@@ -557,7 +584,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     const previousIds = new Set(connections.value.map((connection) => connection.id));
     try {
-      const restoredDatabases = await invokeWorkbench("restore_connection", { kind, url });
+      const restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
       const previousConnections = connections.value;
       connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
       const restored =
@@ -567,12 +594,15 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         if (Array.isArray(restoredDatabases)) restoredDatabaseLists.set(restored.id, restoredDatabases);
         applySavedMetadata(restored, savedConn);
         restored.connected = true;
+        delete restored.restoreError;
         connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
         return restored;
       }
       return upsertSavedConnectionPlaceholder(savedConn, true);
-    } catch {
-      return upsertSavedConnectionPlaceholder(savedConn, false);
+    } catch (error) {
+      const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
+      placeholder.restoreError = String(error?.message || error || formatConnectionTestError(error));
+      return placeholder;
     }
   }
 
@@ -616,7 +646,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
         runtimeConnection = saved ? await ensureSavedConnectionRuntime(saved) : null;
         if (!runtimeConnection?.connected) {
-          prefillConnDialog(connection, "请重新输入密码以恢复连接");
+          const detail = runtimeConnection?.restoreError || connection.restoreError;
+          prefillConnDialog(connection, detail ? `请重新输入密码以恢复连接：${detail}` : "请重新输入密码以恢复连接");
+          setStatus(connDialog.error, { error: true });
           return;
         }
         connectionId = runtimeConnection.id;
