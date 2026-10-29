@@ -456,7 +456,7 @@ export function graphStatuses(local) {
 export const GRAPH_OPTIONS_STORAGE_KEY = "dbscout_relation_graph_options";
 export const GRAPH_HEIGHT = Object.freeze({ min: 180, default: 260, max: 640 });
 export const DEFAULT_GRAPH_OPTIONS = Object.freeze({
-  collapsed: false,
+  collapsed: true,
   depth: 1,
   outgoing: true,
   incoming: true,
@@ -471,7 +471,8 @@ export function clampGraphHeight(value) {
 
 function storedOptions(options) {
   const { depth, outgoing, incoming } = normalizeOptions(options);
-  return { collapsed: options?.collapsed === true, depth, outgoing, incoming, height: clampGraphHeight(options?.height) };
+  const collapsed = typeof options?.collapsed === "boolean" ? options.collapsed : DEFAULT_GRAPH_OPTIONS.collapsed;
+  return { collapsed, depth, outgoing, incoming, height: clampGraphHeight(options?.height) };
 }
 
 function defaultStorage() {

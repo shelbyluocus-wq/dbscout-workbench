@@ -238,12 +238,15 @@ function memoryStorage(initial = {}) {
 test("view options persist and bad saved values fall back to defaults", () => {
   const storage = memoryStorage();
   assert.deepEqual(loadGraphOptions(storage), DEFAULT_GRAPH_OPTIONS);
+  assert.equal(loadGraphOptions(storage).collapsed, true);
+  saveGraphOptions({ collapsed: false }, storage);
+  assert.equal(loadGraphOptions(storage).collapsed, false);
   saveGraphOptions({ collapsed: true, depth: 2, outgoing: false, incoming: true, height: 400 }, storage);
   assert.deepEqual(loadGraphOptions(storage), { collapsed: true, depth: 2, outgoing: false, incoming: true, height: 400 });
   storage.data.set(GRAPH_OPTIONS_STORAGE_KEY, "{broken");
   assert.deepEqual(loadGraphOptions(storage), DEFAULT_GRAPH_OPTIONS);
   storage.data.set(GRAPH_OPTIONS_STORAGE_KEY, JSON.stringify({ depth: 7, outgoing: false, incoming: false, height: 9000 }));
-  assert.deepEqual(loadGraphOptions(storage), { collapsed: false, depth: 2, outgoing: true, incoming: true, height: 640 });
+  assert.deepEqual(loadGraphOptions(storage), { collapsed: true, depth: 2, outgoing: true, incoming: true, height: 640 });
   storage.data.set(GRAPH_OPTIONS_STORAGE_KEY, JSON.stringify({ height: "tall" }));
   assert.equal(loadGraphOptions(storage).height, DEFAULT_GRAPH_OPTIONS.height);
   storage.data.set(GRAPH_OPTIONS_STORAGE_KEY, JSON.stringify({ height: 20 }));
