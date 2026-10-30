@@ -1467,6 +1467,7 @@ export default Object.freeze({
   "shortcut.searchTable": "查找",
   "shortcut.replaceInTable": "替换",
   "shortcut.openDesign": "打开表设计",
+  "shortcut.editTableComment": "修改表备注（首页）",
   "shortcut.openSqlQuery": "新建 SQL 查询",
   "shortcut.openTableTransfer": "一键转表",
   "shortcut.closeTab": "关闭当前标签",

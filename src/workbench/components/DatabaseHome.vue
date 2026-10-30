@@ -149,6 +149,7 @@ const menuShortcuts = computed(() => ({
   open: "Enter",
   design: formatShortcutForPlatform(shortcuts.get("openDesign")),
   rename: "F2",
+  editTableComment: formatShortcutForPlatform(shortcuts.get("editTableComment")),
   copy: formatShortcutForPlatform("Ctrl+C"),
   paste: formatShortcutForPlatform("Ctrl+V"),
   refresh: formatShortcutForPlatform(shortcuts.get("refresh")),
@@ -438,6 +439,7 @@ function handleHomeEnterKeydown(event) {
 // surface, or a table-name button (which handles its own row first).
 function handleHomeListKeydown(event) {
   if (!isHomeListCommandTarget(event.target)) return false;
+  if (handleEditTableCommentKeydown(event)) return true;
   const key = String(event.key || "");
   const command = event.ctrlKey || event.metaKey;
   if (isDeleteCommandKey(event)) {
@@ -655,6 +657,20 @@ function editTableComment(name = menu.tableName) {
   closeMenu();
 }
 
+function handleEditTableCommentKeydown(event) {
+  if (!shortcuts.matchesBinding("editTableComment", event)) return false;
+  if (!canTableDesign.value || isEditableTypeaheadTarget(event.target)) return false;
+  const focused = controller.focusedName.value;
+  const name = menu.open
+    ? menu.tableName
+    : controller.selectedSet.value.has(focused) ? focused : controller.selectedNames.value[0];
+  if (!name) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  editTableComment(name);
+  return true;
+}
+
 function sendSelection() {
   if (!canTableCopy.value || !menu.selectedNames.length) return;
   emit("send-tables", {
@@ -728,6 +744,7 @@ function openKeyboardContextMenu() {
 }
 
 function handleContextMenuKeydown(event) {
+  if (handleEditTableCommentKeydown(event)) return;
   handleMenuKeydown(event, contextMenuRef.value, { close: closeMenu });
 }
 
@@ -1010,7 +1027,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>
-        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="editTableComment(menu.tableName)"><MessageSquareText :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.editTableComment') }}</button>
+        <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="editTableComment(menu.tableName)"><MessageSquareText :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.editTableComment') }}<kbd v-if="menuShortcuts.editTableComment" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.editTableComment }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
         <button type="button" role="menuitem" :disabled="!controller.canCopy.value" @click="copySelection"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.copy }}</kbd></button>
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.paste }}</kbd></button>

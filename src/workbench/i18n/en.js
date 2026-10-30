@@ -1467,6 +1467,7 @@ export default Object.freeze({
   "shortcut.searchTable": "Find",
   "shortcut.replaceInTable": "Replace",
   "shortcut.openDesign": "Open table design",
+  "shortcut.editTableComment": "Edit table comment (Home)",
   "shortcut.openSqlQuery": "New SQL query",
   "shortcut.openTableTransfer": "Table Transfer",
   "shortcut.closeTab": "Close tab",

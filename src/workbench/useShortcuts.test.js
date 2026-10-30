@@ -56,6 +56,18 @@ test("useShortcuts exposes the default bindings", () => {
   assert.equal(get("previousTab"), "Ctrl+Shift+Tab");
 });
 
+test("editing a home table comment defaults to F3 and supports rebinding and clearing", async () => {
+  const shortcuts = useShortcuts(fakeInvoke());
+  assert.equal(shortcuts.get("editTableComment"), "F3");
+  assert.equal(shortcuts.matchesBinding("editTableComment", keyEvent("F3")), true);
+  assert.equal(shortcuts.matchesBinding("editTableComment", keyEvent("F3", { shift: true })), false);
+  await shortcuts.rebind("editTableComment", "Ctrl+E");
+  assert.equal(shortcuts.matchesBinding("editTableComment", keyEvent("F3")), false);
+  assert.equal(shortcuts.matchesBinding("editTableComment", keyEvent("e", { meta: true })), true);
+  await shortcuts.rebind("editTableComment", "");
+  assert.equal(shortcuts.matchesBinding("editTableComment", keyEvent("e", { ctrl: true })), false);
+});
+
 test("matchesBinding compares modifier+key case-insensitively and treats Ctrl/Cmd alike", () => {
   const { matchesBinding } = useShortcuts(fakeInvoke());
   assert.equal(matchesBinding("searchDatabase", keyEvent("p", { ctrl: true })), true);
