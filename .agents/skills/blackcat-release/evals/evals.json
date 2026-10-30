@@ -3,20 +3,38 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "给黑猫打个新版本发版包。",
+      "prompt": "执行黑猫打包流程。",
       "expected_output": "在修改版本号或构建前，只询问一次本次 SVN 更新目录的完整路径。",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "打包并同步，SVN 更新目录是 E:\\company-svn\\navicat-release。",
+      "prompt": "执行打包流程并同步，SVN 更新目录是 E:\\company-svn\\navicat-release。",
       "expected_output": "不重复询问路径；验证工作副本，打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步本次文件，再把版本清单提交到 main 并 push。",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "只更新 AI 运行时，SVN 目录 E:\\company-svn\\navicat-release。",
+      "prompt": "执行打包流程，只更新 AI 运行时，SVN 目录 E:\\company-svn\\navicat-release。",
       "expected_output": "不增加黑猫版本；读取现有 AI 整数版本并加一，只同步 AI ZIP 与 agent-runtime.json。仓库清单无变化时不创建空 commit，也不把 AI ZIP 提交进 git。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "当前电脑是 Mac。给我打个最新包给我装上。",
+      "expected_output": "使用当前工作区代码构建 macOS 应用，备份旧应用、保留用户数据后安装并启动验证；不问 SVN 路径，不自动 pull、升版本、写公告、发布 AI 运行时或 commit/push。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "当前电脑是 Mac。打包。当前代码有未提交修改。",
+      "expected_output": "按 Mac 本机打包安装执行，保留并构建当前未提交代码，不切分支、不回退、不套用 SVN 发版流程。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "给这个 skill 修改一下，只有当我说打包流程的时候才触发流程。",
+      "expected_output": "仅修改 skill 规则，不因规则中的“打包流程”文字而开始构建或发版。",
       "files": []
     }
   ]
