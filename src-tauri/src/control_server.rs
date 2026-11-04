@@ -7,10 +7,8 @@
 //! `<app_data_dir>/control-endpoint.json` so the MCP server can find the
 //! running app.
 //!
-//! Security model: read-only DB tools + UI navigation only. The whitelists in
-//! this module are the final gate — write tool names are rejected here even if
-//! the MCP layer is tampered with. `run_read_query` flows through the existing
-//! `agent::sql_guard` read-only validation inside `db_bridge`.
+//! Database tools are allowlisted at this endpoint. Mutations require explicit
+//! targets and confirmation; table design reuses the preview signature checks.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -42,7 +40,6 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_IMPORT_ROWS: usize = 50_000;
 
 /// Read-only DB tools the endpoint is allowed to forward to `db_bridge`.
-/// `run_write_query` and any unknown name are rejected.
 const READ_ONLY_DB_TOOLS: &[&str] = &[
     "get_database_profile",
     "refresh_database_profile",
@@ -160,6 +157,8 @@ fn parse_control_request(line: &str) -> Result<ControlRequest, String> {
 
 fn is_allowed_db_tool(func: &str) -> bool {
     READ_ONLY_DB_TOOLS.contains(&func)
+        || crate::control_table_tools::READ_TOOLS.contains(&func)
+        || crate::control_table_tools::WRITE_TOOLS.contains(&func)
 }
 
 fn is_allowed_ui_action(action: &str) -> bool {
@@ -513,7 +512,7 @@ async fn dispatch(app: &AppHandle, request: ControlRequest) -> Value {
         ControlRequest::Hello { .. } => serde_json::json!({ "ok": true }),
         ControlRequest::DbTool { id, func, args } => {
             if !is_allowed_db_tool(&func) {
-                return response_err(&id, &format!("拒绝执行:{func} 不在只读白名单内"));
+                return response_err(&id, &format!("拒绝执行:{func} 不在工具白名单内"));
             }
             match run_db_tool(app, &func, args).await {
                 Ok(data) => response_ok(&id, data),
@@ -558,6 +557,14 @@ async fn selected_runtime_context(app: &AppHandle) -> (String, String) {
 }
 
 async fn run_db_tool(app: &AppHandle, func: &str, args: Value) -> Result<Value, String> {
+    if crate::control_table_tools::READ_TOOLS.contains(&func)
+        || crate::control_table_tools::WRITE_TOOLS.contains(&func)
+    {
+        crate::control_table_tools::validate_request(func, &args)?;
+        if func != "run_write_query" {
+            return crate::control_table_tools::run(app, func, args).await;
+        }
+    }
     let (selected_connection_id, selected_database) = selected_runtime_context(app).await;
     let connection_id = {
         let explicit = arg_str(&args, &["connectionId", "connection_id"]);
@@ -1084,11 +1091,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_write_and_unknown_db_tools() {
+    fn allows_table_tools_and_rejects_unknown_db_tools() {
         assert!(is_allowed_db_tool("run_read_query"));
         assert!(is_allowed_db_tool("list_tables"));
         assert!(is_allowed_db_tool("read_table_page"));
-        assert!(!is_allowed_db_tool("run_write_query"));
+        for func in crate::control_table_tools::READ_TOOLS.iter()
+            .chain(crate::control_table_tools::WRITE_TOOLS)
+        {
+            assert!(is_allowed_db_tool(func));
+        }
         assert!(!is_allowed_db_tool("restore_snapshot"));
         assert!(!is_allowed_db_tool(""));
     }

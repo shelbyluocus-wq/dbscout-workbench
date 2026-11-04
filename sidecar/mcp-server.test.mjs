@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import net from "node:net";
+import os from "node:os";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +29,19 @@ function assertCuratedTools(tools) {
   assert.ok(names.includes("import_table_xlsx"));
   assert.ok(names.includes("run_read_query"));
   assert.ok(names.includes("read_table_page"));
-  assert.ok(!names.includes("run_write_query"));
+  for (const name of ["run_write_query", "apply_table_design_change", "copy_tables", "rename_table", "drop_tables"]) {
+    const tool = tools.find((entry) => entry.name === name);
+    assert.ok(tool, `${name} must be exposed`);
+    assert.equal(tool.annotations.readOnlyHint, false);
+    assert.equal(tool.annotations.destructiveHint, true);
+    assert.ok(tool.inputSchema.required.includes("confirmed"));
+    assert.ok(tool.inputSchema.required.includes(name === "copy_tables" ? "targetDatabase" : "database"));
+    assert.ok(tool.inputSchema.required.includes(name === "copy_tables" ? "targetConnectionId" : "connectionId"));
+  }
+  for (const name of ["get_table_design", "preview_table_design_change"]) {
+    assert.equal(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint, true);
+  }
+  assert.ok(names.includes("refresh_table"));
   assert.equal(
     tools.find((tool) => tool.name === "import_table_xlsx")?.annotations?.destructiveHint,
     true
@@ -81,5 +96,80 @@ test("external MCP is selected as modern during automatic protocol negotiation",
     assertCuratedTools(tools);
   } finally {
     await client.close();
+  }
+});
+
+test("mutation calls preserve explicit targets and reject missing confirmation before dispatch", async () => {
+  const requests = [];
+  const sockets = new Set();
+  const listener = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.setEncoding("utf8");
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      while (buffer.includes("\n")) {
+        const newline = buffer.indexOf("\n");
+        const request = JSON.parse(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        if (request.op === "hello") {
+          socket.write(`${JSON.stringify({ ok: true, protocolVersion: 1 })}\n`);
+        } else {
+          requests.push(request);
+          socket.write(`${JSON.stringify({ id: request.id, ok: true, data: { accepted: true } })}\n`);
+        }
+      }
+    });
+  });
+  await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "blackcat-mcp-write-test-"));
+  const discovery = path.join(temp, "endpoint.json");
+  await writeFile(discovery, JSON.stringify({
+    port: listener.address().port, token: "test", pid: process.pid, protocolVersion: 1,
+  }));
+  const client = new Client({ name: "write-routing-test", version: "1.0.0" });
+  try {
+    await client.connect(new StdioClientTransport({
+      ...serverOptions,
+      env: { ...process.env, DBSCOUT_CONTROL_ENDPOINT: discovery },
+    }));
+    const context = { connectionId: "mysql-explicit", database: "explicit_db" };
+    const calls = [
+      ["run_write_query", { ...context, sql: "UPDATE items SET label='new' WHERE id=1" }],
+      ["rename_table", { ...context, table: "items", newName: "items_old" }],
+      ["drop_tables", { ...context, tables: ["items"] }],
+      ["copy_tables", {
+        sourceConnectionId: "source", sourceDatabase: "source_db", tables: ["items"],
+        targetConnectionId: "target", targetDatabase: "target_db", mode: "overwrite",
+      }],
+      ["apply_table_design_change", {
+        ...context, table: "items", schemaSignature: "schema", sourceSignature: "source",
+        previewSignature: "preview",
+        draft: { tableComment: "", columns: [{
+          originalName: "id", name: "id", type: "int", nullable: false,
+          primaryKey: true, defaultMode: "none", comment: "",
+        }] },
+      }],
+    ];
+    for (const [name, args] of calls) {
+      const before = requests.length;
+      for (const confirmed of [undefined, false, "true"]) {
+        const rejected = await client.callTool({ name, arguments: { ...args, confirmed } });
+        assert.equal(rejected.isError, true);
+      }
+      assert.equal(requests.length, before);
+      const result = await client.callTool({ name, arguments: { ...args, confirmed: true } });
+      assert.notEqual(result.isError, true);
+      assert.equal(requests.length, before + 1);
+      assert.equal(requests.at(-1).op, "db_tool");
+      assert.equal(requests.at(-1).func, name);
+      assert.deepEqual(requests.at(-1).args, { ...args, confirmed: true });
+    }
+  } finally {
+    await client.close();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => listener.close(resolve));
+    await rm(temp, { recursive: true, force: true });
   }
 });

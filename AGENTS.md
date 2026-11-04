@@ -353,6 +353,18 @@ npm run tauri -- dev
 
 ### On-demand AI runtime (agent sidecar)
 
+The external Blackcat MCP endpoint exposes data mutations through
+`run_write_query` (single INSERT/UPDATE/DELETE/REPLACE), table copy/rename/drop,
+and table design through `get_table_design`, `preview_table_design_change` and
+`apply_table_design_change`. New mutation tools require explicit connection and
+database targets and `confirmed=true`; the calling AI is responsible for obtaining
+the user's authorization. `control_table_tools.rs` validates these requests at the
+backend boundary and reuses desktop command implementations. Design apply requires
+the original draft and preview signatures, preserving stale-schema rejection.
+Read-only engines remain protected. `refresh_table` updates the visible table
+after changes. Only the existing XLSX import automatically creates a backup;
+other mutations do not add automatic backups or promise one-click undo.
+
 Production installers contain the lightweight `agent-runner.mjs`,
 `mcp-server.mjs`, and agent-auth configuration, but do **not** contain portable
 Node or `claude-code-native(.exe)`. On first use, `agent_runtime.rs` reads

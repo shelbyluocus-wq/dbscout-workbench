@@ -67,6 +67,8 @@ pub mod integration_api {
 
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+mod control_table_tools;
+
 const MCP_HEADLESS_ARG: &str = "--mcp-headless";
 
 fn has_mcp_headless_arg<I, S>(args: I) -> bool

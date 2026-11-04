@@ -147,6 +147,113 @@ dbTool(
   })
 );
 
+const explicitContextFields = {
+  connectionId: z.string().min(1).describe("明确指定连接 ID，不随当前界面切换"),
+  database: z.string().min(1).describe("明确指定数据库"),
+};
+const confirmedField = z.literal(true).describe("用户已授权本次具体操作时传 true");
+const designDraft = z.object({
+  tableComment: z.string(),
+  columns: z.array(z.object({
+    originalName: z.string().describe("现有字段原名；新增字段传空字符串"),
+    name: z.string().min(1),
+    type: z.string().min(1),
+    length: z.number().int().nonnegative().nullable().optional(),
+    scale: z.number().int().nonnegative().nullable().optional(),
+    nullable: z.boolean(),
+    primaryKey: z.boolean(),
+    primaryKeyOrdinal: z.number().int().positive().nullable().optional(),
+    defaultMode: z.string().describe("沿用 get_table_design 返回的 defaultMode"),
+    defaultValue: z.string().nullable().optional(),
+    comment: z.string(),
+  })).min(1).describe("完整目标字段列表；省略现有字段表示删除该字段"),
+});
+
+function writeTool(name, description, inputSchema) {
+  register(name, {
+    title: name,
+    description,
+    inputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  }, (args) => control.request("db_tool", { func: name, args }));
+}
+
+dbTool(
+  "get_table_design",
+  "读取完整表设计，含字段类型、长度、默认值、主键、注释及结构签名。修改结构前先读取。",
+  z.object({ ...explicitContextFields, table: z.string().min(1) })
+);
+dbTool(
+  "preview_table_design_change",
+  "预览完整目标表设计，返回 SQL、数据冲突、警告和三个签名，不修改数据库。必须检查 conflicts 为空，向用户说明删除字段等影响。",
+  z.object({ ...explicitContextFields, table: z.string().min(1), draft: designDraft })
+);
+writeTool(
+  "run_write_query",
+  "执行单条 INSERT/UPDATE/DELETE/REPLACE，支持新增行、修改单元格、删除行和批量修改。必须先取得用户授权并明确目标库。沿用事务和操作审计；任意 SQL 不支持一键撤销。修改表结构请使用表设计预览和应用工具。执行后可用 refresh_table 更新已打开表。",
+  z.object({ ...explicitContextFields, sql: z.string().min(1), confirmed: confirmedField })
+);
+writeTool(
+  "apply_table_design_change",
+  "应用已预览并经用户授权的表设计，可增删改字段、类型、主键、默认值和注释。传入预览时完全相同的目标、草稿及三个签名；结构或草稿变更会拒绝执行。DDL 不能承诺事务回滚，重要数据应先备份。",
+  z.object({
+    ...explicitContextFields,
+    table: z.string().min(1),
+    draft: designDraft,
+    schemaSignature: z.string().min(1),
+    sourceSignature: z.string().min(1),
+    previewSignature: z.string().min(1),
+    confirmed: confirmedField,
+  })
+);
+writeTool(
+  "copy_tables",
+  "复制表结构和数据到指定连接及数据库。copy 模式重名自动加后缀；overwrite 模式覆盖目标同名表，需明确授权覆盖。逐表检查返回结果中的失败项。",
+  z.object({
+    sourceConnectionId: z.string().min(1),
+    sourceDatabase: z.string().min(1),
+    tables: z.array(z.string().min(1)).min(1),
+    targetConnectionId: z.string().min(1),
+    targetDatabase: z.string().min(1),
+    mode: z.enum(["copy", "overwrite"]).default("copy"),
+    confirmed: confirmedField,
+  })
+);
+writeTool(
+  "rename_table",
+  "重命名指定表，保留结构与数据；必须取得用户授权。",
+  z.object({
+    ...explicitContextFields,
+    table: z.string().min(1),
+    newName: z.string().min(1),
+    confirmed: confirmedField,
+  })
+);
+writeTool(
+  "drop_tables",
+  "删除指定表及其中全部数据。必须取得用户明确授权；不能一键撤销，重要数据应先备份。逐表检查 dropped 和 failed。",
+  z.object({
+    ...explicitContextFields,
+    tables: z.array(z.string().min(1)).min(1),
+    confirmed: confirmedField,
+  })
+);
+register(
+  "refresh_table",
+  {
+    title: "刷新黑猫中的表",
+    description: "修改数据或结构后刷新黑猫中的目标表。",
+    inputSchema: z.object({ ...explicitContextFields, table: z.string().min(1) }),
+    annotations: uiAnnotations,
+  },
+  (args) => control.request("ui_action", { action: "refresh_table", args })
+);
+
 register(
   "open_table",
   {

@@ -76,6 +76,15 @@ pub async fn handle_db_request(
 
     let rt = state.runtime.lock().await;
     let connection = rt.connections.get(connection_id).cloned();
+    if func == "run_write_query" {
+        if context.read_only {
+            return Err("当前上下文为只读，不能修改数据".into());
+        }
+        let connection = connection.as_ref().ok_or("连接不存在")?;
+        if connection.kind.is_read_only() {
+            return Err("当前连接为只读，不能修改数据".into());
+        }
+    }
     let target = agent_database_target(connection.as_ref())?;
     drop(rt);
 
