@@ -108,18 +108,21 @@ capabilities:
   on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
-- **Table folders** — a Finder-like page (activity rail, below favorite
-  databases; also in the macOS Tools menu) groups one database's tables into
-  named folders by reference only: tables are never moved or copied. Each
-  database has a fixed Favorites folder, which is what the database home's
-  star toggles (earlier flat favorites migrate into it). A folder is filled
-  by picking tables, by saving this window's open tabs of that database, or
-  by adding another folder's tables as they are now (later changes are not
-  followed). Folders are renamed inline (unique per database, at most 40
-  characters), deleted after a confirmation, follow table renames, and mark
-  tables the database no longer has. A folder opens here (every table as a
-  tab) or in a window of its own: the same workbench page started from the
-  folder (`table-folder-<id>` window, folder injected as
+- **Table folders** — a page per database (a tab, like the database home,
+  opened from the activity rail below favorite databases or the macOS Tools
+  menu) groups that database's tables into named folders by reference only:
+  tables are never moved or copied. Folders sit on the left with a + icon
+  below them; the fixed Favorites folder comes first and is what the home
+  star toggles (earlier flat favorites migrate into it). Tables join a
+  folder by dragging (sidebar tables, a folder's own rows, or a whole folder
+  dropped onto another folder, which adds the tables it holds now) or
+  through Add tables, a picker page that adds on Submit. Rename (F2) and
+  delete (Delete, confirmed) live in the folder's right-click menu with
+  open here / in a new window; a table row's menu opens or removes it. The
+  page shows no counts or hints; tables the database no longer has are
+  marked, and table renames are followed. A folder opens in a window of its
+  own (the header's one primary button): the same workbench page started
+  from the folder (`table-folder-<id>` window, folder injected as
   `__DBSCOUT_WINDOW__`; the browser preview opens `?tableFolder=<id>`). A
   folder window shows the folder's tables (first one loaded, the rest on
   demand), never reads or writes the main window's saved tabs, leaves the
@@ -589,10 +592,12 @@ from UI):
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
 - Table folders: `tableFolderStore.js` — folders, the per-database
   favorites folder (the home star's facade), legacy-favorites migration and
-  cross-window reload; `useTableFolders.js` — the folder page's scope,
-  tables and open actions, plus the folder window's start-up (missing-table
-  notice, re-open events); `utils/windowRole.js` — main vs folder window and
-  the folder window's starting workspace
+  cross-window reload; `useTableFolders.js` — the page's actions (provided
+  through `tableFolderContext.js`: table lists, open here / in a window) and
+  the folder window's start-up (missing-table notice, re-open events);
+  `utils/windowRole.js` — main vs folder window and the folder window's
+  starting workspace; `utils/tableDragPayload.js` — the table / folder drag
+  MIME types shared by the sidebar and the page
 - Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
 - Release workspace: `useReleaseWorkspace.js` — the workspace state and its
@@ -701,7 +706,7 @@ from UI):
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue` (shell + history tab, with the
 `BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
-`TableTransferDialog.vue` (one-click table transfer), `TableFolderDialog.vue` (table folders),
+`TableTransferDialog.vue` (one-click table transfer), `TableFolderPage.vue` (the table folder tab page),
 `ReleaseFlowDialog.vue` (release workspace shell with the `ReleasePlatformBoard.vue` board; `ReleaseRunView.vue` shows an update, the workspace pages and shared parts such as `ReleaseSplitDiff.vue`, `ReleaseSvnWorkspace.vue` and `ReleaseBuildPanel.vue` are the other `Release*.vue` components),
 `ConfigRelationsPanel.vue` (inspector relation page, composed of
 `ConfigRelationRowSection.vue` and `ConfigRelationTableSection.vue` under the
@@ -748,7 +753,8 @@ Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
 lab, `DBSCOUT_RELATION_LAB_SIZE`, default 2000) and
 `node scripts/test-incoming-relations-browser.mjs` against a Vite dev server
 (`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
-Table folder regressions: `node --test src/workbench/tableFolderStore.test.js`,
+Table folder regressions: `node --test src/workbench/tableFolderStore.test.js
+src/workbench/tableFolderPage.test.js src/workbench/windowRole.test.js`,
 `cargo test --manifest-path src-tauri/Cargo.toml --lib -- table_folder_windows`
 and `node scripts/test-table-folders-browser.mjs` against a Vite dev server
 (`DBSCOUT_TABLE_FOLDERS_TEST_URL`, default `http://127.0.0.1:1431`).

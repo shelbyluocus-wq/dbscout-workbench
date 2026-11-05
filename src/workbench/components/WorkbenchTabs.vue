@@ -132,6 +132,7 @@ function tabKind(tab) {
   if (tab.kind === "home") return "home";
   if (tab.kind === "sql") return "sql";
   if (tab.kind === "sql-library") return "sql-library";
+  if (tab.kind === "folders") return "folders";
   return tab.kind === "design" ? "design" : "data";
 }
 
@@ -152,6 +153,7 @@ function normalizeDropPosition(tabId, position) {
 function tabTitle(tab) {
   if (tabKind(tab) === "home") return t('m_203c08e0d44a');
   if (tabKind(tab) === "sql-library") return t('m_6369c8800ff1');
+  if (tabKind(tab) === "folders") return t('tableFolders.title');
   if (tabKind(tab) === "sql") return tab.title || tab.fileName || t('m_6369c8800ff1');
   return formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
 }
@@ -185,12 +187,13 @@ function tabDatabaseDecorationStyle(tab) {
 // Table tabs render as two stacked lines (table name over database name)
 // whenever there is a database to show; everything else stays single-line.
 function hasTabSubtitle(tab) {
-  return isTableLikeTab(tab) && !tab.opening && Boolean(tabDatabaseLabel(tab));
+  return (isTableLikeTab(tab) || tabKind(tab) === "folders") && !tab.opening && Boolean(tabDatabaseLabel(tab));
 }
 
 function tabSourceTitle(tab) {
   if (tabKind(tab) === "home") return t('m_203c08e0d44a');
   if (tabKind(tab) === "sql-library") return t('m_7eb481889026');
+  if (tabKind(tab) === "folders") return `${t('tableFolders.title')}\n${tabDatabaseLabel(tab)}`;
   if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
   const display = formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
   const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;

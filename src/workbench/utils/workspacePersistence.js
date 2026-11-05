@@ -8,7 +8,7 @@ const SNAPSHOT_VERSION = 4;
 let snapshotOverride = null;
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" || kind === "folders" ? kind : "data";
 }
 
 function normalizeDirection(direction) {
@@ -134,6 +134,7 @@ export function buildWorkspaceSnapshot({
       ? [...tab.selectedTableNames]
       : undefined,
     focusedTableName: tab.kind === "home" ? String(tab.focusedTableName || "") : undefined,
+    folderId: tab.kind === "folders" ? String(tab.folderId || "") : undefined,
     title: tab.kind === "sql" ? String(tab.title || "") : undefined,
     documentId: tab.kind === "sql" ? String(tab.documentId || "") : undefined,
     sql: tab.kind === "sql" ? String(tab.sql || "") : undefined,
@@ -204,7 +205,7 @@ export function parseWorkspaceSnapshot(parsed) {
     if (!parsed || typeof parsed !== "object") return null;
     const tabs = Array.isArray(parsed.tabs)
       ? parsed.tabs
-          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home" || tab.kind === "sql" || tab.kind === "sql-library"))
+          .filter((tab) => tab && typeof tab === "object" && (tab.tableName || tab.kind === "home" || tab.kind === "sql" || tab.kind === "sql-library" || tab.kind === "folders"))
           .map((tab) => {
             const kind = normalizeTabKind(tab.kind);
             const saved = {
@@ -233,6 +234,7 @@ export function parseWorkspaceSnapshot(parsed) {
               focusedTableName: String(tab.focusedTableName || ""),
               readOnly: Boolean(tab.readOnly || tab.read_only),
             };
+            if (kind === "folders") saved.folderId = String(tab.folderId || "");
             if (kind === "sql") Object.assign(saved, {
               title: String(tab.title || ""),
               documentId: String(tab.documentId || ""),

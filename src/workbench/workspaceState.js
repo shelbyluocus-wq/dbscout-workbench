@@ -53,7 +53,7 @@ function databaseKey(connectionId, database) {
 }
 
 function normalizeTabKind(kind) {
-  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" ? kind : "data";
+  return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" || kind === "folders" ? kind : "data";
 }
 
 function tabKey(kind, sourceKey) {
@@ -260,6 +260,49 @@ export function openSqlLibraryTab(state, { activate = true, paneId = "" } = {}) 
     return existing;
   }
   const tab = createSqlLibraryTab({ id: `tab-${state.nextTabSeq++}` });
+  state.tabs.push(tab);
+  addTabToPane(state, pane.id, tab.id, { activate });
+  return tab;
+}
+
+function createTableFoldersTab({ id, connectionId, database, folderId = "" }) {
+  const sourceKey = databaseKey(connectionId, database);
+  return {
+    id,
+    kind: "folders",
+    connectionId,
+    database,
+    databaseKey: sourceKey,
+    tableName: "",
+    tableKey: "",
+    tabKey: tabKey("folders", sourceKey),
+    title: "表格文件夹",
+    folderId: String(folderId || ""),
+  };
+}
+
+// One table folder page per database: opening it again brings that tab
+// forward wherever it is.
+export function openTableFoldersTab(state, { connectionId = "", database = "", folderId = "" } = {}, { activate = true, paneId = "" } = {}) {
+  if (!state) return null;
+  const safeConnectionId = String(connectionId || "").trim();
+  const safeDatabase = String(database || "").trim();
+  if (!safeDatabase) return null;
+  const key = tabKey("folders", databaseKey(safeConnectionId, safeDatabase));
+  const existing = state.tabs.find((tab) => tab.kind === "folders" && tab.tabKey === key);
+  if (existing) {
+    if (folderId) existing.folderId = String(folderId);
+    const ownerPane = Object.values(state.panes || {}).find((pane) => pane.tabIds?.includes(existing.id));
+    if (activate) addTabToPane(state, ownerPane?.id || ensurePane(state, paneId).id, existing.id, { activate: true });
+    return existing;
+  }
+  const pane = ensurePane(state, paneId);
+  const tab = createTableFoldersTab({
+    id: `tab-${state.nextTabSeq++}`,
+    connectionId: safeConnectionId,
+    database: safeDatabase,
+    folderId,
+  });
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });
   return tab;

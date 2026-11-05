@@ -26,6 +26,7 @@ import {
   normalizeHomeTabOrder,
   openDatabaseHomeTab,
   openSqlLibraryTab,
+  openTableFoldersTab,
   openSqlQueryTab,
   openTableDesignTab,
   openTableTab,
@@ -63,6 +64,7 @@ import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatf
 import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
 import { useTableFolderStore } from "./composables/tableFolderStore.js";
 import { useTableFolders } from "./composables/useTableFolders.js";
+import { TABLE_FOLDER_CONTEXT } from "./composables/tableFolderContext.js";
 import { currentWindowRole, isTableFolderWindowRole } from "./utils/windowRole.js";
 import { createPageZoom, createPageZoomWheelHandler, pageZoomAction } from "./utils/pageZoom.js";
 import { noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
@@ -151,7 +153,6 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
-const TableFolderDialog = defineAsyncComponent(() => import("./components/TableFolderDialog.vue"));
 import AiActivityGlow from "./components/AiActivityGlow.vue";
 import { requestSqlRun } from "./utils/sqlRunRequests.js";
 import { applyAgentTableViewState } from "./utils/agentTableView.js";
@@ -1104,22 +1105,15 @@ const tableFolderPage = useTableFolders({
   workspace,
   selectedConnectionId,
   selectedDatabase,
-  connections,
-  connectionLabel,
-  databaseLabel,
   openTable: (table) => openTable(table, { paneId: workspace.focusedPaneId }),
   openTables: (request) => openTablesFromSidebar(request),
   notify: (tone, message) => operationNotices.push({ tone, text: message }),
+  confirm: (options) => confirmDialogConfirm(options),
 });
-const {
-  dialog: tableFolderDialog,
-  scope: tableFolderScope,
-  scopeOptions: tableFolderScopeOptions,
-  openTableNames: tableFolderOpenTableNames,
-} = tableFolderPage;
+provide(TABLE_FOLDER_CONTEXT, tableFolderPage.context);
 
 function openTableFolderPage() {
-  tableFolderPage.open();
+  tableFolderPage.openPage();
 }
 
 async function openBackupCenter() {
@@ -5038,6 +5032,15 @@ async function restoreSavedTabs() {
     }
     if (savedTab.connectionId && savedTab.connectionId !== currentConnectionId) continue;
     if (savedTab.database && savedTab.database !== currentDatabase) continue;
+    if (savedTab.kind === "folders") {
+      const restoredFolders = openTableFoldersTab(workspace, {
+        connectionId: currentConnectionId,
+        database: currentDatabase,
+        folderId: savedTab.folderId,
+      }, { activate: false, paneId });
+      if (restoredFolders) savedToRestoredTabId.set(savedTab.id, restoredFolders.id);
+      continue;
+    }
     if (savedTab.kind === "home") {
       const restoredHome = openDatabaseHomeTab(workspace, {
         connectionId: currentConnectionId,
@@ -5913,23 +5916,6 @@ onBeforeUnmount(() => {
       :assistant="agent"
       :theme="effectiveTheme"
       @close="blackcatMcpOpen = false"
-    />
-
-    <TableFolderDialog
-      v-if="tableFolderDialog.open"
-      :scope="tableFolderScope"
-      :scope-options="tableFolderScopeOptions"
-      :tables="tableFolderDialog.tables"
-      :tables-loading="tableFolderDialog.loading"
-      :open-table-names="tableFolderOpenTableNames"
-      :theme="effectiveTheme"
-      :confirm="confirmDialogConfirm"
-      @close="tableFolderPage.close()"
-      @change-scope="tableFolderPage.setScope"
-      @open-window="tableFolderPage.openWindow"
-      @open-here="tableFolderPage.openHere"
-      @open-table="tableFolderPage.openOne"
-      @notice="(notice) => operationNotices.push({ tone: notice.tone, text: notice.message })"
     />
 
     <AiActivityGlow :theme="effectiveTheme" />

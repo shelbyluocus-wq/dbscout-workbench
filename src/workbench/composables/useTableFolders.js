@@ -1,8 +1,6 @@
-import { computed, reactive } from "vue";
-
 import { t as translate } from "../i18n/index.js";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { useTableFolderStore } from "./tableFolderStore.js";
+import { openTableFoldersTab } from "../workspaceState.js";
 import { currentWindowRole, isTableFolderWindowRole } from "../utils/windowRole.js";
 
 export const TABLE_FOLDER_WINDOW_OPEN_EVENT = "table-folder-window-open";
@@ -12,109 +10,48 @@ function sameScope(a, b) {
     && String(a?.database || "") === String(b?.database || "");
 }
 
-function tableRows(tables) {
+export function tableRows(tables) {
   return (Array.isArray(tables) ? tables : [])
     .map((table) => ({ name: normalizeTableName(table), comment: normalizeTableComment(table) }))
     .filter((table) => table.name);
 }
 
-// The table folder page (dialog) and the folder window's own start-up.
+// The table folder page's actions (provided to it as a context) and the
+// folder window's own start-up.
 export function useTableFolders({
   invokeWorkbench,
   workspace,
   selectedConnectionId,
   selectedDatabase,
-  connections,
-  connectionLabel,
-  databaseLabel,
   openTable,
   openTables,
   notify,
+  confirm = null,
   t = translate,
-  store = useTableFolderStore(),
   role = currentWindowRole(),
   listenToWindow = defaultListenToWindow,
 } = {}) {
-  const dialog = reactive({
-    open: false,
-    connectionId: "",
-    database: "",
-    tables: [],
-    loading: false,
-    loadToken: 0,
-  });
-
-  const scope = computed(() => ({ connectionId: dialog.connectionId, database: dialog.database }));
-
-  function scopeLabel({ connectionId, database }) {
-    const connection = connections.value.find((item) => item.id === connectionId);
-    const name = connectionLabel(connectionId, connection?.label || connectionId);
-    return `${name} · ${databaseLabel(connectionId, database) || database}`;
+  // The database shown in the sidebar needs no round trip.
+  async function loadTables(scope) {
+    if (!scope?.database) return [];
+    if (sameScope(scope, { connectionId: selectedConnectionId.value, database: selectedDatabase.value }) && workspace.schema.length) {
+      return tableRows(workspace.schema);
+    }
+    return tableRows(await invokeWorkbench("list_tables", { ...scope, priority: "visible" }));
   }
 
-  const scopeOptions = computed(() => {
-    const options = [];
-    const add = (entry) => {
-      if (!entry.database || options.some((item) => sameScope(item, entry))) return;
-      options.push({ connectionId: entry.connectionId, database: entry.database, label: scopeLabel(entry) });
-    };
-    add({ connectionId: dialog.connectionId, database: dialog.database });
-    add({ connectionId: selectedConnectionId.value, database: selectedDatabase.value });
-    store.scopes().forEach(add);
-    return options;
-  });
-
-  // Tables of the dialog's database open in this window, in tab order.
-  const openTableNames = computed(() => workspace.tabs
-    .filter((tab) => (tab.kind || "data") === "data" && sameScope(tab, scope.value))
-    .map((tab) => tab.tableName)
-    .filter(Boolean));
-
-  async function loadTables() {
-    const token = ++dialog.loadToken;
-    const target = { connectionId: dialog.connectionId, database: dialog.database };
-    if (!target.database) {
-      dialog.tables = [];
-      return;
-    }
-    // The database already shown in the sidebar needs no round trip.
-    if (sameScope(target, { connectionId: selectedConnectionId.value, database: selectedDatabase.value }) && workspace.schema.length) {
-      dialog.tables = tableRows(workspace.schema);
-      dialog.loading = false;
-      return;
-    }
-    dialog.loading = true;
-    dialog.tables = [];
-    try {
-      const tables = await invokeWorkbench("list_tables", { ...target, priority: "visible" });
-      if (token === dialog.loadToken) dialog.tables = tableRows(tables);
-    } catch (error) {
-      if (token === dialog.loadToken) notify("error", String(error?.message || error));
-    } finally {
-      if (token === dialog.loadToken) dialog.loading = false;
-    }
-  }
-
-  function setScope({ connectionId = "", database = "" } = {}) {
-    dialog.connectionId = String(connectionId || "");
-    dialog.database = String(database || "");
-    void loadTables();
-  }
-
-  function open(target = null) {
+  function openPage(target = null) {
     const focusedTab = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
-    const initial = target?.database
+    const scope = target?.database
       ? target
       : focusedTab?.database
         ? { connectionId: focusedTab.connectionId, database: focusedTab.database }
         : { connectionId: selectedConnectionId.value, database: selectedDatabase.value };
-    setScope(initial);
-    dialog.open = true;
-  }
-
-  function close() {
-    dialog.open = false;
-    dialog.loadToken += 1;
+    if (!scope.database) {
+      notify("info", t("tableFolders.noDatabase"));
+      return null;
+    }
+    return openTableFoldersTab(workspace, scope, { activate: true, paneId: workspace.focusedPaneId });
   }
 
   async function openWindow(folder) {
@@ -130,16 +67,16 @@ export function useTableFolders({
           tableNames: [...folder.tableNames],
         },
       });
-      notify("success", result?.reused ? t("tableFolders.windowReused", { name }) : t("tableFolders.windowOpened", { name }));
-      close();
+      if (result?.reused) notify("info", t("tableFolders.windowReused", { name }));
     } catch (error) {
       notify("error", t("tableFolders.windowFailed", { error: String(error?.message || error) }));
     }
   }
 
-  function folderTables(folder) {
-    const known = new Map((sameScope(folder, scope.value) ? dialog.tables : []).map((table) => [table.name, table]));
-    return folder.tableNames
+  // Every table the database still has becomes a tab of this window.
+  async function openHere(folder, knownTables = []) {
+    const known = new Map(tableRows(knownTables).map((table) => [table.name, table]));
+    const tables = folder.tableNames
       .filter((name) => !known.size || known.has(name))
       .map((tableName) => ({
         connectionId: folder.connectionId,
@@ -147,39 +84,38 @@ export function useTableFolders({
         tableName,
         tableComment: known.get(tableName)?.comment || "",
       }));
-  }
-
-  async function openHere(folder) {
-    const tables = folderTables(folder);
     if (!tables.length) return;
-    close();
     await openTables({ tables, activeName: tables[0].tableName });
   }
 
-  async function openOne({ connectionId, database, tableName } = {}) {
-    if (!tableName) return;
-    const comment = dialog.tables.find((table) => table.name === tableName)?.comment || "";
-    close();
-    await openTable({ connectionId, database, tableName, tableComment: comment });
+  async function openFolderTables(tables, activeName) {
+    if (tables.length === 1) {
+      await openTable(tables[0]);
+      return;
+    }
+    await openTables({ tables, activeName });
   }
+
+  const context = Object.freeze({
+    loadTables,
+    openWindow,
+    openHere,
+    openTables: openFolderTables,
+    notify,
+    confirm,
+  });
 
   // ── Folder window ────────────────────────────────────────────────────────
   const isFolderWindow = isTableFolderWindowRole(role);
 
   // Tables the folder names that the database no longer has.
-  function reportMissing(tableNames, scopeTables) {
-    const present = new Set(tableRows(scopeTables).map((table) => table.name));
-    if (!present.size) return;
-    const missing = tableNames.filter((name) => !present.has(name));
-    if (!missing.length) return;
-    notify("warning", t("tableFolders.missingOnOpen", { count: missing.length, names: missing.join(", ") }));
-  }
-
   function afterFolderWindowRestored() {
     if (!isFolderWindow) return;
-    if (sameScope(role, { connectionId: selectedConnectionId.value, database: selectedDatabase.value })) {
-      reportMissing(role.tableNames, workspace.schema);
-    }
+    if (!sameScope(role, { connectionId: selectedConnectionId.value, database: selectedDatabase.value })) return;
+    const present = new Set(tableRows(workspace.schema).map((table) => table.name));
+    if (!present.size) return;
+    const missing = role.tableNames.filter((name) => !present.has(name));
+    if (missing.length) notify("warning", t("tableFolders.missingOnOpen", { count: missing.length, names: missing.join(", ") }));
   }
 
   // The folder was opened again from another window: add what is new since.
@@ -215,18 +151,9 @@ export function useTableFolders({
   }
 
   return {
-    dialog,
-    scope,
-    scopeOptions,
-    openTableNames,
-    open,
-    close,
-    setScope,
-    openWindow,
-    openHere,
-    openOne,
+    context,
+    openPage,
     isFolderWindow,
-    windowRole: role,
     afterFolderWindowRestored,
     addFolderTables,
     startFolderWindow,

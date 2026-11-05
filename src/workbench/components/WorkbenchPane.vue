@@ -44,6 +44,7 @@ import CellDetailPanel from "./CellDetailPanel.vue";
 import DatabaseHome from "./DatabaseHome.vue";
 const SqlQueryWorkspace = defineAsyncComponent(() => import("./SqlQueryWorkspace.vue"));
 const SqlQueryLibrary = defineAsyncComponent(() => import("./SqlQueryLibrary.vue"));
+const TableFolderPage = defineAsyncComponent(() => import("./TableFolderPage.vue"));
 
 const props = defineProps({
   pane: { type: Object, required: true },
@@ -132,6 +133,7 @@ const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? pro
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
 const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
 const activeSqlLibraryTab = computed(() => (props.activeTab?.kind === "sql-library" ? props.activeTab : null));
+const activeFoldersTab = computed(() => (props.activeTab?.kind === "folders" ? props.activeTab : null));
 const activeSourceTab = computed(() => activeDataTab.value || activeDesignTab.value);
 const activeDataReadOnly = computed(() => Boolean(activeDataTab.value?.readOnly || activeDataTab.value?.read_only));
 const activeSourceReadOnly = computed(() => Boolean(activeSourceTab.value?.readOnly || activeSourceTab.value?.read_only));
@@ -1956,6 +1958,12 @@ onMounted(() => emitPaneState());
       @rename-query="emit('rename-sql-document', $event)"
       @delete-query="emit('delete-sql-document', $event, pane.id)"
       @open-file="emit('open-sql-file', $event, pane.id)"
+    />
+
+    <TableFolderPage
+      v-else-if="activeFoldersTab"
+      :key="activeFoldersTab.id"
+      :tab="activeFoldersTab"
     />
 
     <DatabaseHome

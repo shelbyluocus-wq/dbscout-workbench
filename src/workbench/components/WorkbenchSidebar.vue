@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
 import { Server } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
@@ -599,6 +600,16 @@ function setDragPayload(event, kind, id) {
   setDragImage(event);
 }
 
+// Tables dragged out of the sidebar, e.g. into a table folder. A table that
+// belongs to the multi-selection takes the whole selection along.
+function startTableDrag(connectionId, database, table, event) {
+  const name = table?.tableName || "";
+  const names = tableSelection.isMultiple.value && tableSelection.selectedSet.value.has(name)
+    ? filteredTables.value.map((item) => item.tableName).filter((item) => tableSelection.selectedSet.value.has(item))
+    : [name];
+  writeTableDrag(event, { connectionId, database, tableNames: names });
+}
+
 function startSidebarDrag(kind, id, event) {
   dragState.kind = kind;
   dragState.sourceId = id;
@@ -863,6 +874,8 @@ defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, setting
                           }"
                           :aria-current="isTableActive(entry.table) ? 'page' : undefined"
                           :title="tableTitle(entry.table)"
+                          draggable="true"
+                          @dragstart="startTableDrag(connection.id, database, entry.table, $event)"
                           @click="onTableClick(entry.table, $event)"
                           @dblclick="onTableDoubleClick(entry.table)"
                           @contextmenu.prevent.stop="openTableContextMenu($event, entry.table)"
