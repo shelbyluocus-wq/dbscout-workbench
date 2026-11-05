@@ -1918,7 +1918,9 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(orchestrator, /useTheme\(\)/);
   assert.match(orchestrator, /<main[\s\S]*?:data-theme="effectiveTheme"/);
   assert.match(orchestrator, /:is-dark="isDark"/);
-  assert.match(orchestrator, /@toggle-theme="toggleTheme"/);
+  // The settings control is a 3-option segment (light / dark / system) that
+  // emits the explicit choice instead of toggling.
+  assert.match(orchestrator, /@set-theme="setThemePreference"/);
   assert.doesNotMatch(orchestrator, /class="wb-theme-toggle"/);
   // The settings trigger is the gear pinned at the bottom of the activity rail;
   // the sidebar only owns the teleported settings sheet.
@@ -1933,7 +1935,7 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   assert.match(sidebar, /class="wb-sidebar-settings-label"[\s\S]*外观/);
   assert.doesNotMatch(sidebar, /M4 7h7/);
   assert.doesNotMatch(sidebar, /M19\.4 15a7\.8/);
-  assert.match(sidebar, /emit\(["']toggle-theme["']\)/);
+  assert.match(sidebar, /emit\(["']set-theme["'], nextTheme\)/);
   assert.match(sidebar, />浅色<\/button>/);
   assert.match(sidebar, />深色<\/button>/);
   assert.match(theme, /getCurrentWindow/);

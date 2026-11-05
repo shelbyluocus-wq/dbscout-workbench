@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { COLOR_THEMES, DEFAULT_COLOR_THEME, getColorTheme, isColorThemeId } from "./colorThemes.js";
+import { COLOR_THEMES, DEFAULT_COLOR_THEME, getColorTheme, isColorThemeAvailable, isColorThemeId } from "./colorThemes.js";
 import { createColorThemeController, renderColorThemeCss, COLOR_THEME_STORAGE_KEY } from "./colorThemeController.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -134,4 +134,25 @@ test("controller restores the persisted theme on start", () => {
   controller.start();
   assert.equal(documentRef.tags.length, 1);
   assert.match(documentRef.tags[0].textContent, /--wb-accent:#2563eb/);
+});
+
+test("system accent preset derives tokens from the accent color", () => {
+  const theme = getColorTheme("system");
+  assert.equal(typeof theme.tokens, "function");
+  const css = renderColorThemeCss(theme, { accent: "#FFC600" });
+  assert.match(css, /--wb-accent:#FFC600/);
+  assert.match(css, /--wb-accent-control-text:#1a1c20/); // yellow → dark text
+});
+
+test("system preset is unavailable outside the macOS runtime and falls back to slate", () => {
+  assert.equal(isColorThemeAvailable("system", { systemAccentSupported: false }), false);
+  assert.equal(isColorThemeAvailable("system", { systemAccentSupported: true }), true);
+  const storage = { getItem: () => "system", setItem() {}, removeItem() {} };
+  const documentRef = { head: null };
+  const c1 = createColorThemeController({ storage, documentRef, systemAccentSupported: false });
+  assert.equal(c1.currentTheme.value, "slate");
+  assert.equal(c1.themes.some((t) => t.id === "system"), false);
+  const c2 = createColorThemeController({ storage, documentRef, systemAccentSupported: true });
+  assert.equal(c2.currentTheme.value, "system");
+  assert.equal(c2.themes.some((t) => t.id === "system"), true);
 });

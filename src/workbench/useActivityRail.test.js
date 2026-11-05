@@ -131,7 +131,7 @@ test("activity rail tooltips use Command modifier labels on macOS", () => {
     };
     const rail = useActivityRail({ shortcuts: shortcutHelper });
     const item = rail.items.value.find((entry) => entry.id === "quickOpen");
-    assert.equal(item.shortcutLabel, "Command+P");
+    assert.equal(item.shortcutLabel, "⌘P");
     assert.equal(item.ariaShortcut, "Meta+P");
   });
 });

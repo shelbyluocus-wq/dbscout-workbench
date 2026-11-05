@@ -60,6 +60,10 @@ import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
+import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
+import { useMacosTitlebarDoubleClick } from "./composables/useMacosTitlebar.js";
+import { useMacosVibrancy } from "./composables/useMacosVibrancy.js";
+import { APP_VERSION } from "./appVersion.js";
 import { handleMenuKeydown } from "./utils/menuKeyboard.js";
 import { confirmOpeningTables } from "./utils/listSelection.js";
 import { dispatchSqlExecutionEvent } from "./sqlExecutionState.js";
@@ -199,6 +203,10 @@ markPerf("workbench.module-loaded");
 const SEARCH_VALUES_PROGRESS_EVENT = "search-values-progress";
 const DETAIL_CONTEXT_MENU_HEIGHT = 112;
 const usesNativeMacWindowControls = isTauriRuntime() && isMacOSPlatform();
+// macOS: reads AppleActionOnDoubleClick (cached, refreshed on window focus)
+// and swallows the injected drag-region double-click so only the
+// setting-aware handlers act.
+const macosTitlebar = useMacosTitlebarDoubleClick();
 
 // ── Shared state ──────────────────────────────────────────────────────────
 const workspace = reactive(createWorkspaceState());
@@ -252,7 +260,7 @@ watch(quickOpenVisible, (open) => {
 const shortcutHelper = useShortcuts(invokeWorkbench);
 const { hintsVisible: tabShortcutHintsVisible, hide: hideTabShortcutHints } = useTabShortcutHints();
 function withShortcutLabel(action, shortcut) {
-  return shortcut ? t("shell.withShortcut", { action, shortcut }) : action;
+  return shortcut ? t("shell.withShortcut", { action, shortcut: formatShortcutForPlatform(shortcut) }) : action;
 }
 const windowPin = useWindowPin();
 const windowPinButtonLabel = computed(() => withShortcutLabel(
@@ -1195,8 +1203,26 @@ const { confirmDialog: globalConfirmDialog, confirm: confirmDialogConfirm, close
 
 // 窗口宽度检测：窄窗口下提示收起侧边栏，并让右侧栏在空间紧张时先让位。
 const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1280);
+// Native fullscreen hides the traffic lights, so the macOS titlebar drops its
+// 76px clearance. Tracked via debounced isFullscreen() reads on window
+// resize — no polling.
+const macosFullscreen = ref(false);
+let macosFullscreenTimer = 0;
+function refreshMacosFullscreen() {
+  if (!usesNativeMacWindowControls) return;
+  clearTimeout(macosFullscreenTimer);
+  macosFullscreenTimer = setTimeout(async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      macosFullscreen.value = Boolean(await getCurrentWindow().isFullscreen());
+    } catch {
+      // Window API unavailable — keep the last known state.
+    }
+  }, 80);
+}
 function onWindowResize() {
   windowWidth.value = window.innerWidth;
+  refreshMacosFullscreen();
 }
 
 const {
@@ -1218,13 +1244,20 @@ const {
   expandInspector,
 } = usePaneResize({ viewportWidth: windowWidth });
 
-const { effectiveTheme, isDark, toggleTheme } = useTheme();
+const { effectiveTheme, isDark, toggleTheme, preference: themePreference, setThemePreference, refresh: refreshTheme } = useTheme();
+const macosVibrancy = useMacosVibrancy({ themeRefresh: refreshTheme });
+macosVibrancy.start();
 const {
   currentTheme: currentColorTheme,
   themes: colorThemes,
   setColorTheme,
   start: startColorTheme,
-} = createColorThemeController();
+} = createColorThemeController({
+  systemAccentSupported: usesNativeMacWindowControls,
+  accentProvider: usesNativeMacWindowControls
+    ? () => invokeWorkbench("macos_accent_color")
+    : null,
+});
 startColorTheme();
 // 切库流光：跨数据库切换标签时沿内容区三边播放流光并浮现库名（见 watcher 与 DatabaseGlowOverlay）
 const { playback: switchGlowPlayback, play: playSwitchGlow } = createDatabaseSwitchGlow();
@@ -2042,7 +2075,11 @@ function toggleMaximizeWindow() {
 }
 
 function handleTitlebarDoubleClick() {
-  if (!usesNativeMacWindowControls) toggleMaximizeWindow();
+  if (!usesNativeMacWindowControls) {
+    toggleMaximizeWindow();
+    return;
+  }
+  macosTitlebar.runDoubleClickAction({ minimize: minimizeWindow, zoom: toggleMaximizeWindow });
 }
 
 function closeWindow() {
@@ -4375,18 +4412,37 @@ function handleCloseTabKeydown(event) {
   if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
   if (isEditableShortcutTarget(event.target)) return false;
   const tab = activeTab.value;
-  if (!tab) return false;
+  if (!tab) {
+    // On macOS ⌘W is also the app's close-window key: with no tab to close,
+    // hide the window like the default menu's Close Window item did.
+    if (!usesNativeMacWindowControls) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    withCurrentWindow((win) => win.hide());
+    return true;
+  }
   event.preventDefault();
   event.stopPropagation();
   closeTab(tab.id);
   return true;
 }
 
+// Physical Ctrl+Tab / Ctrl+Shift+Tab always cycles tabs on macOS (Safari
+// convention), independent of the configurable next/previous bindings.
+function isMacosPhysicalTabCycle(event) {
+  return Boolean(event?.ctrlKey) && !event?.metaKey && !event?.altKey
+    && (event?.code === "Tab" || event?.key === "Tab");
+}
+
 function handleCycleTabKeydown(event) {
   const pane = getFocusedPane(workspace);
   if (!pane) return false;
-  const isNext = shortcutHelper.matchesBinding("nextTab", event);
-  const isPrev = shortcutHelper.matchesBinding("previousTab", event);
+  let isNext = shortcutHelper.matchesBinding("nextTab", event);
+  let isPrev = shortcutHelper.matchesBinding("previousTab", event);
+  if (!isNext && !isPrev && usesNativeMacWindowControls && isMacosPhysicalTabCycle(event)) {
+    isNext = !event.shiftKey;
+    isPrev = event.shiftKey;
+  }
   if (!isNext && !isPrev) return false;
   if (isEditableShortcutTarget(event.target)) return false;
   const direction = isPrev ? "previous" : "next";
@@ -4862,6 +4918,144 @@ async function restoreSavedTabs() {
   void loadVisibleDeferredTabs();
 }
 
+// ── Native macOS app menu ────────────────────────────────────────────────
+// The menu dispatches to the same orchestrator functions as the keydown
+// handlers; enabled/checked state mirrors the gates those handlers use.
+const nativeMenuTools = computed(() => {
+  const source = moreSource.value || batchTransferSource(activeTab.value);
+  const hasDatabase = Boolean(source.connectionId && source.database);
+  const writable = hasDatabase && !isReadOnlySource(source);
+  return [
+    { id: "backupCenter", label: t("m_965320c43727"), action: "backupCenter" },
+    { id: "tableTransfer", label: t("m_a36603b169a6"), action: "tableTransfer", shortcutAction: "openTableTransfer" },
+    { id: "releaseFlow", label: t("releaseFlow.title"), action: "releaseFlow" },
+    { id: "configRelations", label: t("shell.configRelations"), action: "configRelations" },
+    { id: "moreSync", label: t("m_623281e9dfdb"), action: "moreSync", group: "more", enabled: writable && sourceHasCapability("sync", source) },
+    { id: "moreSend", label: t("m_8f211e16faf2"), action: "moreSend", group: "more", enabled: writable && sourceHasCapability("tableCopy", source) },
+    { id: "moreImport", label: t("m_fd7719273970"), action: "moreImport", group: "more", enabled: writable && sourceHasCapability("import", source) },
+    { id: "moreExport", label: t("m_d2fcdde81f06"), action: "moreExport", group: "more", enabled: hasDatabase },
+  ];
+});
+
+function runMoreMenuAction(id) {
+  moreSource.value = batchTransferSource(activeTab.value);
+  selectMoreAction(id);
+}
+
+function adjacentTabAvailable(direction) {
+  const pane = getFocusedPane(workspace);
+  if (!pane) return false;
+  return Boolean(adjacentPublishedTabId(workspace.tabs, pane, direction));
+}
+
+function cycleFocusedTab(direction) {
+  const pane = getFocusedPane(workspace);
+  if (!pane) return;
+  const nextTabId = adjacentPublishedTabId(workspace.tabs, pane, direction);
+  if (nextTabId) void activateTab(pane.id, nextTabId);
+}
+
+function homeTabForMenu() {
+  return focusedPaneState.activeHomeTab || (activeTab.value?.kind === "home" ? activeTab.value : null);
+}
+
+function openDesignFromMenu() {
+  if (activeDataTab.value) return openTableDesign(activeDataTab.value);
+  const homeTab = homeTabForMenu();
+  if (!homeTab || !resolveHomeDesignTargets(homeTab).length) return null;
+  return openTableDesign(homeTab, workspace.focusedPaneId);
+}
+
+// Mirrors the F3 handler's gate: a home tab with a focused/selected table on
+// a writable, tableDesign-capable source.
+function homeCommentTargetCanEdit() {
+  const target = focusedHomeInspectorSchema.value;
+  if (!target) return false;
+  const source = {
+    connectionId: target.home.connectionId,
+    database: target.home.database,
+    readOnly: target.home.readOnly || target.home.read_only,
+  };
+  return !isReadOnlySource(source) && sourceHasCapability("tableDesign", source);
+}
+
+function editTableCommentFromMenu() {
+  const target = focusedHomeInspectorSchema.value;
+  if (!target) return;
+  openHomeTableCommentEdit({
+    connectionId: target.home.connectionId,
+    database: target.home.database,
+    tableName: target.tableName,
+    tableComment: normalizeTableComment(target.schema) || target.home.focusedTableComment || "",
+  });
+}
+
+function refreshFromMenu() {
+  if (focusedPaneState.isEditing?.()) return;
+  if (activeTab.value?.kind === "home") focusedPaneState.refreshHomeView?.();
+  else if (activeDataTab.value) void refreshDataTab(activeDataTab.value);
+}
+
+// ⌘W: close the active tab; hide the window when there is nothing to close
+// (the default menu's Close Window behaviour).
+function closeTabOrHideWindow() {
+  const tab = activeTab.value;
+  if (tab) {
+    void closeTab(tab.id);
+    return;
+  }
+  withCurrentWindow((win) => win.hide());
+}
+
+useNativeAppMenu({
+  bindings: shortcutHelper.bindings,
+  appName: "黑猫",
+  appVersion: APP_VERSION,
+  state: () => ({
+    hasDataTab: Boolean(activeDataTab.value),
+    canOpenDesign: Boolean(activeDataTab.value) || Boolean(homeTabForMenu() && resolveHomeDesignTargets(homeTabForMenu()).length),
+    canEditTableComment: homeCommentTargetCanEdit(),
+    canRefresh: Boolean(activeTab.value),
+    hasNextTab: adjacentTabAvailable("next"),
+    hasPrevTab: adjacentTabAvailable("previous"),
+    sidebarCollapsed: sidebarCollapsed.value,
+    inspectorCollapsed: inspectorCollapsed.value,
+    windowPinned: windowPin.pinned.value,
+    themePreference: themePreference.value,
+    tools: nativeMenuTools.value,
+  }),
+  actions: {
+    checkUpdates: () => updater.checkForUpdates({ openOnError: true, openOnAvailable: true }),
+    openSettings: () => sidebarRef.value?.openSettings?.(),
+    openShortcutSettings: () => sidebarRef.value?.openShortcuts?.(),
+    newConnection: () => openConnDialog(),
+    openSqlQuery: () => openSqlQuery(),
+    quickOpen: () => openQuickOpenFromAnywhere(),
+    closeTabOrHide: closeTabOrHideWindow,
+    findInTable: () => openFindReplaceDialog("find"),
+    replaceInTable: () => openReplaceDialog(),
+    openDesign: openDesignFromMenu,
+    editTableComment: editTableCommentFromMenu,
+    refresh: refreshFromMenu,
+    backupCenter: openBackupCenter,
+    tableTransfer: openTableTransfer,
+    releaseFlow: openReleaseFlow,
+    configRelations: () => openConfigRelationsReview(),
+    moreSync: () => runMoreMenuAction("sync"),
+    moreSend: () => runMoreMenuAction("send"),
+    moreImport: () => runMoreMenuAction("import"),
+    moreExport: () => runMoreMenuAction("export"),
+    toggleSidebar: () => toggleSidebar(),
+    toggleInspector: () => toggleInspector(),
+    nextTab: () => cycleFocusedTab("next"),
+    previousTab: () => cycleFocusedTab("previous"),
+    togglePinWindow: () => void toggleWindowPin(),
+    appearanceLight: () => setThemePreference("light"),
+    appearanceDark: () => setThemePreference("dark"),
+    appearanceSystem: () => setThemePreference("system"),
+  },
+});
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 // The startup update check runs `svn update` (network + disk). Defer it until
 // the workspace is usable and the WebView is idle so it never competes with
@@ -4902,6 +5096,7 @@ onMounted(async () => {
   document.addEventListener("pointerdown", dismissInputContextMenu, true);
   document.addEventListener("keydown", dismissInputContextMenu, true);
   void windowPin.sync();
+  refreshMacosFullscreen();
   // Re-register the global "open window" shortcut from the persisted binding
   // so a user-rebound combo takes effect this session instead of the Rust
   // startup default (analysis point #2). Best-effort; failures don't block UI.
@@ -4965,6 +5160,7 @@ onBeforeUnmount(() => {
       'is-inspector-collapsed': inspectorCollapsed,
       'is-opening-table': pendingTableOpenCount > 0,
       'is-native-macos': usesNativeMacWindowControls,
+      'is-fullscreen': macosFullscreen,
     }"
     :data-theme="effectiveTheme"
     :style="sidebarLayoutVars"
@@ -5173,6 +5369,9 @@ onBeforeUnmount(() => {
         :tree-query="treeQuery"
         :active-tab="activeTab"
         :is-dark="isDark"
+        :theme-preference="themePreference"
+        :vibrancy-on="macosVibrancy.vibrancy.value"
+        :vibrancy-supported="macosVibrancy.supported"
         :color-themes="colorThemes"
         :color-theme="currentColorTheme"
         @set-color-theme="setColorTheme"
@@ -5198,7 +5397,8 @@ onBeforeUnmount(() => {
         @rename-database="openDatabaseAliasDialog"
         @rename-connection="openConnectionAliasDialog"
         @contextmenu="openSidebarContextMenu"
-        @toggle-theme="toggleTheme"
+        @set-theme="setThemePreference"
+        @set-vibrancy="macosVibrancy.setPreference"
         @change-font="applyFontSettings"
         />
       </div>

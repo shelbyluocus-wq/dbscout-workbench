@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { computed } from "vue";
 import { ExternalLink, FileJson, FileSpreadsheet, FileText, FolderOpen } from "lucide-vue-next";
 
@@ -55,7 +56,7 @@ function formatBytes(value) {
         <ExternalLink :size="14" />
         <span>{{ t('m_c771248e511f') }}</span>
       </button>
-      <button type="button" class="is-icon-only" :title="t('m_064fc3c848b0')" :aria-label="t('m_064fc3c848b0')" @click="emit('reveal', artifact)">
+      <button type="button" class="is-icon-only" :title="tPlatform('m_064fc3c848b0')" :aria-label="tPlatform('m_064fc3c848b0')" @click="emit('reveal', artifact)">
         <FolderOpen :size="15" />
       </button>
     </span>

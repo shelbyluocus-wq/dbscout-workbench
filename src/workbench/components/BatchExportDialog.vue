@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { FolderOpen } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -184,7 +185,7 @@ watch(
             type="button"
             :disabled="batch.openingSavedPath"
             :aria-busy="batch.openingSavedPath"
-            :title="t('m_bf7300afe778')"
+            :title="tPlatform('m_bf7300afe778')"
             @click="transfer.openBatchExportSavedPath"
           >
             <FolderOpen :size="14" aria-hidden="true" />

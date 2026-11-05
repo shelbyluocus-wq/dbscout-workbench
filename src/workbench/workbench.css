@@ -614,6 +614,13 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-titlebar-collapsed-controls-clearance: 150px;
 }
 
+/* In native fullscreen the traffic lights are hidden by macOS, so the
+   76px clearance would just be dead space. */
+.mysql-workbench.is-native-macos.is-fullscreen {
+  --wb-macos-traffic-light-clearance: 0px;
+  --wb-sidebar-tab-clearance: var(--wb-activity-rail-width);
+}
+
 .mysql-workbench.is-inspector-collapsed {
   --wb-titlebar-tab-right-clearance: var(--wb-titlebar-collapsed-controls-clearance);
 }
@@ -23347,3 +23354,119 @@ button.wb-table-mention:active {
 
 /* Text actions must also sit above teleported editor dialogs. */
 .wb-input-context-menu { z-index: 1300; }
+
+/* ── macOS-native look (phase 2) ──────────────────────────────────────────
+   Scoped to <html data-wb-platform="macos"> so Windows is untouched. */
+
+/* E. Platform fonts — the user's saved font preference still wins because
+   useFontPreference writes --wb-font-ui as an inline custom property. */
+:root[data-wb-platform="macos"] {
+  --wb-font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  --wb-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* F. Popup menus styled like native macOS menus. */
+:root[data-wb-platform="macos"] {
+  --wb-mac-menu-surface: rgba(246, 246, 246, 0.82);
+}
+:root[data-wb-platform="macos"] .mysql-workbench[data-theme="dark"],
+:root[data-wb-platform="macos"] .wb-floating-themed[data-theme="dark"] {
+  --wb-mac-menu-surface: rgba(30, 30, 32, 0.78);
+}
+:root[data-wb-platform="macos"] .wb-context-menu,
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed,
+:root[data-wb-platform="macos"] .wb-activity-more-menu,
+:root[data-wb-platform="macos"] .wb-input-context-menu {
+  padding: 5px;
+  border-radius: 7px;
+  background: var(--wb-mac-menu-surface);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  font-size: 13px;
+}
+:root[data-wb-platform="macos"] .wb-context-menu button,
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button {
+  min-height: 22px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  border-radius: 4px;
+}
+:root[data-wb-platform="macos"] .wb-context-menu button:hover,
+:root[data-wb-platform="macos"] .wb-context-menu button:focus-visible,
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button:hover,
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button:focus-visible {
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  outline: none;
+}
+:root[data-wb-platform="macos"] .wb-context-menu button:hover .wb-context-shortcut,
+:root[data-wb-platform="macos"] .wb-context-menu button:focus-visible .wb-context-shortcut,
+:root[data-wb-platform="macos"] .wb-context-menu button:hover .wb-context-icon,
+:root[data-wb-platform="macos"] .wb-context-menu button:focus-visible .wb-context-icon {
+  color: var(--wb-accent-control-text);
+  opacity: 0.85;
+}
+:root[data-wb-platform="macos"] .wb-context-menu button:disabled,
+:root[data-wb-platform="macos"] .wb-context-menu button:disabled:hover {
+  opacity: 0.35;
+  color: inherit;
+}
+:root[data-wb-platform="macos"] .wb-context-shortcut {
+  margin-left: auto;
+  color: var(--wb-quiet-text);
+}
+:root[data-wb-platform="macos"] .wb-context-separator {
+  margin: 4px 8px;
+  border-top-color: var(--wb-line);
+}
+
+/* G. Thinner overlay-style scrollbars on macOS. */
+:root[data-wb-platform="macos"] .mysql-workbench {
+  --wb-scrollbar-size: 8px;
+  --wb-scrollbar-track: transparent;
+  --wb-scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --wb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.28);
+}
+:root[data-wb-platform="macos"] .mysql-workbench[data-theme="dark"] {
+  --wb-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
+}
+:root[data-wb-platform="macos"] .mysql-workbench *::-webkit-scrollbar-thumb {
+  border-width: 1px;
+}
+
+/* H. Stop whole-window rubber-banding; inner scroll areas are untouched. */
+:root[data-wb-platform="macos"],
+:root[data-wb-platform="macos"] body {
+  overscroll-behavior: none;
+}
+
+/* C. macOS vibrancy — the native "sidebar" material sits behind the window;
+   only the rail/sidebar/sidebar titlebar go translucent (new tokens), every
+   other surface keeps its opaque background. */
+:root[data-wb-platform="macos"].is-vibrancy,
+:root[data-wb-platform="macos"].is-vibrancy body {
+  background: transparent;
+}
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench {
+  --wb-vibrancy-rail: rgba(246, 246, 246, 0.6);
+  --wb-vibrancy-sidebar: rgba(240, 241, 243, 0.55);
+  --wb-vibrancy-titlebar: rgba(246, 246, 246, 0.5);
+  background: transparent;
+}
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench[data-theme="dark"] {
+  --wb-vibrancy-rail: rgba(25, 25, 27, 0.55);
+  --wb-vibrancy-sidebar: rgba(28, 29, 31, 0.5);
+  --wb-vibrancy-titlebar: rgba(25, 25, 27, 0.45);
+}
+:root[data-wb-platform="macos"].is-vibrancy .wb-activity-rail {
+  background: var(--wb-vibrancy-rail);
+}
+:root[data-wb-platform="macos"].is-vibrancy .wb-sidebar-slot,
+:root[data-wb-platform="macos"].is-vibrancy .wb-sidebar {
+  background: var(--wb-vibrancy-sidebar);
+}
+:root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar {
+  background: var(--wb-vibrancy-titlebar);
+}

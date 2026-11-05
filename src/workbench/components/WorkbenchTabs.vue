@@ -7,6 +7,7 @@ import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../s
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
@@ -243,6 +244,8 @@ function tabShortcutLabel(tab) {
   return hint ? formatShortcutForPlatform(hint.combo) : "";
 }
 
+const macosTitlebar = useMacosTitlebarDoubleClick();
+
 async function toggleMaximize() {
   try {
     const win = getCurrentWindow();
@@ -251,6 +254,24 @@ async function toggleMaximize() {
   } catch {
     // ignore — window APIs unavailable in non-Tauri context
   }
+}
+
+async function minimizeWindow() {
+  try {
+    await getCurrentWindow().minimize();
+  } catch {
+    // ignore — window APIs unavailable in non-Tauri context
+  }
+}
+
+// On macOS the double-click follows the system "title bar double-click"
+// setting (zoom / minimize / nothing); elsewhere it always toggles maximize.
+function onTabBarDoubleClick() {
+  if (macosTitlebar.managed) {
+    macosTitlebar.runDoubleClickAction({ minimize: minimizeWindow, zoom: toggleMaximize });
+    return;
+  }
+  void toggleMaximize();
 }
 
 const tabListRef = ref(null);
@@ -265,7 +286,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
     @contextmenu.prevent.stop="openTabContextMenu"
     @dragover.prevent.stop="markTabbarDragTarget"
     @drop.prevent.stop="dropTabOnBar"
-    @dblclick="toggleMaximize"
+    @dblclick="onTabBarDoubleClick"
   >
     <div ref="tabListRef" class="wb-tab-list" data-tauri-drag-region>
       <div

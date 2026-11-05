@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
 
 const ORDER_STORAGE_KEY = "dbscout_activity_rail_order";
@@ -115,11 +115,19 @@ const ARIA_MODIFIER_NAMES = Object.freeze({
   shift: "Shift",
 });
 
-function toAriaKeyShortcut(label) {
-  return String(label || "")
+// aria-keyshortcuts wants KeyboardEvent.key modifier names on the raw combo —
+// not the glyph-formatted display label ("⌘P" would not parse).
+function toAriaKeyShortcut(combo) {
+  const onMac = isMacOSPlatform();
+  return String(combo || "")
     .split("+")
     .filter(Boolean)
-    .map((part) => ARIA_MODIFIER_NAMES[part.toLowerCase()] || part)
+    .map((part) => {
+      const name = ARIA_MODIFIER_NAMES[part.toLowerCase()];
+      // "Ctrl" in a combo means the primary modifier: Meta on macOS.
+      if (name === "Control") return onMac ? "Meta" : "Control";
+      return name || part;
+    })
     .join("+");
 }
 
@@ -152,7 +160,7 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
       controls: entry.controls || "",
       expanded: expandedValue === undefined ? undefined : Boolean(typeof expandedValue === "function" ? expandedValue() : expandedValue),
       shortcutLabel,
-      ariaShortcut: toAriaKeyShortcut(shortcutLabel),
+      ariaShortcut: toAriaKeyShortcut(shortcut),
       badge,
       badgeText: badge > 99 ? "99+" : badge > 0 ? String(badge) : "",
       badgeLabel: badge > 0 ? translate("shell.railBadge", { count: badge }) : "",

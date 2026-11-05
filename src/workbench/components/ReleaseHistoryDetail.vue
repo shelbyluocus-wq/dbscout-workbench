@@ -6,6 +6,7 @@
 import { computed } from "vue";
 import { FolderOpen } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { RELEASE_SCOPES } from "../releaseFlowState.js";
 import { describeCocosExit } from "../utils/cocosBuildCommand.js";
 import {
@@ -111,7 +112,7 @@ function reveal() {
         <template v-else-if="details.qa?.status"> · {{ t(`releaseFlow.build.qa.${details.qa.status}`, { count: details.qa.findings?.length || 0 }) }}</template>
       </p>
       <button v-if="canReveal" type="button" class="wb-rf-btn is-small" @click="reveal">
-        <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.build.openOutput') }}
+        <FolderOpen :size="13" aria-hidden="true" />{{ tPlatform('releaseFlow.build.openOutput') }}
       </button>
       <ReleaseTaskLog v-if="entry.logs?.length" :lines="entry.logs" />
     </template>

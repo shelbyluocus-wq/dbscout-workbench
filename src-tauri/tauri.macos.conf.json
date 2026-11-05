@@ -16,7 +16,7 @@
           "x": 13,
           "y": 22
         },
-        "transparent": false,
+        "transparent": true,
         "shadow": true,
         "resizable": true,
         "alwaysOnTop": false,

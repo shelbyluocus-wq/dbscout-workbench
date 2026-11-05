@@ -30,8 +30,33 @@ test("detectDesktopPlatform keeps Windows and Linux out of the macOS path", () =
 });
 
 test("formatShortcutForPlatform presents the primary modifier for each platform", () => {
-  assert.equal(formatShortcutForPlatform("Ctrl+P", { platform: "MacIntel" }), "Command+P");
-  assert.equal(formatShortcutForPlatform("Cmd+Shift+P", { platform: "MacIntel" }), "Command+Shift+P");
   assert.equal(formatShortcutForPlatform("Ctrl+P", { platform: "Win32" }), "Ctrl+P");
+  assert.equal(formatShortcutForPlatform("Alt+Shift+F", { platform: "Win32" }), "Alt+Shift+F");
   assert.equal(formatShortcutForPlatform("", { platform: "MacIntel" }), "");
+});
+
+test("formatShortcutForPlatform renders Apple modifier glyphs on macOS", () => {
+  const mac = { platform: "MacIntel" };
+  // Ctrl and Cmd are the same (primary) modifier in the combo language, so
+  // both render as ⌘.
+  assert.equal(formatShortcutForPlatform("Ctrl+P", mac), "⌘P");
+  assert.equal(formatShortcutForPlatform("Cmd+P", mac), "⌘P");
+  assert.equal(formatShortcutForPlatform("Cmd+Alt+F", mac), "⌥⌘F");
+  assert.equal(formatShortcutForPlatform("Cmd+Shift+T", mac), "⇧⌘T");
+  assert.equal(formatShortcutForPlatform("Cmd+Shift+]", mac), "⇧⌘]");
+  assert.equal(formatShortcutForPlatform("Cmd+Shift+[", mac), "⇧⌘[");
+  assert.equal(formatShortcutForPlatform("Ctrl+`", mac), "⌘`");
+  assert.equal(formatShortcutForPlatform("Ctrl+1", mac), "⌘1");
+  assert.equal(formatShortcutForPlatform("Alt+Shift+F", mac), "⌥⇧F");
+  // Modifier-only combos keep the glyph (e.g. "⌘+Click" hints).
+  assert.equal(formatShortcutForPlatform("Ctrl", mac), "⌘");
+  // Named keys keep readable labels; F-keys stay unchanged.
+  assert.equal(formatShortcutForPlatform("F5", mac), "F5");
+  assert.equal(formatShortcutForPlatform("F8", mac), "F8");
+  assert.equal(formatShortcutForPlatform("Shift+F10", mac), "⇧F10");
+  assert.equal(formatShortcutForPlatform("Backspace", mac), "⌫");
+  assert.equal(formatShortcutForPlatform("Enter", mac), "↩");
+  assert.equal(formatShortcutForPlatform("Escape", mac), "⎋");
+  assert.equal(formatShortcutForPlatform("Ctrl+Tab", mac), "⌘⇥");
+  assert.equal(formatShortcutForPlatform("Ctrl+ArrowLeft", mac), "⌘←");
 });

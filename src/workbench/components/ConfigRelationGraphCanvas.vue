@@ -838,6 +838,30 @@ function onWheel(event) {
   requestDraw();
 }
 
+// WebKit trackpad pinch — event.scale is cumulative across the gesture, so
+// each change applies the ratio since the last event around the pointer.
+let gestureScale = 1;
+function onGestureStart(event) {
+  event.preventDefault();
+  gestureScale = event.scale || 1;
+}
+function onGestureChange(event) {
+  event.preventDefault();
+  const point = localPoint(event);
+  const next = event.scale || 1;
+  const factor = next / gestureScale;
+  gestureScale = next;
+  if (factor !== 1) {
+    fitted = false;
+    camera.zoomAt(factor, point.x, point.y);
+    requestDraw();
+  }
+}
+function onGestureEnd(event) {
+  event.preventDefault();
+  gestureScale = 1;
+}
+
 function onDoubleClick(event) {
   const point = localPoint(event);
   if (nodeAt(point.x, point.y) < 0) fitToDrawing();
@@ -978,6 +1002,9 @@ const statusText = computed(() => {
       @pointercancel="onPointerCancel"
       @pointerleave="onPointerLeave"
       @wheel="onWheel"
+      @gesturestart="onGestureStart"
+      @gesturechange="onGestureChange"
+      @gestureend="onGestureEnd"
       @dblclick="onDoubleClick"
       @keydown="onKeydown"
     />

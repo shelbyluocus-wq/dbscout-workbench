@@ -118,7 +118,10 @@ test("every release workspace message exists in all three languages", () => {
 
 test("every release workspace message is used", () => {
   const used = new Set([...staticKeys(), ...dynamicKeys()]);
-  assert.deepEqual(Object.keys(releaseFlowEn).filter((key) => !used.has(key)), []);
+  // "<key>.macos" variants are resolved by tPlatform at runtime from the base
+  // key's call site, so they count as used whenever the base key is.
+  const isUsed = (key) => used.has(key) || used.has(key.replace(/\.macos$/, ""));
+  assert.deepEqual(Object.keys(releaseFlowEn).filter((key) => !isUsed(key)), []);
 });
 
 test("Taiwan copy uses the workbench's Taiwan terminology", () => {

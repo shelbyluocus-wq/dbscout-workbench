@@ -23,7 +23,7 @@ import {
   Unplug,
 } from "lucide-vue-next";
 import { useShortcuts } from "../composables/useShortcuts.js";
-import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { focusMenuItem, handleMenuKeydown } from "../utils/menuKeyboard.js";
 
 const props = defineProps({
@@ -83,7 +83,7 @@ const shortcutHints = computed(() => ({
   copy: formatShortcutForPlatform("Ctrl+C"),
   paste: formatShortcutForPlatform("Ctrl+V"),
   deleteRows: "Delete",
-  deleteTables: "Delete",
+  deleteTables: isMacOSPlatform() ? formatShortcutForPlatform("Backspace") : "Delete",
   rename: showSidebarTableActions.value ? "F2" : "",
   design: isGridMenu.value ? formatShortcutForPlatform(shortcuts.get("openDesign")) : "",
   refresh: isGridMenu.value ? formatShortcutForPlatform(shortcuts.get("refresh")) : "",

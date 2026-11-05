@@ -3028,6 +3028,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     return { accepted, skipped };
   }
+  if (command === "macos_titlebar_double_click_action") return "zoom";
+  if (command === "macos_accent_color") return "#007AFF";
   return null;
 }
 

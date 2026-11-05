@@ -19,6 +19,7 @@
     "core:window:allow-unminimize",
     "core:window:allow-start-dragging",
     "process:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "core:window:allow-set-effects"
   ]
 }

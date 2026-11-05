@@ -148,3 +148,23 @@ test("applies the active theme to root surfaces", () => {
 
   theme.stop();
 });
+
+test("setThemePreference stores light/dark and 'system' clears the key", () => {
+  const store = {};
+  const storage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+  const mediaQuery = { matches: true, addEventListener() {}, removeEventListener() {} };
+  const theme = createThemeController({ storage, mediaQuery });
+  theme.setThemePreference("light");
+  assert.equal(store.dbscout_theme, "light");
+  assert.equal(theme.preference.value, "light");
+  assert.equal(theme.isDark.value, false);
+  theme.setThemePreference("dark");
+  assert.equal(theme.isDark.value, true);
+  theme.setThemePreference("system");
+  assert.equal(store.dbscout_theme, undefined);
+  assert.equal(theme.preference.value, "system");
+  // "system" follows prefers-color-scheme live (mediaQuery.matches=true → dark).
+  assert.equal(theme.isDark.value, true);
+  theme.setThemePreference("bogus");
+  assert.equal(theme.preference.value, "system");
+});

@@ -7,6 +7,9 @@ import zhTW from "./i18n/zhTW.js";
 import {
   useShortcuts,
   DEFAULT_BINDINGS,
+  MACOS_DEFAULT_BINDINGS,
+  defaultBindingsFor,
+  migrateMacosDefaultBindings,
   shortcutLabel,
   _resetSingletonForTests,
   isSafeInAppShortcut,
@@ -14,6 +17,7 @@ import {
   sameShortcutCombo,
   shortcutComboFromEvent,
 } from "./composables/useShortcuts.js";
+import { _resetMenuShortcutDedupForTests, isRecentShortcutKeydown, noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
 
 function fakeInvoke() {
   const calls = [];
@@ -36,13 +40,22 @@ function failingInvoke(failingCommand) {
   return invoke;
 }
 
-function keyEvent(key, { ctrl = false, shift = false, alt = false, meta = false } = {}) {
-  return { key, ctrlKey: ctrl, shiftKey: shift, altKey: alt, metaKey: meta };
+function keyEvent(key, { ctrl = false, shift = false, alt = false, meta = false, code = "" } = {}) {
+  return { key, ctrlKey: ctrl, shiftKey: shift, altKey: alt, metaKey: meta, code };
+}
+
+// Node's navigator reports the host platform ("MacIntel" here); most tests
+// assume the Windows/default binding set, so pin a Windows-like navigator and
+// let macOS-specific tests override it.
+function pinNavigator(value) {
+  Object.defineProperty(globalThis, "navigator", { value, configurable: true, writable: true });
 }
 
 beforeEach(() => {
   // Each test starts from a clean singleton + empty storage.
   _resetSingletonForTests();
+  _resetMenuShortcutDedupForTests();
+  pinNavigator({ platform: "Win32" });
   globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 });
 
@@ -179,6 +192,107 @@ test("all useShortcuts callers share one reactive bindings instance (#1)", async
   // The orchestrator's view updates live without a reload.
   assert.equal(orchestrator.get("searchDatabase"), "Ctrl+K");
   assert.equal(orchestrator.matchesBinding("searchDatabase", keyEvent("k", { ctrl: true })), true);
+});
+
+test("defaultBindingsFor gives macOS overrides without changing the Windows set", () => {
+  const mac = defaultBindingsFor("macos");
+  assert.equal(mac.replaceInTable, "Cmd+Alt+F");
+  assert.equal(mac.openSqlQuery, "Cmd+T");
+  assert.equal(mac.nextTab, "Cmd+Shift+]");
+  assert.equal(mac.previousTab, "Cmd+Shift+[");
+  // Everything else identical to the Windows defaults.
+  for (const action of Object.keys(DEFAULT_BINDINGS)) {
+    if (!(action in MACOS_DEFAULT_BINDINGS)) assert.equal(mac[action], DEFAULT_BINDINGS[action]);
+  }
+  const windows = defaultBindingsFor("windows");
+  assert.deepEqual(windows, { ...DEFAULT_BINDINGS });
+  assert.equal(defaultBindingsFor("windows").nextTab, "Ctrl+Tab");
+});
+
+test("migrateMacosDefaultBindings rewrites stored old defaults once", () => {
+  const stored = {
+    ...DEFAULT_BINDINGS,
+    replaceInTable: "Ctrl+H",
+    openSqlQuery: "Ctrl+Q",
+    nextTab: "Ctrl+Tab",
+    previousTab: "Ctrl+Shift+Tab",
+    // A user-customized binding is left alone even though it is stored.
+    searchTable: "Ctrl+K",
+  };
+  const { bindings, changed } = migrateMacosDefaultBindings(stored);
+  assert.equal(changed, true);
+  assert.equal(bindings.replaceInTable, "Cmd+Alt+F");
+  assert.equal(bindings.openSqlQuery, "Cmd+T");
+  assert.equal(bindings.nextTab, "Cmd+Shift+]");
+  assert.equal(bindings.previousTab, "Cmd+Shift+[");
+  assert.equal(bindings.searchTable, "Ctrl+K");
+  // A second run finds no old defaults left and is a no-op.
+  assert.equal(migrateMacosDefaultBindings(bindings).changed, false);
+});
+
+test("migrateMacosDefaultBindings keeps the old binding when the new combo is taken", () => {
+  const stored = {
+    ...DEFAULT_BINDINGS,
+    searchTable: "Cmd+Alt+F", // user already claimed the new combo
+  };
+  const { bindings } = migrateMacosDefaultBindings(stored);
+  assert.equal(bindings.replaceInTable, "Ctrl+H");
+  assert.equal(bindings.searchTable, "Cmd+Alt+F");
+  // The other three actions still migrate.
+  assert.equal(bindings.openSqlQuery, "Cmd+T");
+  assert.equal(bindings.nextTab, "Cmd+Shift+]");
+});
+
+test("matchesShortcutCombo falls back to event.code when modifiers rewrite event.key", () => {
+  // macOS Option+F reports event.key "ƒ"; Shift+] reports "}".
+  assert.equal(matchesShortcutCombo("Cmd+Alt+F", keyEvent("ƒ", { meta: true, alt: true, code: "KeyF" })), true);
+  assert.equal(matchesShortcutCombo("Cmd+Shift+]", keyEvent("}", { meta: true, shift: true, code: "BracketRight" })), true);
+  assert.equal(matchesShortcutCombo("Cmd+Shift+[", keyEvent("{", { meta: true, shift: true, code: "BracketLeft" })), true);
+  assert.equal(matchesShortcutCombo("Cmd+`", keyEvent("~", { meta: true, shift: true, code: "Backquote" })), false); // extra Shift still rejected
+  assert.equal(matchesShortcutCombo("Cmd+Alt+F", keyEvent("ƒ", { meta: true, code: "KeyF" })), false); // missing Alt
+  // Without a modifier held the code fallback does not apply.
+  assert.equal(matchesShortcutCombo("F", keyEvent("ƒ", { code: "KeyF" })), false);
+});
+
+test("matchesBinding records matched keydowns for the menu dedup gate", () => {
+  _resetMenuShortcutDedupForTests();
+  const { matchesBinding } = useShortcuts(fakeInvoke());
+  assert.equal(isRecentShortcutKeydown("openWindow"), false);
+  assert.equal(matchesBinding("openWindow", keyEvent("F", { shift: true, alt: true })), true);
+  assert.equal(isRecentShortcutKeydown("openWindow"), true);
+  // A non-matching keydown does not extend the window.
+  noteShortcutKeydownMatch("pinWindow", -100000);
+  assert.equal(matchesBinding("pinWindow", keyEvent("F9")), false);
+  assert.equal(isRecentShortcutKeydown("pinWindow"), false);
+});
+
+test("singleton applies macOS defaults and migrates a stored Windows set once", () => {
+  pinNavigator({ platform: "MacIntel" });
+  const store = { "dbscout-shortcut-bindings": JSON.stringify({ ...DEFAULT_BINDINGS }) };
+  globalThis.localStorage = {
+    getItem: (key) => store[key] ?? null,
+    setItem: (key, value) => { store[key] = value; },
+    removeItem: () => {},
+  };
+  const { get, matchesBinding } = useShortcuts(fakeInvoke());
+  assert.equal(get("openSqlQuery"), "Cmd+T");
+  assert.equal(get("replaceInTable"), "Cmd+Alt+F");
+  assert.equal(get("nextTab"), "Cmd+Shift+]");
+  assert.equal(get("previousTab"), "Cmd+Shift+[");
+  assert.equal(store["dbscout-shortcut-bindings-mac-v1"], "1");
+  // The persisted map was rewritten too.
+  assert.equal(JSON.parse(store["dbscout-shortcut-bindings"]).openSqlQuery, "Cmd+T");
+  // ⌘T matches via the code fallback (macOS turns ⌥ keys into "ƒ"-style chars).
+  assert.equal(matchesBinding("openSqlQuery", keyEvent("t", { meta: true, code: "KeyT" })), true);
+});
+
+test("shortcutComboFromEvent records the physical key when Option is held on macOS", () => {
+  pinNavigator({ platform: "MacIntel" });
+  assert.equal(shortcutComboFromEvent(keyEvent("ƒ", { meta: true, alt: true, code: "KeyF" })), "Cmd+Alt+F");
+  // Without Alt, event.key stays authoritative.
+  assert.equal(shortcutComboFromEvent(keyEvent("}", { meta: true, shift: true, code: "BracketRight" })), "Cmd+Shift+}");
+  pinNavigator({ platform: "Win32" });
+  assert.equal(shortcutComboFromEvent(keyEvent("ƒ", { ctrl: true, alt: true, code: "KeyF" })), "Ctrl+Alt+Ƒ");
 });
 
 test("rebind reverts and throws when the backend rejects a global binding (#3)", async () => {

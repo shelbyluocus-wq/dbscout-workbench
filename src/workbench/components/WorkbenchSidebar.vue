@@ -47,6 +47,9 @@ const props = defineProps({
   treeQuery: { type: String, default: "" },
   activeTab: { type: Object, default: null },
   isDark: { type: Boolean, default: false },
+  themePreference: { type: String, default: "system" },
+  vibrancyOn: { type: Boolean, default: false },
+  vibrancySupported: { type: Boolean, default: false },
   colorThemes: { type: Array, default: () => [] },
   colorTheme: { type: String, default: "slate" },
   fontPreference: { type: String, default: "system" },
@@ -75,6 +78,8 @@ const emit = defineEmits([
   "delete-tables",
   "contextmenu",
   "toggle-theme",
+  "set-theme",
+  "set-vibrancy",
   "set-color-theme",
   "change-font",
 ]);
@@ -168,6 +173,14 @@ function toggleSettings() {
   settingsOpen.value = !settingsOpen.value;
 }
 
+function openSettings() {
+  settingsOpen.value = true;
+}
+
+function openShortcuts() {
+  shortcutsOpen.value = true;
+}
+
 function settingsRailTrigger() {
   return document.querySelector('.wb-activity-rail-btn[data-wb-rail-id="settings"]');
 }
@@ -224,9 +237,7 @@ onBeforeUnmount(() => {
 });
 
 function setTheme(nextTheme) {
-  if ((nextTheme === "dark") !== props.isDark) {
-    emit("toggle-theme");
-  }
+  emit("set-theme", nextTheme);
 }
 
 const previewConnections = computed(() => {
@@ -707,7 +718,7 @@ function focusSearch() {
   });
 }
 
-defineExpose({ focusSearch, toggleSettings, settingsOpen });
+defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, settingsOpen });
 </script>
 
 <template>
@@ -904,8 +915,20 @@ defineExpose({ focusSearch, toggleSettings, settingsOpen });
               <path d="M12 2.7v2.4M12 18.9v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.7 12h2.4M18.9 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7" />
             </svg> {{ t('m_86a63f23a076') }} </span>
           <div class="wb-sidebar-theme-segment" role="group" :aria-label="t('m_d32fff09b9ab')">
-            <button type="button" :class="{ active: !isDark }" @click.stop="setTheme('light')">{{ t('m_aa0819dfc4d8') }}</button>
-            <button type="button" :class="{ active: isDark }" @click.stop="setTheme('dark')">{{ t('m_a6b75d068032') }}</button>
+            <button type="button" :class="{ active: themePreference === 'light' }" @click.stop="setTheme('light')">{{ t('m_aa0819dfc4d8') }}</button>
+            <button type="button" :class="{ active: themePreference === 'dark' }" @click.stop="setTheme('dark')">{{ t('m_a6b75d068032') }}</button>
+            <button type="button" :class="{ active: themePreference === 'system' }" @click.stop="setTheme('system')">{{ t('m_c9a1f2b3d4e5') }}</button>
+          </div>
+        </div>
+        <div v-if="vibrancySupported" class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="3" />
+              <path d="M3 10h18" />
+            </svg> {{ t('m_b7c2d3e4f5a6') }} </span>
+          <div class="wb-sidebar-theme-segment" role="group" :aria-label="t('m_b7c2d3e4f5a6')">
+            <button type="button" :class="{ active: vibrancyOn }" @click.stop="emit('set-vibrancy', true)">{{ t('m_c1d2e3f4a5b6') }}</button>
+            <button type="button" :class="{ active: !vibrancyOn }" @click.stop="emit('set-vibrancy', false)">{{ t('m_d1e2f3a4b5c6') }}</button>
           </div>
         </div>
         <div class="wb-sidebar-settings-row wb-sidebar-settings-row-themes">

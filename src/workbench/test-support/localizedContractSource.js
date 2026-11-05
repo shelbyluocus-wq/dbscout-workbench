@@ -11,7 +11,10 @@ export function localizedContractSource(source) {
   };
   return source
     .replace(/\{\{\s*t\(['"](m_[a-f0-9]+)['"]\)\s*\}\}/g, (_, key) => message(key))
+    .replace(/\{\{\s*tPlatform\(['"](m_[a-f0-9]+)['"]\)\s*\}\}/g, (_, key) => message(key))
     .replace(/:([\w-]+)="t\('((?:m_)[a-f0-9]+)'\)"/g, (_, attr, key) => `${attr}="${message(key)}"`)
+    .replace(/:([\w-]+)="tPlatform\('((?:m_)[a-f0-9]+)'\)"/g, (_, attr, key) => `${attr}="${message(key)}"`)
+    .replace(/tPlatform\(['"](m_[a-f0-9]+)['"]\)/g, (_, key) => `'${message(key).replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll("\n", "\\n")}'`)
     .replace(/t\(['"](m_[a-f0-9]+)['"]\)/g, (_, key) => `'${message(key).replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll("\n", "\\n")}'`);
 }
 

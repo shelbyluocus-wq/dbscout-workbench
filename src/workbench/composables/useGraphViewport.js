@@ -173,7 +173,28 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
 
   function onWheel(event) {
     event.preventDefault();
+    // ctrl+wheel (trackpad pinch reported as wheel) flows through the same
+    // proportional factor — small deltas zoom smoothly, not per-notch.
     zoomBy(wheelZoomFactor(event), graphPoint(event), { animate: false });
+  }
+
+  // WebKit trackpad pinch — event.scale is cumulative across the gesture, so
+  // each change applies the ratio since the last event around the pointer.
+  let gestureScale = 1;
+  function onGestureStart(event) {
+    event.preventDefault();
+    gestureScale = event.scale || 1;
+  }
+  function onGestureChange(event) {
+    event.preventDefault();
+    const next = event.scale || 1;
+    const factor = next / gestureScale;
+    gestureScale = next;
+    if (factor !== 1) zoomBy(factor, graphPoint(event), { animate: false });
+  }
+  function onGestureEnd(event) {
+    event.preventDefault();
+    gestureScale = 1;
   }
 
   function startPan(event) {
@@ -201,5 +222,5 @@ export function useGraphViewport({ fit, hostSize, svgEl, maxFitScale = Infinity 
 
   onBeforeUnmount(() => stopGlide());
 
-  return { zoom, center, panning, viewBox, scale, fitFrame, resetView, zoomBy, graphPoint, onWheel, startPan, movePan, endPan };
+  return { zoom, center, panning, viewBox, scale, fitFrame, resetView, zoomBy, graphPoint, onWheel, onGestureStart, onGestureChange, onGestureEnd, startPan, movePan, endPan };
 }

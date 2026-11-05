@@ -4,6 +4,8 @@
 // 因此 Teleport 浮层无需任何改动即可继承主题。
 // 新增主题 = 在此追加一条记录，无需改动其他任何文件。
 
+import { systemAccentTokens } from "./utils/systemAccentTheme.js";
+
 export const COLOR_THEMES = [
   {
     id: "slate",
@@ -116,12 +118,37 @@ export const COLOR_THEMES = [
       "--wb-index-surface": "oklch(20.5% 0.006 255)",
     },
   },
+  {
+    id: "system",
+    label: "跟随系统强调色",
+    description: "macOS · 使用系统强调色",
+    swatch: ["#007AFF", "#e5e8eb", "#121214"],
+    // 仅 macOS Tauri 运行时提供；其他平台存到 "system" 时回落到 slate。
+    // 覆盖令牌由 tokens(mode, { accent }) 按强调色推导，基座仍为 slate。
+    systemAccent: true,
+    // Static maps double as the structural shape other presets have and as
+    // the fallback before the first accent read lands; tokens() takes over
+    // once the real accent is known.
+    light: systemAccentTokens("light", "#007AFF"),
+    dark: systemAccentTokens("dark", "#007AFF"),
+    tokens(mode, { accent = "#007AFF" } = {}) {
+      return systemAccentTokens(mode, accent);
+    },
+  },
 ];
 
 export const DEFAULT_COLOR_THEME = "slate";
 
 export function getColorTheme(id) {
   return COLOR_THEMES.find((theme) => theme.id === id) || null;
+}
+
+// A preset is "available" where it can actually work: system accent needs the
+// native macOS runtime; anywhere else a stored "system" falls back to slate.
+export function isColorThemeAvailable(id, { systemAccentSupported = false } = {}) {
+  const theme = getColorTheme(id);
+  if (!theme) return false;
+  return !theme.systemAccent || systemAccentSupported;
 }
 
 export function isColorThemeId(id) {

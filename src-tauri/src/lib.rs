@@ -17,6 +17,7 @@ mod config_relations;
 mod control_server;
 mod database_sync_jobs;
 mod db;
+mod macos_appearance;
 mod ddl;
 mod demo;
 mod mysql_column_types;
@@ -342,6 +343,8 @@ pub fn run() {
             commands::sync_audit_now,
             commands::register_global_shortcut,
             commands::unregister_global_shortcut,
+            macos_appearance::macos_titlebar_double_click_action,
+            macos_appearance::macos_accent_color,
             sql_console::start_sql_execution,
             sql_console::cancel_sql_execution,
             sql_console::begin_sql_transaction,

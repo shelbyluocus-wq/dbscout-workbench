@@ -7,6 +7,7 @@
 import { computed, onBeforeUnmount } from "vue";
 import { CircleCheck, CircleX, FolderOpen, Package, Square } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { cocosBuildConfirmOptions, useCocosBuildTool } from "../composables/useCocosBuild.js";
 import { TASK_STATUS } from "../releaseFlowState.js";
@@ -142,7 +143,7 @@ function outcomeText() {
     <div v-if="result?.outputDir && state.status === 'done'" class="wb-rf-build-result">
       <span class="wb-rf-code">{{ result.outputDir }}</span>
       <button v-if="!result.simulated" type="button" class="wb-rf-btn is-small" @click="reveal">
-        <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.build.openOutput') }}
+        <FolderOpen :size="13" aria-hidden="true" />{{ tPlatform('releaseFlow.build.openOutput') }}
       </button>
     </div>
     <ReleaseTaskLog v-if="state.lines.length" :lines="state.lines" />

@@ -7,6 +7,7 @@
 import { computed, nextTick, ref } from "vue";
 import { Check, FileSpreadsheet, FileText, FolderOpen, FolderSearch, Plus } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
@@ -144,7 +145,7 @@ function setStrategy(value) {
               <FileText :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickScript') }}
             </button>
             <button v-if="selected.scriptPath" type="button" class="wb-rf-btn is-small is-quiet" @click="transfer.revealPath(selected.scriptPath)">
-              <FolderSearch :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.reveal') }}
+              <FolderSearch :size="13" aria-hidden="true" />{{ tPlatform('releaseFlow.transfer.reveal') }}
             </button>
           </span>
         </dd>

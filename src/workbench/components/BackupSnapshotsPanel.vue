@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { Archive, Camera, ChevronDown, Clock, Eraser, FileInput, FolderOpen, RotateCcw, Trash2, X } from "lucide-vue-next";
 
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { formatBackupSize, formatBackupTimestamp } from "../utils/backupDisplay.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
@@ -456,7 +457,7 @@ async function onToggleSnapshotEnabled(connectionId, database, enabled) {
               class="wb-backup-action-btn wb-backup-icon-text"
               :disabled="busy.openingPath"
               @click="onOpenSnapshotFolder(snapshot)"
-            ><FolderOpen :size="14" aria-hidden="true" />{{ t('m_4b4d6c35f5f7') }}</button>
+            ><FolderOpen :size="14" aria-hidden="true" />{{ tPlatform('m_4b4d6c35f5f7') }}</button>
             <button
               type="button"
               class="wb-backup-action-btn wb-backup-icon-text"

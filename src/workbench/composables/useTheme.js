@@ -59,6 +59,10 @@ export function createThemeController({
   applyNativeTheme,
   rootElement = globalThis.document?.documentElement,
   bodyElement = globalThis.document?.body,
+  // When macOS vibrancy is on (the is-vibrancy root class), html/body must
+  // stay transparent so the native blur shows through — the inline solid
+  // background would cover it.
+  suppressRootBackground = () => globalThis.document?.documentElement?.classList?.contains?.("is-vibrancy") === true,
 } = {}) {
   const manualPreference = ref(readThemePreference(storage));
   const effectiveTheme = ref(manualPreference.value || systemTheme(mediaQuery));
@@ -71,8 +75,9 @@ export function createThemeController({
     if (rootElement?.dataset) rootElement.dataset.wbTheme = theme;
     if (bodyElement?.dataset) bodyElement.dataset.wbTheme = theme;
     rootElement?.style?.setProperty?.("--wb-root-background", rootBackgroundToken(theme));
-    if (rootElement?.style) rootElement.style.backgroundColor = rootBackgroundColor(theme);
-    if (bodyElement?.style) bodyElement.style.backgroundColor = rootBackgroundColor(theme);
+    const background = suppressRootBackground() ? "transparent" : rootBackgroundColor(theme);
+    if (rootElement?.style) rootElement.style.backgroundColor = background;
+    if (bodyElement?.style) bodyElement.style.backgroundColor = background;
     applyThemeQuietly(applyNativeTheme, theme);
   }
 
@@ -109,13 +114,44 @@ export function createThemeController({
     applyTheme(nextTheme);
   }
 
+  // "system" clears the stored choice so the theme follows
+  // prefers-color-scheme live (the mediaQuery listener only acts when there
+  // is no manual preference).
+  function setThemePreference(theme) {
+    if (theme === "system") {
+      manualPreference.value = null;
+      try {
+        storage?.removeItem(THEME_STORAGE_KEY);
+      } catch {
+        // Persistence blocked — the session still follows the system.
+      }
+      applyTheme(systemTheme(mediaQuery));
+      return;
+    }
+    if (!isTheme(theme)) return;
+    manualPreference.value = theme;
+    writeThemePreference(storage, theme);
+    applyTheme(theme);
+  }
+
+  const preference = computed(() => manualPreference.value || "system");
+
+  // Re-applies the current theme (incl. the html/body background) — needed
+  // when vibrancy flips the inline-background rule at runtime.
+  function refresh() {
+    applyTheme(effectiveTheme.value);
+  }
+
   return {
     effectiveTheme,
     isDark,
     manualPreference,
+    preference,
     start,
     stop,
     toggleTheme,
+    setThemePreference,
+    refresh,
   };
 }
 

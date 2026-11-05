@@ -306,7 +306,35 @@ capabilities:
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based
-  in-app updater.
+  in-app updater. On macOS the app additionally behaves like a Mac app:
+  a native menu bar built from `utils/nativeAppMenuModel.js` +
+  `composables/useNativeAppMenu.js` (labels/accelerators come from the live
+  i18n catalogs and shortcut bindings; ⌘W falls back to hiding the window
+  when no tab is open), macOS default shortcuts (`⌘T` new SQL tab,
+  `⌥⌘F` replace, `⇧⌘]`/`⇧⌘[` tab cycling — physical `Ctrl+Tab` still cycles
+  as a fixed alias), a one-time localStorage migration that rewrites stored
+  Windows-era defaults, Apple-order shortcut glyphs (`⌥⇧⌘P`), Finder wording
+  via `.macos` catalog variants (`utils/platformLabels.js` `tPlatform`),
+  a dropped traffic-light clearance in native fullscreen, and a
+  title-bar double-click that follows `AppleActionOnDoubleClick`
+  (`src-tauri/src/macos_appearance.rs`; the injected drag-region double-click
+  is swallowed so it does not toggle twice — the swallow matches Tauri's own
+  target check so double clicks on tabs inside drag regions still work).
+  Appearance: Light/Dark/Follow system (`setThemePreference`; "system"
+  removes the stored key and follows prefers-color-scheme, also in the
+  显示 menu as three check items); a macOS-only "sidebar blur" setting
+  (localStorage `dbscout_macos_vibrancy`, `useMacosVibrancy.js`,
+  `macOSPrivateApi` + `transparent` macOS window + `setEffects(Sidebar)`,
+  `is-vibrancy` root class — only the rail/sidebar/sidebar titlebar get
+  translucent `--wb-vibrancy-*` tints, everything else stays opaque);
+  a "system accent" color-theme preset (`macos_accent_color` command reads
+  `AppleAccentColor`, `systemAccentTheme.js` derives the accent tokens and
+  picks control text by luminance; re-read on window focus while active,
+  unavailable outside Tauri macOS and falls back to slate);
+  `data-wb-platform="macos"` on `<html>` drives Mac font stacks, smaller
+  rounded scrollbars, `overscroll-behavior:none`, and native-style popup
+  menus (translucent + backdrop blur); relation maps support trackpad
+  pinch (WebKit gesture events and proportional ctrl+wheel).
 
 The app runs against built-in demo data by default, so it launches with no
 database configured. Provide a real MySQL server via `DBSCOUT_MYSQL_URL` before

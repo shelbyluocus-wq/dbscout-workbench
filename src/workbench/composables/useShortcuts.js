@@ -1,7 +1,12 @@
 import { reactive, readonly } from "vue";
 import { t } from "../i18n/index.js";
+import { detectDesktopPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
+import { noteShortcutKeydownMatch } from "../utils/menuShortcutDedup.js";
 
 const STORAGE_KEY = "dbscout-shortcut-bindings";
+// Set once the macOS default-migration has run, so the Windows-era defaults
+// stored by existing installs are rewritten exactly once.
+const MACOS_MIGRATION_KEY = "dbscout-shortcut-bindings-mac-v1";
 
 // Default shortcut bindings. Only `openWindow` is a true OS-level global
 // shortcut (registered in Rust); the others are in-app keyboard shortcuts
@@ -27,6 +32,28 @@ export const DEFAULT_BINDINGS = Object.freeze({
   // the WebView reload the whole window (and lose unsaved work).
   refresh: "F5",
 });
+
+// macOS-only overrides: the Windows defaults collide with system shortcuts
+// there (Ctrl+Q = ⌘Q quits, Ctrl+H = ⌘H hides, Ctrl+Tab = ⌘Tab switches apps).
+// "Cmd" and "Ctrl" are interchangeable in this table — matching treats them
+// as the same modifier.
+export const MACOS_DEFAULT_BINDINGS = Object.freeze({
+  replaceInTable: "Cmd+Alt+F",
+  openSqlQuery: "Cmd+T",
+  nextTab: "Cmd+Shift+]",
+  previousTab: "Cmd+Shift+[",
+});
+
+/**
+ * The default binding set for a platform ("macos" | "windows" | …), so the
+ * settings dialog's reset and the first-run defaults follow Mac conventions
+ * on macOS while Windows keeps DEFAULT_BINDINGS unchanged.
+ */
+export function defaultBindingsFor(platform = detectDesktopPlatform()) {
+  return platform === "macos"
+    ? { ...DEFAULT_BINDINGS, ...MACOS_DEFAULT_BINDINGS }
+    : { ...DEFAULT_BINDINGS };
+}
 
 // Simplified Chinese action names for messages still authored in Chinese;
 // interface labels come from `shortcutLabel`.
@@ -79,7 +106,7 @@ function normalizeCombo(value) {
   return String(value || "").trim();
 }
 
-function shortcutParts(value) {
+export function shortcutParts(value) {
   const parts = normalizeCombo(value).split("+").map((part) => part.trim()).filter(Boolean);
   const key = parts.pop() || "";
   const lowered = parts.map((part) => part.toLowerCase());
@@ -91,6 +118,36 @@ function shortcutParts(value) {
   };
 }
 
+// Physical key derived from KeyboardEvent.code. With Option or Shift held,
+// macOS reports event.key as the translated character ("ƒ", "}"), so combos
+// must also match on the layout-independent code.
+const CODE_TO_KEY = Object.freeze({
+  Backquote: "`",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Minus: "-",
+  Equal: "=",
+  Comma: ",",
+  Period: ".",
+  Semicolon: ";",
+  Quote: "'",
+  Slash: "/",
+  Space: "space",
+  Tab: "tab",
+  Enter: "enter",
+  Escape: "escape",
+});
+
+export function shortcutKeyFromCode(code) {
+  const raw = String(code || "");
+  if (/^Key[A-Z]$/.test(raw)) return raw.slice(3).toLowerCase();
+  if (/^Digit\d$/.test(raw)) return raw.slice(5);
+  if (/^Numpad\d$/.test(raw)) return raw.slice(6);
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(raw)) return raw.toLowerCase();
+  return CODE_TO_KEY[raw] || "";
+}
+
 export function shortcutComboFromEvent(event) {
   const parts = [];
   if (event.ctrlKey) parts.push("Ctrl");
@@ -99,7 +156,12 @@ export function shortcutComboFromEvent(event) {
   if (event.altKey) parts.push("Alt");
   const rawKey = String(event.key || "");
   if (["Control", "Meta", "Shift", "Alt"].includes(rawKey)) return null;
-  const key = rawKey === " " ? "Space" : rawKey.trim();
+  let key = rawKey === " " ? "Space" : rawKey.trim();
+  // Option turns event.key into "ƒ"-style characters on macOS; record the
+  // physical key so the stored combo stays readable and re-matchable.
+  if (event.altKey && isMacOSPlatform()) {
+    key = shortcutKeyFromCode(event.code) || key;
+  }
   if (!key) return null;
   parts.push(key.length === 1 ? key.toUpperCase() : key);
   return parts.join("+");
@@ -111,7 +173,12 @@ export function matchesShortcutCombo(combo, event) {
   const eventKey = String(event.key || "").toLowerCase() === " "
     ? "space"
     : String(event.key || "").toLowerCase();
-  if (eventKey !== parsed.key) return false;
+  if (eventKey !== parsed.key) {
+    const modifierHeld = Boolean(event.ctrlKey || event.metaKey || event.altKey || event.shiftKey);
+    // Fall back to the physical key (event.code) when a modifier rewrites
+    // event.key — mainly Option/Shift on macOS.
+    if (!modifierHeld || shortcutKeyFromCode(event.code) !== parsed.key) return false;
+  }
   const hasCtrl = Boolean(event.ctrlKey || event.metaKey);
   return (
     parsed.ctrl === hasCtrl &&
@@ -153,6 +220,45 @@ function persistBindings(values) {
   }
 }
 
+/**
+ * One-time migration for existing macOS installs: bindings persisted under
+ * the old Windows-era defaults (Ctrl+Q hijacks ⌘Q, Ctrl+H hijacks ⌘H, …) are
+ * rewritten to the macOS defaults. A stored combo counts as "old default" via
+ * sameShortcutCombo; if the new macOS combo is already claimed by another
+ * action the action keeps its stored binding. Returns the migrated map and
+ * whether anything changed.
+ */
+export function migrateMacosDefaultBindings(bindings = {}) {
+  const next = { ...bindings };
+  let changed = false;
+  for (const [action, combo] of Object.entries(MACOS_DEFAULT_BINDINGS)) {
+    if (!sameShortcutCombo(next[action], DEFAULT_BINDINGS[action])) continue;
+    const taken = Object.keys(next).some(
+      (other) => other !== action && sameShortcutCombo(next[other], combo),
+    );
+    if (taken) continue;
+    next[action] = combo;
+    changed = true;
+  }
+  return { bindings: next, changed };
+}
+
+function readMigrationFlag() {
+  try {
+    return globalThis.localStorage?.getItem(MACOS_MIGRATION_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeMigrationFlag() {
+  try {
+    globalThis.localStorage?.setItem(MACOS_MIGRATION_KEY, "1");
+  } catch {
+    // best-effort persistence
+  }
+}
+
 // ── Shared singleton state ──────────────────────────────────────────────
 // A single reactive bindings object is shared across every `useShortcuts()`
 // caller so the orchestrator's keydown handler and the settings dialog read
@@ -165,7 +271,15 @@ let sharedInvoke = null;
 function ensureSharedBindings() {
   if (!sharedBindings) {
     const stored = loadStoredBindings();
-    sharedBindings = reactive({ ...DEFAULT_BINDINGS, ...(stored || {}) });
+    const merged = { ...defaultBindingsFor(), ...(stored || {}) };
+    if (isMacOSPlatform() && !readMigrationFlag()) {
+      const migrated = migrateMacosDefaultBindings(merged);
+      if (migrated.changed) persistBindings(migrated.bindings);
+      writeMigrationFlag();
+      sharedBindings = reactive(migrated.bindings);
+    } else {
+      sharedBindings = reactive(merged);
+    }
   }
   return sharedBindings;
 }
@@ -201,7 +315,11 @@ export function useShortcuts(invokeWorkbench) {
    * on the key and supports Ctrl/Cmd interchangeably.
    */
   function matchesBinding(action, event) {
-    return matchesShortcutCombo(get(action), event);
+    const matched = matchesShortcutCombo(get(action), event);
+    // Let the native menu de-dup an action whose accelerator keystroke was
+    // already consumed by an in-page keydown handler.
+    if (matched) noteShortcutKeydownMatch(action);
+    return matched;
   }
 
   async function registerGlobal(combo) {
@@ -233,14 +351,16 @@ export function useShortcuts(invokeWorkbench) {
   }
 
   async function reset() {
-    // Restore every default binding, then re-register the global shortcut so
-    // the backend matches the UI (analysis point #2).
-    for (const action of Object.keys(DEFAULT_BINDINGS)) {
-      bindings[action] = DEFAULT_BINDINGS[action];
+    // Restore every default binding for this platform (the settings dialog's
+    // reset must bring back macOS defaults on a Mac), then re-register the
+    // global shortcut so the backend matches the UI (analysis point #2).
+    const defaults = defaultBindingsFor();
+    for (const action of Object.keys(defaults)) {
+      bindings[action] = defaults[action];
     }
     persistBindings(bindings);
     try {
-      await registerGlobal(DEFAULT_BINDINGS.openWindow);
+      await registerGlobal(defaults.openWindow);
     } catch (error) {
       throw new Error(`恢复默认快捷键失败：${String(error?.message || error)}`);
     }

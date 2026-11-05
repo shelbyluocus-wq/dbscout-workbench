@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import {
   Cloud,
   FileText,
@@ -358,7 +359,7 @@ async function deleteActiveTemplate() {
               <button
                 type="button"
                 class="wb-table-transfer-browse"
-                :title="t('m_d10ec81b9024')"
+                :title="tPlatform('m_d10ec81b9024')"
                 :aria-label="t('m_d9b35c1d0873')"
                 :disabled="isRunning || !activeTemplate.scriptPath"
                 @click="browseScript"
@@ -381,7 +382,7 @@ async function deleteActiveTemplate() {
               <button
                 type="button"
                 class="wb-table-transfer-browse"
-                :title="t('m_d10ec81b9024')"
+                :title="tPlatform('m_d10ec81b9024')"
                 :aria-label="t('m_c2af1dee9520')"
                 :disabled="isRunning || !activeTemplate.projectRoot"
                 @click="browseProject"
