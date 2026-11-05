@@ -10950,11 +10950,17 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab[data-kind="home"] .wb-tab-title {
   flex: 0 0 auto;
-  font-weight: 650;
+  align-items: center;
+  color: var(--wb-secondary-text);
 }
 
+.wb-tab[data-kind="home"]:hover .wb-tab-title,
 .wb-tab[data-kind="home"].active .wb-tab-title {
-  font-weight: 700;
+  color: var(--wb-text);
+}
+
+.wb-tab-home-icon {
+  flex: 0 0 auto;
 }
 
 .wb-tab > .wb-object-icon {

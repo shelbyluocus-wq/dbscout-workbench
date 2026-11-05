@@ -2,6 +2,7 @@
 import { t } from "../i18n/index.js";
 import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
 import { computed, ref } from "vue";
+import { House } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
@@ -334,6 +335,10 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
               </svg>
               <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
             </span>
+          </template>
+          <template v-else-if="tabKind(tab) === 'home'">
+            <House class="wb-tab-home-icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
+            <span class="wb-tab-name wb-visually-hidden">{{ tabTitle(tab) }}</span>
           </template>
           <template v-else>
             <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>
