@@ -13956,10 +13956,6 @@ label:has(input[type="checkbox"]:disabled) {
   left: 0;
 }
 
-.wb-grid-loadmore-cell.is-done {
-  color: var(--wb-muted);
-}
-
 .wb-grid-loadmore-spinner {
   display: inline-block;
   vertical-align: middle;

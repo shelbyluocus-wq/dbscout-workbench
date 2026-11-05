@@ -1727,7 +1727,7 @@ test("grid scroll schedules paging outside the event and keeps both directions f
   assert.match(pane, /distanceToTableWindowStart\(tab,\s*target\.scrollTop,\s*rowHeight\.value\)/);
   assert.doesNotMatch(pane, /target\.scrollHeight\s*-\s*target\.scrollTop\s*-\s*target\.clientHeight/);
   assert.doesNotMatch(pane, /offsetGridScroll|handleGridWheel|@wheel=/);
-  assert.match(dataGrid, /v-else-if="loadedRowCount > 0"\s+aria-hidden="true"\s+class="wb-grid-loadmore-row"/);
+  assert.match(dataGrid, /v-else-if="!tab\.fullyLoaded && loadedRowCount > 0"\s+aria-hidden="true"\s+class="wb-grid-loadmore-row"/);
   assert.match(virtualGrid, /const\s+loadedEnd\s*=\s*loadedStart\s*\+\s*loadedTotal/);
   assert.match(virtualGrid, /const\s+total\s*=\s*tableScrollRowCount\(activeTab\.value,\s*loadedTotal\)/);
   assert.doesNotMatch(virtualGrid, /maintainScrollAnchor|GRID_SCROLL_RECONCILE/);
@@ -2655,9 +2655,11 @@ test("data grid uses row headers and insert-row keyboard wiring", () => {
   assert.match(pane, /@append-row="insertDraftBelow"/);
   const trailingInsertRowsPosition = dataGrid.indexOf('v-for="(insertRow, insertRowIndex) in trailingInsertRows"');
   const appendRowPosition = dataGrid.indexOf('class="wb-grid-append-row"');
-  const fullyLoadedPosition = dataGrid.indexOf('v-else-if="tab.fullyLoaded && loadedRowCount > 0"');
+  const loadingMorePosition = dataGrid.indexOf('v-if="tab.loadingMore"');
   assert.ok(trailingInsertRowsPosition < appendRowPosition, "末尾新增草稿应显示在新增入口上方");
-  assert.ok(appendRowPosition < fullyLoadedPosition, "已加载全部状态应显示在新增入口下方");
+  assert.ok(appendRowPosition < loadingMorePosition, "加载中状态应显示在新增入口下方");
+  assert.doesNotMatch(dataGrid, /loadedRangeLabel|m_ff9c1fbf5115/);
+  assert.match(dataGrid, /v-else-if="!tab\.fullyLoaded && loadedRowCount > 0" aria-hidden="true"/);
   assert.match(styles, /\.wb-grid-append-action\s*\{[^}]*min-height:\s*var\(--wb-grid-row-height,\s*28px\)/s);
   assert.match(styles, /\.wb-grid-append-action:hover,\s*\.wb-grid-append-action:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(pane, /:get-visible-insert-rows="getVisibleInsertRows"/);

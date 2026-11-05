@@ -180,14 +180,6 @@ watch(
 
 const loadedRowCount = computed(() => tabRowCount(props.tab));
 const rowWindowOffset = computed(() => Math.max(0, Math.floor(Number(props.tab?.rowWindowOffset) || 0)));
-const loadedRangeLabel = computed(() => {
-  const start = rowWindowOffset.value + 1;
-  const end = rowWindowOffset.value + loadedRowCount.value;
-  const total = Math.max(0, Math.floor(Number(props.tab?.totalRows) || 0));
-  if (!loadedRowCount.value) return t('m_497c85690c4c');
-  if (rowWindowOffset.value > 0) return t('m_ec3adf524ae4', { start, end, total });
-  return t('m_ff9c1fbf5115', { count: loadedRowCount.value });
-});
 const boundaryNavigationDisabledReason = computed(() => {
   if (!props.tab?.searchResultMode) return "";
   return props.tab?.searchResultComplete
@@ -1882,19 +1874,13 @@ function handleTableContextMenu(event) {
               </button>
             </td>
           </tr>
-          <!-- 加载状态始终收在表格最底部，避免新增草稿出现在“已加载全部”之后。 -->
           <tr v-if="tab.loadingMore" class="wb-grid-loadmore-row">
             <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell">
               <span class="wb-grid-loadmore-spinner" aria-hidden="true"></span>
               <span>{{ t('m_58be224a15bb') }}</span>
             </td>
           </tr>
-          <tr v-else-if="tab.fullyLoaded && loadedRowCount > 0" class="wb-grid-loadmore-row">
-            <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell is-done">
-              {{ loadedRangeLabel }}
-            </td>
-          </tr>
-          <tr v-else-if="loadedRowCount > 0" aria-hidden="true" class="wb-grid-loadmore-row">
+          <tr v-else-if="!tab.fullyLoaded && loadedRowCount > 0" aria-hidden="true" class="wb-grid-loadmore-row">
             <td :colspan="1 + renderCellColumns.length" class="wb-grid-loadmore-cell">
               <span>&nbsp;</span>
             </td>
