@@ -3177,15 +3177,16 @@ test("tauri macOS window uses native traffic lights over the integrated titlebar
   assert.equal(macMain.titleBarStyle, "Overlay");
   assert.equal(macMain.hiddenTitle, true);
   assert.deepEqual(macMain.trafficLightPosition, { x: 13, y: 22 });
+  assert.equal(macMain.maximized, false);
+  assert.equal(macMain.transparent, true);
+  assert.equal(baseConfig.app.macOSPrivateApi, true);
   for (const key of [
     "label",
     "title",
     "width",
     "height",
-    "maximized",
     "minWidth",
     "minHeight",
-    "transparent",
     "shadow",
     "resizable",
     "alwaysOnTop",
@@ -3225,6 +3226,7 @@ test("tauri updater uses the local SVN update directory flow", () => {
   const cargo = read("../../src-tauri/Cargo.toml");
   const lib = read("../../src-tauri/src/lib.rs");
   const svnUpdater = read("../../src-tauri/src/svn_updater.rs");
+  const svnClient = read("../../src-tauri/src/svn_client.rs");
   const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
 
@@ -3237,8 +3239,9 @@ test("tauri updater uses the local SVN update directory flow", () => {
   assert.match(lib, /commands::svn_update_check/);
   assert.match(lib, /svn_updater::spawn_background_checks/);
   assert.match(svnUpdater, /Duration::from_secs\(60 \* 60\)/);
-  assert.match(svnUpdater, /run_svn_command\(&svn, "cleanup", directory\)/);
-  assert.match(svnUpdater, /CREATE_NO_WINDOW/);
+  assert.match(svnUpdater, /SvnClient::for_working_copy\(app, directory\)\.await\?/);
+  assert.match(svnUpdater, /run_svn_command\(&mut svn, "cleanup", directory\)\.await\?;\s*run_svn_command\(&mut svn, "update", directory\)\.await/);
+  assert.match(svnClient, /#\[cfg\(target_os = "windows"\)\]\s*command\.creation_flags\(0x0800_0000\)/);
   assert.match(svnUpdater, /REQUIRED_DIRECTORY_NAME:\s*&str\s*=\s*"navicat"/);
   assert.match(svnUpdater, /"\/opt\/homebrew\/bin\/svn"/);
   assert.match(svnUpdater, /find_on_path\("svn"\)\.or_else\(find_svn_in_standard_locations\)/);
@@ -3246,7 +3249,7 @@ test("tauri updater uses the local SVN update directory flow", () => {
   assert.match(svnUpdater, /pick_windows_svn_exe\(/);
   assert.match(svnUpdater, /find_tortoise_svn\(\)/);
   assert.match(svnUpdater, /resource_dir\.join\("svn"\)\.join\("svn\.exe"\)/);
-  assert.equal(config.bundle?.resources?.["resources/svn/**/*"], "svn/");
+  assert.equal(config.bundle?.resources?.["resources/svn/"], "svn/");
   assert.equal(config.bundle.createUpdaterArtifacts, undefined);
   assert.equal(config.plugins?.updater, undefined);
   assert.doesNotMatch(JSON.stringify(config), /gitee\.com/i);
