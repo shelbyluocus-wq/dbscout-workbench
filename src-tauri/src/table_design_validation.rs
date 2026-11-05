@@ -823,6 +823,7 @@ mod tests {
                 original_name: "code".into(),
                 name: "code".into(),
                 data_type: data_type.into(),
+                unsigned: None,
                 length,
                 scale: None,
                 nullable: true,
@@ -846,6 +847,23 @@ mod tests {
             .expect("compatibility check should run");
 
         assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn signedness_changes_check_negative_values_and_upper_bounds() {
+        let mut current = current();
+        current.columns[0].data_type = "int".into();
+        current.columns[0].column_type = "int".into();
+        current.columns[0].length = None;
+        let mut draft = draft_for("int", None);
+        draft.columns[0].unsigned = Some(true);
+        let rows = vec![HashMap::from([("code".into(), "-1".into())])];
+        assert!(!validate_materialized_rows(&current, &draft, &rows).unwrap().is_empty());
+        let rows = vec![HashMap::from([("code".into(), "4294967295".into())])];
+        assert!(validate_materialized_rows(&current, &draft, &rows).unwrap().is_empty());
+        current.columns[0].column_type = "int unsigned".into();
+        draft.columns[0].unsigned = Some(false);
+        assert!(!validate_materialized_rows(&current, &draft, &rows).unwrap().is_empty());
     }
 
     #[test]

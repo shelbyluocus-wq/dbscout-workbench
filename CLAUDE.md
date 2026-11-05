@@ -403,6 +403,11 @@ database targets and `confirmed=true`; the calling AI is responsible for obtaini
 the user's authorization. `control_table_tools.rs` validates these requests at the
 backend boundary and reuses desktop command implementations. Design apply requires
 the original draft and preview signatures, preserving stale-schema rejection.
+Column drafts accept optional `unsigned`: true/false explicitly changes numeric
+signedness; omission preserves existing signedness and defaults new columns to
+signed. Inline `int unsigned` / `int signed` is also supported; conflicting
+settings and unsigned nonnumeric types are rejected. Signedness changes take
+part in data compatibility checks, SQL previews and preview signatures.
 Read-only engines remain protected. `refresh_table` updates the visible table
 after changes. Only the existing XLSX import automatically creates a backup;
 other mutations do not add automatic backups or promise one-click undo.

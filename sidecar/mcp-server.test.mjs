@@ -41,6 +41,11 @@ function assertCuratedTools(tools) {
   for (const name of ["get_table_design", "preview_table_design_change"]) {
     assert.equal(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint, true);
   }
+  for (const name of ["preview_table_design_change", "apply_table_design_change"]) {
+    const column = tools.find((tool) => tool.name === name).inputSchema.properties.draft.properties.columns.items;
+    assert.equal(column.properties.unsigned.type, "boolean");
+    assert.ok(!column.required.includes("unsigned"));
+  }
   assert.ok(names.includes("refresh_table"));
   assert.equal(
     tools.find((tool) => tool.name === "import_table_xlsx")?.annotations?.destructiveHint,
@@ -148,7 +153,7 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
         previewSignature: "preview",
         draft: { tableComment: "", columns: [{
           originalName: "id", name: "id", type: "int", nullable: false,
-          primaryKey: true, defaultMode: "none", comment: "",
+          primaryKey: true, defaultMode: "none", comment: "", unsigned: true,
         }] },
       }],
     ];
@@ -165,6 +170,16 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
       assert.equal(requests.at(-1).op, "db_tool");
       assert.equal(requests.at(-1).func, name);
       assert.deepEqual(requests.at(-1).args, { ...args, confirmed: true });
+    }
+    const designArgs = calls.find(([name]) => name === "apply_table_design_change")[1];
+    for (const unsigned of [true, false]) {
+      const args = structuredClone(designArgs);
+      args.draft.columns[0].unsigned = unsigned;
+      for (const name of ["preview_table_design_change", "apply_table_design_change"]) {
+        const result = await client.callTool({ name, arguments: { ...args, confirmed: true } });
+        assert.notEqual(result.isError, true);
+        assert.equal(requests.at(-1).args.draft.columns[0].unsigned, unsigned);
+      }
     }
   } finally {
     await client.close();

@@ -706,6 +706,8 @@ pub struct ColumnDesignDraft {
     pub name: String,
     #[serde(rename = "type", alias = "dataType", alias = "data_type")]
     pub data_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unsigned: Option<bool>,
     pub length: Option<u64>,
     pub scale: Option<u64>,
     pub nullable: bool,

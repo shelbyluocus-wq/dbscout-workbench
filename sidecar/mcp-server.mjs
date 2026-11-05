@@ -157,7 +157,8 @@ const designDraft = z.object({
   columns: z.array(z.object({
     originalName: z.string().describe("现有字段原名；新增字段传空字符串"),
     name: z.string().min(1),
-    type: z.string().min(1),
+    type: z.string().min(1).describe("字段类型，如 int；也支持 int unsigned"),
+    unsigned: z.boolean().optional().describe("数值字段无符号属性：true 不允许负数，false 改为有符号；省略时保留现有属性，新字段默认有符号。不要与 type 中的 signed/unsigned 冲突"),
     length: z.number().int().nonnegative().nullable().optional(),
     scale: z.number().int().nonnegative().nullable().optional(),
     nullable: z.boolean(),

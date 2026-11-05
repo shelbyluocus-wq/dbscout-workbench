@@ -2454,15 +2454,15 @@ pub async fn get_table_schema(
 
 fn parse_demo_column_type(column_type: &str) -> (String, Option<u64>, Option<u64>) {
     let raw = column_type.trim();
+    let data_type = crate::mysql_column_types::normalize_data_type(raw);
     if let Some(open) = raw.find('(') {
-        if raw.ends_with(')') {
-            let data_type = raw[..open].trim().to_ascii_lowercase();
-            let inner = &raw[open + 1..raw.len() - 1];
+        if let Some(close) = raw[open + 1..].find(')').map(|offset| open + 1 + offset) {
+            let inner = &raw[open + 1..close];
             let mut parts = inner.split(',').map(|part| part.trim().parse::<u64>().ok());
             return (data_type, parts.next().flatten(), parts.next().flatten());
         }
     }
-    (raw.to_ascii_lowercase(), None, None)
+    (data_type, None, None)
 }
 
 fn demo_column_design(
@@ -2689,7 +2689,11 @@ fn apply_demo_table_design_change(
             renames.push((column.column_name.clone(), draft.name.clone()));
         }
         column.column_name = draft.name.clone();
-        column.column_type = draft_column_type(draft)?;
+        let current_column = current.columns.iter()
+            .find(|current| current.column_name.eq_ignore_ascii_case(&draft.original_name))
+            .ok_or_else(|| format!("unknown original column: {}", draft.original_name))?;
+        column.column_type = crate::ddl::column_type_definition_sql(draft, current_column)?;
+        column.is_unsigned = column.column_type.to_ascii_lowercase().contains("unsigned");
         column.column_comment = draft.comment.clone();
         column.is_primary_key = draft.primary_key;
         column.is_nullable = if draft.primary_key {
@@ -7949,6 +7953,7 @@ mod tests {
                     original_name: column.column_name.clone(),
                     name: column.column_name.clone(),
                     data_type: column.data_type.clone(),
+                    unsigned: None,
                     length: column.length,
                     scale: column.scale,
                     nullable: column.is_nullable,
@@ -7987,6 +7992,29 @@ mod tests {
             .clone()
             .unwrap_or_default()
             .is_empty());
+    }
+
+    #[test]
+    fn demo_unsigned_changes_match_preview_and_preserve_omitted_flags() {
+        let mut schema = vec![TableMeta {
+            table_name: "scores".into(), table_comment: String::new(), primary_key_order: vec![],
+            columns: vec![ColumnMeta::with_basic("score", "int", String::new(), false, true)],
+        }];
+        let mut rows = HashMap::new();
+        for unsigned in [Some(true), None, Some(false)] {
+            let current = demo_table_design_from_schema("demo", "game_db", "scores", &schema).unwrap();
+            let mut draft = design_draft_from(&current);
+            draft.columns[0].unsigned = unsigned;
+            draft.columns[0].comment = format!("{unsigned:?}");
+            let preview = crate::ddl::preview_table_design_change(&current, &draft).unwrap();
+            apply_demo_table_design_change(&mut schema, &mut rows, ApplyTableDesignRequest {
+                connection_id: "demo".into(), database: "game_db".into(), table_name: "scores".into(), draft,
+                schema_signature: Some(preview.schema_signature), source_signature: Some(preview.source_signature),
+                preview_signature: Some(preview.preview_signature),
+            }, None).unwrap();
+            assert_eq!(schema[0].columns[0].is_unsigned, unsigned != Some(false));
+            assert_eq!(schema[0].columns[0].column_type.contains("unsigned"), unsigned != Some(false));
+        }
     }
 
     #[test]
@@ -8065,6 +8093,7 @@ mod tests {
                 original_name: String::new(),
                 name: "score".into(),
                 data_type: "int".into(),
+                unsigned: None,
                 length: None,
                 scale: None,
                 nullable: true,

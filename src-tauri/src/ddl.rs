@@ -110,17 +110,34 @@ fn has_auto_increment_extra(extra: &str) -> bool {
         .any(|part| part.eq_ignore_ascii_case("auto_increment"))
 }
 
-fn preserved_type_modifier_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> String {
-    if has_type_modifier(&current.column_type, "unsigned")
-        && supports_unsigned_modifier(&draft.data_type)
+fn requested_unsigned(draft: &ColumnDesignDraft) -> Result<Option<bool>, String> {
+    let inline_unsigned = has_type_modifier(&draft.data_type, "unsigned");
+    let inline_signed = has_type_modifier(&draft.data_type, "signed");
+    if (inline_unsigned && inline_signed)
+        || (inline_unsigned && draft.unsigned == Some(false))
+        || (inline_signed && draft.unsigned == Some(true))
     {
-        " unsigned".into()
-    } else {
-        String::new()
+        return Err(format!("conflicting signed/unsigned settings for column: {}", draft.name));
     }
+    Ok(draft.unsigned.or(if inline_unsigned {
+        Some(true)
+    } else if inline_signed {
+        Some(false)
+    } else {
+        None
+    }))
 }
 
 pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
+    let unsigned = requested_unsigned(draft)?.unwrap_or(false);
+    if unsigned && !supports_unsigned_modifier(&draft.data_type) {
+        return Err(format!("type {} does not support unsigned", draft.data_type));
+    }
+    let base = column_base_type_sql(draft)?;
+    Ok(if unsigned { format!("{base} unsigned") } else { base })
+}
+
+fn column_base_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     validate_identifier(&draft.name)?;
     let data_type = normalize_data_type(&draft.data_type);
     if !supports_table_design(&data_type) {
@@ -149,21 +166,17 @@ pub fn column_type_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     Ok(data_type)
 }
 
-fn column_type_definition_sql(
+pub(crate) fn column_type_definition_sql(
     draft: &ColumnDesignDraft,
     current: &ColumnDesignMeta,
 ) -> Result<String, String> {
-    let generated_type = column_type_sql(draft)?;
+    let generated_type = column_type_sql(&effective_draft(current, draft))?;
     let current_draft = current_as_draft(current);
     if !current.column_type.trim().is_empty() && column_type_sql(&current_draft)? == generated_type
     {
         return Ok(current.column_type.trim().to_string());
     }
-    Ok(format!(
-        "{}{}",
-        generated_type,
-        preserved_type_modifier_sql(draft, current)
-    ))
+    Ok(generated_type)
 }
 
 fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
@@ -277,7 +290,7 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
         .iter()
         .map(|column| {
             format!(
-                "{}>{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}",
+                "{}>{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}:{:?}:{}:{}",
                 column.original_name,
                 column.name,
                 normalize_data_type(&column.data_type),
@@ -289,6 +302,9 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
                 column.default_mode,
                 column.default_value,
                 column.comment,
+                column.unsigned,
+                has_type_modifier(&column.data_type, "unsigned"),
+                has_type_modifier(&column.data_type, "signed"),
             )
         })
         .collect::<Vec<_>>()
@@ -382,7 +398,12 @@ fn column_type_display(data_type: &str, length: Option<u64>, scale: Option<u64>)
 
 fn column_type_display_from_sql(column_type: &str) -> String {
     let (data_type, length, scale) = parse_type_parts(column_type);
-    column_type_display(&data_type, length, scale)
+    let display = column_type_display(&data_type, length, scale);
+    if has_type_modifier(column_type, "unsigned") {
+        format!("{display} UNSIGNED")
+    } else {
+        display
+    }
 }
 
 fn build_human_descriptions(
@@ -580,6 +601,13 @@ fn effective_draft(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Col
     if out.scale.is_none() {
         out.scale = current.scale.or(parsed_scale);
     }
+    if out.unsigned.is_none()
+        && !has_type_modifier(&out.data_type, "unsigned")
+        && !has_type_modifier(&out.data_type, "signed")
+        && supports_unsigned_modifier(&out.data_type)
+    {
+        out.unsigned = Some(has_type_modifier(&current.column_type, "unsigned"));
+    }
     out
 }
 
@@ -742,6 +770,7 @@ fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
             column.data_type.clone()
         },
         length: column.length.or(parsed_length),
+        unsigned: Some(has_type_modifier(&column.column_type, "unsigned")),
         scale: column.scale.or(parsed_scale),
         nullable: column.is_nullable,
         primary_key: column.is_primary_key,
@@ -1187,6 +1216,7 @@ mod tests {
                     original_name: column.column_name.clone(),
                     name: column.column_name.clone(),
                     data_type: column.data_type.clone(),
+                    unsigned: None,
                     length: column.length,
                     scale: column.scale,
                     nullable: column.is_nullable,
@@ -1349,6 +1379,7 @@ mod tests {
                 original_name: String::new(),
                 name: "score".into(),
                 data_type: "int".into(),
+                unsigned: None,
                 length: None,
                 scale: None,
                 nullable: false,
@@ -1368,6 +1399,106 @@ mod tests {
             "statements were {:?}",
             result.statements
         );
+    }
+
+    #[test]
+    fn unsigned_new_columns_support_flag_and_inline_type() {
+        let current = meta();
+        for (data_type, unsigned) in [("int", Some(true)), ("int unsigned", None)] {
+            let mut draft = draft_from(&current);
+            let mut added = draft.columns[0].clone();
+            added.original_name.clear();
+            added.name = "score".into();
+            added.primary_key = false;
+            added.primary_key_ordinal = None;
+            added.data_type = data_type.into();
+            added.unsigned = unsigned;
+            draft.columns.push(added);
+            let result = preview(&current, &draft);
+            assert!(result.statements.join(" ").contains("ADD COLUMN `score` int unsigned"));
+            assert!(result.human_descriptions.join(" ").contains("UNSIGNED"));
+            let request = ApplyTableDesignRequest {
+                connection_id: current.source.connection_id.clone(),
+                database: current.source.database.clone(),
+                table_name: current.table_name.clone(),
+                draft,
+                schema_signature: Some(result.schema_signature),
+                source_signature: Some(result.source_signature),
+                preview_signature: Some(result.preview_signature),
+            };
+            assert_eq!(verify_table_design_apply(&current, &request).unwrap().statements, result.statements);
+        }
+    }
+
+    #[test]
+    fn unsigned_changes_are_detected_validated_and_bound_to_preview() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        draft.columns[0].unsigned = Some(true);
+        let result = preview(&current, &draft);
+        assert!(result.statements.join(" ").contains("MODIFY COLUMN `id` int unsigned"));
+        let changes = table_design_type_changes(&current, &draft).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert!(changes[0].target_column.is_unsigned);
+        let mut request = ApplyTableDesignRequest {
+            connection_id: current.source.connection_id.clone(),
+            database: current.source.database.clone(),
+            table_name: current.table_name.clone(),
+            draft,
+            schema_signature: Some(result.schema_signature),
+            source_signature: Some(result.source_signature),
+            preview_signature: Some(result.preview_signature),
+        };
+        request.draft.columns[0].unsigned = Some(false);
+        assert!(verify_table_design_apply(&current, &request).unwrap_err().contains("preview signature mismatch"));
+    }
+
+    #[test]
+    fn unsigned_can_be_removed_and_omission_preserves_existing_columns() {
+        let current = unsigned_tinyint_meta();
+        let mut draft = draft_from(&current);
+        assert!(!preview(&current, &draft).has_changes);
+        draft.columns[1].unsigned = Some(false);
+        let result = preview(&current, &draft);
+        assert!(result.statements.join(" ").contains("MODIFY COLUMN `username` tinyint NOT NULL"));
+        assert!(!result.statements.join(" ").contains("unsigned"));
+        assert_eq!(table_design_type_changes(&current, &draft).unwrap().len(), 1);
+        draft.columns[1].unsigned = None;
+        draft.columns[1].data_type = "tinyint signed".into();
+        assert_eq!(preview(&current, &draft).statements, result.statements);
+    }
+
+    #[test]
+    fn unsigned_rejects_conflicting_and_non_numeric_types() {
+        let current = meta();
+        let mut draft = draft_from(&current);
+        draft.columns[1].unsigned = Some(true);
+        assert!(preview_table_design_change(&current, &draft).unwrap_err().contains("does not support unsigned"));
+        for (data_type, unsigned) in [
+            ("int unsigned", Some(false)), ("int signed", Some(true)),
+            ("int signed unsigned", None),
+        ] {
+            draft = draft_from(&current);
+            draft.columns[0].data_type = data_type.into();
+            draft.columns[0].unsigned = unsigned;
+            assert!(preview_table_design_change(&current, &draft).unwrap_err().contains("conflicting"));
+        }
+        draft = draft_from(&current);
+        draft.columns[0].data_type = "decimal".into();
+        draft.columns[0].length = Some(10);
+        draft.columns[0].scale = Some(2);
+        draft.columns[0].unsigned = Some(true);
+        assert!(preview(&current, &draft).statements.join(" ").contains("decimal(10,2) unsigned"));
+    }
+
+    #[test]
+    fn legacy_drafts_deserialize_without_unsigned() {
+        let draft: ColumnDesignDraft = serde_json::from_value(serde_json::json!({
+            "originalName": "", "name": "score", "type": "int",
+            "nullable": false, "primaryKey": false, "defaultMode": "none", "comment": ""
+        })).unwrap();
+        assert_eq!(draft.unsigned, None);
+        assert_eq!(column_type_sql(&draft).unwrap(), "int");
     }
 
     #[test]
@@ -1400,6 +1531,7 @@ mod tests {
             original_name: String::new(),
             name: "status".into(),
             data_type: "enum".into(),
+            unsigned: None,
             length: None,
             scale: None,
             nullable: true,
@@ -1750,6 +1882,7 @@ mod tests {
             original_name: "new_column".into(),
             name: "new_column".into(),
             data_type: "int".into(),
+            unsigned: None,
             length: None,
             scale: None,
             nullable: true,
@@ -1771,6 +1904,7 @@ mod tests {
             original_name: String::new(),
             name: "score".into(),
             data_type: "int".into(),
+            unsigned: None,
             length: None,
             scale: None,
             nullable: false,
