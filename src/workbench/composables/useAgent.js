@@ -292,6 +292,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     nodePath: "",
     serverPath: "",
     installCommand: "",
+    permissions: { navigate: true, writeData: true, schema: true, manageTables: true },
   });
   const externalMcpLoading = ref(false);
   const externalMcpError = ref("");
@@ -626,17 +627,21 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     controlUnlisten = null;
   }
 
-  async function loadExternalMcpStatus() {
-    externalMcpLoading.value = true;
-    externalMcpError.value = "";
+  // `silent` skips the loading flag and error line so a background poll does
+  // not flicker switches or clobber a message the user is looking at.
+  async function loadExternalMcpStatus({ silent = false } = {}) {
+    if (!silent) {
+      externalMcpLoading.value = true;
+      externalMcpError.value = "";
+    }
     try {
       externalMcpStatus.value = await invokeWorkbench("get_external_mcp_status");
       return externalMcpStatus.value;
     } catch (err) {
-      externalMcpError.value = String(err?.message || err);
+      if (!silent) externalMcpError.value = String(err?.message || err);
       return null;
     } finally {
-      externalMcpLoading.value = false;
+      if (!silent) externalMcpLoading.value = false;
     }
   }
 
@@ -653,6 +658,26 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
       return null;
     } finally {
       externalMcpLoading.value = false;
+    }
+  }
+
+  // Optimistic: the switch moves immediately, then the backend's authoritative
+  // status replaces it. On failure the group returns to its previous value.
+  async function setExternalMcpPermission(key, value) {
+    const defaults = { navigate: true, writeData: true, schema: true, manageTables: true };
+    const previous = { ...defaults, ...(externalMcpStatus.value?.permissions || {}) };
+    const next = { ...previous, [key]: Boolean(value) };
+    externalMcpStatus.value = { ...(externalMcpStatus.value || {}), permissions: next };
+    externalMcpError.value = "";
+    try {
+      externalMcpStatus.value = await invokeWorkbench("set_external_mcp_permissions", {
+        permissions: next,
+      });
+      return externalMcpStatus.value;
+    } catch (err) {
+      externalMcpStatus.value = { ...(externalMcpStatus.value || {}), permissions: previous };
+      externalMcpError.value = String(err?.message || err);
+      return null;
     }
   }
 
@@ -1585,6 +1610,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     externalMcpError,
     loadExternalMcpStatus,
     setExternalMcpEnabled,
+    setExternalMcpPermission,
     setMode,
     setAutoApprove,
     sessions,

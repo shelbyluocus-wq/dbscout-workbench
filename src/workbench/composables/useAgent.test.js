@@ -365,6 +365,61 @@ describe("useAgent", () => {
     await agent.disposeControlListener();
   });
 
+  it("toggles an external MCP permission group optimistically and sends the full object", async () => {
+    const invocations = [];
+    const invokeWorkbench = async (command, payload) => {
+      invocations.push({ command, payload });
+      if (command === "set_external_mcp_permissions") {
+        return {
+          enabled: true,
+          running: true,
+          connectedClients: 0,
+          permissions: payload.permissions,
+        };
+      }
+      return null;
+    };
+    const agent = useAgent({}, invokeWorkbench);
+    agent.externalMcpStatus.value = {
+      enabled: true,
+      permissions: { navigate: true, writeData: true, schema: true, manageTables: true },
+    };
+
+    const pending = agent.setExternalMcpPermission("writeData", false);
+    // Optimistic: the switch flips before the backend answers.
+    assert.equal(agent.externalMcpStatus.value.permissions.writeData, false);
+    await pending;
+
+    const call = invocations.find((item) => item.command === "set_external_mcp_permissions");
+    assert.deepEqual(call.payload, {
+      permissions: { navigate: true, writeData: false, schema: true, manageTables: true },
+    });
+    // The backend's authoritative status replaces the optimistic one.
+    assert.equal(agent.externalMcpStatus.value.permissions.navigate, true);
+    assert.equal(agent.externalMcpStatus.value.permissions.writeData, false);
+    assert.equal(agent.externalMcpError.value, "");
+  });
+
+  it("reverts an external MCP permission group and reports the error on failure", async () => {
+    const agent = useAgent({}, async (command) => {
+      if (command === "set_external_mcp_permissions") throw new Error("保存失败");
+      return null;
+    });
+    agent.externalMcpStatus.value = {
+      enabled: true,
+      permissions: { navigate: true, writeData: false, schema: true, manageTables: true },
+    };
+
+    const pending = agent.setExternalMcpPermission("navigate", false);
+    assert.equal(agent.externalMcpStatus.value.permissions.navigate, false);
+    const result = await pending;
+
+    assert.equal(result, null);
+    assert.equal(agent.externalMcpStatus.value.permissions.navigate, true);
+    assert.equal(agent.externalMcpStatus.value.permissions.writeData, false);
+    assert.equal(agent.externalMcpError.value, "保存失败");
+  });
+
   it("drops malformed control endpoint actions instead of queueing them", async () => {
     const agent = useAgent({}, async () => null);
     await agent.ensureControlListener();

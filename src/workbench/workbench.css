@@ -19851,6 +19851,269 @@ label:has(input[type="checkbox"]:disabled) {
   line-height: 1.45;
 }
 
+/* 黑猫 MCP rail dialog: master switch, coarse permission groups, setup snippets. */
+.wb-mcp-dialog {
+  width: min(440px, calc(100vw - 32px));
+  border-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+}
+
+.wb-mcp-dialog-overlay {
+  background: var(--wb-overlay);
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
+}
+
+.wb-mcp-dialog-header {
+  border-bottom-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+}
+
+.wb-mcp-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.wb-mcp-dialog-close:hover,
+.wb-mcp-dialog-close:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-mcp-dialog-close:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-mcp-dialog-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+
+.wb-mcp-master {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-field-surface);
+  cursor: pointer;
+}
+
+.wb-mcp-master-text {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wb-mcp-master-text strong {
+  color: var(--wb-text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.wb-mcp-sub {
+  color: var(--wb-quiet-text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wb-mcp-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-secondary-text);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wb-mcp-chip.is-on {
+  background: var(--wb-success-surface, #f0f9eb);
+  color: var(--wb-success-text, #2e7d32);
+}
+
+.wb-mcp-groups {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-mcp-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+}
+
+.wb-mcp-group-icon {
+  flex: none;
+  color: var(--wb-secondary-text);
+}
+
+.wb-mcp-group-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.wb-mcp-group-text {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wb-mcp-group-name {
+  color: var(--wb-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-mcp-group-hint {
+  color: var(--wb-quiet-text);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wb-mcp-group-hint.is-warning {
+  color: var(--wb-warning-text);
+}
+
+.wb-mcp-note {
+  margin: 0;
+  color: var(--wb-quiet-text);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.wb-mcp-connect {
+  border-top: 1px solid var(--wb-border);
+  padding-top: 4px;
+}
+
+.wb-mcp-connect-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px;
+  color: var(--wb-secondary-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.wb-mcp-connect-summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-mcp-connect-summary:hover,
+.wb-mcp-connect-summary:focus-visible {
+  color: var(--wb-text);
+}
+
+.wb-mcp-connect-summary:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.wb-mcp-connect-chevron {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+
+.wb-mcp-connect[open] .wb-mcp-connect-chevron {
+  transform: rotate(180deg);
+}
+
+.wb-mcp-connect-body {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 2px;
+}
+
+.wb-mcp-connect-block {
+  display: grid;
+  gap: 5px;
+}
+
+.wb-mcp-connect-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--wb-secondary-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wb-mcp-copy {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-button-surface, var(--wb-field-surface));
+  color: var(--wb-text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.wb-mcp-copy:hover {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-mcp-connect-code {
+  width: 100%;
+  min-height: 34px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+  font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wb-mcp-connect-code:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-mcp-error {
+  margin: 0;
+  color: var(--wb-danger);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-mcp-connect-chevron {
+    transition: none;
+  }
+}
+
 /* Session list */
 .wb-ai-session-list {
   display: grid;

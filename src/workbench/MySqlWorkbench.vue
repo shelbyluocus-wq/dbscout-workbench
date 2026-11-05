@@ -145,6 +145,7 @@ import BackupCenterDialog from "./components/BackupCenterDialog.vue";
 import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
+const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
 import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
@@ -1080,6 +1081,13 @@ const account = useAccount({
   },
 });
 
+// 黑猫 MCP：管理外部 AI（Codex、Claude Code 等）的连接与权限分组。
+const blackcatMcpOpen = ref(false);
+
+function openBlackcatMcp() {
+  blackcatMcpOpen.value = true;
+}
+
 async function openBackupCenter() {
   // Change logs are a cross-connection history, so open with the broadest
   // view instead of silently narrowing the list to the active workspace.
@@ -1122,6 +1130,7 @@ const {
     tableTransfer: openTableTransfer,
     releaseFlow: openReleaseFlow,
     configRelations: openConfigRelationsReview,
+    blackcatMcp: openBlackcatMcp,
     settings: openSidebarSettings,
   },
 });
@@ -4930,6 +4939,7 @@ const nativeMenuTools = computed(() => {
     { id: "tableTransfer", label: t("m_a36603b169a6"), action: "tableTransfer", shortcutAction: "openTableTransfer" },
     { id: "releaseFlow", label: t("releaseFlow.title"), action: "releaseFlow" },
     { id: "configRelations", label: t("shell.configRelations"), action: "configRelations" },
+    { id: "blackcatMcp", label: t("blackcatMcp.title"), action: "blackcatMcp" },
     { id: "moreSync", label: t("m_623281e9dfdb"), action: "moreSync", group: "more", enabled: writable && sourceHasCapability("sync", source) },
     { id: "moreSend", label: t("m_8f211e16faf2"), action: "moreSend", group: "more", enabled: writable && sourceHasCapability("tableCopy", source) },
     { id: "moreImport", label: t("m_fd7719273970"), action: "moreImport", group: "more", enabled: writable && sourceHasCapability("import", source) },
@@ -5041,6 +5051,7 @@ useNativeAppMenu({
     tableTransfer: openTableTransfer,
     releaseFlow: openReleaseFlow,
     configRelations: () => openConfigRelationsReview(),
+    blackcatMcp: openBlackcatMcp,
     moreSync: () => runMoreMenuAction("sync"),
     moreSend: () => runMoreMenuAction("send"),
     moreImport: () => runMoreMenuAction("import"),
@@ -5741,6 +5752,13 @@ onBeforeUnmount(() => {
       :schema="workspace.schema"
       @close="configRelationsDialogOpen = false"
       @open-table="openConfigRelationTable"
+    />
+
+    <BlackcatMcpDialog
+      v-if="blackcatMcpOpen"
+      :assistant="agent"
+      :theme="effectiveTheme"
+      @close="blackcatMcpOpen = false"
     />
 
     <!-- Table Rename Dialog -->

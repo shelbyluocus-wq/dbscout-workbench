@@ -75,6 +75,66 @@ struct EndpointInfo {
     protocol_version: u32,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Coarse permission groups for the external MCP, toggled from the 黑猫 MCP
+/// dialog. Reading is always allowed while the master switch is on; every
+/// group defaults to true so older config files keep today's behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPermissions {
+    #[serde(default = "default_true")]
+    pub navigate: bool,
+    #[serde(default = "default_true")]
+    pub write_data: bool,
+    #[serde(default = "default_true")]
+    pub schema: bool,
+    #[serde(default = "default_true")]
+    pub manage_tables: bool,
+}
+
+impl Default for McpPermissions {
+    fn default() -> Self {
+        Self {
+            navigate: true,
+            write_data: true,
+            schema: true,
+            manage_tables: true,
+        }
+    }
+}
+
+/// A permission group that can gate a control request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpPermission {
+    Navigate,
+    WriteData,
+    Schema,
+    ManageTables,
+}
+
+impl McpPermission {
+    fn label(self) -> &'static str {
+        match self {
+            McpPermission::Navigate => "打开和定位表",
+            McpPermission::WriteData => "修改数据",
+            McpPermission::Schema => "修改表结构",
+            McpPermission::ManageTables => "复制、重命名和删除表",
+        }
+    }
+
+    fn granted(self, permissions: &McpPermissions) -> bool {
+        match self {
+            McpPermission::Navigate => permissions.navigate,
+            McpPermission::WriteData => permissions.write_data,
+            McpPermission::Schema => permissions.schema,
+            McpPermission::ManageTables => permissions.manage_tables,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalMcpStatus {
@@ -88,10 +148,12 @@ pub struct ExternalMcpStatus {
     app_path: String,
     install_command: String,
     codex_install_command: String,
+    permissions: McpPermissions,
 }
 
 pub struct ControlServerState {
     enabled: AtomicBool,
+    permissions: RwLock<McpPermissions>,
     ui_ready: AtomicBool,
     active_clients: AtomicUsize,
     endpoint: RwLock<Option<EndpointInfo>>,
@@ -104,6 +166,7 @@ impl Default for ControlServerState {
     fn default() -> Self {
         Self {
             enabled: AtomicBool::new(true),
+            permissions: RwLock::new(McpPermissions::default()),
             ui_ready: AtomicBool::new(false),
             active_clients: AtomicUsize::new(0),
             endpoint: RwLock::new(None),
@@ -163,6 +226,30 @@ fn is_allowed_db_tool(func: &str) -> bool {
 
 fn is_allowed_ui_action(action: &str) -> bool {
     UI_ACTIONS.contains(&action)
+}
+
+/// The permission group that gates a control request, if any. Reads, context,
+/// connection discovery, export and `refresh_table` stay ungated — the master
+/// `enabled` switch is the only thing that can stop them. `refresh_table`
+/// keeps the visible table consistent after writes, so it must not be blocked
+/// by the navigate group (its window reveal is suppressed separately instead).
+fn required_permission(request: &ControlRequest) -> Option<McpPermission> {
+    match request {
+        ControlRequest::DbTool { func, .. } => match func.as_str() {
+            "run_write_query" => Some(McpPermission::WriteData),
+            "apply_table_design_change" => Some(McpPermission::Schema),
+            "copy_tables" | "rename_table" | "drop_tables" => Some(McpPermission::ManageTables),
+            _ => None,
+        },
+        ControlRequest::UiAction { action, .. } => match action.as_str() {
+            "open_table" | "focus_column" | "focus_row" | "focus_cell" | "reveal_window" => {
+                Some(McpPermission::Navigate)
+            }
+            _ => None,
+        },
+        ControlRequest::ImportTable { .. } => Some(McpPermission::WriteData),
+        _ => None,
+    }
 }
 
 fn arg_str(args: &Value, keys: &[&str]) -> String {
@@ -290,10 +377,12 @@ async fn wait_for_frontend_ready(app: &AppHandle) -> Result<(), String> {
 /// the endpoint only powers the optional external MCP integration.
 pub fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let enabled = load_enabled(&app).unwrap_or(true);
-        app.state::<ControlServerState>()
-            .enabled
-            .store(enabled, Ordering::Release);
+        let config = load_control_config(&app).unwrap_or_default();
+        {
+            let state = app.state::<ControlServerState>();
+            state.enabled.store(config.enabled, Ordering::Release);
+            *state.permissions.write().await = config.permissions;
+        }
         if let Err(error) = run(app).await {
             eprintln!(
                 "[dbscout] 本地控制端点启动失败(外部 MCP 集成本次不可用,其余功能不受影响): {error}"
@@ -396,22 +485,56 @@ fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), String
     }
 }
 
-fn load_enabled(app: &AppHandle) -> Result<bool, String> {
+/// Persisted `control-config.json`: the master switch plus the permission
+/// groups. Missing keys fall back to the defaults (enabled + every group on),
+/// so files written by older versions load unchanged.
+#[derive(Debug, Clone, Copy)]
+struct ControlConfig {
+    enabled: bool,
+    permissions: McpPermissions,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            permissions: McpPermissions::default(),
+        }
+    }
+}
+
+fn parse_control_config(body: &str) -> Result<ControlConfig, String> {
+    let value: Value =
+        serde_json::from_str(body).map_err(|error| format!("解析外部 MCP 配置失败: {error}"))?;
+    let enabled = value.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+    let permissions = value
+        .get("permissions")
+        .cloned()
+        .map(serde_json::from_value::<McpPermissions>)
+        .transpose()
+        .map_err(|error| format!("解析外部 MCP 权限配置失败: {error}"))?
+        .unwrap_or_default();
+    Ok(ControlConfig {
+        enabled,
+        permissions,
+    })
+}
+
+fn load_control_config(app: &AppHandle) -> Result<ControlConfig, String> {
     let path = app_data_file(app, CONFIG_FILE_NAME)?;
     if !path.exists() {
-        return Ok(true);
+        return Ok(ControlConfig::default());
     }
     let body =
         std::fs::read_to_string(path).map_err(|error| format!("读取外部 MCP 配置失败: {error}"))?;
-    let value: Value =
-        serde_json::from_str(&body).map_err(|error| format!("解析外部 MCP 配置失败: {error}"))?;
-    Ok(value
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(true))
+    parse_control_config(&body)
 }
 
-fn save_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn save_control_config(
+    app: &AppHandle,
+    enabled: bool,
+    permissions: McpPermissions,
+) -> Result<(), String> {
     let path = app_data_file(app, CONFIG_FILE_NAME)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -419,7 +542,7 @@ fn save_enabled(app: &AppHandle, enabled: bool) -> Result<(), String> {
     }
     write_private_file(
         &path,
-        serde_json::json!({ "enabled": enabled })
+        serde_json::json!({ "enabled": enabled, "permissions": permissions })
             .to_string()
             .as_bytes(),
     )
@@ -456,6 +579,7 @@ async fn handle_connection(app: AppHandle, stream: tokio::net::TcpStream, token:
         "version": app.package_info().version.to_string(),
         "protocolVersion": CONTROL_PROTOCOL_VERSION,
         "enabled": app.state::<ControlServerState>().enabled.load(Ordering::Acquire),
+        "permissions": *app.state::<ControlServerState>().permissions.read().await,
         "capabilities": ["get_connections"],
     });
     if write_line(&mut write_half, &hello).await.is_err() {
@@ -499,8 +623,21 @@ async fn dispatch(app: &AppHandle, request: ControlRequest) -> Value {
     {
         return response_err(
             request_id(&request),
-            "外部 MCP 已关闭，请在黑猫 AI 设置中开启",
+            "黑猫 MCP 已关闭，请在黑猫左侧「黑猫 MCP」中开启",
         );
+    }
+    if let Some(permission) = required_permission(&request) {
+        let granted =
+            permission.granted(&app.state::<ControlServerState>().permissions.read().await.clone());
+        if !granted {
+            return response_err(
+                request_id(&request),
+                &format!(
+                    "黑猫 MCP 未开启「{}」权限，请在黑猫左侧「黑猫 MCP」中开启后重试",
+                    permission.label()
+                ),
+            );
+        }
     }
     if request_needs_frontend_ready(&request) {
         if let Err(error) = wait_for_frontend_ready(app).await {
@@ -604,8 +741,14 @@ async fn run_ui_action(app: &AppHandle, action: &str, args: Value) -> Result<Val
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    // Surface the window first so the user sees the tab open.
-    window_reveal::reveal_main_window(app);
+    // Surface the window first so the user sees the tab open. refresh_table is
+    // never gated (writes keep the visible table consistent through it), but
+    // with navigation off it must not pull the window forward either — this
+    // also covers the internal refresh triggered by import_table_xlsx.
+    let permissions = *app.state::<ControlServerState>().permissions.read().await;
+    if action != "refresh_table" || permissions.navigate {
+        window_reveal::reveal_main_window(app);
+    }
     let (sender, receiver) = oneshot::channel();
     let control = app.state::<ControlServerState>();
     control
@@ -682,6 +825,16 @@ async fn current_context(app: &AppHandle) -> Result<Value, String> {
                     .enabled
                     .load(Ordering::Acquire),
             ),
+        );
+        target.insert(
+            "externalMcpPermissions".to_string(),
+            serde_json::to_value(
+                *app.state::<ControlServerState>()
+                    .permissions
+                    .read()
+                    .await,
+            )
+            .unwrap_or_default(),
         );
     }
     Ok(context)
@@ -992,6 +1145,7 @@ async fn external_mcp_status(
         app_path,
         install_command,
         codex_install_command,
+        permissions: *state.permissions.read().await,
     })
 }
 
@@ -1009,7 +1163,8 @@ pub async fn set_external_mcp_enabled(
     app: AppHandle,
     state: State<'_, ControlServerState>,
 ) -> Result<ExternalMcpStatus, String> {
-    save_enabled(&app, enabled)?;
+    let permissions = *state.permissions.read().await;
+    save_control_config(&app, enabled, permissions)?;
     state.enabled.store(enabled, Ordering::Release);
     if !enabled {
         state.queued_ui_actions.lock().await.clear();
@@ -1018,6 +1173,17 @@ pub async fn set_external_mcp_enabled(
             let _ = sender.send(Err("外部 MCP 已关闭".to_string()));
         }
     }
+    external_mcp_status(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn set_external_mcp_permissions(
+    permissions: McpPermissions,
+    app: AppHandle,
+    state: State<'_, ControlServerState>,
+) -> Result<ExternalMcpStatus, String> {
+    save_control_config(&app, state.enabled.load(Ordering::Acquire), permissions)?;
+    *state.permissions.write().await = permissions;
     external_mcp_status(&app, &state).await
 }
 
@@ -1230,5 +1396,158 @@ mod tests {
         assert_eq!(payload["token"], "tok");
         assert_eq!(payload["pid"], 4242);
         assert_eq!(payload["version"], "0.1.25");
+    }
+
+    fn ui_action(action: &str) -> ControlRequest {
+        parse_control_request(&format!(
+            r#"{{"op":"ui_action","id":"1","action":"{action}","args":{{}}}}"#
+        ))
+        .unwrap()
+    }
+
+    fn db_tool(func: &str) -> ControlRequest {
+        parse_control_request(&format!(
+            r#"{{"op":"db_tool","id":"1","func":"{func}","args":{{}}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_request_maps_to_its_permission_group_or_stays_ungated() {
+        for action in [
+            "open_table",
+            "focus_column",
+            "focus_row",
+            "focus_cell",
+            "reveal_window",
+        ] {
+            assert_eq!(
+                required_permission(&ui_action(action)),
+                Some(McpPermission::Navigate),
+                "{action} should require the navigate group"
+            );
+        }
+        // refresh_table is never gated: writes keep the visible table
+        // consistent through it.
+        assert_eq!(required_permission(&ui_action("refresh_table")), None);
+        assert_eq!(required_permission(&ui_action("bogus_action")), None);
+
+        for func in READ_ONLY_DB_TOOLS
+            .iter()
+            .chain(crate::control_table_tools::READ_TOOLS)
+        {
+            assert_eq!(
+                required_permission(&db_tool(func)),
+                None,
+                "read tool {func} should stay ungated"
+            );
+        }
+        assert_eq!(
+            required_permission(&db_tool("run_write_query")),
+            Some(McpPermission::WriteData)
+        );
+        assert_eq!(
+            required_permission(&db_tool("apply_table_design_change")),
+            Some(McpPermission::Schema)
+        );
+        for func in ["copy_tables", "rename_table", "drop_tables"] {
+            assert_eq!(
+                required_permission(&db_tool(func)),
+                Some(McpPermission::ManageTables),
+                "{func} should require the manage-tables group"
+            );
+        }
+        assert_eq!(required_permission(&db_tool("unknown_tool")), None);
+
+        assert_eq!(
+            required_permission(
+                &parse_control_request(r#"{"op":"import_table","id":"1","args":{}}"#).unwrap()
+            ),
+            Some(McpPermission::WriteData)
+        );
+        for op in [
+            r#"{"op":"hello","token":"t"}"#,
+            r#"{"op":"get_context","id":"1"}"#,
+            r#"{"op":"get_connections","id":"1"}"#,
+            r#"{"op":"export_table","id":"1","args":{}}"#,
+        ] {
+            assert_eq!(
+                required_permission(&parse_control_request(op).unwrap()),
+                None,
+                "{op} should stay ungated"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_labels_match_the_dialog_group_names() {
+        assert_eq!(McpPermission::Navigate.label(), "打开和定位表");
+        assert_eq!(McpPermission::WriteData.label(), "修改数据");
+        assert_eq!(McpPermission::Schema.label(), "修改表结构");
+        assert_eq!(McpPermission::ManageTables.label(), "复制、重命名和删除表");
+        let permissions = McpPermissions {
+            navigate: false,
+            write_data: false,
+            schema: false,
+            manage_tables: false,
+        };
+        for permission in [
+            McpPermission::Navigate,
+            McpPermission::WriteData,
+            McpPermission::Schema,
+            McpPermission::ManageTables,
+        ] {
+            assert!(!permission.granted(&permissions));
+        }
+        assert!(McpPermission::Navigate.granted(&McpPermissions::default()));
+    }
+
+    #[test]
+    fn permissions_default_to_on_and_serialize_camel_case() {
+        let permissions = McpPermissions::default();
+        assert!(permissions.navigate);
+        assert!(permissions.write_data);
+        assert!(permissions.schema);
+        assert!(permissions.manage_tables);
+        let value = serde_json::to_value(permissions).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "navigate": true,
+                "writeData": true,
+                "schema": true,
+                "manageTables": true,
+            })
+        );
+    }
+
+    #[test]
+    fn old_config_files_without_permissions_keep_everything_on() {
+        // Files written before permission groups existed carry only `enabled`.
+        let config = parse_control_config(r#"{"enabled":false}"#).unwrap();
+        assert!(!config.enabled);
+        assert_eq!(config.permissions, McpPermissions::default());
+
+        let config = parse_control_config(r#"{"enabled":true}"#).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.permissions, McpPermissions::default());
+    }
+
+    #[test]
+    fn partial_permission_objects_default_the_missing_groups_to_on() {
+        let config = parse_control_config(
+            r#"{"enabled":true,"permissions":{"navigate":false,"writeData":false}}"#,
+        )
+        .unwrap();
+        assert!(config.enabled);
+        assert!(!config.permissions.navigate);
+        assert!(!config.permissions.write_data);
+        assert!(config.permissions.schema);
+        assert!(config.permissions.manage_tables);
+
+        let config = parse_control_config(r#"{"permissions":{"manageTables":false}}"#).unwrap();
+        assert!(config.enabled);
+        assert!(!config.permissions.manage_tables);
+        assert!(config.permissions.navigate);
     }
 }

@@ -359,6 +359,7 @@ pub fn run() {
             sql_history::clear_sql_history,
             control_server::get_external_mcp_status,
             control_server::set_external_mcp_enabled,
+            control_server::set_external_mcp_permissions,
             control_server::control_frontend_ready,
             control_server::control_frontend_unready,
             control_server::control_update_context,

@@ -31,6 +31,7 @@ const perfRows = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
 let mockExternalMcpEnabled = true;
+let mockExternalMcpPermissions = { navigate: true, writeData: true, schema: true, manageTables: true };
 let mockExternalMcpContext = {};
 let mockSqlJobSeq = 0;
 let mockSqlHistorySeq = 0;
@@ -1416,11 +1417,19 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (mockPageLatencyMs > 0 && (command === "fetch_table_page" || command === "fetch_table_count")) {
     await new Promise((resolve) => setTimeout(resolve, mockPageLatencyMs));
   }
-  if (command === "get_external_mcp_status" || command === "set_external_mcp_enabled") {
+  if (
+    command === "get_external_mcp_status"
+    || command === "set_external_mcp_enabled"
+    || command === "set_external_mcp_permissions"
+  ) {
     if (command === "set_external_mcp_enabled") mockExternalMcpEnabled = Boolean(payload.enabled);
+    if (command === "set_external_mcp_permissions" && payload.permissions && typeof payload.permissions === "object") {
+      mockExternalMcpPermissions = { ...mockExternalMcpPermissions, ...payload.permissions };
+    }
     return {
       enabled: mockExternalMcpEnabled,
       running: true,
+      permissions: { ...mockExternalMcpPermissions },
       connectedClients: 0,
       protocolVersion: 1,
       endpointFile: "mock://control-endpoint.json",

@@ -2,6 +2,8 @@
 import { t } from "../i18n/index.js";
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import AgentSessionList from "./AgentSessionList.vue";
+import { useCopyFeedback } from "../composables/useCopyFeedback.js";
+import { genericMcpConfigJson } from "../utils/externalMcp.js";
 
 const { assistant } = defineProps({
   assistant: { type: Object, required: true },
@@ -27,46 +29,17 @@ function onResume(id) {
 // 1.5s fade-out timer on every change, so a burst of typing keeps the chip
 // visible until the user pauses.
 const savedVisible = ref(false);
-const mcpCopiedTarget = ref("");
-const genericMcpConfig = computed(() => JSON.stringify({
-  command: assistant.externalMcpStatus.value?.nodePath || "node",
-  args: [
-    assistant.externalMcpStatus.value?.serverPath || "mcp-server.mjs",
-    "--app-executable",
-    assistant.externalMcpStatus.value?.appPath || "blackcat",
-  ],
-}, null, 2));
+const { copiedTarget: mcpCopiedTarget, copy: copyText } = useCopyFeedback();
+const genericMcpConfig = computed(() => genericMcpConfigJson(assistant.externalMcpStatus.value));
 let savedTimer = null;
-let mcpCopiedTimer = null;
 
 async function copyMcpInstallCommand(target) {
   const field = target === "codex" ? "codexInstallCommand" : "installCommand";
-  const command = String(assistant.externalMcpStatus.value?.[field] || "");
-  if (!command) return;
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(command);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = command;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-9999px";
-      document.body.appendChild(textarea);
-      textarea.select();
-      const copied = document.execCommand?.("copy") === true;
-      textarea.remove();
-      if (!copied) throw new Error("当前环境不允许访问剪贴板");
-    }
+    await copyText(target, assistant.externalMcpStatus.value?.[field]);
   } catch (error) {
     assistant.externalMcpError.value = `复制失败：${String(error?.message || error)}`;
-    return;
   }
-  mcpCopiedTarget.value = target;
-  if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer);
-  mcpCopiedTimer = setTimeout(() => {
-    mcpCopiedTarget.value = "";
-    mcpCopiedTimer = null;
-  }, 1500);
 }
 
 watch(
@@ -84,7 +57,6 @@ watch(
 
 onBeforeUnmount(() => {
   if (savedTimer) clearTimeout(savedTimer);
-  if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer);
 });
 </script>
 

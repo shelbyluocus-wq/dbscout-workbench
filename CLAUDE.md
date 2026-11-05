@@ -411,6 +411,13 @@ part in data compatibility checks, SQL previews and preview signatures.
 Read-only engines remain protected. `refresh_table` updates the visible table
 after changes. Only the existing XLSX import automatically creates a backup;
 other mutations do not add automatic backups or promise one-click undo.
+The activity rail's 黑猫 MCP entry opens a dialog with the master switch plus
+four coarse permission groups — 打开和定位表 (open/focus UI actions), 修改数据
+(writes and whole-table import), 修改表结构 (design apply), and 复制、重命名和
+删除表 — enforced at the control endpoint and persisted in
+`control-config.json` alongside `enabled`; all groups default to on.
+`refresh_table` is never gated, but while navigation is off it no longer pulls
+the window forward.
 
 Production installers contain the lightweight `agent-runner.mjs`,
 `mcp-server.mjs`, and agent-auth configuration, but do **not** contain portable

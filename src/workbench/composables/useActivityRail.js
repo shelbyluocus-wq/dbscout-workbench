@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plug, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -56,6 +56,13 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     icon: Link2,
     labelKey: "shell.configRelations",
     hintKey: "shell.configRelationsHint",
+    popup: "dialog",
+  }),
+  Object.freeze({
+    id: "blackcatMcp",
+    icon: Plug,
+    labelKey: "blackcatMcp.title",
+    hintKey: "blackcatMcp.hint",
     popup: "dialog",
   }),
   Object.freeze({ id: "more", icon: Ellipsis, labelKey: "m_38844b135cf7", popup: "menu", controls: "wb-activity-more-menu", zone: "more" }),
