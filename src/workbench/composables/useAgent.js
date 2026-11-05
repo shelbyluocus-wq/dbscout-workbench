@@ -292,7 +292,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
     nodePath: "",
     serverPath: "",
     installCommand: "",
-    permissions: { navigate: true, writeData: true, schema: true, manageTables: true },
+    permissions: { navigate: true, writeData: true, schema: true, manageTables: true, readProject: false, scanRelations: false, editRelations: false },
   });
   const externalMcpLoading = ref(false);
   const externalMcpError = ref("");
@@ -664,7 +664,7 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
   // Optimistic: the switch moves immediately, then the backend's authoritative
   // status replaces it. On failure the group returns to its previous value.
   async function setExternalMcpPermission(key, value) {
-    const defaults = { navigate: true, writeData: true, schema: true, manageTables: true };
+    const defaults = { navigate: true, writeData: true, schema: true, manageTables: true, readProject: false, scanRelations: false, editRelations: false };
     const previous = { ...defaults, ...(externalMcpStatus.value?.permissions || {}) };
     const next = { ...previous, [key]: Boolean(value) };
     externalMcpStatus.value = { ...(externalMcpStatus.value || {}), permissions: next };

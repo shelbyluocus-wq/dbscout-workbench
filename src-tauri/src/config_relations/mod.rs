@@ -3,6 +3,10 @@
 //! source code, and recognisable data formats.
 
 mod assembly;
+mod assisted_rules;
+pub mod assistant;
+mod project_access;
+mod reference_scan;
 mod catalog;
 pub mod code_scan;
 pub mod commands;

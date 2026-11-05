@@ -48,6 +48,12 @@ This new nested-path feature has not been accepted on MySQL 5.7.
 
 ## Verification
 
+External MCP can inspect this engine and propose database-scoped, user-approved
+declarative overrides. See [AI-Assisted Config Relations](ai-assisted-relations.md)
+for candidate scanning, bound-code access, permissions, preview/revision guards,
+history and coverage limitations. Candidate numeric hits never create rules
+automatically; stale assisted rules remain non-executable.
+
 Shared cases are in `tests/fixtures/config-reference-formats.json` and exercised
 by both Rust and JavaScript. These include ID boundaries, amounts versus keys,
 JSON member order, false matches inside strings, deduplication and invalid data.

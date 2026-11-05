@@ -42,7 +42,7 @@ globalThis.__DBSCOUT_SIMULATE_UI_ACTION__ = (action, args = {}) => {
 };
 
 let mockExternalMcpEnabled = true;
-let mockExternalMcpPermissions = { navigate: true, writeData: true, schema: true, manageTables: true };
+let mockExternalMcpPermissions = { navigate: true, writeData: true, schema: true, manageTables: true, readProject: false, scanRelations: false, editRelations: false };
 let mockExternalMcpContext = {};
 let mockSqlJobSeq = 0;
 let mockSqlHistorySeq = 0;

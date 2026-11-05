@@ -271,6 +271,8 @@ impl ReferenceParser {
 
 enum PathStep { Member(String), Index(usize), Each }
 
+pub fn valid_json_path(path: &str) -> bool { path_steps(path).is_some() }
+
 fn path_steps(path: &str) -> Option<Vec<PathStep>> {
     let mut rest = path.strip_prefix('$')?;
     let mut steps = Vec::new();

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { appExecutableFromArgs, ControlClient } from "./controlClient.mjs";
 import { runUiActionBatch } from "./uiActionBatch.mjs";
 import { executeExternalImport, previewExternalImport } from "./externalImport.mjs";
+import { registerRelationTools } from "./relationTools.mjs";
 
 const control = new ControlClient({ appExecutable: appExecutableFromArgs() });
 const toolRegistrations = [];
@@ -98,6 +99,8 @@ register(
       locate: "focus_row/focus_cell：传完整 rowIdentity；未加载时在独立主键精确筛选标签定位，保留原标签筛选。",
       read: "read_table_page：使用 nextOffset 分页；搜索结构用 search_schema，不要空关键字。",
       batch: "run_ui_actions：fast 默认无等待；demo 每步停留；compact 默认精简，full 排错。",
+      relations: ["get_relation_overview", "get_record_relations", "read_reference_rows", "start_reference_scan", "get_reference_scan", "search_relation_code", "read_relation_code", "test_relation_rule_page", "preview_relation_rule", "apply_relation_rule"],
+      relationSafety: "只支持 MySQL。查询已有关系无需新权限；项目代码、后台扫描、修改本地规则分别授权，默认关闭。候选命中不是引用证明；区分直接、间接、动态未知和查漏失败。保存规则需用户确认；不修改游戏库，不执行配置函数。用 focus_cell + rowIdentity 打开命中行。",
     },
   })
 );
@@ -119,7 +122,7 @@ dbTool(
 );
 dbTool(
   "find_related_tables",
-  "查找可能与目标表相关的表，并返回关系依据。",
+  "按字段命名推测可能相关的表，仅为线索。游戏配置关联应优先 get_table_relations，逐行查引用用 read_reference_rows，漏项用 start_reference_scan。",
   z.object({ ...contextFields, table: z.string().min(1) })
 );
 dbTool(
@@ -489,6 +492,8 @@ register(
   },
   (args) => executeExternalImport(control, args)
 );
+
+registerRelationTools(register, control);
 
 function createServer() {
   const server = new McpServer({ name: "blackcat", version: "1.0.0" });

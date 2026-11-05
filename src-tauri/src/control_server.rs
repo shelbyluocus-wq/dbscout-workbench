@@ -90,6 +90,12 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpPermissions {
+    #[serde(default)]
+    pub read_project: bool,
+    #[serde(default)]
+    pub scan_relations: bool,
+    #[serde(default)]
+    pub edit_relations: bool,
     #[serde(default = "default_true")]
     pub navigate: bool,
     #[serde(default = "default_true")]
@@ -103,6 +109,9 @@ pub struct McpPermissions {
 impl Default for McpPermissions {
     fn default() -> Self {
         Self {
+            read_project: false,
+            scan_relations: false,
+            edit_relations: false,
             navigate: true,
             write_data: true,
             schema: true,
@@ -114,6 +123,9 @@ impl Default for McpPermissions {
 /// A permission group that can gate a control request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum McpPermission {
+    ReadProject,
+    ScanRelations,
+    EditRelations,
     Navigate,
     WriteData,
     Schema,
@@ -123,6 +135,9 @@ enum McpPermission {
 impl McpPermission {
     fn label(self) -> &'static str {
         match self {
+            McpPermission::ReadProject => "读取绑定项目代码",
+            McpPermission::ScanRelations => "后台关联扫描",
+            McpPermission::EditRelations => "修改本地关联规则",
             McpPermission::Navigate => "操作黑猫界面",
             McpPermission::WriteData => "修改数据",
             McpPermission::Schema => "修改表结构",
@@ -132,6 +147,9 @@ impl McpPermission {
 
     fn granted(self, permissions: &McpPermissions) -> bool {
         match self {
+            McpPermission::ReadProject => permissions.read_project,
+            McpPermission::ScanRelations => permissions.scan_relations,
+            McpPermission::EditRelations => permissions.edit_relations,
             McpPermission::Navigate => permissions.navigate,
             McpPermission::WriteData => permissions.write_data,
             McpPermission::Schema => permissions.schema,
@@ -224,7 +242,8 @@ fn parse_control_request(line: &str) -> Result<ControlRequest, String> {
 }
 
 fn is_allowed_db_tool(func: &str) -> bool {
-    READ_ONLY_DB_TOOLS.contains(&func)
+    crate::config_relations::assistant::allowed(func)
+        || READ_ONLY_DB_TOOLS.contains(&func)
         || crate::control_table_tools::READ_TOOLS.contains(&func)
         || crate::control_table_tools::WRITE_TOOLS.contains(&func)
 }
@@ -241,6 +260,15 @@ fn is_allowed_ui_action(action: &str) -> bool {
 fn required_permission(request: &ControlRequest) -> Option<McpPermission> {
     match request {
         ControlRequest::DbTool { func, .. } => match func.as_str() {
+            name if crate::config_relations::assistant::PROJECT_TOOLS.contains(&name) => Some(McpPermission::ReadProject),
+            name if crate::config_relations::assistant::RULE_TOOLS.contains(&name) => Some(McpPermission::EditRelations),
+            "start_reference_scan" | "preview_relation_rule" | "test_relation_rule_page" => Some(McpPermission::ScanRelations),
+            "control_reference_scan" => {
+                if let ControlRequest::DbTool { args, .. } = request {
+                    if args.get("action").and_then(Value::as_str) == Some("resume") { return Some(McpPermission::ScanRelations); }
+                }
+                None
+            }
             "run_write_query" => Some(McpPermission::WriteData),
             "apply_table_design_change" => Some(McpPermission::Schema),
             "copy_tables" | "rename_table" | "drop_tables" => Some(McpPermission::ManageTables),
@@ -273,7 +301,7 @@ fn activity_kind(request: &ControlRequest) -> Option<ControlActivityKind> {
     if matches!(request, ControlRequest::UiAction { .. }) {
         return Some(ControlActivityKind::Ui);
     }
-    if required_permission(request).is_some() {
+    if matches!(required_permission(request), Some(McpPermission::WriteData | McpPermission::Schema | McpPermission::ManageTables | McpPermission::EditRelations)) {
         return Some(ControlActivityKind::Write);
     }
     if matches!(request, ControlRequest::Hello { .. }) {
@@ -802,6 +830,9 @@ async fn selected_runtime_context(app: &AppHandle) -> (String, String) {
 }
 
 async fn run_db_tool(app: &AppHandle, func: &str, args: Value) -> Result<Value, String> {
+    if crate::config_relations::assistant::allowed(func) {
+        return crate::config_relations::assistant::run(app, func, args).await;
+    }
     if crate::control_table_tools::READ_TOOLS.contains(&func)
         || crate::control_table_tools::WRITE_TOOLS.contains(&func)
     {
@@ -834,6 +865,18 @@ async fn run_db_tool(app: &AppHandle, func: &str, args: Value) -> Result<Value, 
     };
     let state = app.state::<AppState>();
     crate::agent::db_bridge::handle_db_request(state, app.clone(), &context, func, args).await
+}
+
+pub async fn relation_permission(app: &AppHandle, permission: &str) -> bool {
+    let state = app.state::<ControlServerState>();
+    if !state.enabled.load(Ordering::Acquire) { return false; }
+    let permissions = state.permissions.read().await;
+    match permission {
+        "project" => permissions.read_project,
+        "scan" => permissions.scan_relations,
+        "rules" => permissions.edit_relations,
+        _ => false,
+    }
 }
 
 async fn run_ui_action(app: &AppHandle, action: &str, args: Value) -> Result<Value, String> {
@@ -1393,6 +1436,21 @@ mod tests {
     }
 
     #[test]
+    fn relation_permissions_are_opt_in_and_enforced_at_endpoint() {
+        let defaults = McpPermissions::default();
+        assert!(!defaults.read_project && !defaults.scan_relations && !defaults.edit_relations);
+        for name in crate::config_relations::assistant::READ_TOOLS { assert!(is_allowed_db_tool(name)); assert_eq!(required_permission(&db_tool(name)),None); }
+        for name in crate::config_relations::assistant::PROJECT_TOOLS { assert_eq!(required_permission(&db_tool(name)),Some(McpPermission::ReadProject)); }
+        assert_eq!(required_permission(&db_tool("apply_relation_rule")),Some(McpPermission::EditRelations));
+        assert_eq!(required_permission(&db_tool("start_reference_scan")),Some(McpPermission::ScanRelations));
+        assert_eq!(required_permission(&db_tool("test_relation_rule_page")),Some(McpPermission::ScanRelations));
+        let request = |action| ControlRequest::DbTool { id:"test".into(),func:"control_reference_scan".into(),args:serde_json::json!({"action":action}) };
+        assert_eq!(required_permission(&request("resume")),Some(McpPermission::ScanRelations));
+        assert_eq!(required_permission(&request("cancel")),None);
+        assert_eq!(required_permission(&request("pause")),None);
+    }
+
+    #[test]
     fn allows_table_tools_and_rejects_unknown_db_tools() {
         assert!(is_allowed_db_tool("run_read_query"));
         assert!(is_allowed_db_tool("list_tables"));
@@ -1626,6 +1684,7 @@ mod tests {
             write_data: false,
             schema: false,
             manage_tables: false,
+            ..Default::default()
         };
         for permission in [
             McpPermission::Navigate,
@@ -1653,6 +1712,9 @@ mod tests {
                 "writeData": true,
                 "schema": true,
                 "manageTables": true,
+                "readProject": false,
+                "scanRelations": false,
+                "editRelations": false,
             })
         );
     }
@@ -1671,6 +1733,10 @@ mod tests {
 
     #[test]
     fn activity_kind_classifies_requests() {
+        for name in ["read_relation_code", "search_relation_code", "start_reference_scan", "preview_relation_rule", "test_relation_rule_page"] {
+            assert_eq!(activity_kind(&db_tool(name)), Some(ControlActivityKind::Read));
+        }
+        assert_eq!(activity_kind(&db_tool("apply_relation_rule")), Some(ControlActivityKind::Write));
         assert_eq!(activity_kind(&ui_action("open_table")), Some(ControlActivityKind::Ui));
         assert_eq!(activity_kind(&ui_action("refresh_table")), Some(ControlActivityKind::Ui));
         assert_eq!(activity_kind(&db_tool("run_write_query")), Some(ControlActivityKind::Write));

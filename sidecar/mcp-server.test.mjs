@@ -28,6 +28,13 @@ function assertCuratedTools(tools) {
     assert.ok(names.includes(name), `${name} must be discoverable`);
   }
   const batch = tools.find((tool) => tool.name === "run_ui_actions");
+  for (const name of ["get_relation_overview", "get_table_relations", "get_record_relations", "read_reference_rows", "get_relation_rules", "read_relation_code", "search_relation_code", "start_reference_scan", "get_reference_scan", "control_reference_scan", "preview_relation_rule", "test_relation_rule_page", "apply_relation_rule"]) {
+    const relationTool = tools.find((tool) => tool.name === name);
+    assert.ok(relationTool, name);
+    assert.ok(relationTool.inputSchema.required.includes("connectionId"), name);
+    assert.ok(relationTool.inputSchema.required.includes("database"), name);
+  }
+  assert.ok(tools.find((tool) => tool.name === "apply_relation_rule").inputSchema.required.includes("confirmed"));
   assert.equal(batch.inputSchema.properties.mode.default, "fast");
   assert.equal(batch.inputSchema.properties.detail.default, "compact");
   assert.ok(names.includes("export_table_xlsx"));

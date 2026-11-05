@@ -392,7 +392,7 @@ describe("useAgent", () => {
 
     const call = invocations.find((item) => item.command === "set_external_mcp_permissions");
     assert.deepEqual(call.payload, {
-      permissions: { navigate: true, writeData: false, schema: true, manageTables: true },
+      permissions: { navigate: true, writeData: false, schema: true, manageTables: true, readProject: false, scanRelations: false, editRelations: false },
     });
     // The backend's authoritative status replaces the optimistic one.
     assert.equal(agent.externalMcpStatus.value.permissions.navigate, true);
@@ -418,6 +418,20 @@ describe("useAgent", () => {
     assert.equal(agent.externalMcpStatus.value.permissions.navigate, true);
     assert.equal(agent.externalMcpStatus.value.permissions.writeData, false);
     assert.equal(agent.externalMcpError.value, "保存失败");
+  });
+
+  it("keeps new relation permissions opt-in when older status objects omit them", async () => {
+    const agent = useAgent({}, async (command, payload) => ({ enabled: true, permissions: payload.permissions }));
+    agent.externalMcpStatus.value = { enabled: true, permissions: { navigate: true } };
+    await agent.setExternalMcpPermission("readProject", true);
+    assert.equal(agent.externalMcpStatus.value.permissions.readProject, true);
+    assert.equal(agent.externalMcpStatus.value.permissions.scanRelations, false);
+    assert.equal(agent.externalMcpStatus.value.permissions.editRelations, false);
+    const failing = useAgent({}, async () => { throw new Error("save failed"); });
+    failing.externalMcpStatus.value = { enabled: true, permissions: {} };
+    await failing.setExternalMcpPermission("editRelations", true);
+    assert.equal(failing.externalMcpStatus.value.permissions.editRelations, false);
+    assert.equal(failing.externalMcpError.value, "save failed");
   });
 
   it("drops malformed control endpoint actions instead of queueing them", async () => {

@@ -42,6 +42,7 @@ const FORMAT_SAMPLE_ROWS: u32 = 200;
 
 #[derive(Default)]
 pub struct ConfigRelationsState {
+    pub assistant: super::assistant::AssistantState,
     store: AsyncMutex<Option<Store>>,
     contexts: std::sync::Mutex<HashMap<(String, String), Arc<Context>>>,
     scan_caches: std::sync::Mutex<HashMap<String, Arc<std::sync::Mutex<ScanCache>>>>,
@@ -91,6 +92,7 @@ struct SampledFormats {
 }
 
 struct ContextData {
+    verified_rules: BTreeMap<String, String>,
     snapshot: Option<Arc<DbSnapshot>>,
     snapshot_signature: u64,
     snapshot_at: Option<Instant>,
@@ -108,6 +110,7 @@ struct ContextData {
 impl Default for ContextData {
     fn default() -> Self {
         Self {
+            verified_rules: BTreeMap::new(),
             snapshot: None,
             snapshot_signature: 0,
             snapshot_at: None,
@@ -271,6 +274,62 @@ async fn load_snapshot(app: &AppHandle, context: &Context, class: WorkClass) -> 
     .await
 }
 
+pub async fn fresh_snapshot(app: &AppHandle, context: &Context) -> Result<DbSnapshot, String> {
+    load_snapshot(app, context, WorkClass::Background).await
+}
+
+pub async fn rule_book(app: &AppHandle, context: &Context) -> Result<super::assisted_rules::RuleBook, String> {
+    Ok(server_record(app, &context.server_key).await?.and_then(|record| record.rule_books.get(&context.database).cloned()).unwrap_or_default())
+}
+
+pub async fn save_rule(app: &AppHandle, context: &Arc<Context>, rule: super::assisted_rules::SavedRule, expected: u64) -> Result<Option<String>, String> {
+    let server = context.server_key.clone();
+    let database = context.database.clone();
+    with_store(app, move |store| {
+        let old = store.server(&server).cloned().unwrap_or_default();
+        if rule.draft.enabled && old.decisions.values().any(|decision| !decision.auto && super::assisted_rules::same_endpoints(&decision.relation, &rule.draft.key())) {
+            return Err("已有人工审核结论，不能由 AI 规则覆盖；请先在关联审核中处理".into());
+        }
+        let mut next = old.clone();
+        next.rule_books.entry(database).or_default().apply(rule, expected)?;
+        *store.server_mut(&server) = next;
+        if let Err(error) = store.save() { *store.server_mut(&server) = old; return Err(error); }
+        Ok(())
+    }).await??;
+    let mut warning = verify_rules(app, context).await.err();
+    if context.data.lock().await.snapshot.is_some() {
+        if let Err(error) = rebuild(app, context).await { warning = Some(error); }
+    }
+    schedule_refresh(app, context, true);
+    Ok(warning)
+}
+
+async fn verify_rules(app: &AppHandle, context: &Context) -> Result<bool, String> {
+    let book = rule_book(app, context).await?;
+    let binding = binding(app, &context.server_key).await?;
+    let verified = tauri::async_runtime::spawn_blocking(move || {
+        let mut fingerprints = BTreeMap::new();
+        book.rules.into_iter().filter_map(|(id, rule)| {
+            if !rule.draft.enabled { return None; }
+            let signature = super::assisted_rules::value_signature(&rule).ok()?;
+            let binding_signature = binding.as_ref().map(|binding| super::assisted_rules::digest(binding.path.as_bytes())).unwrap_or_default();
+            if binding_signature != rule.binding_signature { return None; }
+            if rule.code_hashes.is_empty() { return Some((id,signature)); }
+            let root = Path::new(&binding.as_ref()?.path);
+            let valid = rule.code_hashes.iter().all(|(path, expected)| {
+                fingerprints.entry(path.clone()).or_insert_with(|| {
+                    super::project_access::fingerprints(root, std::slice::from_ref(path)).ok().and_then(|hashes| hashes.get(path).cloned())
+                }).as_ref() == Some(expected)
+            });
+            valid.then_some((id,signature))
+        }).collect::<BTreeMap<_,_>>()
+    }).await.map_err(|error| error.to_string())?;
+    let mut data = context.data.lock().await;
+    let changed = data.verified_rules != verified;
+    data.verified_rules = verified;
+    Ok(changed)
+}
+
 async fn sample_formats(
     pool: &MySqlPool,
     database: &str,
@@ -385,7 +444,7 @@ async fn rebuild(app: &AppHandle, context: &Context) -> Result<Arc<RelationIndex
             .iter()
             .map(|(table, sampled)| (table.clone(), sampled.findings.clone()))
             .collect::<BTreeMap<_, _>>();
-        let index = assembly::assemble(&Inputs {
+        let mut index = assembly::assemble(&Inputs {
             snapshot: &snapshot,
             code: &data.code,
             formats: &formats,
@@ -393,6 +452,12 @@ async fn rebuild(app: &AppHandle, context: &Context) -> Result<Arc<RelationIndex
             record: record.as_ref(),
             now: &now,
         });
+        if let Some(book) = record.as_ref().and_then(|record| record.rule_books.get(&context.database)) {
+            let views = book.views(&snapshot, &data.verified_rules).into_iter().filter(|view| {
+                !record.as_ref().is_some_and(|record| record.decisions.values().any(|decision| !decision.auto && super::assisted_rules::same_endpoints(&decision.relation, &view.key)))
+            }).collect();
+            index.overlay(views);
+        }
         (index, matches!(data.code, CodeState::Ready(_)))
     };
     let set_baseline = code_ready
@@ -500,6 +565,7 @@ async fn emit_settled(app: &AppHandle, context: &Context) {
 async fn refresh(app: &AppHandle, context: &Arc<Context>, force: bool) -> Result<(), String> {
     let mut changed = refresh_snapshot(app, context, force).await?;
     changed |= refresh_code(app, context, force).await?;
+    changed |= verify_rules(app, context).await?;
     if changed {
         rebuild(app, context).await?;
     }
@@ -727,6 +793,7 @@ pub async fn review(
     verdict: Option<Verdict>,
 ) -> Result<(), String> {
     let (_, current) = index(app, context).await?;
+    let reviewed_keys = relation_ids.iter().filter_map(|id|current.find(id).map(|view|view.key.clone())).collect::<Vec<_>>();
     let now = now_text();
     let decisions = relation_ids
         .iter()
@@ -760,6 +827,9 @@ pub async fn review(
     let server_key = context.server_key.clone();
     with_store(app, move |store| {
         let record = store.server_mut(&server_key);
+        if reviewed_keys.iter().any(|key| record.rule_books.values().any(|book| book.rules.values().any(|rule| rule.draft.enabled && super::assisted_rules::same_endpoints(&rule.draft.key(), key)))) {
+            return Err("该关联使用 AI 辅助规则，请通过 MCP 重新预览并确认，或停用本地规则；普通审核不能替换其解析器".into());
+        }
         for (id, decision) in decisions {
             match decision {
                 Some(decision) => {

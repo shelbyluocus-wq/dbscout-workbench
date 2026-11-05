@@ -48,6 +48,8 @@ pub struct Decision {
 #[serde(rename_all = "camelCase")]
 pub struct ServerRecord {
     #[serde(default)]
+    pub rule_books: BTreeMap<String, super::assisted_rules::RuleBook>,
+    #[serde(default)]
     pub client: Option<ClientBinding>,
     /// The user removed the client on purpose. A recommendation must not
     /// bind itself again until they pick a folder.
@@ -170,5 +172,26 @@ mod tests {
         assert!(store.server("any").is_none());
         assert!(path.with_extension("json.corrupt").is_file());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn rule_history_round_trips_with_case_sensitive_database_scopes() {
+        use crate::config_relations::assisted_rules::{RuleBook, RuleDraft, SavedRule};
+        let path = temp_path("rules");
+        let mut store = Store::load(path.clone());
+        let rule = SavedRule { draft:RuleDraft { source_table:"rewards".into(),source_column:"items".into(),target_table:"goods".into(),target_column:"id".into(),parser:None,source_constraints:vec![],evidence:"evidence".into(),code_paths:vec![],enabled:true },schema_signature:"schema".into(),code_hashes:BTreeMap::new(),binding_signature:"binding".into(),saved_at:"now".into() };
+        let mut book = RuleBook::default();
+        book.apply(rule.clone(),0).unwrap();
+        let mut disabled = rule.clone();
+        disabled.draft.enabled = false;
+        book.apply(disabled,1).unwrap();
+        store.server_mut("server").rule_books.insert("Game".into(),book.clone());
+        store.save().unwrap();
+        let reloaded = Store::load(path.clone());
+        let books = &reloaded.server("server").unwrap().rule_books;
+        assert_eq!(books.get("Game"),Some(&book));
+        assert!(!books.contains_key("game"));
+        assert_eq!(books["Game"].history[1].previous,Some(rule));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

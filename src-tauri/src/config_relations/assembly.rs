@@ -586,6 +586,26 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
 }
 
 impl RelationIndex {
+    pub fn overlay(&mut self, views: Vec<RelationView>) {
+        for view in views {
+            if view.parser == Some(ReferenceParser::Unsupported) {
+                let columns = self.unsupported_fields.entry(view.key.source_table.clone()).or_default();
+                if !columns.contains(&view.key.source_column) { columns.push(view.key.source_column.clone()); }
+            }
+            self.relations.retain(|existing| !super::assisted_rules::same_endpoints(&existing.key, &view.key));
+            self.relations.push(view);
+        }
+        self.relation_ids = self.relations.iter().map(|view| view.id.clone()).collect();
+        self.by_source.clear();
+        self.by_target.clear();
+        self.totals = StatusTotals::default();
+        for (position, view) in self.relations.iter().enumerate() {
+            self.by_source.entry(view.key.source_table.clone()).or_default().push(position);
+            self.by_target.entry(view.key.target_table.clone()).or_default().push(position);
+            self.totals.add(view);
+        }
+    }
+
     fn collect(&self, positions: Option<&Vec<usize>>) -> Vec<RelationView> {
         positions
             .map(|positions| positions.iter().map(|position| self.relations[*position].clone()).collect())
@@ -765,6 +785,21 @@ mod tests {
         assert!(matches!(coverage.gaps[0], CoverageGap::NoClient));
         assert_eq!(index.incoming("goodsprop").len(), 2);
         assert_eq!(index.outgoing("rewardprop").len(), 3);
+    }
+
+    #[test]
+    fn assisted_overlay_replaces_matching_endpoints_and_keeps_unrelated_edges() {
+        let mut index = assemble_with(&CodeState::NoClient,None);
+        let mut view = index.find("rewardprop.itemid>goodsprop.id").unwrap().clone();
+        view.parser = Some(ReferenceParser::Unsupported);
+        view.status = RelationStatus::Stale;
+        view.key.kind = RelationKind::List;
+        view.id = view.key.id();
+        index.overlay(vec![view]);
+        assert!(index.find("rewardprop.itemid>goodsprop.id").is_none());
+        assert!(index.find("rewardprop.itemid[]>goodsprop.id").is_some());
+        assert_eq!(index.incoming("goodsprop").len(),2);
+        assert!(index.coverage("rewardprop").gaps.iter().any(|gap| matches!(gap,CoverageGap::UnsupportedFields { .. })));
     }
 
     #[test]

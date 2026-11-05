@@ -24,6 +24,9 @@ const permissions = computed(() => ({
   writeData: true,
   schema: true,
   manageTables: true,
+  readProject: false,
+  scanRelations: false,
+  editRelations: false,
   ...(status.value.permissions || {}),
 }));
 
@@ -40,6 +43,9 @@ const groups = [
   { key: "writeData", icon: PencilLine, titleKey: "blackcatMcp.group.writeData", hintKey: "blackcatMcp.group.writeDataHint" },
   { key: "schema", icon: TableProperties, titleKey: "blackcatMcp.group.schema", hintKey: "blackcatMcp.group.schemaHint" },
   { key: "manageTables", icon: Files, titleKey: "blackcatMcp.group.manageTables", hintKey: "blackcatMcp.group.manageTablesHint", warning: true },
+  { key: "readProject", icon: Files, titleKey: "blackcatMcp.group.readProject", hintKey: "blackcatMcp.group.readProjectHint" },
+  { key: "scanRelations", icon: Focus, titleKey: "blackcatMcp.group.scanRelations", hintKey: "blackcatMcp.group.scanRelationsHint" },
+  { key: "editRelations", icon: PencilLine, titleKey: "blackcatMcp.group.editRelations", hintKey: "blackcatMcp.group.editRelationsHint", warning: true },
 ];
 
 const genericMcpConfig = computed(() => genericMcpConfigJson(status.value));

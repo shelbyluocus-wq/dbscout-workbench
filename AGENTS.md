@@ -426,7 +426,7 @@ The activity rail's 黑猫 MCP entry opens a dialog with the master switch plus
 four coarse permission groups — 打开和定位表 (open/focus UI actions), 修改数据
 (writes and whole-table import), 修改表结构 (design apply), and 复制、重命名和
 删除表 — enforced at the control endpoint and persisted in
-`control-config.json` alongside `enabled`; all groups default to on.
+`control-config.json` alongside `enabled`; these four groups default to on.
 `refresh_table` is never gated, but while navigation is off it no longer pulls
 the window forward. While the external MCP drives the workbench, a soft inner window-edge
 glow (`AiActivityGlow.vue`, fed by `control-activity` events) signals activity —
@@ -435,6 +435,19 @@ passively (visible windows are never focused; hidden ones only un-minimize, so
 the AI never pops the window over the user). The navigate group 操作黑猫界面
 also covers `select_database`, `open_sql` (read-only when `run`), `select_range`,
 open_table `filter`/`filterMode`/`sort`, and the `run_ui_actions` batch tool.
+
+AI-assisted relation tools in `sidecar/relationTools.mjs` expose the actual
+relation engine, paged incoming rows, bounded background candidate scans,
+bound-client code reads/search and previewed local rules. Three additional
+permission groups (`readProject`, `scanRelations`, `editRelations`) default off,
+including upgrades; the original four keep their defaults. Candidates are not
+proven references. Local rules are database-scoped, versioned, user-confirmed,
+never override manual review, and become non-executable when tracked evidence
+changes. No business data or executable config is written/run by these tools.
+Backend modules: `config_relations/assistant.rs` (routing and previews),
+`assisted_rules.rs` (validation/history), `reference_scan.rs` (bounded jobs),
+`project_access.rs` (bound-source restrictions). See
+`docs/ai-assisted-relations.md` for contracts, limits and validation commands.
 
 
 Production installers contain the lightweight `agent-runner.mjs`,
