@@ -289,6 +289,10 @@ capabilities:
   review verdicts stay local in `config-relations.json`, shared by every
   database on the same server. Available for MySQL connections and the
   built-in demo data; ClickHouse and MongoDB are excluded.
+- **Page zoom** uses macOS `Cmd` / Windows `Ctrl` with `+` (or `=`), `-`, and
+  `0` (reset), in 10% steps from 50% to 200%, through native WebView zoom.
+  These fixed shortcuts work inside editors and dialogs, are listed in shortcut
+  settings and the macOS View menu, and leave graph wheel/pinch zoom untouched.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based

@@ -61,6 +61,8 @@ import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js"
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
+import { createPageZoom, pageZoomAction } from "./utils/pageZoom.js";
+import { noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
 import { useMacosTitlebarDoubleClick } from "./composables/useMacosTitlebar.js";
 import { useMacosVibrancy } from "./composables/useMacosVibrancy.js";
 import { APP_VERSION } from "./appVersion.js";
@@ -4541,8 +4543,25 @@ function preventDialogShortcutDefault(event) {
   event.preventDefault();
 }
 
+const pageZoom = createPageZoom({
+  applyZoom: async (scale) => {
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    await getCurrentWebview().setZoom(scale);
+  },
+  onChange: (percent) => setStatus(t("pageZoom.changed", { percent })),
+  onError: (error) => setStatus(t("pageZoom.failed", { error: String(error?.message || error) }), { tone: "error" }),
+});
+
 function handleGlobalShortcutKeydown(event) {
   if (event.target?.closest?.('[data-wb-shortcut-capture="true"]')) return;
+  const zoomAction = pageZoomAction(event, isMacOSPlatform() ? "macos" : "windows");
+  if (zoomAction && isTauriRuntime()) {
+    event.preventDefault();
+    event.stopPropagation();
+    noteShortcutKeydownMatch(zoomAction);
+    void pageZoom.run(zoomAction);
+    return;
+  }
   if (dialogLayerManager.hasActiveModalLayer()) {
     hideTabShortcutHints();
     preventDialogShortcutDefault(event);
@@ -5058,6 +5077,9 @@ useNativeAppMenu({
     moreExport: () => runMoreMenuAction("export"),
     toggleSidebar: () => toggleSidebar(),
     toggleInspector: () => toggleInspector(),
+    zoomIn: () => pageZoom.run("zoomIn"),
+    zoomOut: () => pageZoom.run("zoomOut"),
+    zoomReset: () => pageZoom.run("zoomReset"),
     nextTab: () => cycleFocusedTab("next"),
     previousTab: () => cycleFocusedTab("previous"),
     togglePinWindow: () => void toggleWindowPin(),
