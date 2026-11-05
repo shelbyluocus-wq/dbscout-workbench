@@ -35,7 +35,7 @@
 .wb-rf-board-caption {
   margin: 4px 4px 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -124,7 +124,7 @@
 
 .wb-rf-note-title strong {
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -136,7 +136,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-rf-note-edge) 14%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -155,7 +155,7 @@
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -172,7 +172,7 @@
 
 .wb-rf-note-count {
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -180,7 +180,7 @@
   display: grid;
   gap: 2px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -189,7 +189,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -226,7 +226,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 450;
   text-align: left;
 }
@@ -289,7 +289,7 @@
 
 .wb-rf-head-link {
   margin-left: auto;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 /* Small modal dialogs inside the workspace ------------------------------------- */
@@ -327,14 +327,14 @@
 
 .wb-rf-modal-head h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--wb-fs-heading);
   font-weight: 650;
 }
 
 .wb-rf-modal-head p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -378,7 +378,7 @@
   align-items: center;
   justify-content: space-between;
   color: var(--wb-text);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 .wb-rf-choice-name svg {
@@ -387,7 +387,7 @@
 
 .wb-rf-choice-state {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-choice-state.is-open {
@@ -415,12 +415,12 @@
 
 .wb-rf-fact dt {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-fact dd {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -463,7 +463,7 @@
 
 .wb-rf-field-error {
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-visually-hidden {
@@ -494,7 +494,7 @@
   border: none;
   background: transparent;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   box-shadow: none;
 }
 
@@ -511,7 +511,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 450;
 }
 
@@ -562,7 +562,7 @@
   grid-column: 2;
   width: fit-content;
   height: 20px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-rf-action-icon {
@@ -582,13 +582,13 @@
 }
 
 .wb-rf-action-text strong {
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-rf-action-text span {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -613,7 +613,7 @@
   gap: 12px;
   min-height: 38px;
   border-bottom: 1px solid var(--wb-line);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-home-rows li:last-child {
@@ -656,7 +656,7 @@
 .wb-rf-history-day h4 {
   margin: 0 0 6px 4px;
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -713,7 +713,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-history-title strong {
@@ -730,7 +730,7 @@
 
 .wb-rf-history-meta {
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -742,7 +742,7 @@
 .wb-rf-history-tags .wb-rf-chip {
   height: 20px;
   padding: 0 7px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-rf-history-list.is-compact .wb-rf-history-row {
@@ -770,7 +770,7 @@
 
 .wb-rf-history-detail-head h4 {
   margin: 0;
-  font-size: 14.5px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
 }
 
@@ -783,7 +783,7 @@
 .wb-rf-history-stats {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-history-stats .is-danger,
@@ -814,7 +814,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-history-step-line strong {
@@ -822,26 +822,26 @@
 }
 
 .wb-rf-history-step-line span {
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
 .wb-rf-history-result {
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-history-warnings {
   display: grid;
   gap: 2px;
   color: var(--wb-warning-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-history-log summary {
   width: fit-content;
   color: var(--wb-accent);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -854,7 +854,7 @@
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--wb-rf-sunken);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   white-space: pre-wrap;
 }
 
@@ -956,7 +956,7 @@
 .wb-rf-combobox-empty {
   padding: 8px 10px;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-pop-enter-active,
@@ -1007,7 +1007,7 @@
 
 .wb-rf-rule-kind {
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -1060,7 +1060,7 @@
   display: inline-flex;
   gap: 6px;
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-diff-delta .is-add { color: var(--wb-success-text); }
@@ -1071,7 +1071,7 @@
   max-height: 560px;
   overflow: auto;
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.65;
   outline: none;
 }
@@ -1212,7 +1212,7 @@
 .wb-rf-svn-group-head h5 {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -1266,7 +1266,7 @@
   background: var(--wb-rf-sunken);
   color: var(--wb-secondary-text);
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
 }
 
@@ -1292,7 +1292,7 @@
 
 .wb-rf-svn-path small {
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-rf-svn-check-gap {
@@ -1349,7 +1349,7 @@
   align-items: center;
   gap: 10px;
   min-height: 42px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -1363,7 +1363,7 @@
 .wb-rf-svn-log-list summary .wb-rf-muted {
   flex: none;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-svn-log-message {
@@ -1371,7 +1371,7 @@
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--wb-rf-sunken);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   white-space: pre-wrap;
 }
 
@@ -1464,7 +1464,7 @@
   gap: 6px 10px;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-build-problems {
@@ -1476,7 +1476,7 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -1491,7 +1491,7 @@
 .wb-rf-build-command summary {
   width: fit-content;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 

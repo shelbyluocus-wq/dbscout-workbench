@@ -120,7 +120,7 @@ function sectionTitle(section) {
   background: var(--wb-menu-surface);
   box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
   pointer-events: none;
 }
@@ -193,7 +193,7 @@ function sectionTitle(section) {
   flex: none;
   max-width: 100%;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -214,7 +214,7 @@ function sectionTitle(section) {
 }
 
 .wb-relation-graph-card.is-pinned .wb-relation-graph-card-title strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -236,7 +236,7 @@ function sectionTitle(section) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 17px;
   white-space: nowrap;
@@ -246,7 +246,7 @@ function sectionTitle(section) {
   margin-top: -3px;
   padding: 0 12px 8px 30px;
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-card-body {
@@ -276,7 +276,7 @@ function sectionTitle(section) {
   gap: 5px;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -314,7 +314,7 @@ function sectionTitle(section) {
   max-width: 100%;
   overflow: hidden;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   color: var(--wb-text);
   text-overflow: ellipsis;
@@ -371,7 +371,7 @@ button.wb-relation-graph-card-table:focus-visible {
 
 .wb-relation-graph-card-fields code {
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   overflow-wrap: anywhere;
 }
 
@@ -385,7 +385,7 @@ button.wb-relation-graph-card-table:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 9.5px;
+  font-size: var(--wb-fs-micro);
   font-weight: 600;
   line-height: 15px;
 }
@@ -413,7 +413,7 @@ button.wb-relation-graph-card-table:focus-visible {
   padding: 6px 12px 8px;
   border-top: 1px solid var(--wb-line);
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-card-actions {
@@ -433,7 +433,7 @@ button.wb-relation-graph-card-table:focus-visible {
   height: 24px;
   padding: 0 9px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-card-action.is-primary {

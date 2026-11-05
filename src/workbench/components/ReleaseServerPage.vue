@@ -236,7 +236,7 @@ const events = computed(() => state.events
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-rf-server-tone) 12%, transparent);
   color: var(--wb-rf-server-tone);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -258,7 +258,7 @@ const events = computed(() => state.events
 }
 
 .wb-rf-server-title {
-  font-size: 20px;
+  font-size: var(--wb-fs-display);
   font-weight: 650;
   line-height: 1.3;
 }
@@ -268,7 +268,7 @@ const events = computed(() => state.events
   flex-wrap: wrap;
   gap: 6px 22px;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -289,7 +289,7 @@ const events = computed(() => state.events
 
 .wb-rf-server-clock span {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-server-clock strong {
@@ -312,7 +312,7 @@ const events = computed(() => state.events
   gap: 6px;
   padding-top: 2px;
   color: var(--wb-quiet-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
@@ -367,7 +367,7 @@ const events = computed(() => state.events
 .wb-rf-server-stages small {
   min-height: 16px;
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -389,7 +389,7 @@ const events = computed(() => state.events
   gap: 16px;
   min-height: 32px;
   border-top: 1px solid var(--wb-line);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-server-events time {

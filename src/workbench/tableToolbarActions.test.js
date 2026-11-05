@@ -83,7 +83,7 @@ test("table search mode is a single setting control inside the search field", ()
   assert.match(component, /singleTrigger/);
   assert.match(component, /class="wb-toolbar-menu-button"/);
   assert.match(styles, /\.wb-table-search-field \.wb-search-mode-control\.wb-toolbar-split-button/);
-  assert.match(styles, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
 });
 
 test("table and homepage toolbars progressively collapse in narrow split panes", () => {

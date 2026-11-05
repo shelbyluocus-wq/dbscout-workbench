@@ -256,7 +256,7 @@ function onMenuFocusOut(event) {
   width: fit-content;
   margin-bottom: 8px;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -301,7 +301,7 @@ function onMenuFocusOut(event) {
   max-width: 40%;
   overflow: hidden;
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -316,7 +316,7 @@ function onMenuFocusOut(event) {
   background: var(--wb-accent-soft);
   color: var(--wb-text);
   font-family: var(--wb-font-mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
 }
 

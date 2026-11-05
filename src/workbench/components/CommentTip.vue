@@ -175,7 +175,7 @@ onBeforeUnmount(hide);
 .wb-comment-tip-name {
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   letter-spacing: 0.01em;
   text-overflow: ellipsis;
@@ -185,7 +185,7 @@ onBeforeUnmount(hide);
 .wb-comment-tip-comment {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   overflow-wrap: anywhere;
   white-space: pre-line;
   -webkit-box-orient: vertical;

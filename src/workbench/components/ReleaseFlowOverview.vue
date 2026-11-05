@@ -128,7 +128,7 @@ function scopeDisabled(scope) {
 }
 
 .wb-rf-platform-fixed strong {
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   font-weight: 650;
 }
 
@@ -142,7 +142,7 @@ function scopeDisabled(scope) {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-date input {
@@ -166,7 +166,7 @@ function scopeDisabled(scope) {
   border-radius: 10px;
   background: var(--wb-table-surface);
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
 }
 
@@ -188,7 +188,7 @@ function scopeDisabled(scope) {
   padding: 12px 16px;
   border: 1px dashed var(--wb-border-strong);
   border-radius: 10px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 

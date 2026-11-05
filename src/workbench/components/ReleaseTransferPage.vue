@@ -230,7 +230,7 @@ function setStrategy(value) {
   align-items: center;
   gap: 8px;
   color: var(--wb-text);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 .wb-rf-template-check {
@@ -259,7 +259,7 @@ function setStrategy(value) {
   border-radius: 10px;
   background: var(--wb-rf-sunken);
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-stage strong {
@@ -274,7 +274,7 @@ function setStrategy(value) {
   height: 22px;
   border-radius: 7px;
   background: var(--wb-table-surface);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
 }
 

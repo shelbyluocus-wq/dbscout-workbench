@@ -70,7 +70,7 @@ test("font settings remain readable and responsive in both themes", () => {
   assert.match(styles, /\.wb-font-dialog\s*\{[^}]*background:\s*var\(--wb-dialog-surface\)/s);
   assert.match(styles, /\.wb-font-dialog-overlay\s*\{[^}]*background:\s*var\(--wb-overlay\)[^}]*backdrop-filter:\s*blur\(1\.5px\)/s);
   assert.match(styles, /\.wb-font-dialog-body\s*\{[^}]*grid-template-columns:\s*minmax\(0, 328px\) minmax\(0, 1fr\)[^}]*grid-template-areas:\s*"controls preview"[^}]*overflow-y:\s*auto/s);
-  assert.match(styles, /\.wb-font-field\s*>\s*span\s*\{[^}]*font-size:\s*15px[^}]*font-weight:\s*700/s);
+  assert.match(styles, /\.wb-font-field\s*>\s*span\s*\{[^}]*font-size:\s*var\(--wb-fs-title\)[^}]*font-weight:\s*700/s);
   assert.match(styles, /\.wb-font-search,\s*\.wb-font-family-list\s*\{[^}]*background:\s*var\(--wb-field-surface\)/s);
   assert.match(styles, /\.wb-font-family-list\s*\{[^}]*height:\s*176px[^}]*scrollbar-gutter:\s*stable/s);
   assert.match(styles, /\.wb-font-search::placeholder\s*\{[^}]*color:\s*var\(--wb-quiet-text\)[^}]*opacity:\s*1/s);

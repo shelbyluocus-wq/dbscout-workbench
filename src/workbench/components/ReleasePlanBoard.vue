@@ -202,7 +202,7 @@ async function remove(item) {
   align-items: center;
   gap: 10px;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-plan-date input {
@@ -246,7 +246,7 @@ async function remove(item) {
 
 .wb-rf-plan-matrix tbody th strong {
   margin-right: 8px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -260,7 +260,7 @@ async function remove(item) {
   border-radius: 999px;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -280,7 +280,7 @@ async function remove(item) {
   border-radius: 7px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   box-shadow: none;
 }
 
@@ -298,7 +298,7 @@ async function remove(item) {
   min-width: 52px;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
@@ -342,7 +342,7 @@ async function remove(item) {
   gap: 8px;
   margin-top: 2px;
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 450;
 }
 

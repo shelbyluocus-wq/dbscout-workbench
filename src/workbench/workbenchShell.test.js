@@ -106,7 +106,7 @@ test("workbench components render polished desktop database chrome", () => {
   assert.match(styles, /--wb-glass/);
   assert.match(styles, /backdrop-filter/);
   assert.match(styles, /@supports/);
-  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*13\.5px/);
+  assert.match(styles, /\.wb-grid\s*\{[\s\S]*font-size:\s*var\(--wb-fs-body\)/);
   assert.match(styles, /\.wb-table-toolbar/);
   assert.match(styles, /\.wb-row-index/);
 });
@@ -676,7 +676,7 @@ test("sidebar table rows preserve table-name width before showing optional comme
   assert.match(copyRule, /text-overflow:\s*ellipsis/);
   assert.match(copyRule, /white-space:\s*nowrap/);
   assert.match(commentRule, /margin-left:\s*7px/);
-  assert.match(commentRule, /font-size:\s*12\.5px/);
+  assert.match(commentRule, /font-size:\s*var\(--wb-fs-body\)/);
   assert.match(commentRule, /line-height:\s*1\.45/);
   assert.doesNotMatch(styles, /\.wb-table-copy\.has-comment\s+\.wb-table-name\s*\{[^}]*max-width:/s);
 });
@@ -2154,9 +2154,9 @@ test("theme palettes style the full workbench and its sidebar settings control",
   assert.doesNotMatch(styles, /\.wb-sidebar-settings-trigger|\.wb-sidebar-settings-icon|\.wb-sidebar-settings-dock/);
   assert.match(styles, /\.wb-sidebar-settings-sheet\s*\{/);
   assert.match(styles, /\.wb-sidebar-theme-segment\s*\{/);
-  assert.match(styles, /\.wb-sidebar-settings-label\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-sidebar-settings-label\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.match(styles, /\.wb-sidebar-settings-label svg\s*\{[^}]*width:\s*17px/s);
-  assert.match(styles, /\.wb-sidebar-theme-segment button\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-sidebar-theme-segment button\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.doesNotMatch(styles, /\.wb-sidebar-settings-dock\s*\{/);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*position:\s*relative/s);
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
@@ -2174,7 +2174,7 @@ test("grid readability uses comfortable density and stronger theme contrast toke
   const darkRule = cssRuleBody(styles, DARK_THEME_SELECTOR);
 
   assert.match(constants, /GRID_ROW_HEIGHT\s*=\s*28/);
-  assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*13\.5px/s);
+  assert.match(styles, /\.wb-grid\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.match(styles, /\.wb-grid th,\s*\.wb-grid td\s*\{[^}]*height:\s*var\(--wb-grid-row-height,\s*28px\)/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
   assert.match(styles, /\.wb-cell-text,\s*\.wb-grid td input\s*\{[^}]*line-height:\s*var\(--wb-grid-cell-height,\s*27px\)/s);
@@ -2485,16 +2485,16 @@ test("semantic text tokens keep metadata and support content readable in both th
   assert.match(rootRule, /--wb-database-text:\s*#1a1c20/);
   assert.match(darkRule, /--wb-database-text:\s*#e2e4e8/);
   assert.match(styles, /\.wb-schema-field-type\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-field-comment-text\)[^}]*font-size:\s*12\.5px[^}]*line-height:\s*1\.6/s);
+  assert.match(styles, /\.wb-schema-field-comment\s*\{[^}]*color:\s*var\(--wb-field-comment-text\)[^}]*font-size:\s*var\(--wb-fs-body\)[^}]*line-height:\s*1\.6/s);
   assert.match(styles, /\.wb-schema-key-badge\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
   assert.match(styles, /\.wb-schema-column\.is-selected\s*\{[^}]*background:\s*var\(--wb-accent-soft\)/s);
   assert.match(styles, /\.wb-database-item\s*\{[^}]*color:\s*var\(--wb-database-text\)/s);
-  assert.match(styles, /\.wb-database-item\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(styles, /\.wb-database-item\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.match(styles, /\.wb-database-item \.wb-tree-label\s*\{[^}]*align-items:\s*center/s);
   assert.match(styles, /\.wb-database-item \.wb-tree-label\s*\{[^}]*line-height:\s*16px/s);
-  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
+  assert.match(styles, /\.wb-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.match(styles, /\.wb-tab-title small\s*\{[^}]*color:\s*var\(--wb-type-text\)/s);
-  assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*12\.5px/s);
+  assert.match(styles, /\.wb-inspector-table-comment\s*\{[^}]*color:\s*var\(--wb-remark-text\)[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   assert.match(styles, /\.wb-cell-identity-label,[\s\S]*?\.wb-cell-identity-count\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-row-index\s*\{[^}]*color:\s*var\(--wb-quiet-text\)/s);
   assert.match(styles, /\.wb-grid-loading\s*\{[^}]*color:\s*var\(--wb-secondary-text\)/s);

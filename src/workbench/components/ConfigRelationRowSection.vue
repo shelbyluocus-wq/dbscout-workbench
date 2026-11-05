@@ -364,7 +364,7 @@ function targetTitle(target, relation) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -382,7 +382,7 @@ function targetTitle(target, relation) {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 18px;
 }
 
@@ -424,7 +424,7 @@ function targetTitle(target, relation) {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-row-target-all:hover:not(:disabled) {
@@ -451,7 +451,7 @@ function targetTitle(target, relation) {
   border-radius: 6px;
   background: var(--wb-relation-out-soft);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-target:hover:not(:disabled) {

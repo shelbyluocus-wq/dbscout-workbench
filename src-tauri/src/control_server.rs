@@ -258,6 +258,30 @@ fn required_permission(request: &ControlRequest) -> Option<McpPermission> {
     }
 }
 
+/// Activity classification for the `control-activity` window event: `write`
+/// for permission-gated mutations, `ui` for any UI action, `read` for reads.
+/// Hello is not activity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ControlActivityKind {
+    Read,
+    Ui,
+    Write,
+}
+
+fn activity_kind(request: &ControlRequest) -> Option<ControlActivityKind> {
+    if matches!(request, ControlRequest::UiAction { .. }) {
+        return Some(ControlActivityKind::Ui);
+    }
+    if required_permission(request).is_some() {
+        return Some(ControlActivityKind::Write);
+    }
+    if matches!(request, ControlRequest::Hello { .. }) {
+        return None;
+    }
+    Some(ControlActivityKind::Read)
+}
+
 fn arg_str(args: &Value, keys: &[&str]) -> String {
     for key in keys {
         if let Some(value) = args.get(*key).and_then(Value::as_str) {
@@ -713,7 +737,15 @@ async fn dispatch(app: &AppHandle, request: ControlRequest) -> Value {
             return response_err(request_id(&request), &error);
         }
     }
-    match request {
+    let activity = activity_kind(&request);
+    let activity_id = request_id(&request).to_string();
+    if let Some(kind) = activity {
+        let _ = app.emit(
+            "control-activity",
+            serde_json::json!({ "phase": "start", "kind": kind, "id": activity_id }),
+        );
+    }
+    let response = match request {
         // A repeated hello after authentication is harmless; acknowledge it.
         ControlRequest::Hello { .. } => serde_json::json!({ "ok": true }),
         ControlRequest::DbTool { id, func, args } => {
@@ -750,7 +782,14 @@ async fn dispatch(app: &AppHandle, request: ControlRequest) -> Value {
             Ok(data) => response_ok(&id, data),
             Err(error) => response_err(&id, &error),
         },
+    };
+    if let Some(kind) = activity {
+        let _ = app.emit(
+            "control-activity",
+            serde_json::json!({ "phase": "end", "kind": kind, "id": activity_id }),
+        );
     }
+    response
 }
 
 async fn selected_runtime_context(app: &AppHandle) -> (String, String) {
@@ -1628,6 +1667,18 @@ mod tests {
         let config = parse_control_config(r#"{"enabled":true}"#).unwrap();
         assert!(config.enabled);
         assert_eq!(config.permissions, McpPermissions::default());
+    }
+
+    #[test]
+    fn activity_kind_classifies_requests() {
+        assert_eq!(activity_kind(&ui_action("open_table")), Some(ControlActivityKind::Ui));
+        assert_eq!(activity_kind(&ui_action("refresh_table")), Some(ControlActivityKind::Ui));
+        assert_eq!(activity_kind(&db_tool("run_write_query")), Some(ControlActivityKind::Write));
+        assert_eq!(activity_kind(&db_tool("drop_tables")), Some(ControlActivityKind::Write));
+        assert_eq!(activity_kind(&db_tool("list_tables")), Some(ControlActivityKind::Read));
+        assert_eq!(activity_kind(&parse_control_request(r#"{"op":"import_table","id":"1","args":{}}"#).unwrap()), Some(ControlActivityKind::Write));
+        assert_eq!(activity_kind(&parse_control_request(r#"{"op":"get_context","id":"1"}"#).unwrap()), Some(ControlActivityKind::Read));
+        assert_eq!(activity_kind(&parse_control_request(r#"{"op":"hello","token":"t"}"#).unwrap()), None);
     }
 
     #[test]

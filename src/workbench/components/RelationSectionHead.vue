@@ -91,7 +91,7 @@ const emit = defineEmits(["toggle"]);
 
 .wb-relation-section-label {
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
@@ -105,7 +105,7 @@ const emit = defineEmits(["toggle"]);
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 16px;

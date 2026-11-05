@@ -122,7 +122,7 @@ onMounted(() => {
   border-radius: 9px;
   background: var(--wb-menu-surface);
   box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-find-field {

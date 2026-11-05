@@ -52,7 +52,7 @@
 
 .wb-rf-title {
   margin: 0 8px 0 0;
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
   white-space: nowrap;
 }
@@ -79,7 +79,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   white-space: nowrap;
 }
@@ -114,7 +114,7 @@
   border: 1px dashed var(--wb-border-strong);
   border-radius: 999px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -136,7 +136,7 @@
 .wb-rf-menu-title {
   margin: 2px 6px 6px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -147,7 +147,7 @@
   min-height: 32px;
   padding: 0 6px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -167,7 +167,7 @@
   gap: 8px;
   min-height: 36px;
   padding: 0 6px;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-menu-divider {
@@ -199,7 +199,7 @@
 .wb-rf-eyebrow {
   margin: 0 0 -20px;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   letter-spacing: 0.02em;
 }
@@ -240,7 +240,7 @@
 .wb-rf-page-head p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -261,7 +261,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-footer-status > span {
@@ -297,7 +297,7 @@
   border-radius: var(--wb-rf-radius-control);
   background: var(--wb-table-surface);
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
@@ -343,7 +343,7 @@
   min-height: 38px;
   padding: 0 18px 0 20px;
   border-radius: 10px;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   gap: 8px;
 }
 
@@ -351,7 +351,7 @@
   height: 28px;
   min-height: 28px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-btn svg {
@@ -415,13 +415,13 @@
 
 .wb-rf-group-head h4 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-rf-count {
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -435,7 +435,7 @@
 .wb-rf-hint {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -445,7 +445,7 @@
 
 .wb-rf-code {
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   overflow-wrap: anywhere;
 }
 
@@ -461,7 +461,7 @@
   border-radius: 999px;
   background: var(--wb-rf-sunken);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   white-space: nowrap;
 }
@@ -562,12 +562,12 @@
   align-items: center;
   gap: 6px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-route-node > strong {
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -599,7 +599,7 @@
 
 .wb-rf-stat span {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-stat.is-success strong { color: var(--wb-success-text); }
@@ -616,7 +616,7 @@
   border-radius: var(--wb-rf-radius-control);
   background: var(--wb-rf-sunken);
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -653,7 +653,7 @@
   gap: 6px;
   min-width: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-field input,
@@ -666,7 +666,7 @@
   border-radius: var(--wb-rf-radius-control);
   background: var(--wb-cell-editor);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-segmented {
@@ -688,7 +688,7 @@
   border-radius: 7px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
 }
 
@@ -696,7 +696,7 @@
   height: 26px;
   min-height: 26px;
   padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-segmented button:hover:not(:disabled) {
@@ -718,7 +718,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -753,7 +753,7 @@
   background: var(--wb-rf-sunken);
   color: var(--wb-text);
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -774,7 +774,7 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-table thead th {
@@ -786,7 +786,7 @@
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-table-surface);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   text-align: left;
   white-space: nowrap;
@@ -816,7 +816,7 @@
   border: none;
   background: transparent;
   color: var(--wb-accent);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
 }
 
@@ -833,7 +833,7 @@
   gap: 6px;
   padding: 32px 12px;
   color: var(--wb-quiet-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
@@ -860,7 +860,7 @@
   min-height: 32px;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-task-line.is-success {
@@ -896,7 +896,7 @@
 .wb-rf-task-duration {
   flex: none;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 

@@ -125,7 +125,7 @@ function ariaCurrent(id) {
   border-radius: 6px;
   background: var(--wb-accent-soft);
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
@@ -137,7 +137,7 @@ function ariaCurrent(id) {
 
 .wb-rf-phase-title {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 

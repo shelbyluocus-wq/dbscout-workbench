@@ -33,6 +33,16 @@ paths unless the user explicitly asks for technical detail. If technical context
 is necessary, first state the product-facing meaning, then offer to expand on the
 technical details separately.
 
+## Typography
+
+Interface text uses six tokens defined in `workbench.css` `:root`:
+`--wb-fs-micro` (fixed-size badges/counters/kbd glyphs), `--wb-fs-caption`
+(hints, meta, secondary text), `--wb-fs-body` (default controls/grid/menus,
+13px), `--wb-fs-title` (section and dialog titles), `--wb-fs-heading`
+(page/panel headings), `--wb-fs-display` (empty-state heroes). Never hard-code
+`font-size` in CSS, `<style>` blocks, or inline styles — use a token;
+`src/workbench/typographyTokens.test.js` enforces it.
+
 ## Project Overview
 
 DB Scout Workbench (product name **Blackcat**, `com.dbscout.workbench`) is a
@@ -415,7 +425,14 @@ four coarse permission groups — 打开和定位表 (open/focus UI actions), �
 删除表 — enforced at the control endpoint and persisted in
 `control-config.json` alongside `enabled`; all groups default to on.
 `refresh_table` is never gated, but while navigation is off it no longer pulls
-the window forward.
+the window forward. While the external MCP drives the workbench, a soft inner window-edge
+glow (`AiActivityGlow.vue`, fed by `control-activity` events) signals activity —
+calmer for reads/UI, stronger during writes — and UI actions surface the window
+passively (visible windows are never focused; hidden ones only un-minimize, so
+the AI never pops the window over the user). The navigate group 操作黑猫界面
+also covers `select_database`, `open_sql` (read-only when `run`), `select_range`,
+open_table `filter`/`filterMode`/`sort`, and the `run_ui_actions` batch tool.
+
 
 Production installers contain the lightweight `agent-runner.mjs`,
 `mcp-server.mjs`, and agent-auth configuration, but do **not** contain portable

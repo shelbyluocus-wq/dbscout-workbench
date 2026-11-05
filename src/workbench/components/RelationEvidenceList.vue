@@ -71,7 +71,7 @@ const EVIDENCE_ICONS = Object.freeze({ comment: MessageSquareText, code: CodeXml
   gap: 6px;
   min-width: 0;
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -128,7 +128,7 @@ q.wb-relation-evidence-text {
   background: color-mix(in srgb, var(--wb-text) 6%, transparent);
   color: var(--wb-text);
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

@@ -131,12 +131,12 @@ const entries = computed(() => [...auto.value.log].reverse());
   display: grid;
   gap: 2px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-auto-text strong {
   color: var(--wb-rf-auto-tone);
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -164,7 +164,7 @@ const entries = computed(() => [...auto.value.log].reverse());
   display: flex;
   gap: 14px;
   padding: 5px 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-auto-log time {

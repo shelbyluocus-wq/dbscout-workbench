@@ -149,6 +149,7 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
+import AiActivityGlow from "./components/AiActivityGlow.vue";
 import { requestSqlRun } from "./utils/sqlRunRequests.js";
 import { applyAgentTableViewState } from "./utils/agentTableView.js";
 import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
@@ -5961,6 +5962,8 @@ onBeforeUnmount(() => {
       @close="blackcatMcpOpen = false"
     />
 
+    <AiActivityGlow :theme="effectiveTheme" />
+
     <!-- Table Rename Dialog -->
     <div v-if="tableRename.open" class="wb-dialog-overlay">
       <form ref="tableRenameDialogRef" class="wb-dialog" role="dialog" aria-modal="true" :aria-label="t('m_c1c0117d498e')" tabindex="-1" @submit.prevent="executeTableRename">
@@ -5968,7 +5971,7 @@ onBeforeUnmount(() => {
           <strong>{{ t('m_c1c0117d498e') }}</strong>
           <button type="button" class="wb-dialog-close" @click="closeTableRename">×</button>
         </header>
-        <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
+        <p style="margin: 0 0 10px; font-size: var(--wb-fs-body); color: var(--wb-secondary-text);">
           {{ tableRename.database }} · {{ tableRename.tableName }}
         </p>
         <label class="wb-dialog-field">
@@ -5991,7 +5994,7 @@ onBeforeUnmount(() => {
           <strong>{{ aliasDialog.type === "connection" ? t('m_c3a80a6a1e41') : t('m_287199464530') }}</strong>
           <button type="button" class="wb-dialog-close" @click="closeAliasDialog">×</button>
         </header>
-        <p style="margin: 0 0 10px; font-size: 12px; color: var(--wb-secondary-text);">
+        <p style="margin: 0 0 10px; font-size: var(--wb-fs-body); color: var(--wb-secondary-text);">
           {{ aliasDialog.type === "connection" ? t('m_970932d40f1a') : t('m_5c169ab6b865') }}：{{ aliasDialog.realName }}{{ t('m_0e08a67346ea') }}{{ aliasDialog.type === "connection" ? t('m_a5574109f020') : t('m_263200d7d529') }}）
         </p>
         <label class="wb-dialog-field">

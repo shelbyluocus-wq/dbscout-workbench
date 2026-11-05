@@ -447,7 +447,7 @@ onMounted(async () => {
 .wb-relations-dialog-heading h2 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
 }
 
@@ -455,7 +455,7 @@ onMounted(async () => {
   margin: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -475,12 +475,12 @@ onMounted(async () => {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 5%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relations-stat strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
   font-weight: 650;
 }
@@ -527,7 +527,7 @@ onMounted(async () => {
 .wb-relations-dialog-section-head h3 {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -538,7 +538,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 16px;
@@ -552,7 +552,7 @@ onMounted(async () => {
   margin-left: auto;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 18px;
 }
@@ -615,7 +615,7 @@ onMounted(async () => {
   overflow: hidden;
   color: var(--wb-text);
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -627,7 +627,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 16px;
 }
@@ -649,7 +649,7 @@ onMounted(async () => {
   align-items: center;
   gap: 2px 12px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relations-coverage-bar {
@@ -697,20 +697,20 @@ onMounted(async () => {
   gap: 6px;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
 .wb-relations-dialog-note {
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relations-quiet-btn {
   min-height: 26px;
   height: 26px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -736,7 +736,7 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -760,13 +760,13 @@ onMounted(async () => {
   background: var(--wb-field-surface);
   box-shadow: inset 0 0 0 1px var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
 .wb-relations-dialog-empty strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 

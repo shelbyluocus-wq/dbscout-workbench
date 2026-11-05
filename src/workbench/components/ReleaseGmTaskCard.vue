@@ -99,11 +99,11 @@ function act() {
   display: grid;
   gap: 3px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-gm-body > strong {
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 

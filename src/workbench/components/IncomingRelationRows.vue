@@ -143,7 +143,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   border-radius: 6px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: left;
 }
 
@@ -204,7 +204,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 16px;
 }
@@ -218,7 +218,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   border-radius: 999px;
   background: var(--wb-relation-in-soft);
   color: var(--wb-relation-in);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 650;
   line-height: 16px;
@@ -290,7 +290,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   border-radius: 0;
   background: transparent;
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: left;
   user-select: text;
 }
@@ -345,7 +345,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   margin: 0;
   padding: 2px 8px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   overflow-wrap: anywhere;
 }
 
@@ -360,7 +360,7 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   padding: 0 8px;
   border-radius: 5px;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-incoming-spin {

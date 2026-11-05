@@ -248,7 +248,7 @@ function remove(name) {
   align-items: baseline;
   gap: 4px 10px;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 .wb-rf-plan-sentence .is-close {
@@ -271,7 +271,7 @@ function remove(name) {
   gap: 12px;
   min-height: 38px;
   border-bottom: 1px solid var(--wb-line);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-change-mark {
@@ -313,7 +313,7 @@ function remove(name) {
   gap: 8px;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-backup-actions {
@@ -334,7 +334,7 @@ function remove(name) {
 .wb-rf-sql summary {
   width: fit-content;
   color: var(--wb-accent);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 

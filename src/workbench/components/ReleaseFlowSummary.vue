@@ -144,7 +144,7 @@ async function copyReport() {
 .wb-rf-summary-hero p {
   margin: 4px 0 0;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-summary-hero .wb-rf-btn {
@@ -175,7 +175,7 @@ async function copyReport() {
   padding: 0 14px;
   border-radius: 10px;
   background: var(--wb-rf-sunken);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-remaining .wb-rf-link {
@@ -191,7 +191,7 @@ async function copyReport() {
 
 .wb-rf-summary-phase {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -217,13 +217,13 @@ async function copyReport() {
 }
 
 .wb-rf-summary-tasks strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
 .wb-rf-summary-tasks div > span {
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }

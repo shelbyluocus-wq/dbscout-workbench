@@ -283,7 +283,7 @@ function onRowClick(event) {
   gap: 2px 5px;
   min-width: 0;
   color: var(--wb-identifier-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   line-height: 18px;
 }
@@ -304,7 +304,7 @@ function onRowClick(event) {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 16px;
 }
@@ -325,7 +325,7 @@ function onRowClick(event) {
 .wb-relation-card-reason {
   min-width: 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 16px;
 }
 
@@ -347,7 +347,7 @@ function onRowClick(event) {
 .wb-relation-card-conflict {
   margin: 1px 0 0;
   color: var(--wb-danger-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 16px;
   overflow-wrap: anywhere;
 }
@@ -407,7 +407,7 @@ function onRowClick(event) {
 .wb-relation-card-decided {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-card-actions {
@@ -430,7 +430,7 @@ function onRowClick(event) {
   height: 24px;
   padding: 0 9px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-card-action.is-confirm {

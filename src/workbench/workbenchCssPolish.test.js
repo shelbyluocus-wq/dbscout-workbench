@@ -286,7 +286,7 @@ test("tab shortcut badges use shared accent tokens and stay inside the tab", () 
   assert.match(badgeRule, /background:\s*var\(--wb-accent-soft\)/);
   assert.match(badgeRule, /color:\s*var\(--wb-accent-strong\)/);
   assert.match(badgeRule, /font-family:\s*var\(--wb-mono/);
-  assert.match(badgeRule, /font-size:\s*12px/);
+  assert.match(badgeRule, /font-size:\s*var\(--wb-fs-body\)/);
   assert.match(showingTitleRule, /opacity:/);
   assert.match(homeShowingTitleRule, /visibility:\s*hidden/);
 });
@@ -355,7 +355,7 @@ test("open table tabs connect the active document to its pane", () => {
   assert.match(tabRule, /--wb-active-tab-surface\s*:\s*var\(--wb-workspace-mist-raised\)/);
   assert.match(homeRule, /--wb-active-tab-surface\s*:\s*var\(--wb-chrome-surface\)/);
   assert.match(tabRule, /border-radius\s*:\s*8px 8px 0 0/);
-  assert.match(titleRule, /font-size\s*:\s*13px/);
+  assert.match(titleRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(activeRule, /border-color\s*:\s*var\(--wb-tab-active-border\)/);
   assert.match(activeRule, /border-bottom-color\s*:\s*var\(--wb-active-tab-surface\)/);
   assert.match(activeRule, /background\s*:\s*var\(--wb-active-tab-surface\)/);
@@ -671,7 +671,7 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   const tableSearchIconRule = ruleBody(".wb-table-search-icon");
   const tableSearchFocusRule = ruleBody(".wb-table-search:focus-within input");
   const tableSearchFilledRule = ruleBody(".wb-table-search.has-query input");
-  assert.match(tableSearchInputRule, /font-size\s*:\s*12px/);
+  assert.match(tableSearchInputRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(tableSearchInputRule, /line-height\s*:\s*1\.45/);
   assert.match(tableSearchInputRule, /height\s*:\s*28px/);
   assert.match(tableSearchInputRule, /padding\s*:\s*0 9px 0 30px/);
@@ -805,7 +805,7 @@ test("data grid filter mode is embedded in the search field as a single dropdown
   assert.match(toolbarSplitButtonVue, /singleTrigger/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-menu-button"/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-menu wb-floating-themed"/);
-  assert.match(css, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*13px/s);
+  assert.match(css, /\.wb-table-toolbar \.wb-search-mode-control \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/s);
   // 旧的双按钮分段控件已移除
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-segment"/);
   assert.doesNotMatch(dataGridVue, /class="wb-filter-mode-option"/);
@@ -1076,18 +1076,18 @@ test("grid and inspector typography favor long-session readability", () => {
   const tableCommentRule = ruleBody(".wb-inspector-table-comment");
   const cellIdentityRule = ruleBody(".wb-cell-identity");
 
-  assert.match(gridRule, /font-size\s*:\s*13\.5px/);
-  assert.match(thRule, /font-size\s*:\s*13px/);
+  assert.match(gridRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
+  assert.match(thRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(thRule, /font-weight\s*:\s*650/);
-  assert.match(commentRule, /font-size\s*:\s*12\.5px/);
+  assert.match(commentRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(commentRule, /line-height\s*:\s*1\.6/);
-  assert.match(detailRule, /font-size\s*:\s*13px/);
-  assert.match(tableCommentRule, /font-size\s*:\s*12\.5px/);
+  assert.match(detailRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
+  assert.match(tableCommentRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(tableCommentRule, /white-space\s*:\s*normal/);
   assert.match(tableCommentRule, /overflow-wrap\s*:\s*anywhere/);
   assert.doesNotMatch(tableCommentRule, /white-space\s*:\s*nowrap/);
   assert.doesNotMatch(tableCommentRule, /text-overflow\s*:\s*ellipsis/);
-  assert.match(cellIdentityRule, /font-size\s*:\s*11px/);
+  assert.match(cellIdentityRule, /font-size\s*:\s*var\(--wb-fs-caption\)/);
 });
 
 test("field comment text wraps within its adjustable row and clamps overflow", () => {

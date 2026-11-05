@@ -1,5 +1,12 @@
 :root {
   color-scheme: light;
+  /* App-wide type scale — see docs/AGENTS Typography. Never hard-code font-size. */
+  --wb-fs-micro: 11px;
+  --wb-fs-caption: 12px;
+  --wb-fs-body: 13px;
+  --wb-fs-title: 14px;
+  --wb-fs-heading: 16px;
+  --wb-fs-display: 20px;
   --wb-root-background-light: #eaebed;
   --wb-root-background-dark: #0c0c0e;
   --wb-root-background: var(--wb-root-background-light);
@@ -412,7 +419,7 @@ body {
   margin: 0;
   min-width: 1120px;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 button,
@@ -431,7 +438,7 @@ button {
   color: var(--wb-text);
   box-shadow: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -940,7 +947,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-glass-strong);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
@@ -1079,7 +1086,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   box-shadow: none;
   color: var(--wb-accent);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 400;
   line-height: 1;
   text-align: center;
@@ -1208,7 +1215,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-toolbar-separator { flex: 0 0 1px; align-self: stretch; margin: 2px 3px; background: var(--wb-border); }
 .wb-sql-toolbar-spacer { flex: 1 0 12px; }
 
-.wb-sql-switch { font-size: 12px; }
+.wb-sql-switch { font-size: var(--wb-fs-body); }
 .wb-sql-switch input { position: absolute; opacity: 0; pointer-events: none; }
 .wb-sql-switch > span {
   position: relative;
@@ -1242,7 +1249,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-workspace-mist-raised);
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 .wb-sql-filebar code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-sql-filebar span::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--wb-accent); }
@@ -1257,7 +1264,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-table-surface);
 }
 .wb-sql-code-editor { width: 100%; height: 100%; background: var(--wb-table-surface); }
-.wb-sql-code-editor .cm-editor { background: transparent; color: var(--wb-text); font-size: 13px; }
+.wb-sql-code-editor .cm-editor { background: transparent; color: var(--wb-text); font-size: var(--wb-fs-body); }
 .wb-sql-code-editor .cm-editor.cm-focused { outline: none; }
 .wb-sql-code-editor .cm-content { caret-color: var(--wb-text); }
 .wb-sql-code-editor .cm-gutters { border-right: 1px solid var(--wb-border); background: var(--wb-chrome-surface); color: var(--wb-quiet-text); }
@@ -1305,7 +1312,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-chrome-surface);
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-sans);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 .wb-sql-code-editor .cm-completionLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1316,7 +1323,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-sans);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
   text-overflow: ellipsis;
 }
@@ -1330,7 +1337,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: 0 3px 8px color-mix(in srgb, var(--wb-text) 14%, transparent);
   color: var(--wb-secondary-text);
   font-family: var(--wb-font-sans);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 .wb-sql-code-editor .cm-snippetField { outline: 1px solid var(--wb-accent); background: var(--wb-accent-soft); }
@@ -1397,20 +1404,20 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 2px 7px;
   border-bottom: 1px solid var(--wb-border);
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 .wb-sql-result-tools label { display: flex; align-items: center; gap: 5px; min-width: 120px; max-width: 240px; }
 .wb-sql-result-tools input { min-width: 0; width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--wb-border); border-radius: 3px; background: var(--wb-field-surface); color: var(--wb-text); }
 .wb-sql-result-tools > span { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; white-space: nowrap; }
-.wb-sql-result-tools small { font-size: 9px; }
+.wb-sql-result-tools small { font-size: var(--wb-fs-micro); }
 .wb-sql-result-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--wb-table-surface); }
-.wb-sql-result-scroll table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-family: var(--wb-font-mono); font-size: 12px; }
+.wb-sql-result-scroll table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-family: var(--wb-font-mono); font-size: var(--wb-fs-body); }
 .wb-sql-result-scroll thead { position: sticky; top: 0; z-index: 2; }
 .wb-sql-result-scroll th,
 .wb-sql-result-scroll td { height: 28px; padding: 0 8px; overflow: hidden; border-right: 1px solid var(--wb-border); border-bottom: 1px solid var(--wb-border); text-overflow: ellipsis; white-space: nowrap; }
 .wb-sql-result-scroll th { position: relative; text-align: left; background: var(--wb-chrome-surface); color: var(--wb-text); cursor: pointer; }
 .wb-sql-result-scroll th span { display: block; overflow: hidden; text-overflow: ellipsis; }
-.wb-sql-result-scroll th small { display: block; color: var(--wb-quiet-text); font-size: 9px; font-weight: 400; }
+.wb-sql-result-scroll th small { display: block; color: var(--wb-quiet-text); font-size: var(--wb-fs-micro); font-weight: 400; }
 .wb-sql-result-scroll th i { position: absolute; top: 0; right: -2px; width: 5px; height: 100%; cursor: col-resize; }
 .wb-sql-result-scroll tbody tr:hover td { background: var(--wb-row-hover); }
 .wb-sql-result-scroll td.is-null { color: var(--wb-quiet-text); font-style: italic; }
@@ -1436,7 +1443,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 10px;
   color: var(--wb-secondary-text);
 }
-.wb-sql-result-summary strong { color: var(--wb-text); font-size: 13px; font-weight: 600; }
+.wb-sql-result-summary strong { color: var(--wb-text); font-size: var(--wb-fs-body); font-weight: 600; }
 .wb-sql-result-summary.is-failed strong { color: var(--wb-danger); }
 .wb-sql-result-summary code {
   display: block;
@@ -1448,11 +1455,11 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-table-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-mono);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   white-space: pre-wrap;
 }
 .wb-sql-output-empty { display: grid; place-items: center; color: var(--wb-empty-text); }
-.wb-sql-result-status { display: flex; flex: 0 0 23px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-result-status { display: flex; flex: 0 0 23px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: var(--wb-fs-caption); }
 .wb-sql-result-status b { color: var(--wb-warning-text); }
 
 .wb-sql-history-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0, 0, 0, 0.24); }
@@ -1461,7 +1468,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-history-views { display: flex; flex: 0 0 34px; align-items: end; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--wb-border); }
 .wb-sql-history-views button { height: 33px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--wb-quiet-text); }
 .wb-sql-history-views button.active { border-bottom-color: var(--wb-accent); color: var(--wb-text); }
-.wb-sql-history-views small { margin-left: 3px; color: var(--wb-quiet-text); font-size: 10px; }
+.wb-sql-history-views small { margin-left: 3px; color: var(--wb-quiet-text); font-size: var(--wb-fs-caption); }
 .wb-sql-history-search { display: flex; flex: 0 0 42px; align-items: center; gap: 7px; padding: 6px 12px; border-bottom: 1px solid var(--wb-border); }
 .wb-sql-history-search input { flex: 1; height: 28px; border: 0; outline: 0; background: transparent; color: var(--wb-text); }
 .wb-sql-history-list { flex: 1 1 auto; overflow: auto; }
@@ -1470,18 +1477,18 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-history-item:hover { background: var(--wb-accent-soft); }
 .wb-sql-history-open code { display: -webkit-box; overflow: hidden; color: var(--wb-text); font-family: var(--wb-font-mono); white-space: pre-wrap; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .wb-sql-favorite-title { overflow: hidden; padding-right: 26px; text-overflow: ellipsis; white-space: nowrap; }
-.wb-sql-history-meta { color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-history-meta { color: var(--wb-quiet-text); font-size: var(--wb-fs-caption); }
 .wb-sql-history-meta b { margin-right: 8px; color: var(--wb-accent-strong); }
 .wb-sql-history-meta b.is-failed { color: var(--wb-danger); }
 .wb-sql-history-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; }
 .wb-sql-history-actions button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border-color: transparent; background: transparent; color: var(--wb-quiet-text); }
 .wb-sql-history-actions button:hover { background: var(--wb-chrome-surface); color: var(--wb-text); }
 .wb-sql-history-item.is-renaming { padding-bottom: 42px; }
-.wb-sql-favorite-editor { position: absolute; right: 14px; bottom: 8px; left: 14px; display: flex; align-items: center; gap: 8px; color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-favorite-editor { position: absolute; right: 14px; bottom: 8px; left: 14px; display: flex; align-items: center; gap: 8px; color: var(--wb-quiet-text); font-size: var(--wb-fs-caption); }
 .wb-sql-favorite-editor input { flex: 1; min-width: 0; height: 27px; padding: 0 7px; border: 1px solid var(--wb-border); border-radius: 3px; background: var(--wb-field-surface); color: var(--wb-text); }
 .wb-sql-recent-file .wb-sql-history-open { min-height: 70px; }
 .wb-sql-history-list > p { padding: 30px; text-align: center; color: var(--wb-empty-text); }
-.wb-sql-history > footer { display: flex; flex: 0 0 44px; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: 11px; }
+.wb-sql-history > footer { display: flex; flex: 0 0 44px; align-items: center; justify-content: space-between; padding: 0 12px; border-top: 1px solid var(--wb-border); color: var(--wb-quiet-text); font-size: var(--wb-fs-caption); }
 
 @container (max-width: 860px) {
   .wb-sql-toolbar { flex-basis: 40px; gap: 3px; padding-inline: 5px; }
@@ -1537,7 +1544,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-confirm-note {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-confirm-item-list {
@@ -1561,7 +1568,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-text);
   font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1598,7 +1605,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 .wb-dialog-close {
@@ -1612,7 +1619,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: transparent;
   box-shadow: none;
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   line-height: 1;
   color: var(--wb-muted);
   cursor: pointer;
@@ -1635,7 +1642,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -1678,7 +1685,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-accent-soft) 70%, transparent);
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.25;
   box-sizing: border-box;
 }
@@ -1698,7 +1705,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -1707,7 +1714,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 4px 0 8px;
   padding-left: calc(56px + 8px);
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -1716,7 +1723,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 4px 0 8px;
   padding-left: calc(56px + 8px);
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dialog-actions {
@@ -1747,7 +1754,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-comment-edit-heading small {
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1781,7 +1788,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-comment-edit-error {
   margin: 8px 0 0;
   color: var(--wb-danger-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
 }
 
@@ -1795,14 +1802,14 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   margin: 2px 0 4px calc(56px + 8px);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
   cursor: pointer;
 }
 
 .wb-replace-feedback {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -1842,7 +1849,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow:
     0 0 0 1px var(--wb-floating-border),
     var(--wb-floating-shadow);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
 }
 
@@ -1940,7 +1947,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-find-replace-title {
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
 }
 
 .wb-find-replace-dialog .wb-dialog-close {
@@ -1974,7 +1981,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--wb-muted);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   cursor: pointer;
   transition: color 0.12s ease, border-color 0.12s ease;
 }
@@ -1998,12 +2005,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-find-replace-body .wb-replace-field {
   grid-template-columns: 68px minmax(0, 1fr);
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-find-replace-body .wb-replace-field input {
   height: 32px;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 /* 上一个/下一个紧贴查找输入框，Enter / Shift+Enter 同效 */
@@ -2051,12 +2058,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-find-replace-options .wb-replace-option {
   margin: 0 0 0 calc(68px + 8px);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
 .wb-find-replace-scope-text {
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
   white-space: nowrap;
 }
@@ -2088,7 +2095,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-border);
   background: var(--wb-dialog-surface);
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   user-select: none;
 }
 
@@ -2121,7 +2128,7 @@ label:has(input[type="checkbox"]:disabled) {
   place-items: center;
   min-height: 48px;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-find-result-row {
@@ -2136,7 +2143,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   text-align: left;
   cursor: pointer;
 }
@@ -2189,18 +2196,18 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
 .wb-find-results-summary {
   margin: 6px 2px 0;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
 .wb-find-replace-dialog .wb-dialog-actions button {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-find-all-button {
@@ -2303,7 +2310,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 0 0 0 16px;
   overflow-y: auto;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -2332,13 +2339,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-update-notice-copy strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.35;
 }
 
 .wb-update-notice-copy span {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.35;
 }
 
@@ -2372,7 +2379,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-color: transparent;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 18px;
+  font-size: var(--wb-fs-heading);
   line-height: 1;
 }
 
@@ -2415,7 +2422,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-update-error {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -2430,7 +2437,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 7px;
   background: var(--wb-accent-soft);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -2443,7 +2450,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-detail-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -2503,14 +2510,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-database-sync-header h2 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   line-height: 20px;
 }
 
 .wb-database-sync-header p {
   margin: 1px 0 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 16px;
 }
 
@@ -2542,7 +2549,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-sync-route-label {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   letter-spacing: 0.04em;
 }
@@ -2562,7 +2569,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-field-surface);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: border-color 0.15s ease;
 }
@@ -2592,7 +2599,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-database-sync-danger-hint svg {
@@ -2623,7 +2630,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 7px;
   flex-shrink: 0;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-section-title strong {
@@ -2640,7 +2647,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -2660,7 +2667,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -2700,7 +2707,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-pane-header);
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -2759,7 +2766,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2769,7 +2776,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2784,13 +2791,13 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   padding: 48px 24px;
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
 .wb-database-sync-empty small {
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 /* Right sidebar */
@@ -2829,7 +2836,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-muted);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -2868,7 +2875,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2878,7 +2885,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -2916,11 +2923,11 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-sync-excluded-empty strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-excluded-empty span {
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 /* Status strip */
@@ -2949,7 +2956,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 4px;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-footer-left strong {
@@ -2973,7 +2980,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-database-sync-progress-section p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -3000,7 +3007,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sync-templates-tip {
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-secondary-text);
 }
 
@@ -3022,7 +3029,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 1px 4px 1px 6px;
   border-radius: 5px;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   transition: background 0.12s ease;
 }
 
@@ -3058,7 +3065,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sync-template-count {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-secondary-text);
   white-space: nowrap;
 }
@@ -3106,12 +3113,12 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   height: 24px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-sync-templates-empty {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-secondary-text);
 }
 
@@ -3125,7 +3132,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   height: 26px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-sync-template-save button {
@@ -3137,7 +3144,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sync-template-feedback {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-secondary-text);
 }
 
@@ -3166,7 +3173,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-database-sync-restore-result p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -3176,7 +3183,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: auto;
   padding-left: 18px;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-preview small {
@@ -3200,7 +3207,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: space-between;
   gap: 12px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-progress-heading strong {
@@ -3208,7 +3215,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   min-width: 0;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-sync-activity {
@@ -3258,7 +3265,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-sync-progress-meta {
   color: var(--wb-type-text) !important;
-  font-size: 11px !important;
+  font-size: var(--wb-fs-caption) !important;
 }
 
 @keyframes wb-database-sync-activity-pulse {
@@ -3291,7 +3298,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-sync-success {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -3334,7 +3341,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 32px;
   min-height: 32px;
   padding: 0;
-  font-size: 20px;
+  font-size: var(--wb-fs-display);
 }
 
 .wb-backup-heading {
@@ -3345,7 +3352,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-heading strong {
   color: var(--wb-text);
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
 }
 
@@ -3353,7 +3360,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3384,7 +3391,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 50%;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -3404,7 +3411,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.2;
   text-align: left;
   text-overflow: ellipsis;
@@ -3413,7 +3420,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-user-name em {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
 }
 
@@ -3443,7 +3450,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 7px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -3469,7 +3476,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 9px;
   background: color-mix(in srgb, var(--wb-text) 9%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   line-height: 17px;
   text-align: center;
@@ -3637,7 +3644,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   gap: 4px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -3651,7 +3658,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   height: 30px;
   padding: 0 30px 0 9px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 400;
   cursor: pointer;
   appearance: none;
@@ -3703,7 +3710,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -3740,7 +3747,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-list-header strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -3754,7 +3761,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 10px;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
@@ -3785,14 +3792,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-empty strong {
   color: var(--wb-text);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
 }
 
 .wb-backup-empty span {
   max-width: 40ch;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -3826,7 +3833,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px 10px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-audit-main .wb-backup-ts {
@@ -3841,7 +3848,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px 8px;
   min-width: 0;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-backup-row-actions {
@@ -3858,7 +3865,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-ts {
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -3868,7 +3875,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 1.5;
   white-space: nowrap;
@@ -3897,7 +3904,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-diff {
   color: var(--wb-remark-text);
   font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-backup-change-summary {
@@ -3926,7 +3933,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: color-mix(in srgb, var(--wb-text) 4%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-change-details-head {
@@ -3938,13 +3945,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-change-details-head strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-backup-change-details-head span {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-backup-change-details ul {
@@ -3991,7 +3998,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-editor-surface, var(--wb-surface));
   color: var(--wb-text);
   font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4002,7 +4009,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: color-mix(in srgb, var(--wb-text) 6%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -4034,13 +4041,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-meta {
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-action-btn {
   min-height: 28px;
   padding-inline: 10px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   white-space: nowrap;
 }
 
@@ -4061,7 +4068,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-progress-text {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-progress {
@@ -4102,14 +4109,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-import-head strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-import-file {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4117,7 +4124,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-import-origin {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-import-fields {
@@ -4174,12 +4181,12 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1;
   gap: 1px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-auto-text strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -4239,7 +4246,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-enable-head-text strong,
 .wb-backup-selected-head-text strong {
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -4247,7 +4254,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-selected-head-text p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -4294,7 +4301,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-text);
   font-family: var(--wb-mono-font, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4311,7 +4318,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -4329,7 +4336,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 120px;
   padding: 14px;
   color: var(--wb-muted);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   text-align: center;
 }
@@ -4337,7 +4344,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-enable-empty strong,
 .wb-backup-selected-empty strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -4379,7 +4386,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 100%;
   overflow: hidden;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4459,7 +4466,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-snapshot-db {
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4477,7 +4484,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.6;
 }
 
@@ -4530,7 +4537,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-settings-head h3 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -4538,7 +4545,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 88ch;
   margin: 2px 0 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -4555,7 +4562,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 16px;
   min-height: 30px;
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-config-field > .wb-backup-switch {
@@ -4576,7 +4583,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-config-input em {
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-style: normal;
 }
 
@@ -4592,7 +4599,7 @@ label:has(input[type="checkbox"]:disabled) {
   width: 100%;
   height: 30px;
   padding: 0 28px 0 9px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4687,7 +4694,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-surface);
   color: var(--wb-text);
   font-family: var(--wb-mono-font, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4710,7 +4717,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 420px;
   height: 30px;
   padding: 0 9px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-account-logged-in {
@@ -4739,7 +4746,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 50%;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -4752,13 +4759,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-account-session-text strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
 .wb-account-session-text em {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
 }
 
@@ -4772,7 +4779,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1;
   margin: 0;
   color: var(--wb-muted);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -4790,7 +4797,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-backup-settings-state {
   margin-right: auto;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-backup-settings-footer[data-dirty="true"] .wb-backup-settings-state {
@@ -4958,7 +4965,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 2px dashed var(--wb-border);
   border-radius: 8px;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -4978,7 +4985,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-import-info {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -4995,7 +5002,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: max-content;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -5027,7 +5034,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-import-mapping-header {
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-secondary-text);
   background: var(--wb-pane-header);
   position: sticky;
@@ -5040,7 +5047,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   align-items: center;
   padding: 4px 6px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-import-file-col {
@@ -5051,19 +5058,19 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-import-col-type {
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-type-text);
 }
 
 .wb-import-mapping-row select {
   height: 26px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-import-summary p {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -5079,7 +5086,7 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
   padding: 6px 20px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-import-start-btn:hover:not(:disabled),
@@ -5100,7 +5107,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: transparent;
   color: var(--wb-danger);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -5111,7 +5118,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-import-cancel-hint {
   color: var(--wb-warning-text, var(--wb-warning-border));
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dialog-close:disabled {
@@ -5143,7 +5150,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-import-errors {
   margin: 0;
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-import-error-details {
@@ -5165,7 +5172,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 6px 8px;
   border-bottom: 1px solid var(--wb-border);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-import-error-details li:last-child {
@@ -5187,7 +5194,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-import-error-more {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-import-warning-box {
@@ -5199,7 +5206,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-import-warning-box p {
   margin: 3px 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-warning-text);
 }
 
@@ -5234,7 +5241,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-dialog.is-comparison-mode .wb-batch-comparison-summary strong {
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
 }
 
 .wb-dialog.is-comparison-mode .wb-batch-comparison-toolbar {
@@ -5287,7 +5294,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-transfer-dialog .wb-dialog-header small {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
 }
 
@@ -5439,7 +5446,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-export-settings > small {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-export-comments-option {
@@ -5466,13 +5473,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-selection-focus strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-batch-selection-focus small {
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-selection-focus button {
@@ -5483,7 +5490,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-dialog-surface);
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
 }
 
@@ -5509,7 +5516,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-transfer-toolbar > span {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   white-space: nowrap;
 }
 
@@ -5518,7 +5525,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   white-space: nowrap;
 }
 
@@ -5547,7 +5554,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 4px 10px;
   border-bottom: 1px solid var(--wb-line);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-transfer-row:last-child {
@@ -5567,7 +5574,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 26px;
   min-width: 0;
   padding: 0 26px 0 7px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-transfer-name,
@@ -5589,7 +5596,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5598,7 +5605,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-batch-transfer-comment,
 .wb-batch-transfer-state {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-transfer-state {
@@ -5664,7 +5671,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: inherit;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5782,7 +5789,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--wb-text) 8%, transparent);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-stage-back:hover,
@@ -5804,7 +5811,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-stage-identity strong {
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   font-weight: 650;
   letter-spacing: -0.02em;
   text-overflow: ellipsis;
@@ -5819,12 +5826,12 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 0;
   list-style: none;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-table-stage-counts strong {
   margin-right: 4px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5840,7 +5847,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 4px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -5940,7 +5947,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-summary strong {
   color: var(--wb-accent-strong);
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5962,7 +5969,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-summary span {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-toolbar {
@@ -6003,7 +6010,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   box-shadow: none;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-mode button:last-child {
@@ -6028,7 +6035,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 5px;
   min-height: 26px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -6081,7 +6088,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-secondary-text);
   box-shadow: none;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-filters button:hover,
@@ -6098,7 +6105,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-filters button span {
   color: inherit;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -6129,7 +6136,7 @@ label:has(input[type="checkbox"]:disabled) {
   outline: 0;
   background: transparent;
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-body {
@@ -6219,7 +6226,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-batch-comparison-tables button strong {
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -6235,7 +6242,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-load-state {
@@ -6248,7 +6255,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-toolbar-surface);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-search input:disabled {
@@ -6261,13 +6268,13 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 24px;
   padding: 0 5px 0 7px;
   border-radius: 0 4px 4px 0;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-searching {
   min-width: 36px;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   text-align: right;
   white-space: nowrap;
 }
@@ -6293,7 +6300,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   box-shadow: none;
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-comparison-load-state button:hover:not(:disabled),
@@ -6326,14 +6333,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-diff-section-header strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-diff-section-header span {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6378,7 +6385,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   outline: none;
   background: var(--wb-dialog-surface);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-diff-heads {
@@ -6780,7 +6787,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6792,7 +6799,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
   color: var(--wb-secondary-text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-diff-detail-header button:hover,
@@ -6819,7 +6826,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-batch-diff-detail-panes.is-empty p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-diff-detail-panes section {
@@ -6843,7 +6850,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
   padding-bottom: 3px;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -6858,14 +6865,14 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .wb-batch-diff-plain {
   padding: 4px 2px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-diff-plain p {
@@ -6900,7 +6907,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   box-shadow: none;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-diff-more:hover,
@@ -6915,7 +6922,7 @@ label:has(input[type="checkbox"]:disabled) {
   place-items: center;
   min-height: 150px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-compare-action {
@@ -6963,12 +6970,12 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-transfer-progress p strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -6995,7 +7002,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-batch-transfer-warning {
   margin: 0;
   color: var(--wb-warning-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-batch-result-summary {
@@ -7020,14 +7027,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-result-summary strong {
   color: var(--wb-accent-strong);
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   font-variant-numeric: tabular-nums;
 }
 
 .wb-batch-result-summary span,
 .wb-batch-result-summary p {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-batch-result-summary p {
@@ -7070,7 +7077,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-dialog-surface);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -7138,7 +7145,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 7px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   box-shadow: var(--wb-floating-shadow);
   pointer-events: auto;
 }
@@ -7155,7 +7162,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-warning-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -7320,7 +7327,7 @@ label:has(input[type="checkbox"]:disabled) {
     0 0 0 1px var(--wb-floating-border),
     var(--wb-floating-shadow);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 1.4;
   text-align: left;
@@ -7378,7 +7385,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin-left: auto;
   color: var(--wb-quiet-text);
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 550;
 }
 
@@ -7856,7 +7863,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-pane-header strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -7864,7 +7871,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-toolbar span,
 .wb-text-panel > div > span {
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
 }
 
@@ -7895,7 +7902,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -7905,7 +7912,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-inspector-table-comment {
   min-width: 0;
   color: var(--wb-remark-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 400;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -7914,7 +7921,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-inspector-table-comment.is-empty {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-inspector-section-head {
@@ -7931,7 +7938,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   padding: 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 620;
 }
 
@@ -7962,7 +7969,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   min-width: 2.2em;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 620;
   text-align: center;
@@ -7982,7 +7989,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 18px 12px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
   text-align: center;
 }
@@ -8083,14 +8090,14 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
   font-weight: 500;
 }
 
 .wb-ai-brand strong {
   color: var(--wb-ai-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.25;
 }
@@ -8099,7 +8106,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8142,20 +8149,20 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-ai-runtime-copy h2 {
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
   line-height: 1.35;
 }
 
 .wb-ai-runtime-copy p {
   color: var(--wb-ai-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
 .wb-ai-runtime-copy .wb-ai-runtime-support {
   color: var(--wb-ai-quiet);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-runtime-progress {
@@ -8190,7 +8197,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-runtime-meta {
   min-width: 0;
   color: var(--wb-ai-quiet);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -8230,7 +8237,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-hero h2 {
   margin: 0;
   color: var(--wb-ai-text);
-  font-size: 18px;
+  font-size: var(--wb-fs-heading);
   font-weight: 500;
   line-height: 1.3;
   text-wrap: balance;
@@ -8251,7 +8258,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-ai-muted);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
@@ -8306,7 +8313,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-startup-kicker {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 1.35;
 }
@@ -8314,7 +8321,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-startup-copy h2 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 720;
   line-height: 1.3;
 }
@@ -8322,7 +8329,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-startup-copy p {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -8351,7 +8358,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 10px;
   min-width: 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.2;
 }
 
@@ -8407,7 +8414,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-top-left-radius: 4px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -8431,7 +8438,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-thinking summary {
   padding: 6px 10px;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -8445,7 +8452,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 8px 10px;
   color: var(--wb-ai-quiet);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -8467,7 +8474,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-tool-step.is-error {
@@ -8501,7 +8508,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   padding: 1px 5px;
   border-radius: 999px;
-  font-size: 9.5px;
+  font-size: var(--wb-fs-micro);
   font-weight: 650;
   white-space: nowrap;
 }
@@ -8533,7 +8540,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.4;
 }
 
@@ -8566,7 +8573,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-accent) 18%, transparent);
   color: var(--wb-accent);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   pointer-events: none;
 }
@@ -8594,7 +8601,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-config-panel span {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -8611,14 +8618,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-config-panel input {
   height: 28px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-config-panel small,
 .wb-ai-history-panel p {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
@@ -8631,13 +8638,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-history-panel header strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 680;
 }
 
 .wb-ai-history-panel header span {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-history-item {
@@ -8666,7 +8673,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-history-item span {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 640;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8674,7 +8681,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-history-item em {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
 }
 
@@ -8692,7 +8699,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: pointer;
 }
@@ -8740,7 +8747,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar-title strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -8754,7 +8761,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 1;
 }
@@ -8888,7 +8895,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -8902,7 +8909,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   padding: 3px 10px;
   cursor: pointer;
 }
@@ -8934,7 +8941,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -9054,7 +9061,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px 10px;
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 700;
   color: var(--wb-text);
   border-bottom: 1px solid var(--wb-line);
@@ -9064,21 +9071,21 @@ label:has(input[type="checkbox"]:disabled) {
   border: none;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   cursor: pointer;
 }
 
 .wb-shortcut-dialog-hint {
   margin: 0;
   padding: 8px 16px 4px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
 .wb-shortcut-dialog-error {
   margin: 0;
   padding: 8px 16px 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-danger, #c0392b);
 }
 
@@ -9102,7 +9109,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-shortcut-row-label {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
   line-height: 1.4;
   overflow-wrap: break-word;
@@ -9111,7 +9118,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-shortcut-global-badge {
   margin-left: 4px;
   font-style: normal;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-shortcut-row-body {
@@ -9124,7 +9131,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-shortcut-combo {
   font-family: var(--wb-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   padding: 2px 8px;
   border-radius: 5px;
   background: var(--wb-grid-row-alt);
@@ -9137,7 +9144,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-shortcut-listening {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-accent-strong);
   font-style: italic;
   white-space: nowrap;
@@ -9154,7 +9161,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   padding: 3px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -9184,14 +9191,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-shortcut-reference h3 {
   margin: 0 0 2px;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-shortcut-reference p {
   margin: 0 0 8px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-shortcut-reference dl {
@@ -9205,7 +9212,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-shortcut-reference dt {
   min-width: 0;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   overflow-wrap: break-word;
 }
 
@@ -9230,7 +9237,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   padding: 5px 14px;
   cursor: pointer;
 }
@@ -9248,7 +9255,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sidebar-settings-label {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   line-height: 1;
 }
@@ -9268,7 +9275,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 17px;
   color: var(--wb-secondary-text);
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
   line-height: 1;
 }
@@ -9296,7 +9303,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: pointer;
 }
@@ -9323,7 +9330,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   padding: 0 4px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   white-space: nowrap;
 }
 
@@ -9350,7 +9357,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 14px 20px;
   border-bottom-color: var(--wb-border-strong);
   background: var(--wb-dialog-surface);
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
 }
 
 .wb-font-dialog .wb-shortcut-dialog-close {
@@ -9398,7 +9405,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-font-field > span {
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 700;
   line-height: 1.4;
 }
@@ -9415,7 +9422,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: space-between;
   gap: 12px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -9429,7 +9436,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   box-shadow: var(--wb-control-shadow);
 }
@@ -9445,7 +9452,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 10px;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -9459,7 +9466,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-font-weight-field select:focus-visible {
@@ -9499,7 +9506,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: space-between;
   gap: 8px;
   color: var(--wb-danger-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-system-font-error button {
@@ -9519,7 +9526,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-font-dialog-error {
   margin: -4px 0 0;
   color: var(--wb-danger-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-font-preview {
@@ -9538,7 +9545,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-font-preview-label {
   color: var(--wb-quiet-text) !important;
   font-family: var(--wb-font-ui) !important;
-  font-size: 12px !important;
+  font-size: var(--wb-fs-body) !important;
   font-weight: 650;
   line-height: 1.4 !important;
 }
@@ -9550,13 +9557,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-font-preview-sample strong {
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
   font-weight: inherit;
 }
 
 .wb-font-preview-sample span {
   color: var(--wb-secondary-text);
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
@@ -9749,7 +9756,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   box-shadow: none;
   color: var(--wb-tree-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: left;
   transform: translateZ(0);
   transition:
@@ -9914,7 +9921,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-item {
   color: var(--wb-database-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   align-items: center;
   background: var(--wb-chrome-surface);
 }
@@ -9955,7 +9962,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10086,7 +10093,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 7px;
   background: color-mix(in srgb, var(--wb-field-surface) 54%, var(--wb-control-hover));
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--wb-text) 6%, transparent),
@@ -10172,7 +10179,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 560;
   line-height: 1.35;
   text-align: left;
@@ -10227,7 +10234,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-search-error,
 .wb-search-group-title {
   margin: 5px 0 4px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-quiet-text);
 }
 
@@ -10262,7 +10269,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   overflow: hidden;
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10313,7 +10320,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-tree-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10326,7 +10333,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 5px;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -10345,7 +10352,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 5px;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10359,7 +10366,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-hit-table-name-bg);
   color: var(--wb-hit-table-name-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 14px;
 }
@@ -10398,7 +10405,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-search-hit-label {
   flex: 0 0 auto;
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-column-hit-name {
@@ -10479,14 +10486,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-name {
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
 .wb-table-comment {
   margin-left: 7px;
   color: var(--wb-remark-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 400;
   line-height: 1.45;
 }
@@ -10507,7 +10514,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tree-empty {
   margin: 6px 6px 8px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-tree-loading {
@@ -10516,7 +10523,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 7px;
   margin: 6px 6px 8px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-tree-loading-spinner {
@@ -10557,7 +10564,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: color-mix(in srgb, var(--wb-surface) 88%, var(--wb-accent-soft));
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -10663,7 +10670,7 @@ label:has(input[type="checkbox"]:disabled) {
     0 10px 30px color-mix(in srgb, var(--wb-glow-color) 26%, transparent),
     var(--wb-floating-shadow);
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -10762,7 +10769,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 28px;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -10770,7 +10777,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-cell-identity-count {
   flex: 0 0 auto;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   letter-spacing: 0.02em;
 }
 
@@ -10996,7 +11003,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-title .wb-tab-opening-label {
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -11028,7 +11035,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 550;
   line-height: 1.2;
 }
@@ -11049,7 +11056,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--wb-type-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 400;
 }
 
@@ -11072,7 +11079,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
   font-family: var(--wb-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.2;
   white-space: nowrap;
@@ -11106,7 +11113,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab-line-primary {
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -11117,7 +11124,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-line-secondary {
   color: var(--wb-type-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 450;
   line-height: 1.2;
   letter-spacing: 0.01em;
@@ -11320,13 +11327,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorites-header > span {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
 }
 
 .wb-home-favorites-header > small {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorites-list {
@@ -11406,13 +11413,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-copy strong {
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-home-favorite-copy small {
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-state {
@@ -11421,7 +11428,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -11458,7 +11465,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-grid-row-alt);
   color: var(--wb-text);
   font-family: var(--wb-mono, ui-monospace, monospace);
-  font-size: 9.5px;
+  font-size: var(--wb-fs-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11497,7 +11504,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -11507,7 +11514,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
 }
 
@@ -11520,7 +11527,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-home-favorite-shortcut-editor > small {
   flex: 1 0 100%;
   color: var(--wb-danger);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorites-empty {
@@ -11543,14 +11550,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorites-empty strong {
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-home-favorites-empty small {
   margin-top: 3px;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorites-add {
@@ -11564,7 +11571,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: pointer;
 }
@@ -11630,13 +11637,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-picker-header strong {
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 700;
 }
 
 .wb-home-favorite-picker-header small {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-picker-header > button {
@@ -11708,7 +11715,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 9px;
+  font-size: var(--wb-fs-micro);
   font-weight: 750;
 }
 
@@ -11727,14 +11734,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-connection-copy strong {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-home-favorite-connection-copy small,
 .wb-home-favorite-count {
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-count {
@@ -11766,7 +11773,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-home-favorite-databases > header strong {
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -11774,7 +11781,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-home-favorite-databases > header small {
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-search {
@@ -11803,7 +11810,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-database-list {
@@ -11861,13 +11868,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-database-list strong {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
 .wb-home-favorite-database-list small {
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-database-list em {
@@ -11875,7 +11882,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 3px;
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
   font-weight: 650;
 }
@@ -11888,7 +11895,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   justify-content: center;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
@@ -11904,7 +11911,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-home-favorite-picker-empty strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-home-favorite-picker-empty span {
@@ -11921,7 +11928,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 10px 14px;
   border-top: 1px solid var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-home-favorite-picker-footer > span {
@@ -12027,7 +12034,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding-left: 8px;
   border-left: 1px solid var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -12076,7 +12083,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-search-field .wb-search-aux .wb-search-hit-count {
   flex: 0 0 auto;
   padding: 0 2px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-quiet-text);
   white-space: nowrap;
   pointer-events: none;
@@ -12128,7 +12135,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 1;
@@ -12240,13 +12247,13 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 12px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
 .wb-sort-chip-icon {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-sort-chip-clear {
@@ -12261,7 +12268,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 50%;
   background: transparent;
   color: var(--wb-muted);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   line-height: 1;
   cursor: pointer;
 }
@@ -12298,7 +12305,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 12px;
   background: var(--wb-relation-out-soft);
   color: var(--wb-relation-out);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -12359,7 +12366,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   padding: 2px 6px 3px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
 }
 
@@ -12383,7 +12390,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 6px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -12394,14 +12401,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-relations-hint.is-quiet {
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relations-note {
   margin: 0;
   padding: 2px 6px 4px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -12415,7 +12422,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 2px 6px;
   color: var(--wb-danger);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -12427,7 +12434,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-warning-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -12443,7 +12450,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
 }
 
@@ -12467,7 +12474,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 4px 0 6px;
   padding: 7px 8px 7px 10px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -12503,7 +12510,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relations-spin {
@@ -12549,14 +12556,14 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   padding: 28px 16px 20px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   text-align: center;
 }
 
 .wb-relations-empty strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -12582,7 +12589,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 0 6px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -12602,7 +12609,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: left;
 }
 
@@ -12626,7 +12633,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 16px;
 }
@@ -12654,7 +12661,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-danger);
   color: var(--wb-accent-contrast, #fff);
-  font-size: 9.5px;
+  font-size: var(--wb-fs-micro);
   font-weight: 700;
   line-height: 15px;
   text-align: center;
@@ -12690,7 +12697,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   cursor: pointer;
 }
@@ -12702,7 +12709,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 8%, transparent);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 16px;
@@ -12786,7 +12793,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   min-width: 42px;
   padding: 0 8px;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -12869,7 +12876,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: inherit;
   background: transparent;
   color: inherit;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   box-shadow: none;
 }
@@ -12919,7 +12926,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   min-width: 60px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
@@ -12976,7 +12983,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-toolbar-action-group .wb-toolbar-split-button-main {
   min-width: 70px;
   padding: 0 9px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-toolbar-action-group .wb-toolbar-split-button-caret {
@@ -13014,7 +13021,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 24px;
   padding: 0 6px 0 8px;
   border-radius: 0 4px 4px 0;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-toolbar .wb-search-mode-control .wb-toolbar-menu-button:focus-visible {
@@ -13032,7 +13039,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 26px;
   min-height: 26px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 /* 表工具栏按优先级让位：先把低频的冻结、分屏收进「更多」，
@@ -13045,7 +13052,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 26px;
   min-height: 26px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 @container (max-width: 780px) {
@@ -13202,14 +13209,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-toolbar-action-menu-label {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   line-height: 1.25;
 }
 
 .wb-toolbar-action-menu-hint {
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 400;
   line-height: 1.25;
 }
@@ -13349,7 +13356,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-menu-surface);
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14), 0 1px 3px rgba(15, 23, 42, 0.08);
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -13455,7 +13462,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-display-heading small {
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-database-display-realname {
@@ -13480,7 +13487,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-display-label {
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -13493,7 +13500,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -13520,7 +13527,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   min-height: 24px;
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-database-marker-row svg {
@@ -13530,7 +13537,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-database-marker-row.is-child {
   padding-left: 17px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-database-marker-chevron {
@@ -13569,7 +13576,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -13608,13 +13615,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-color-label strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-database-color-label small {
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   white-space: nowrap;
 }
 
@@ -13697,7 +13704,7 @@ label:has(input[type="checkbox"]:disabled) {
   grid-column: 2;
   margin-top: -4px;
   color: var(--wb-warning-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
@@ -13718,7 +13725,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid transparent;
   background: transparent;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
 }
 
@@ -13781,7 +13788,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   background: var(--wb-grid-loading);
   color: var(--wb-secondary-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-grid-loading-spinner {
@@ -13831,7 +13838,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-grid-error-title {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 600;
   color: var(--wb-text);
 }
@@ -13839,7 +13846,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-grid-error-detail {
   margin: 0;
   max-width: 420px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
   word-break: break-word;
   line-height: 1.5;
@@ -13852,7 +13859,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-accent);
   color: #fff;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -13872,7 +13879,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-align: center;
   padding: 48px 16px;
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-grid-empty-action {
@@ -13949,7 +13956,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-align: center;
   padding: 10px 16px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   background: var(--wb-grid-row);
   border-top: 1px solid var(--wb-line);
   position: sticky;
@@ -13978,7 +13985,7 @@ label:has(input[type="checkbox"]:disabled) {
   width: max-content;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.32;
 }
 
@@ -14066,7 +14073,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-align: left;
   background: var(--wb-grid-header);
   color: var(--wb-grid-heading);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: default;
   user-select: none;
@@ -14156,7 +14163,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 3px;
   background: var(--wb-grid-header);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 26px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14296,7 +14303,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: left;
   white-space: nowrap;
 }
@@ -14568,7 +14575,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-row-insert-marker {
   color: var(--wb-accent-strong);
   background: var(--wb-insert-row) !important;
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
   box-shadow: inset 3px 0 0 var(--wb-insert-unsaved-accent);
 }
@@ -14581,7 +14588,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-quiet-text);
   content: "未存";
-  font-size: 8px;
+  font-size: var(--wb-fs-micro);
   font-weight: 600;
   line-height: 9px;
   text-align: center;
@@ -14591,7 +14598,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-insert-row-number {
   display: block;
   transform: translateY(-4px);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 12px;
 }
 
@@ -14820,7 +14827,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-typeahead-query {
   font-family: var(--wb-mono-font, ui-monospace, monospace);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -14828,7 +14835,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding-left: 10px;
   border-left: 1px solid var(--wb-line);
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-typeahead-result mark {
@@ -14873,7 +14880,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--wb-dbhome-name-color, var(--wb-text));
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
   line-height: 1.25;
 }
@@ -14881,7 +14888,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dbhome-title p {
   margin: 2px 0 0;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.25;
 }
 
@@ -14899,7 +14906,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   flex: 0 0 auto;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-summary span {
@@ -15052,7 +15059,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
@@ -15209,7 +15216,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-quiet-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   text-align: left;
   overflow: hidden;
@@ -15350,7 +15357,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-object-name {
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -15375,7 +15382,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-rename-error {
@@ -15392,7 +15399,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin-inline-end: 5px;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1;
 }
 
@@ -15413,7 +15420,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-dbhome-name-color, var(--wb-text));
   font: inherit;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.2;
   overflow: hidden;
@@ -15504,14 +15511,14 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sql-library-header h2 {
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 700;
   line-height: 20px;
 }
 
 .wb-sql-library-header p {
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 18px;
 }
 
@@ -15541,7 +15548,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -15603,7 +15610,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-sql-library-search input {
@@ -15645,7 +15652,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-sql-library-filter select {
@@ -15707,7 +15714,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sql-library-section-heading h3 {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
 }
 
@@ -15717,7 +15724,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-accent-soft);
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 16px;
   text-align: center;
 }
@@ -15803,7 +15810,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-library-document-title strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -15821,7 +15828,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-field-surface);
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   line-height: 17px;
 }
@@ -15846,7 +15853,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-mono, "Cascadia Mono", Consolas, monospace);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -15857,7 +15864,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-items: end;
   gap: 2px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-sql-library-document-source span {
@@ -15869,7 +15876,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sql-library-document-source small {
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-sql-library-row-actions {
@@ -15916,7 +15923,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sql-library-empty p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-sql-library-recent-row {
@@ -15955,14 +15962,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sql-library-recent-row strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .wb-sql-library-recent-row small {
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-sql-library-recent-row > button:last-child {
@@ -16040,7 +16047,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-object-comment {
   color: var(--wb-remark-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-object-comment-text {
@@ -16063,7 +16070,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: flex-end;
   border-right: 0;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-readonly {
@@ -16083,7 +16090,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-dbhome-name-color, var(--wb-text));
   font: inherit;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -16107,11 +16114,11 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-empty-list strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-empty-list span {
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-dbhome-context-menu button:disabled {
@@ -16175,7 +16182,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-title strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -16183,7 +16190,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -16191,7 +16198,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-design-dirty {
   flex: 0 0 auto;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
   font-weight: 650;
 }
@@ -16238,7 +16245,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   padding: 8px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-state {
@@ -16274,13 +16281,13 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-danger-surface, #fdf2f2);
   color: var(--wb-danger-text, #842029);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
 }
 
 .wb-design-conflict-banner strong {
   font-weight: 650;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 /* 弹窗中更醒目的冲突提示 */
@@ -16291,13 +16298,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-conflicts-critical .wb-design-conflicts-title {
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   color: var(--wb-danger);
 }
 
 .wb-design-conflicts-subtitle {
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -16308,7 +16315,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: start;
   gap: 8px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-comment span {
@@ -16335,7 +16342,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-grid th,
@@ -16401,7 +16408,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 24px;
   padding: 0 6px;
   background: var(--wb-cell-editor);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-grid input[type="checkbox"] {
@@ -16414,7 +16421,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
   margin-top: 2px;
   color: var(--wb-danger);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
@@ -16485,7 +16492,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-warning-text);
   color: var(--wb-grid-row);
-  font-size: 9px;
+  font-size: var(--wb-fs-micro);
   font-variant-numeric: tabular-nums;
   font-weight: 750;
   line-height: 1;
@@ -16575,7 +16582,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 18px;
   cursor: grab;
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1;
   user-select: none;
 }
@@ -16619,7 +16626,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   box-shadow: none;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -16674,7 +16681,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: space-between;
   padding: 12px 16px;
   background: var(--wb-pane-header);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   font-weight: 650;
 }
 
@@ -16701,7 +16708,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-cell-editor);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
   resize: none;
 }
@@ -16718,7 +16725,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-comment-dialog-preview-content {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.7;
   color: var(--wb-text);
 }
@@ -16732,9 +16739,9 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 650;
 }
 
-.wb-design-comment-dialog-preview-content h1 { font-size: 18px; }
-.wb-design-comment-dialog-preview-content h2 { font-size: 16px; }
-.wb-design-comment-dialog-preview-content h3 { font-size: 14px; }
+.wb-design-comment-dialog-preview-content h1 { font-size: var(--wb-fs-heading); }
+.wb-design-comment-dialog-preview-content h2 { font-size: var(--wb-fs-heading); }
+.wb-design-comment-dialog-preview-content h3 { font-size: var(--wb-fs-title); }
 
 .wb-design-comment-dialog-preview-content p {
   margin: 8px 0;
@@ -16746,7 +16753,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-soft);
   color: var(--wb-code-keyword);
   font-family: Consolas, "Cascadia Mono", monospace;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-comment-dialog-preview-content pre {
@@ -16761,7 +16768,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 0;
   background: transparent;
   color: var(--wb-code-key);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-comment-dialog-preview-content blockquote {
@@ -16831,7 +16838,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
   margin-bottom: 6px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -16876,7 +16883,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 7px;
   color: var(--wb-warning-text);
   background: var(--wb-warning-surface);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-sql {
@@ -16889,7 +16896,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-detail-surface);
   color: var(--wb-code-key);
   font-family: Consolas, "Cascadia Mono", monospace;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -16921,14 +16928,14 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-danger-surface, #fdf2f2);
   color: var(--wb-danger-text, #842029);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
 .wb-design-conflicts-title {
   margin-bottom: 6px;
   font-weight: 650;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-conflicts ul {
@@ -16950,14 +16957,14 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: var(--wb-detail-surface);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.7;
 }
 
 .wb-design-human-title {
   margin-bottom: 6px;
   font-weight: 650;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
 }
 
@@ -16983,7 +16990,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-grid-canvas);
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 /* ---------- 原始 SQL 折叠区域 ---------- */
@@ -16993,7 +17000,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: var(--wb-chrome-surface);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-design-sql-details summary {
@@ -17021,7 +17028,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-detail-surface);
   color: var(--wb-code-key);
   font-family: Consolas, "Cascadia Mono", monospace;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -17054,13 +17061,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-empty-content strong {
-  font-size: 15px;
+  font-size: var(--wb-fs-title);
   font-weight: 600;
   color: var(--wb-text);
 }
 
 .wb-empty-content span {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-muted);
 }
 
@@ -17071,7 +17078,7 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
   border: none;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
@@ -17171,7 +17178,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 100%;
   overflow: hidden;
   color: var(--wb-identifier-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 18px;
   text-overflow: ellipsis;
@@ -17189,7 +17196,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-schema-field-type {
   overflow: hidden;
   color: var(--wb-type-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-style: normal;
   font-weight: 550;
   text-overflow: ellipsis;
@@ -17203,7 +17210,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 1.35;
 }
@@ -17215,7 +17222,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-schema-field-comment {
   flex: 1 0 100%;
   color: var(--wb-field-comment-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -17231,14 +17238,14 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   padding: 24px 20px 64px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   text-align: center;
 }
 
 .wb-inspector-empty strong {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
@@ -17352,7 +17359,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 1 auto;
   overflow: hidden;
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   letter-spacing: 0.01em;
   text-overflow: ellipsis;
@@ -17381,7 +17388,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-cell-detail-stat-label {
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-ui);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   letter-spacing: 0.02em;
 }
 
@@ -17389,7 +17396,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -17402,7 +17409,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-ui);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -17438,7 +17445,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
   color: var(--wb-muted);
   font-family: var(--wb-font-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1;
@@ -17587,7 +17594,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 0;
   border-radius: 0;
   font-family: var(--wb-font-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -17737,7 +17744,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 10px;
   min-height: 30px;
   padding: 2px 7px 3px 8px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-secondary-text);
 }
 
@@ -17785,7 +17792,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 0;
   background: transparent;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
   text-align: center;
   outline: none;
@@ -17898,7 +17905,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 3px;
   color: var(--wb-quiet-text);
   font-family: var(--wb-font-mono);
-  font-size: 9px;
+  font-size: var(--wb-fs-micro);
   font-style: normal;
   line-height: 14px;
   letter-spacing: 0.03em;
@@ -18341,14 +18348,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-copy-header h2 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   line-height: 20px;
 }
 
 .wb-table-copy-header p {
   margin: 1px 0 0;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 16px;
 }
 
@@ -18381,7 +18388,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-copy-route-label {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   letter-spacing: 0.04em;
 }
@@ -18402,12 +18409,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-copy-route-info strong {
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-copy-route-info span {
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-table-copy-route-arrow {
@@ -18432,7 +18439,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   outline: none;
   cursor: pointer;
   transition: border-color 0.15s ease;
@@ -18447,7 +18454,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-copy-route-warning {
   margin: 2px 0 0;
   color: var(--wb-danger-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
 }
 
@@ -18492,13 +18499,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-copy-mode-text strong {
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
   color: var(--wb-text);
 }
 
 .wb-table-copy-mode-text small {
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
   color: var(--wb-secondary-text);
 }
@@ -18536,7 +18543,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 7px;
   flex-shrink: 0;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-copy-section-title strong,
@@ -18555,7 +18562,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -18575,7 +18582,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -18616,7 +18623,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-bottom: 1px solid var(--wb-line);
   background: var(--wb-pane-header);
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -18657,7 +18664,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-table-copy-danger-hint svg {
@@ -18725,7 +18732,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -18735,7 +18742,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -18751,13 +18758,13 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   padding: 48px 24px;
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
 .wb-table-copy-empty small {
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 /* Selected tables */
@@ -18789,7 +18796,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-muted);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -18851,7 +18858,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 30px;
   padding: 0 8px 0 12px;
   color: var(--wb-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-table-copy-selection-row:hover {
@@ -18909,13 +18916,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-copy-selection-empty strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-table-copy-selection-empty span {
   max-width: 22ch;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 15px;
 }
 
@@ -18945,7 +18952,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 10px;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-copy-footer-left strong {
@@ -19086,7 +19093,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-approval-title {
   margin-bottom: 6px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -19094,7 +19101,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   gap: 4px;
   margin-bottom: 10px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-approval-body code {
@@ -19102,7 +19109,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-approval-actions {
@@ -19117,7 +19124,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -19151,7 +19158,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-ai-brand-text strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 680;
 }
 
@@ -19159,7 +19166,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -19234,7 +19241,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-ai-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 660;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -19248,7 +19255,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -19263,7 +19270,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: 1px solid color-mix(in srgb, var(--wb-ai-status) 52%, transparent);
   border-radius: 999px;
   color: var(--wb-ai-status);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 1.2;
   white-space: nowrap;
@@ -19308,7 +19315,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 7px;
   min-height: 30px;
   padding: 7px 9px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 620;
 }
 
@@ -19356,7 +19363,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 2px 3px;
   border-radius: 5px;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.2;
 }
 
@@ -19399,7 +19406,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-ai-hero h2 {
-  font-size: 20px;
+  font-size: var(--wb-fs-display);
   font-weight: 560;
 }
 
@@ -19407,7 +19414,7 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 32ch;
   margin-top: 10px;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -19426,7 +19433,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-field-surface);
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
@@ -19463,7 +19470,7 @@ label:has(input[type="checkbox"]:disabled) {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 760;
 }
 
@@ -19494,7 +19501,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 720;
 }
 
@@ -19509,7 +19516,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-top-left-radius: 2px;
   background: color-mix(in srgb, var(--wb-field-surface) 78%, transparent);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -19530,7 +19537,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-thinking summary {
   padding: 6px 9px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   cursor: pointer;
   user-select: none;
@@ -19544,7 +19551,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 8px 10px;
   color: var(--wb-quiet-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -19598,7 +19605,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-accent-strong);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -19608,7 +19615,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -19635,7 +19642,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: color-mix(in srgb, var(--wb-workspace-mist) 65%, transparent);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -19669,14 +19676,14 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
 }
 
 .wb-ai-status {
   margin: 0 0 8px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 /* Settings panel */
@@ -19699,14 +19706,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-config-title {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
 }
 
 .wb-ai-config-hint {
   margin: -4px 0 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
 }
 
@@ -19717,7 +19724,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-config-field span {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -19731,7 +19738,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-config-field input:focus-visible,
@@ -19746,7 +19753,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   cursor: pointer;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-config-toggle input {
@@ -19779,7 +19786,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
 }
 
@@ -19795,7 +19802,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -19806,7 +19813,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-mcp-runtime {
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-config-field textarea {
@@ -19818,7 +19825,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-field-surface);
   color: var(--wb-secondary-text);
-  font: 10.5px/1.4 var(--wb-font-mono);
+  font: var(--wb-fs-caption)/1.4 var(--wb-font-mono);
 }
 
 .wb-ai-config-field textarea:focus-visible {
@@ -19835,7 +19842,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-button-surface, var(--wb-field-surface));
   color: var(--wb-text);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -19847,7 +19854,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-mcp-error {
   margin: 0;
   color: var(--wb-danger);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
 }
 
@@ -19916,13 +19923,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-mcp-master-text strong {
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-mcp-sub {
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
 }
 
@@ -19932,7 +19939,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -19982,13 +19989,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-mcp-group-name {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 600;
 }
 
 .wb-mcp-group-hint {
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
 }
 
@@ -19999,7 +20006,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-mcp-note {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
 }
 
@@ -20014,7 +20021,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   padding: 6px 2px;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   cursor: pointer;
   list-style: none;
@@ -20061,7 +20068,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: space-between;
   gap: 8px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -20073,7 +20080,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-button-surface, var(--wb-field-surface));
   color: var(--wb-text);
   cursor: pointer;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -20092,7 +20099,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-secondary-text);
   font-family: var(--wb-font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
 }
 
@@ -20104,7 +20111,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-mcp-error {
   margin: 0;
   color: var(--wb-danger);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.45;
 }
 
@@ -20129,7 +20136,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-session-header strong {
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
 }
 
@@ -20172,7 +20179,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-session-title {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 640;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -20180,7 +20187,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-session-date {
   color: var(--wb-secondary-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-session-delete {
@@ -20211,7 +20218,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 8px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
@@ -20241,7 +20248,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-field-surface);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
@@ -20296,7 +20303,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
 }
 
@@ -20322,7 +20329,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -20403,7 +20410,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 8px;
   margin-bottom: 8px;
   color: var(--wb-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
 }
 
@@ -20472,7 +20479,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
 }
 
@@ -20484,7 +20491,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-workspace-mist) 60%, transparent);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -20493,7 +20500,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-plan-empty {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-plan-feedback {
@@ -20503,7 +20510,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-plan-feedback span {
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -20516,7 +20523,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   font-family: var(--wb-font-ui);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-ai-approval-actions,
@@ -20529,7 +20536,7 @@ label:has(input[type="checkbox"]:disabled) {
 /* Markdown styles */
 .wb-md {
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -20592,7 +20599,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 4px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -20601,7 +20608,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: block;
   color: var(--wb-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
   white-space: pre;
 }
@@ -20753,14 +20760,14 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-warning-surface);
   color: var(--wb-warning-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.4;
   font-weight: 500;
 }
 
 .wb-ai-brand strong {
   color: var(--wb-ai-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   line-height: 1.25;
 }
@@ -20769,7 +20776,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -20786,7 +20793,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.3;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
   pointer-events: none;
@@ -20844,7 +20851,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-hero h2 {
   margin: 0;
   color: var(--wb-ai-text);
-  font-size: 18px;
+  font-size: var(--wb-fs-heading);
   font-weight: 500;
   line-height: 1.3;
   text-wrap: balance;
@@ -20865,7 +20872,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-ai-muted);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
@@ -20915,7 +20922,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: none;
   background: transparent;
   color: var(--wb-ai-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -20946,7 +20953,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-tool-step.is-error {
@@ -20980,7 +20987,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   padding: 1px 5px;
   border-radius: 999px;
-  font-size: 9.5px;
+  font-size: var(--wb-fs-micro);
   font-weight: 650;
   white-space: nowrap;
 }
@@ -21021,7 +21028,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: color-mix(in srgb, var(--wb-ai-bg-elevated) 86%, var(--wb-accent) 8%);
   color: var(--wb-ai-text);
   font-family: var(--wb-font-ui);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 22px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -21081,14 +21088,14 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-ai-artifact-info strong {
   color: var(--wb-ai-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
 .wb-ai-artifact-info small,
 .wb-ai-artifact-info > span {
   color: var(--wb-ai-muted);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.3;
 }
 
@@ -21110,7 +21117,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-ai-text);
   font: inherit;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
 }
 
@@ -21137,7 +21144,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-thinking summary {
   padding: 6px 10px;
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -21151,7 +21158,7 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   padding: 8px 10px;
   color: var(--wb-ai-quiet);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -21168,7 +21175,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   margin: 0 0 10px;
   color: var(--wb-ai-status);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-style: italic;
   line-height: 1.45;
 }
@@ -21199,7 +21206,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 6px;
   background: color-mix(in srgb, var(--wb-danger) 12%, transparent);
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
 }
 
@@ -21257,7 +21264,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding-bottom: 5px;
   border-bottom: 1px solid color-mix(in srgb, var(--wb-ai-border) 72%, transparent);
   color: var(--wb-ai-quiet);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.3;
 }
 
@@ -21315,7 +21322,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
   color: var(--wb-ai-text);
   font-family: var(--wb-font-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
   -webkit-appearance: none;
   appearance: none;
@@ -21340,7 +21347,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-ai-muted);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   cursor: pointer;
 }
@@ -21432,7 +21439,7 @@ label:has(input[type="checkbox"]:disabled) {
   align-self: flex-start;
   margin: -2px 0 0;
   color: var(--wb-ai-quiet);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
@@ -21449,7 +21456,7 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
   margin-top: 2px;
   color: var(--wb-ai-quiet);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-message-elapsed {
@@ -21464,7 +21471,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-ai-muted);
   font-family: var(--wb-font-ui);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
 }
 
@@ -21489,7 +21496,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-muted);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
   user-select: none;
 }
@@ -21509,7 +21516,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 999px;
   background: var(--wb-ai-bg-elevated);
   color: var(--wb-ai-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   cursor: pointer;
 }
@@ -21611,7 +21618,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-spacing: 0;
   table-layout: auto;
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
 }
 
@@ -21723,7 +21730,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-onboarding-hero h2 {
   margin: 0;
   color: var(--wb-text);
-  font-size: 17px;
+  font-size: var(--wb-fs-heading);
   font-weight: 720;
   letter-spacing: 0.2px;
 }
@@ -21731,7 +21738,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-onboarding-hero p {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   line-height: 1.55;
 }
 
@@ -21749,7 +21756,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   gap: 3px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   letter-spacing: 0.2px;
 }
@@ -21767,7 +21774,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-field-surface);
   color: var(--wb-text);
   padding: 8px 10px;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   outline: none;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -21819,7 +21826,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-ai-onboarding-error {
   margin: 0;
   color: var(--wb-danger, #d44);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-ai-onboarding-start {
@@ -21829,7 +21836,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 8px;
   background: var(--wb-accent);
   color: var(--wb-accent-contrast, #fff);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s, transform 0.05s;
@@ -21857,7 +21864,7 @@ label:has(input[type="checkbox"]:disabled) {
   border: none;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--wb-secondary-text) 40%, transparent);
   text-underline-offset: 2px;
@@ -21951,7 +21958,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-object-cell {
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -22015,7 +22022,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: color-mix(in srgb, var(--wb-grid-header) 76%, var(--wb-grid-row));
   color: var(--wb-remark-text);
   box-shadow: none;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 500;
   line-height: 1.35;
 }
@@ -22115,7 +22122,7 @@ button.wb-table-mention:active {
   background: transparent;
   color: var(--wb-quiet-text);
   font: inherit;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   cursor: pointer;
 }
@@ -22171,7 +22178,7 @@ button.wb-table-mention:active {
   border-radius: 6px;
   background: transparent;
   color: var(--wb-accent-strong);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background .12s ease, color .12s ease, border-color .12s ease;
@@ -22248,7 +22255,7 @@ button.wb-table-mention:active {
   background: transparent;
   color: var(--wb-text);
   box-shadow: none;
-  font-size: 14px;
+  font-size: var(--wb-fs-title);
   outline: none;
 }
 
@@ -22276,7 +22283,7 @@ button.wb-table-mention:active {
   background: transparent;
   color: var(--wb-secondary-text);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 550;
   cursor: pointer;
 }
@@ -22318,14 +22325,14 @@ button.wb-table-mention:active {
 .wb-quick-open-value-hint {
   margin: 2px 12px 4px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
 .wb-quick-open-value-error {
   margin: 2px 12px 4px;
   color: var(--wb-danger);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.35;
 }
 
@@ -22368,7 +22375,7 @@ button.wb-table-mention:active {
   padding: 0 10px;
   border-bottom: 1px solid var(--wb-border);
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
 
@@ -22391,7 +22398,7 @@ button.wb-table-mention:active {
   background-color: var(--wb-field-surface);
   color: var(--wb-text);
   font: inherit;
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 550;
   cursor: pointer;
   outline: none;
@@ -22458,7 +22465,7 @@ button.wb-table-mention:active {
   background: transparent;
   color: var(--wb-text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: left;
   cursor: pointer;
 }
@@ -22478,7 +22485,7 @@ button.wb-table-mention:active {
 .wb-quick-open-scope-summary {
   margin-left: auto;
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 400;
 }
 
@@ -22490,7 +22497,7 @@ button.wb-table-mention:active {
   background: transparent;
   color: var(--wb-accent-strong);
   font: inherit;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   cursor: pointer;
 }
 
@@ -22548,7 +22555,7 @@ button.wb-table-mention:active {
   color: var(--wb-text);
   box-shadow: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   outline: none;
 }
 
@@ -22571,7 +22578,7 @@ button.wb-table-mention:active {
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   cursor: pointer;
 }
@@ -22613,7 +22620,7 @@ button.wb-table-mention:active {
   margin: auto;
   padding: 16px 24px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.55;
   text-align: center;
 }
@@ -22673,7 +22680,7 @@ button.wb-table-mention:active {
   min-width: 0;
   overflow: hidden;
   color: var(--wb-tree-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -22686,7 +22693,7 @@ button.wb-table-mention:active {
   gap: 5px;
   overflow: hidden;
   color: var(--wb-remark-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -22699,7 +22706,7 @@ button.wb-table-mention:active {
   border-radius: 4px;
   background: color-mix(in srgb, var(--wb-accent-soft) 78%, transparent);
   color: var(--wb-accent-strong);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
   line-height: 14px;
 }
@@ -22707,7 +22714,7 @@ button.wb-table-mention:active {
 .wb-quick-open-empty {
   margin: 16px 12px;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: center;
 }
 
@@ -22791,7 +22798,7 @@ button.wb-table-mention:active {
   align-items: center;
   gap: 6px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-quick-open-hint kbd {
@@ -22806,7 +22813,7 @@ button.wb-table-mention:active {
   background: var(--wb-surface, var(--wb-bg));
   color: var(--wb-secondary-text);
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   line-height: 1;
 }
 
@@ -22873,7 +22880,7 @@ button.wb-table-mention:active {
   border-radius: 0;
   background: transparent;
   color: var(--wb-tree-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: left;
   cursor: pointer;
   transition: color 0.12s ease, box-shadow 0.12s ease;
@@ -22971,7 +22978,7 @@ button.wb-table-mention:active {
   border-radius: 5px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
@@ -22983,7 +22990,7 @@ button.wb-table-mention:active {
 .wb-quick-open-db-section-title {
   margin: 2px 6px 4px;
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -23000,7 +23007,7 @@ button.wb-table-mention:active {
   border-radius: 5px;
   background: transparent;
   color: var(--wb-tree-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-align: left;
   cursor: pointer;
   transition: color 0.12s ease, box-shadow 0.12s ease;
@@ -23038,7 +23045,7 @@ button.wb-table-mention:active {
   max-width: 40%;
   overflow: hidden;
   color: var(--wb-quiet-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -23061,7 +23068,7 @@ button.wb-table-mention:active {
 .wb-quick-open-db-empty {
   margin: 12px 8px;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   text-align: center;
 }
 
@@ -23073,7 +23080,7 @@ button.wb-table-mention:active {
 .wb-quick-open-quick-hint {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
 }
 
@@ -23092,7 +23099,7 @@ button.wb-table-mention:active {
   background: var(--wb-menu-surface);
   color: var(--wb-text);
   box-shadow: var(--wb-floating-shadow-strong);
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   outline: none;
 }
 
@@ -23110,7 +23117,7 @@ button.wb-table-mention:active {
 }
 
 .wb-design-debug-header strong {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -23119,7 +23126,7 @@ button.wb-table-mention:active {
   border-radius: 999px;
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -23177,7 +23184,7 @@ button.wb-table-mention:active {
 
 .wb-design-debug-value {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   color: var(--wb-quiet-text);
   text-align: right;
 }
@@ -23195,7 +23202,7 @@ button.wb-table-mention:active {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
 }
 
@@ -23217,7 +23224,7 @@ button.wb-table-mention:active {
 .wb-design-debug-hint {
   margin: 8px 12px 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
@@ -23250,7 +23257,7 @@ button.wb-table-mention:active {
   border-radius: 6px;
   background: var(--wb-control);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1;
   cursor: pointer;
 }
@@ -23270,7 +23277,7 @@ button.wb-table-mention:active {
 .wb-design-debug-fill-hint {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 /* Virtual columns preserve table geometry without content or pointer targets. */
@@ -23289,7 +23296,7 @@ button.wb-table-mention:active {
 .wb-audit-search { display: flex; flex: none; gap: 6px; padding: 10px; border-bottom: 1px solid var(--wb-border); }
 .wb-audit-search-field { position: relative; flex: 1; min-width: 0; }
 .wb-audit-search-field > svg { position: absolute; z-index: 1; top: 50%; left: 9px; color: var(--wb-muted); transform: translateY(-50%); pointer-events: none; }
-.wb-audit-search input { width: 100%; min-width: 0; height: 30px; padding: 0 8px 0 29px; font-size: 12px; }
+.wb-audit-search input { width: 100%; min-width: 0; height: 30px; padding: 0 8px 0 29px; font-size: var(--wb-fs-body); }
 .wb-audit-search button { flex: none; width: 30px; height: 30px; padding: 0; display: inline-grid; place-items: center; }
 .wb-audit-table-scroll, .wb-audit-timeline { min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 /* Keep each entry at its content height when the list overflows. */
@@ -23297,18 +23304,18 @@ button.wb-table-mention:active {
 .wb-audit-table { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; row-gap: 2px; width: 100%; min-width: 0; min-height: min-content; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--wb-text); text-align: left; }
 .wb-audit-table-icon { grid-row: 1 / span 3; margin-top: 2px; color: var(--wb-muted); }
 .wb-audit-table strong, .wb-audit-table span, .wb-audit-table time { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-audit-table strong { font-size: 12.5px; font-weight: 600; line-height: 1.45; }
-.wb-audit-table span, .wb-audit-table time { color: var(--wb-muted); font-size: 11.5px; line-height: 1.45; }
+.wb-audit-table strong { font-size: var(--wb-fs-body); font-weight: 600; line-height: 1.45; }
+.wb-audit-table span, .wb-audit-table time { color: var(--wb-muted); font-size: var(--wb-fs-caption); line-height: 1.45; }
 .wb-audit-table time { font-variant-numeric: tabular-nums; }
 .wb-audit-table:hover:not(:disabled) { background: var(--wb-control-hover); }
 .wb-audit-table.active { background: var(--wb-accent-soft); box-shadow: inset 3px 0 var(--wb-accent-control); }
 .wb-audit-table.active .wb-audit-table-icon { color: var(--wb-accent-strong); }
-.wb-audit-hint { margin: 0; color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.wb-audit-hint { margin: 0; color: var(--wb-muted); font-size: var(--wb-fs-body); line-height: 1.6; }
 .wb-audit-list-hint { padding: 10px 6px; }
 .wb-audit-timeline { padding: 16px 20px 20px; }
 .wb-audit-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 14px; overflow-wrap: anywhere; }
-.wb-audit-heading > strong { font-size: 16px; font-weight: 650; }
-.wb-audit-heading > span { color: var(--wb-muted); font-size: 12px; }
+.wb-audit-heading > strong { font-size: var(--wb-fs-heading); font-weight: 650; }
+.wb-audit-heading > span { color: var(--wb-muted); font-size: var(--wb-fs-body); }
 .wb-audit-heading > .wb-audit-hint { flex-basis: 100%; }
 .wb-audit-operations { position: relative; display: grid; gap: 10px; padding-left: 20px; }
 .wb-audit-operations::before { content: ""; position: absolute; top: 14px; bottom: 14px; left: 5px; width: 2px; border-radius: 1px; background: var(--wb-border-strong); }
@@ -23318,16 +23325,16 @@ button.wb-table-mention:active {
 .wb-audit-operation[data-source="rollback"]::before { background: var(--wb-warning-text); }
 .wb-audit-operation.targeted { box-shadow: inset 0 0 0 1px var(--wb-danger-border); }
 .wb-audit-operation > header, .wb-audit-detail > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
-.wb-audit-operation > header strong { font-size: 13px; font-weight: 650; }
-.wb-audit-operation time, .wb-audit-detail header > time, .wb-audit-detail header > span:last-child { color: var(--wb-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wb-audit-operation > header strong { font-size: var(--wb-fs-body); font-weight: 650; }
+.wb-audit-operation time, .wb-audit-detail header > time, .wb-audit-detail header > span:last-child { color: var(--wb-muted); font-size: var(--wb-fs-body); font-variant-numeric: tabular-nums; }
 .wb-audit-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
-.wb-audit-count { padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--wb-text) 6%, transparent); color: var(--wb-secondary-text); font-size: 11.5px; line-height: 1.6; white-space: nowrap; }
+.wb-audit-count { padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--wb-text) 6%, transparent); color: var(--wb-secondary-text); font-size: var(--wb-fs-caption); line-height: 1.6; white-space: nowrap; }
 .wb-audit-count b { font-variant-numeric: tabular-nums; font-weight: 700; }
 .wb-audit-count[data-kind="insert"]:not([data-zero="true"]) { background: var(--wb-success-surface); color: var(--wb-success-text); }
 .wb-audit-count[data-kind="update"]:not([data-zero="true"]) { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
 .wb-audit-count[data-kind="delete"]:not([data-zero="true"]) { background: color-mix(in srgb, var(--wb-danger) 12%, transparent); color: var(--wb-danger); }
 .wb-audit-count[data-zero="true"] { opacity: 0.7; }
-.wb-audit-blocked { display: inline-flex; align-items: center; gap: 4px; color: var(--wb-warning-text); font-size: 11.5px; font-weight: 600; }
+.wb-audit-blocked { display: inline-flex; align-items: center; gap: 4px; color: var(--wb-warning-text); font-size: var(--wb-fs-caption); font-weight: 600; }
 .wb-audit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .wb-audit-actions > button { display: inline-flex; align-items: center; gap: 6px; }
 .wb-audit-details-toggle > svg { transition: transform 0.15s ease; }
@@ -23336,12 +23343,12 @@ button.wb-table-mention:active {
 .wb-audit-history .wb-audit-back { display: none; }
 .wb-audit-back { align-items: center; gap: 6px; }
 .wb-audit-preview { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border-radius: 10px; outline: none; background: var(--wb-danger-surface); box-shadow: inset 0 0 0 1px var(--wb-danger-border); }
-.wb-audit-preview h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--wb-danger-text); font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
-.wb-audit-preview-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: 12.5px; }
+.wb-audit-preview h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--wb-danger-text); font-size: var(--wb-fs-title); font-weight: 650; overflow-wrap: anywhere; }
+.wb-audit-preview-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: var(--wb-fs-body); }
 .wb-audit-preview-facts dt { color: var(--wb-secondary-text); }
 .wb-audit-preview-facts dd { margin: 0; color: var(--wb-text); }
 .wb-audit-preview p { margin: 0; line-height: 1.55; }
-.wb-audit-preview-warning { color: var(--wb-text); font-size: 12.5px; }
+.wb-audit-preview-warning { color: var(--wb-text); font-size: var(--wb-fs-body); }
 .wb-audit-preview .wb-audit-actions { justify-content: flex-end; }
 .wb-audit-error { margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; background: var(--wb-danger-surface); color: var(--wb-danger-text); line-height: 1.55; overflow-wrap: anywhere; }
 .wb-audit-tables > .wb-audit-error { margin: 8px; }
@@ -23349,12 +23356,12 @@ button.wb-table-mention:active {
 .wb-audit-details { display: grid; gap: 2px; padding: 4px 12px; border-radius: 8px; background: color-mix(in srgb, var(--wb-text) 3.5%, transparent); }
 .wb-audit-detail { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--wb-border); overflow-wrap: anywhere; }
 .wb-audit-detail:last-of-type { border-bottom: 0; }
-.wb-audit-identity { margin: 0; color: var(--wb-secondary-text); font-family: var(--wb-mono-font, ui-monospace, monospace); font-size: 11.5px; }
-.wb-audit-detail ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+.wb-audit-identity { margin: 0; color: var(--wb-secondary-text); font-family: var(--wb-mono-font, ui-monospace, monospace); font-size: var(--wb-fs-caption); }
+.wb-audit-detail ul { margin: 0; padding-left: 18px; font-size: var(--wb-fs-body); line-height: 1.65; white-space: pre-wrap; }
 .wb-audit-more { justify-self: center; margin: 8px auto; }
 .wb-audit-welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 100%; padding: 40px 16px; text-align: center; }
-.wb-audit-welcome strong { font-size: 14px; font-weight: 650; }
-.wb-audit-welcome p { max-width: 42ch; margin: 0; color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.wb-audit-welcome strong { font-size: var(--wb-fs-title); font-weight: 650; }
+.wb-audit-welcome p { max-width: 42ch; margin: 0; color: var(--wb-muted); font-size: var(--wb-fs-body); line-height: 1.6; }
 @media (max-width: 700px) {
   .wb-audit-history { grid-template-columns: minmax(0, 1fr); }
   .wb-audit-history:not(.has-selection) .wb-audit-timeline { display: none; }
@@ -23400,7 +23407,7 @@ button.wb-table-mention:active {
     0 0 0 1px color-mix(in srgb, var(--wb-notice-accent) 18%, transparent),
     var(--wb-floating-shadow);
   color: var(--wb-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.45;
   pointer-events: auto;
   user-select: text;
@@ -23447,7 +23454,7 @@ button.wb-table-mention:active {
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-notice-accent) 14%, transparent);
   color: var(--wb-notice-accent);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   vertical-align: 1px;
@@ -23580,7 +23587,7 @@ button.wb-table-mention:active {
   padding-left: 24px;
   color: var(--wb-quiet-text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -23642,7 +23649,7 @@ button.wb-table-mention:active {
   background: var(--wb-mac-menu-surface);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   backdrop-filter: blur(24px) saturate(1.8);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 :root[data-wb-platform="macos"] .wb-context-menu button,
 :root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button {
@@ -23728,4 +23735,80 @@ button.wb-table-mention:active {
 }
 :root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar {
   background: var(--wb-vibrancy-titlebar);
+}
+
+/* External-AI activity glow: soft inner edge ring + status pill. */
+.wb-ai-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease-out;
+  border-radius: inherit;
+}
+
+.wb-ai-glow.is-active {
+  opacity: 1;
+  transition: opacity 0.18s ease-out;
+}
+
+.wb-ai-glow-edge {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--wb-glow-color, var(--wb-glow-custom, var(--wb-accent))) 60%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--wb-glow-color, var(--wb-glow-custom, var(--wb-accent))) 34%, transparent);
+  animation: wb-ai-glow-breathe 2.4s ease-in-out infinite;
+}
+
+.wb-ai-glow.is-write .wb-ai-glow-edge {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--wb-glow-color, var(--wb-glow-custom, var(--wb-accent))) 85%, transparent),
+    inset 0 0 40px color-mix(in srgb, var(--wb-glow-color, var(--wb-glow-custom, var(--wb-accent))) 55%, transparent);
+}
+
+@keyframes wb-ai-glow-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.wb-ai-glow-pill {
+  position: fixed;
+  top: 6px;
+  right: 132px;
+  left: auto;
+  transform: none;
+  z-index: 901;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-toolbar-surface, var(--wb-surface)) 82%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  pointer-events: none;
+}
+
+.wb-ai-glow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-accent);
+}
+
+.wb-ai-glow-pill.is-write .wb-ai-glow-dot { background: var(--wb-accent-strong, var(--wb-accent)); }
+
+.wb-ai-glow-pill-enter-active { transition: opacity 0.18s ease-out; }
+.wb-ai-glow-pill-leave-active { transition: opacity 0.6s ease-out; }
+.wb-ai-glow-pill-enter-from, .wb-ai-glow-pill-leave-to { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-ai-glow-edge { animation: none; opacity: 1; }
+  .wb-ai-glow, .wb-ai-glow-pill-enter-active, .wb-ai-glow-pill-leave-active { transition: none; }
 }

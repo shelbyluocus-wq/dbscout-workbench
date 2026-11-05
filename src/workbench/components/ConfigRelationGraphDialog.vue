@@ -225,14 +225,14 @@ function goHome() {
 .wb-relation-graph-fullscreen-title strong {
   flex: none;
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
 .wb-relation-graph-fullscreen-comment {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -246,7 +246,7 @@ function goHome() {
   height: 24px;
   padding: 0 9px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-fullscreen-tools {
@@ -269,7 +269,7 @@ function goHome() {
   min-height: 28px;
   height: 28px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-relation-graph-fullscreen-body {
@@ -290,7 +290,7 @@ function goHome() {
   height: 100%;
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 @media (prefers-reduced-motion: reduce) {

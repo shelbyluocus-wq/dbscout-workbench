@@ -68,7 +68,7 @@ function update(key, event) {
 .wb-rf-editor-group h4 {
   margin: 0;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 

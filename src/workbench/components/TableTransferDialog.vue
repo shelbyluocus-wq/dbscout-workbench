@@ -493,11 +493,11 @@ async function deleteActiveTemplate() {
 }
 
 .wb-table-transfer-header h2 {
-  font-size: 16px;
+  font-size: var(--wb-fs-heading);
 }
 
 .wb-table-transfer-header p {
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-transfer-body {
@@ -533,7 +533,7 @@ async function deleteActiveTemplate() {
   border-radius: 4px;
   background: var(--wb-pane-header);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
@@ -558,7 +558,7 @@ async function deleteActiveTemplate() {
   border-radius: 4px;
   background: var(--wb-cell-editor);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-transfer-name-input[aria-invalid="true"] {
@@ -574,7 +574,7 @@ async function deleteActiveTemplate() {
   height: 30px;
   padding: 0 10px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   white-space: nowrap;
 }
 
@@ -615,7 +615,7 @@ async function deleteActiveTemplate() {
 .wb-table-transfer-name-error {
   margin: -6px 0 0;
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 /* Two-column form: the label column is as wide as the longest label in the
@@ -634,7 +634,7 @@ async function deleteActiveTemplate() {
 
 .wb-table-transfer-label {
   min-width: 56px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
   white-space: nowrap;
 }
@@ -655,7 +655,7 @@ async function deleteActiveTemplate() {
   border-radius: 3px;
   background: var(--wb-cell-editor);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-table-transfer-path button {
@@ -670,7 +670,7 @@ async function deleteActiveTemplate() {
   border-radius: 3px;
   background: var(--wb-pane-header);
   color: var(--wb-text);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -697,7 +697,7 @@ async function deleteActiveTemplate() {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
 }
 
@@ -737,7 +737,7 @@ async function deleteActiveTemplate() {
   max-height: 7.5em;
   overflow: auto;
   color: var(--wb-danger);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -751,7 +751,7 @@ async function deleteActiveTemplate() {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
 }
 
@@ -773,7 +773,7 @@ async function deleteActiveTemplate() {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   color: var(--wb-text);
   word-break: break-all;
 }
@@ -789,7 +789,7 @@ async function deleteActiveTemplate() {
   background: transparent;
   font-family: var(--wb-font-ui);
   font-weight: var(--wb-font-weight-ui);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
   line-height: 1.6;
   color: var(--wb-text);
   white-space: pre-wrap;

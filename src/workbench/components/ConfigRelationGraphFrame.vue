@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
   background: var(--wb-menu-surface);
   box-shadow: 0 0 0 1px var(--wb-border), var(--wb-floating-shadow);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
   opacity: 0;
   pointer-events: none;
@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
 
 .wb-relation-graph-help-tip strong {
   color: var(--wb-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
 }
 
@@ -399,7 +399,7 @@ onBeforeUnmount(() => {
   background: var(--wb-menu-surface);
   box-shadow: 0 0 0 1px var(--wb-border), 0 2px 8px rgba(0, 0, 0, 0.08);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -433,7 +433,7 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--wb-menu-surface) 88%, transparent);
   box-shadow: 0 0 0 1px var(--wb-line);
   color: var(--wb-quiet-text);
-  font-size: 10.5px;
+  font-size: var(--wb-fs-caption);
   line-height: 18px;
   pointer-events: none;
 }

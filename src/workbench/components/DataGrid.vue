@@ -1093,8 +1093,12 @@ function setupResizeObserver() {
   gridViewportHeight.value = gridWrapRef.value.clientHeight;
   resizeObserver = new ResizeObserver(() => {
     gridViewportHeight.value = gridWrapRef.value?.clientHeight || 0;
+    nextTick(updateFillOverlayPosition);
   });
   resizeObserver.observe(gridWrapRef.value);
+  for (const element of gridWrapRef.value.querySelectorAll(".wb-grid, .wb-grid thead")) {
+    resizeObserver.observe(element);
+  }
 }
 
 watch(
@@ -1140,12 +1144,20 @@ watch(
 
 watch(
   () => [
+    props.tab?.id,
     props.showFillHandle,
     props.fillOptions,
     props.selectedRange,
     props.virtualRange?.start,
     props.virtualRange?.end,
-    props.visibleRows.length,
+    props.virtualRange?.padTop,
+    props.visibleRows,
+    renderCellColumns.value,
+    rowHeight.value,
+    fieldCommentBandHeight.value,
+    frozenRowStart.value,
+    frozenRowCount.value,
+    frozenColumnCount.value,
   ],
   () => {
     nextTick(updateFillOverlayPosition);

@@ -20,7 +20,7 @@ defineProps({
   border: 1px solid var(--wb-border-strong);
   border-radius: 999px;
   color: var(--wb-secondary-text);
-  font-size: 10px;
+  font-size: var(--wb-fs-caption);
   font-weight: 600;
   line-height: 15px;
   white-space: nowrap;

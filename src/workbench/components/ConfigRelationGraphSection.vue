@@ -185,7 +185,7 @@ function openExpanded() {
   background: var(--wb-field-surface);
   box-shadow: inset 0 0 0 1px var(--wb-line);
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-placeholder.is-empty {

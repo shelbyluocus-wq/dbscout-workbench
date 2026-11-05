@@ -133,7 +133,7 @@ function set(ruleId, value) {
   border: 1px solid var(--wb-border);
   border-radius: 999px;
   color: var(--wb-secondary-text);
-  font-size: 12px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-auto-body {
@@ -143,7 +143,7 @@ function set(ruleId, value) {
 
 .wb-rf-auto-body h5 {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--wb-fs-body);
   font-weight: 650;
 }
 
@@ -165,7 +165,7 @@ function set(ruleId, value) {
   gap: 6px 16px;
   min-height: 38px;
   border-top: 1px solid var(--wb-line);
-  font-size: 13px;
+  font-size: var(--wb-fs-body);
 }
 
 .wb-rf-auto-chevron {

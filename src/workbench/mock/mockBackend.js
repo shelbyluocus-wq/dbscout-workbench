@@ -30,6 +30,11 @@ const mockSessions = new Map();
 const perfRows = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+globalThis.__DBSCOUT_SIMULATE_AI_ACTIVITY__ = (kind = "read", ms = 2000) => {
+  const id = `sim-${Date.now()}`;
+  emitMockEvent("control-activity", { phase: "start", kind, id });
+  setTimeout(() => emitMockEvent("control-activity", { phase: "end", kind, id }), ms);
+};
 // Dev-only: emit an external-MCP `control-workbench-action` UI action as if the
 // Rust control server forwarded it (e.g. `__DBSCOUT_SIMULATE_UI_ACTION__("open_table", { table: "player" })`).
 globalThis.__DBSCOUT_SIMULATE_UI_ACTION__ = (action, args = {}) => {

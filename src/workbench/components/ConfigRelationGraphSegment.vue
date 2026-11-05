@@ -43,7 +43,7 @@ const emit = defineEmits(["select"]);
   border-radius: 5px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
   white-space: nowrap;
 }

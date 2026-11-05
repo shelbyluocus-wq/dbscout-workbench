@@ -94,7 +94,7 @@ function toggle(key) {
   border-radius: 999px;
   background: transparent;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   font-weight: 500;
 }
 
@@ -160,7 +160,7 @@ function toggle(key) {
   flex-wrap: wrap;
   gap: 2px 10px;
   color: var(--wb-secondary-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-relation-graph-status {
@@ -190,7 +190,7 @@ function toggle(key) {
 .wb-relation-graph-hidden {
   margin: 0;
   color: var(--wb-quiet-text);
-  font-size: 11px;
+  font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 </style>

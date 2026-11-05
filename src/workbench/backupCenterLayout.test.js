@@ -52,7 +52,7 @@ test("backup center close button has a stable header-specific target", () => {
   assert.match(styles, /\.wb-backup-close\s*\{[^}]*width:\s*32px/s);
   assert.match(styles, /\.wb-backup-close\s*\{[^}]*height:\s*32px/s);
   assert.match(styles, /\.wb-backup-close\s*\{[^}]*justify-self:\s*end/s);
-  assert.match(styles, /\.wb-backup-close\s*\{[^}]*font-size:\s*20px/s);
+  assert.match(styles, /\.wb-backup-close\s*\{[^}]*font-size:\s*var\(--wb-fs-display\)/s);
   assert.match(
     styles,
     /\.wb-dialog-close:hover:not\(:disabled\),\s*\.wb-dialog-close:focus-visible\s*\{[^}]*background:\s*var\(--wb-accent-soft\)[^}]*color:\s*var\(--wb-text\)/s,
