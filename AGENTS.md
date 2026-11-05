@@ -311,6 +311,9 @@ capabilities:
   `0` (reset), in 10% steps from 50% to 200%, through native WebView zoom.
   These fixed shortcuts work inside editors and dialogs, are listed in shortcut
   settings and the macOS View menu, and leave graph wheel/pinch zoom untouched.
+  Holding the same platform modifier while scrolling the wheel also zooms the
+  page (up enlarges, down shrinks); plain scrolling and relation-graph gestures
+  stay unchanged. `Cmd` / `Ctrl` + `0` resets to the default 100% size.
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based

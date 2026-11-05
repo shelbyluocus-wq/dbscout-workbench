@@ -61,7 +61,7 @@ import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js"
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
-import { createPageZoom, pageZoomAction } from "./utils/pageZoom.js";
+import { createPageZoom, createPageZoomWheelHandler, pageZoomAction } from "./utils/pageZoom.js";
 import { noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
 import { useMacosTitlebarDoubleClick } from "./composables/useMacosTitlebar.js";
 import { useMacosVibrancy } from "./composables/useMacosVibrancy.js";
@@ -4731,6 +4731,12 @@ const pageZoom = createPageZoom({
   onError: (error) => setStatus(t("pageZoom.failed", { error: String(error?.message || error) }), { tone: "error" }),
 });
 
+const handlePageZoomWheel = createPageZoomWheelHandler({
+  platform: isMacOSPlatform() ? "macos" : "windows",
+  run: pageZoom.run,
+  enabled: isTauriRuntime,
+});
+
 function handleGlobalShortcutKeydown(event) {
   if (event.target?.closest?.('[data-wb-shortcut-capture="true"]')) return;
   const zoomAction = pageZoomAction(event, isMacOSPlatform() ? "macos" : "windows");
@@ -5304,6 +5310,7 @@ onMounted(async () => {
   // Capture-phase listener so native WebView shortcuts are intercepted before
   // Ctrl+F opens find-in-page or Ctrl+P opens the print dialog.
   document.addEventListener("keydown", handleGlobalShortcutKeydown, true);
+  document.addEventListener("wheel", handlePageZoomWheel, { capture: true, passive: false });
   document.addEventListener("contextmenu", openInputContextMenu, true);
   document.addEventListener("pointerdown", dismissInputContextMenu, true);
   document.addEventListener("keydown", dismissInputContextMenu, true);
@@ -5350,6 +5357,7 @@ onBeforeUnmount(() => {
   void disposeTableSessions();
   window.removeEventListener("resize", onWindowResize);
   document.removeEventListener("keydown", handleGlobalShortcutKeydown, true);
+  document.removeEventListener("wheel", handlePageZoomWheel, true);
   document.removeEventListener("contextmenu", openInputContextMenu, true);
   document.removeEventListener("pointerdown", dismissInputContextMenu, true);
   document.removeEventListener("keydown", dismissInputContextMenu, true);

@@ -41,6 +41,7 @@ const referenceRows = computed(() => {
     { label: t("pageZoom.in"), keys: [`${formatShortcutForPlatform("Ctrl")} +`, formatShortcutForPlatform("Ctrl+=")] },
     { label: t("pageZoom.out"), keys: [formatShortcutForPlatform("Ctrl+-")] },
     { label: t("pageZoom.reset"), keys: [formatShortcutForPlatform("Ctrl+0")] },
+    { label: t("pageZoom.wheel"), keys: [`${formatShortcutForPlatform("Ctrl")} + ${t("pageZoom.wheelKey")}`] },
     { label: t("shortcut.refOpen"), keys: ["Enter", t("shortcut.keyDoubleClick")] },
     { label: t("shortcut.refDelete"), keys: ["Delete"] },
     { label: t("shortcut.refRename"), keys: ["F2"] },

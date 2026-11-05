@@ -10,6 +10,31 @@ export function pageZoomAction(event, platform) {
   return null;
 }
 
+export function createPageZoomWheelHandler({ platform, run, enabled = () => true, now = () => performance.now() }) {
+  let accumulated = 0;
+  let lastTime = -Infinity;
+  return (event) => {
+    const modifier = platform === "macos" ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (!enabled() || !modifier || event.altKey || event.shiftKey || event.defaultPrevented
+      || !Number.isFinite(event.deltaY) || !event.deltaY || event.cancelable === false
+      || Math.abs(event.deltaX || 0) > Math.abs(event.deltaY)
+      || event.target?.closest?.('.wb-relation-graph-canvas, .wb-relation-graph-surface, [data-wb-shortcut-capture="true"]')) {
+      accumulated = 0;
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const time = now();
+    const delta = event.deltaY * (event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? 80 : 1);
+    if (time - lastTime > 200 || Math.sign(delta) !== Math.sign(accumulated)) accumulated = 0;
+    lastTime = time;
+    accumulated += delta;
+    if (Math.abs(accumulated) < 80) return;
+    accumulated = 0;
+    void run(delta < 0 ? "zoomIn" : "zoomOut");
+  };
+}
+
 export function createPageZoom({ applyZoom, onChange = () => {}, onError = () => {} }) {
   let applied = 1;
   let requested = 1;
