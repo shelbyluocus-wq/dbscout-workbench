@@ -23850,3 +23850,481 @@ button.wb-table-mention:active {
   .wb-ai-glow-edge { animation: none; opacity: 1; }
   .wb-ai-glow, .wb-ai-glow-pill-enter-active, .wb-ai-glow-pill-leave-active { transition: none; }
 }
+
+/* ── Table folders (Finder-like page) ─────────────────────────────────── */
+/* Same layer as the other workbench dialogs, so the shared confirmation
+   (deleting a folder, opening many tables) stacks above it. */
+.wb-table-folder-overlay {
+  z-index: 200;
+}
+
+.wb-table-folder-dialog {
+  width: min(920px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 64px));
+  border-color: var(--wb-border-strong);
+  background: var(--wb-dialog-surface);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-table-folder-header {
+  gap: 12px;
+}
+
+.wb-table-folder-header > strong {
+  flex: 0 0 auto;
+}
+
+.wb-table-folder-scope {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: var(--wb-fs-caption);
+  font-weight: 500;
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-folder-scope select {
+  max-width: 340px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: var(--wb-fs-body);
+}
+
+.wb-table-folder-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-table-folder-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--wb-border);
+  background: var(--wb-tree-surface);
+}
+
+.wb-table-folder-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.wb-table-folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-table-folder-item:hover {
+  background: var(--wb-list-hover);
+}
+
+.wb-table-folder-item.is-selected {
+  background: var(--wb-list-selected);
+  font-weight: 600;
+}
+
+.wb-table-folder-item:focus-visible,
+.wb-table-folder-row:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-table-folder-item > svg {
+  flex: 0 0 auto;
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-folder-item .wb-table-folder-star,
+.wb-table-folder-import-menu .wb-table-folder-star {
+  color: var(--wb-database-name-amber);
+}
+
+.wb-table-folder-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-folder-item small,
+.wb-table-folder-import-menu small {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-table-folder-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 4px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.wb-table-folder-error {
+  margin: 2px 8px 6px;
+  color: var(--wb-danger);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-table-folder-sidebar-actions {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-table-folder-sidebar-actions button,
+.wb-table-folder-actions button,
+.wb-table-folder-picker-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-table-folder-sidebar-actions button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-folder-sidebar-actions button:hover:not(:disabled),
+.wb-table-folder-actions button:hover:not(:disabled),
+.wb-table-folder-picker-footer button:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-table-folder-actions button.is-primary,
+.wb-table-folder-picker-footer button.is-primary {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  font-weight: 650;
+}
+
+.wb-table-folder-actions button.is-primary:hover:not(:disabled),
+.wb-table-folder-picker-footer button.is-primary:hover:not(:disabled) {
+  background: var(--wb-accent-control-hover);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-table-folder-actions button[aria-pressed="true"] {
+  background: var(--wb-list-selected);
+}
+
+.wb-table-folder-sidebar-actions button:disabled,
+.wb-table-folder-actions button:disabled,
+.wb-table-folder-picker-footer button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.wb-table-folder-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-table-folder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-table-folder-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-table-folder-heading strong {
+  overflow: hidden;
+  font-size: var(--wb-fs-title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-folder-heading > span {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-table-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-table-folder-icon-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-table-folder-icon-button:hover,
+.wb-table-folder-icon-button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-table-folder-icon-button.is-danger:hover,
+.wb-table-folder-icon-button.is-danger:focus-visible {
+  color: var(--wb-danger);
+}
+
+.wb-table-folder-import {
+  position: relative;
+}
+
+.wb-table-folder-import-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  width: 260px;
+  max-height: 280px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--wb-floating-border);
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  box-shadow: var(--wb-floating-shadow);
+}
+
+.wb-table-folder-import-menu p {
+  margin: 2px 6px 6px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.45;
+}
+
+.wb-table-folder-actions .wb-table-folder-import-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+}
+
+.wb-table-folder-import-menu button span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.wb-table-folder-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.wb-table-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.wb-table-folder-row:hover,
+.wb-table-folder-row.is-focused {
+  background: var(--wb-list-hover);
+}
+
+.wb-table-folder-row-icon {
+  flex: 0 0 auto;
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-folder-table {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-identifier-text);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-folder-comment {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-remark-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-table-folder-missing {
+  flex: 1 1 auto;
+  color: var(--wb-danger);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-table-folder-row.is-missing .wb-table-folder-table {
+  color: var(--wb-quiet-text);
+  text-decoration: line-through;
+}
+
+.wb-table-folder-row .wb-table-folder-icon-button {
+  opacity: 0;
+}
+
+.wb-table-folder-row:hover .wb-table-folder-icon-button,
+.wb-table-folder-row.is-focused .wb-table-folder-icon-button,
+.wb-table-folder-row .wb-table-folder-icon-button:focus-visible {
+  opacity: 1;
+}
+
+.wb-table-folder-picker {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wb-table-folder-picker .wb-table-folder-row {
+  cursor: pointer;
+}
+
+.wb-table-folder-row.is-present {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.wb-table-folder-check {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 4px;
+  background: var(--wb-field-surface);
+}
+
+.wb-table-folder-row.is-checked .wb-table-folder-check {
+  border-color: transparent;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+}
+
+.wb-table-folder-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 14px 4px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-folder-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.wb-table-folder-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-table-folder-empty,
+.wb-table-folder-empty-scope,
+.wb-table-folder-muted {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+  line-height: 1.5;
+}
+
+.wb-table-folder-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--wb-border);
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+}

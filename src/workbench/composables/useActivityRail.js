@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, Pin, Plug, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, FolderOpen, Pin, Plug, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -28,6 +28,13 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     labelKey: "m_b2772946e700",
     hintKey: "shell.databaseFavoritesHint",
     popup: "menu",
+  }),
+  Object.freeze({
+    id: "tableFolders",
+    icon: FolderOpen,
+    labelKey: "tableFolders.title",
+    hintKey: "tableFolders.hint",
+    popup: "dialog",
   }),
   Object.freeze({
     id: "backupCenter",
@@ -65,6 +72,8 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
   }),
 ]);
 
+const INSERT_AFTER = Object.freeze({ pinWindow: "blackcatMcp", tableFolders: "databaseFavorites" });
+
 const LEAD_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "lead");
 const TOP_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => !entry.zone);
 const BOTTOM_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "bottom");
@@ -95,7 +104,9 @@ export function resolveActivityRailOrder(stored) {
   const ordered = (Array.isArray(stored) ? stored : []).filter((id) => known.has(String(id)));
   defaultIds.forEach((id, index) => {
     if (!ordered.includes(id)) {
-      const insertion = id === "pinWindow" ? ordered.indexOf("blackcatMcp") + 1 : Math.min(index, ordered.length);
+      // Entries that ship later sit beside their neighbour in a custom order.
+      const anchor = INSERT_AFTER[id];
+      const insertion = anchor && ordered.includes(anchor) ? ordered.indexOf(anchor) + 1 : Math.min(index, ordered.length);
       ordered.splice(insertion, 0, id);
     }
   });

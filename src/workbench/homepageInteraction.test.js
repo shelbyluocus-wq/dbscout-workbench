@@ -180,7 +180,7 @@ test("homepage table favorites use aligned accessible star controls", () => {
   const tableList = read("./components/DatabaseTableList.vue");
   const styles = read("./workbench.css");
 
-  assert.match(home, /useTableFavoriteStore/);
+  assert.match(home, /useTableFolderStore/);
   assert.match(home, /:favorite-names="favoriteTableNames"/);
   assert.match(home, /@toggle-favorite="toggleTableFavorite"/);
   assert.match(home, /function\s+toggleTableFavorite\(name\)[\s\S]*?const\s+favorite\s*=\s*tableFavoriteStore\.toggleFavorite[\s\S]*?if\s*\(!favorite\)\s*return;[\s\S]*?nextTick\(\(\)\s*=>\s*tableListRef\.value\?\.scrollTableIntoView\?\.\(name,\s*\{\s*block:\s*"nearest"\s*\}\)\)/);

@@ -5,6 +5,7 @@ import { normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilt
 
 const STORAGE_KEY = "dbscout_workspace";
 const SNAPSHOT_VERSION = 4;
+let snapshotOverride = null;
 
 function normalizeTabKind(kind) {
   return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" ? kind : "data";
@@ -167,6 +168,7 @@ export function buildWorkspaceSnapshot({
  * Save a workspace snapshot to localStorage.
  */
 export function saveWorkspaceSnapshot(snapshot) {
+  if (snapshotOverride) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
@@ -179,10 +181,26 @@ export function saveWorkspaceSnapshot(snapshot) {
  * Returns null when no valid snapshot exists.
  */
 export function loadWorkspaceSnapshot() {
+  if (snapshotOverride) return parseWorkspaceSnapshot(snapshotOverride);
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    return parseWorkspaceSnapshot(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A window that is not the main window (a table folder window) starts from
+ * its own snapshot and never writes the main window's saved workspace.
+ */
+export function setWorkspaceSnapshotOverride(snapshot) {
+  snapshotOverride = snapshot && typeof snapshot === "object" ? snapshot : null;
+}
+
+export function parseWorkspaceSnapshot(parsed) {
+  try {
     if (!parsed || typeof parsed !== "object") return null;
     const tabs = Array.isArray(parsed.tabs)
       ? parsed.tabs
@@ -262,6 +280,7 @@ export function loadWorkspaceSnapshot() {
  * Clear the persisted workspace snapshot.
  */
 export function clearWorkspaceSnapshot() {
+  if (snapshotOverride) return;
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {

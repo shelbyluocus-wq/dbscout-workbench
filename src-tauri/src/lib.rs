@@ -46,6 +46,7 @@ mod table_replace;
 pub mod table_search;
 mod table_sessions;
 mod table_transfer;
+mod table_folder_windows;
 mod table_xlsx;
 #[cfg(test)]
 mod test_temp_dir;
@@ -111,9 +112,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Intercept the close button: hide to tray instead of quitting.
             // A real exit is only available from the tray menu (#10).
+            // Table folder windows close for real.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                if table_folder_windows::hides_to_tray(window.label()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .setup(move |app| {
@@ -209,6 +213,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             clipboard::read_clipboard_text,
+            table_folder_windows::open_table_folder_window,
+            table_folder_windows::forward_app_menu_action,
             commands::svn_update_get_config,
             commands::svn_update_pick_directory,
             commands::svn_update_check,

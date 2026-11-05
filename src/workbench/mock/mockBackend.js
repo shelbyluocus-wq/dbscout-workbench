@@ -1461,6 +1461,22 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     emitMockEvent("control-ui-result", payload);
     return null;
   }
+  if (command === "open_table_folder_window") {
+    // The browser preview opens the folder in a new browser tab, which reads
+    // the folder from the shared folder store.
+    const folderId = String(payload.request?.folderId || "");
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(folderId)) throw new Error("invalid folder id");
+    const label = `table-folder-${folderId}`;
+    const url = new URL(globalThis.location?.href || "http://127.0.0.1/");
+    url.search = "";
+    url.searchParams.set("tableFolder", folderId);
+    for (const [key, value] of new URLSearchParams(globalThis.location?.search || "")) {
+      if (key !== "tableFolder") url.searchParams.set(key, value);
+    }
+    globalThis.open?.(url.toString(), label);
+    return { reused: false, label, simulated: true };
+  }
+  if (command === "forward_app_menu_action") return false;
   if (command === "read_clipboard_text") {
     const readText = globalThis.navigator?.clipboard?.readText;
     if (typeof readText !== "function") throw new Error("读取剪贴板失败");

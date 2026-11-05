@@ -3215,7 +3215,7 @@ test("windows release binary uses the GUI subsystem instead of opening a console
 test("tauri permits custom titlebar window controls", () => {
   const capability = JSON.parse(read("../../src-tauri/capabilities/main.json"));
 
-  assert.deepEqual(capability.windows, ["main"]);
+  assert.deepEqual(capability.windows, ["main", "table-folder-*"]);
   assert.ok(capability.permissions.includes("core:default"));
   assert.ok(capability.permissions.includes("core:window:allow-set-theme"));
   assert.ok(capability.permissions.includes("core:window:allow-minimize"));

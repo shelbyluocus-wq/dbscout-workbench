@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 /// First Windows 11 build. Windows 10 paints the undecorated shadow inset as a
@@ -12,18 +12,22 @@ pub(crate) fn keep_system_window_shadow(windows_build: u32) -> bool {
 }
 
 pub(crate) fn soften_main_window_frame<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        soften_window_frame(&window);
+    }
+}
+
+/// Applied while a window is still hidden, so the black frame never flashes.
+/// Edge resizing stays available through the borderless hit test that runs
+/// when the shadow is off.
+pub(crate) fn soften_window_frame<R: Runtime>(window: &WebviewWindow<R>) {
     #[cfg(target_os = "windows")]
     if !keep_system_window_shadow(current_windows_build()) {
-        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-            // Applied while the window is still hidden, so the black frame
-            // never flashes. Edge resizing stays available through the
-            // borderless hit test that runs when the shadow is off.
-            let _ = window.set_shadow(false);
-        }
+        let _ = window.set_shadow(false);
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = app;
+        let _ = window;
     }
 }
 

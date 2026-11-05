@@ -23,7 +23,7 @@ import { databaseTextColorCss, useDatabaseDecorations } from "../composables/dat
 import { createHomepageTypeahead } from "../composables/useHomepageTypeahead.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
-import { useTableFavoriteStore } from "../composables/tableFavoriteStore.js";
+import { useTableFolderStore } from "../composables/tableFolderStore.js";
 import { createHomepageSelectionDismissal } from "../homepageSelectionDismissal.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
@@ -80,7 +80,8 @@ const clipboardRef = computed({
 const homeLoading = computed(() => props.tab.loading === true);
 const tableSource = computed(() => homeLoading.value ? [] : props.tables);
 const recentSource = computed(() => props.recentTableNames);
-const tableFavoriteStore = useTableFavoriteStore();
+// The star toggles the database's favorites folder.
+const tableFavoriteStore = useTableFolderStore();
 const favoriteTableNames = computed(() =>
   tableFavoriteStore.favoriteNames(props.tab.connectionId, props.tab.database),
 );
@@ -630,7 +631,6 @@ function submitRename(oldName, nextName) {
     tableName: oldName,
     newName: result.value,
     onSuccess: () => {
-      tableFavoriteStore.renameFavorite(props.tab.connectionId, props.tab.database, oldName, result.value);
       controller.completeRename(renameAttempt);
     },
     onError: (error) => {

@@ -15,7 +15,7 @@ test("activity rail pins add connection on top, lists the tool group, then pins 
   assert.deepEqual(leadItems.value.map((item) => item.id), ["addConnection"]);
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
+    ["quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
   );
   assert.deepEqual(
     bottomItems.value.map((item) => item.id),
@@ -157,11 +157,11 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("tableTransfer", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "blackcatMcp", "pinWindow"],
   );
   assert.equal(
     storage.getItem("dbscout_activity_rail_order"),
-    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"]),
+    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "blackcatMcp", "pinWindow"]),
   );
 
   // Fixed zones never join the sortable order.
@@ -169,14 +169,14 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("settings", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "blackcatMcp", "pinWindow"],
   );
 
   // A fresh composable on the same storage restores the custom order.
   const restored = useActivityRail({ storage });
   assert.deepEqual(
     restored.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "blackcatMcp", "pinWindow"],
   );
 });
 
@@ -189,7 +189,7 @@ test("activity rail order drops unknown ids and re-inserts missing entries at th
   // Stored ids keep their relative order; missing defaults re-insert at their slot.
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen", "blackcatMcp", "pinWindow"],
+    ["tableTransfer", "databaseFavorites", "tableFolders", "backupCenter", "quickOpen", "blackcatMcp", "pinWindow"],
   );
 });
 
@@ -200,7 +200,7 @@ test("activity rail ignores corrupt or absent stored order", () => {
     });
     assert.deepEqual(
       rail.items.value.map((item) => item.id),
-      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
+      ["quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
       `stored=${stored}`,
     );
   }
@@ -232,7 +232,7 @@ test("activity rail keeps the rail component inside the workbench before the sid
   assert.match(button, /:data-wb-rail-id="item\.id"/);
 
   assert.match(i18n, /"shell\.activityRail":\s*"功能入口"/);
-  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 10);
+  assert.equal(ACTIVITY_RAIL_ENTRIES.length, 11);
 });
 
 test("activity rail badges reflect live counts, cap at 99+, and hide at zero", () => {
@@ -268,7 +268,7 @@ test("old custom rail order removes relocated entries and places the new pin bel
   const rail = useActivityRail({ storage: {
     getItem: () => JSON.stringify(["blackcatMcp", "releaseFlow", "configRelations", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"]),
   } });
-  assert.deepEqual(rail.items.value.map((item) => item.id), ["blackcatMcp", "pinWindow", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"]);
+  assert.deepEqual(rail.items.value.map((item) => item.id), ["blackcatMcp", "pinWindow", "quickOpen", "databaseFavorites", "tableFolders", "backupCenter", "tableTransfer"]);
 });
 
 test("rail pin and update states react without rebuilding the rail", () => {

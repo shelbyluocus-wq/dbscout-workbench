@@ -61,6 +61,9 @@ import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js"
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
+import { useTableFolderStore } from "./composables/tableFolderStore.js";
+import { useTableFolders } from "./composables/useTableFolders.js";
+import { currentWindowRole, isTableFolderWindowRole } from "./utils/windowRole.js";
 import { createPageZoom, createPageZoomWheelHandler, pageZoomAction } from "./utils/pageZoom.js";
 import { noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
 import { useMacosTitlebarDoubleClick } from "./composables/useMacosTitlebar.js";
@@ -148,6 +151,7 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
+const TableFolderDialog = defineAsyncComponent(() => import("./components/TableFolderDialog.vue"));
 import AiActivityGlow from "./components/AiActivityGlow.vue";
 import { requestSqlRun } from "./utils/sqlRunRequests.js";
 import { applyAgentTableViewState } from "./utils/agentTableView.js";
@@ -1089,6 +1093,35 @@ function openBlackcatMcp() {
   blackcatMcpOpen.value = true;
 }
 
+// Table folders: named groups of one database's tables, opened together here
+// or in a window of their own. A folder window is this same page started
+// from a folder; it keeps no saved tabs and leaves the tray, updates and the
+// external MCP connection to the main window.
+const tableFolders = useTableFolderStore();
+const isFolderWindow = isTableFolderWindowRole(currentWindowRole());
+const tableFolderPage = useTableFolders({
+  invokeWorkbench,
+  workspace,
+  selectedConnectionId,
+  selectedDatabase,
+  connections,
+  connectionLabel,
+  databaseLabel,
+  openTable: (table) => openTable(table, { paneId: workspace.focusedPaneId }),
+  openTables: (request) => openTablesFromSidebar(request),
+  notify: (tone, message) => operationNotices.push({ tone, text: message }),
+});
+const {
+  dialog: tableFolderDialog,
+  scope: tableFolderScope,
+  scopeOptions: tableFolderScopeOptions,
+  openTableNames: tableFolderOpenTableNames,
+} = tableFolderPage;
+
+function openTableFolderPage() {
+  tableFolderPage.open();
+}
+
 async function openBackupCenter() {
   // Change logs are a cross-connection history, so open with the broadest
   // view instead of silently narrowing the list to the active workspace.
@@ -1148,6 +1181,7 @@ const {
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
     blackcatMcp: openBlackcatMcp,
+    tableFolders: openTableFolderPage,
     pinWindow: toggleWindowPin,
     update: openUpdateDialog,
     settings: openSidebarSettings,
@@ -3394,6 +3428,7 @@ async function executeTableRename() {
       oldName: tableRename.tableName,
       newName: tableRename.newName,
     });
+    tableFolders.renameTable(tableRename.connectionId, tableRename.database, tableRename.tableName, tableRename.newName);
     await conn.loadTables({ connectionId: tableRename.connectionId, database: tableRename.database });
   } catch (error) {
     tableRename.error = String(error);
@@ -3613,6 +3648,7 @@ async function renameHomeTable(source) {
     oldName: source.tableName,
     newName: source.newName,
   });
+  tableFolders.renameTable(source.connectionId, source.database, source.tableName, source.newName);
 
   try {
     await loadTables({ connectionId: source.connectionId, database: source.database });
@@ -3885,8 +3921,9 @@ function contextMenuTableSource() {
 
 // Opens several sidebar tables: the one the user acted on becomes the active
 // tab, the others load in the background in list order.
-async function openTablesFromSidebar({ tables = [], activeName = "" } = {}) {
-  if (!tables.length || !(await confirmOpeningTables(tables.length, { confirm: confirmDialogConfirm, t }))) return;
+async function openTablesFromSidebar({ tables = [], activeName = "", skipConfirm = false } = {}) {
+  if (!tables.length) return;
+  if (!skipConfirm && !(await confirmOpeningTables(tables.length, { confirm: confirmDialogConfirm, t }))) return;
   focusedPaneState.captureActiveTableViewState?.();
   const paneId = workspace.focusedPaneId;
   await Promise.all(tables.map(async (table) => {
@@ -5104,6 +5141,7 @@ const nativeMenuTools = computed(() => {
   const hasDatabase = Boolean(source.connectionId && source.database);
   const writable = hasDatabase && !isReadOnlySource(source);
   return [
+    { id: "tableFolders", label: t("tableFolders.title"), action: "tableFolders" },
     { id: "backupCenter", label: t("m_965320c43727"), action: "backupCenter" },
     { id: "tableTransfer", label: t("m_a36603b169a6"), action: "tableTransfer", shortcutAction: "openTableTransfer" },
     { id: "releaseFlow", label: t("releaseFlow.title"), action: "releaseFlow" },
@@ -5183,10 +5221,11 @@ function closeTabOrHideWindow() {
     void closeTab(tab.id);
     return;
   }
-  withCurrentWindow((win) => win.hide());
+  withCurrentWindow((win) => (isFolderWindow ? win.close() : win.hide()));
 }
 
 useNativeAppMenu({
+  secondaryWindow: isFolderWindow,
   bindings: shortcutHelper.bindings,
   appName: "黑猫",
   appVersion: APP_VERSION,
@@ -5216,6 +5255,7 @@ useNativeAppMenu({
     openDesign: openDesignFromMenu,
     editTableComment: editTableCommentFromMenu,
     refresh: refreshFromMenu,
+    tableFolders: openTableFolderPage,
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
     releaseFlow: openReleaseFlow,
@@ -5266,7 +5306,7 @@ function scheduleDeferredUpdateCheck() {
 onMounted(async () => {
   markPerf("workbench.mounted");
   tableModifiedTimeAutoRefresh.start();
-  void updater.startBackgroundListener();
+  if (!isFolderWindow) void updater.startBackgroundListener();
   void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);
   document.addEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
@@ -5284,28 +5324,30 @@ onMounted(async () => {
   // Re-register the global "open window" shortcut from the persisted binding
   // so a user-rebound combo takes effect this session instead of the Rust
   // startup default (analysis point #2). Best-effort; failures don't block UI.
-  void syncGlobalShortcutBinding();
+  if (!isFolderWindow) void syncGlobalShortcutBinding();
   try {
     await conn.loadConnections();
     // loadConnections() returns once the last-used connection is ready; other
     // saved connections keep restoring in order in the background. Only mark
     // the external MCP frontend ready after all of them, so a hidden cold
     // start cannot race its first DB/UI request against connection restoration.
-    void conn.whenConnectionsRestored().finally(() => agent.ensureControlListener());
+    if (!isFolderWindow) void conn.whenConnectionsRestored().finally(() => agent.ensureControlListener());
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
     await restoreSavedTabs();
     await ensureCurrentDatabaseHome();
+    tableFolderPage.afterFolderWindowRestored();
+    void tableFolderPage.startFolderWindow();
     markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
     sampleNextFrame("workbench.first-usable-frame", { tabs: workspace.tabs.length, tables: workspace.tables.length });
   } catch (e) {
     // Still release queued MCP calls so they receive the real connection error
     // instead of waiting until the control timeout.
-    await agent.ensureControlListener();
+    if (!isFolderWindow) await agent.ensureControlListener();
     conn.statusText.value = `初始化失败：${String(e)}`;
   }
   persistenceReady = true;
   persistWorkspace();
-  scheduleDeferredUpdateCheck();
+  if (!isFolderWindow) scheduleDeferredUpdateCheck();
   scheduleIdleStartupWork(() => { void preloadDeferredTabs(); }, RESTORED_TAB_PRELOAD_IDLE_TIMEOUT_MS);
 });
 
@@ -5316,6 +5358,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", flushWorkspacePersistence);
   tableModifiedTimeAutoRefresh.stop();
   void agent.disposeControlListener();
+  tableFolderPage.dispose();
   disposeConnection();
   void disposeGlobalTableSearch();
   void disposeTableSessions();
@@ -5870,6 +5913,23 @@ onBeforeUnmount(() => {
       :assistant="agent"
       :theme="effectiveTheme"
       @close="blackcatMcpOpen = false"
+    />
+
+    <TableFolderDialog
+      v-if="tableFolderDialog.open"
+      :scope="tableFolderScope"
+      :scope-options="tableFolderScopeOptions"
+      :tables="tableFolderDialog.tables"
+      :tables-loading="tableFolderDialog.loading"
+      :open-table-names="tableFolderOpenTableNames"
+      :theme="effectiveTheme"
+      :confirm="confirmDialogConfirm"
+      @close="tableFolderPage.close()"
+      @change-scope="tableFolderPage.setScope"
+      @open-window="tableFolderPage.openWindow"
+      @open-here="tableFolderPage.openHere"
+      @open-table="tableFolderPage.openOne"
+      @notice="(notice) => operationNotices.push({ tone: notice.tone, text: notice.message })"
     />
 
     <AiActivityGlow :theme="effectiveTheme" />

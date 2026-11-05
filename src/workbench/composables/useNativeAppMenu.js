@@ -20,6 +20,12 @@ export function useNativeAppMenu({
   appVersion = "",
   enabled = () => isTauriRuntime() && isMacOSPlatform(),
   menuApi = null,
+  // A table folder window builds no menu of its own: the main window owns
+  // the app-wide menu bar and hands items over while this window has focus.
+  secondaryWindow = false,
+  hasFocus = () => globalThis.document?.hasFocus?.() !== false,
+  forwardAction = defaultForwardAction,
+  listenForwarded = defaultListenForwarded,
 } = {}) {
   const itemById = new Map();
   const lastApplied = new Map();
@@ -43,12 +49,25 @@ export function useNativeAppMenu({
     return menuModulePromise;
   }
 
-  function dispatch(entry) {
+  function run(entry) {
     // The keystroke may have already been consumed by the in-page handler for
     // the same binding — skip a menu fire that lands within the dedup window.
     if (entry.shortcutAction && isRecentShortcutKeydown(entry.shortcutAction)) return;
     const action = actions[entry.action];
     if (typeof action === "function") void action();
+  }
+
+  async function dispatch(entry) {
+    // ⌘W chosen while a folder window has focus must close that window's
+    // tab, not one of the main window's.
+    if (!hasFocus()) {
+      try {
+        if (await forwardAction(entry)) return;
+      } catch {
+        // No folder window took it: act here.
+      }
+    }
+    run(entry);
   }
 
   async function createItem(api, entry) {
@@ -199,6 +218,30 @@ export function useNativeAppMenu({
     started = false;
   }
 
+  if (secondaryWindow) {
+    if (enabled()) {
+      void Promise.resolve(listenForwarded((entry) => {
+        if (entry?.action) run(entry);
+      })).catch((error) => console.error("[useNativeAppMenu] forward listener failed:", error));
+    }
+    return { start: () => () => {}, stop() {}, get menu() { return null; } };
+  }
   start();
   return { start, stop, get menu() { return appMenu; } };
+}
+
+export const APP_MENU_FORWARD_EVENT = "app-menu-forward";
+
+async function defaultForwardAction(entry) {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return Boolean(await invoke("forward_app_menu_action", {
+    action: String(entry?.action || ""),
+    shortcutAction: entry?.shortcutAction ? String(entry.shortcutAction) : null,
+  }));
+}
+
+// Targeted at this window only (a global listener would not receive it).
+async function defaultListenForwarded(handler) {
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen(APP_MENU_FORWARD_EVENT, (event) => handler(event?.payload || {}));
 }

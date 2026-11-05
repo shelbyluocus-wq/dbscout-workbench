@@ -94,6 +94,27 @@ capabilities:
   on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
+- **Table folders** — a Finder-like page (activity rail, below favorite
+  databases; also in the macOS Tools menu) groups one database's tables into
+  named folders by reference only: tables are never moved or copied. Each
+  database has a fixed Favorites folder, which is what the database home's
+  star toggles (earlier flat favorites migrate into it). A folder is filled
+  by picking tables, by saving this window's open tabs of that database, or
+  by adding another folder's tables as they are now (later changes are not
+  followed). Folders are renamed inline (unique per database, at most 40
+  characters), deleted after a confirmation, follow table renames, and mark
+  tables the database no longer has. A folder opens here (every table as a
+  tab) or in a window of its own: the same workbench page started from the
+  folder (`table-folder-<id>` window, folder injected as
+  `__DBSCOUT_WINDOW__`; the browser preview opens `?tableFolder=<id>`). A
+  folder window shows the folder's tables (first one loaded, the rest on
+  demand), never reads or writes the main window's saved tabs, leaves the
+  tray, updater, global shortcut and external MCP to the main window, is
+  smaller-minimum so two fit side by side, closes for real, and takes the
+  folder's new tables when the folder is opened again. On macOS the main
+  window owns the app menu and forwards an item to a focused folder window.
+  Folders live in localStorage (`dbscout.table-folders.v1`) and stay in step
+  across windows through storage events.
 - **Switch-database glow** — when open tabs span ≥2 databases,
   switching to another database's tab plays a traveling glow along the center
   pane's left/top/right edges and floats "<connection name> · <database label>"
@@ -552,6 +573,12 @@ from UI):
   effect-color preference (`dbscout_glow_color_{light,dark}` →
   `--wb-glow-custom` root override, `useCellHighlight.js` pattern)
 - Safety / server: `useBackupCenter.js`, `useAccount.js`
+- Table folders: `tableFolderStore.js` — folders, the per-database
+  favorites folder (the home star's facade), legacy-favorites migration and
+  cross-window reload; `useTableFolders.js` — the folder page's scope,
+  tables and open actions, plus the folder window's start-up (missing-table
+  notice, re-open events); `utils/windowRole.js` — main vs folder window and
+  the folder window's starting workspace
 - Table transfer: `useTableTransfer.js` — one-click table transfer templates
   (localStorage), run/cancel state, `table-transfer-progress` event log
 - Release workspace: `useReleaseWorkspace.js` — the workspace state and its
@@ -660,7 +687,7 @@ from UI):
 `TableDesignEditor.vue`, `DatabaseSyncDialog.vue`, `TableCopyDialog.vue`,
 `BackupCenterDialog.vue` (shell + history tab, with the
 `BackupSnapshotsPanel.vue` / `BackupSettingsPanel.vue` tabs),
-`TableTransferDialog.vue` (one-click table transfer),
+`TableTransferDialog.vue` (one-click table transfer), `TableFolderDialog.vue` (table folders),
 `ReleaseFlowDialog.vue` (release workspace shell with the `ReleasePlatformBoard.vue` board; `ReleaseRunView.vue` shows an update, the workspace pages and shared parts such as `ReleaseSplitDiff.vue`, `ReleaseSvnWorkspace.vue` and `ReleaseBuildPanel.vue` are the other `Release*.vue` components),
 `ConfigRelationsPanel.vue` (inspector relation page, composed of
 `ConfigRelationRowSection.vue` and `ConfigRelationTableSection.vue` under the
@@ -707,6 +734,10 @@ Relation page regressions: `node scripts/test-relations-panel-browser.mjs`,
 lab, `DBSCOUT_RELATION_LAB_SIZE`, default 2000) and
 `node scripts/test-incoming-relations-browser.mjs` against a Vite dev server
 (`DBSCOUT_RELATIONS_TEST_URL`, default `http://127.0.0.1:1431`).
+Table folder regressions: `node --test src/workbench/tableFolderStore.test.js`,
+`cargo test --manifest-path src-tauri/Cargo.toml --lib -- table_folder_windows`
+and `node scripts/test-table-folders-browser.mjs` against a Vite dev server
+(`DBSCOUT_TABLE_FOLDERS_TEST_URL`, default `http://127.0.0.1:1431`).
 Release workspace regressions: `node --test src/workbench/useReleaseFlow.test.js
 src/workbench/releaseFlowState.test.js src/workbench/releaseWorkspaceState.test.js
 src/workbench/releaseAutopilotState.test.js src/workbench/releaseFlowCopy.test.js src/workbench/useCocosBuild.test.js
@@ -786,6 +817,12 @@ The Rust backend is split by concern:
 - **`audit_sync.rs`** — Background outbox that pushes local audit rows to the
   central server (offline-first, idempotent on `client_id`)
 - **`account.rs`** — Account/session persistence + central-server client
+- **`table_folder_windows.rs`** — Table folder windows:
+  `open_table_folder_window` (creates or brings forward `table-folder-<id>`,
+  platform chrome as the main window, role injected by an initialization
+  script, `table-folder-window-open` to an existing one) and
+  `forward_app_menu_action` (macOS menu items for a focused folder window).
+  Only the main window hides to the tray.
 - **`svn_updater.rs`** — SVN-based in-app updater (config, check, install).
   If no update folder is saved, auto-discovers a `Navicat Pro` release folder under a tools directory (leaf
   must contain `navicat` and include `latest.json`) on non-C drives. When
