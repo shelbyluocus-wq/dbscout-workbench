@@ -1092,7 +1092,11 @@ test("grid and inspector typography favor long-session readability", () => {
 
 test("field comment text wraps within its adjustable row and clamps overflow", () => {
   const commentRule = ruleBody(".wb-field-comment-text");
+  const rowRule = ruleBody(".wb-grid .wb-field-comments-row th");
 
+  assert.match(commentRule, /max-height\s*:\s*calc\(var\(--wb-field-comment-row-height,\s*32px\)\s*-\s*2px\)/);
+  assert.match(commentRule, /overflow\s*:\s*hidden/);
+  assert.doesNotMatch(rowRule, /transition\s*:[^;}]*(?:height|all)/);
   assert.match(commentRule, /white-space\s*:\s*normal/);
   assert.match(commentRule, /overflow-wrap\s*:\s*anywhere/);
   assert.match(commentRule, /-webkit-line-clamp\s*:\s*var\(--wb-field-comment-lines,\s*1\)/);

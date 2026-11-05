@@ -22018,7 +22018,6 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
-  transition: height 0.16s ease, min-height 0.16s ease;
 }
 
 .wb-grid .wb-field-comments-row.is-collapsed th {
@@ -22054,6 +22053,7 @@ button.wb-table-mention:active {
 
 .wb-field-comment-text {
   display: block;
+  max-height: calc(var(--wb-field-comment-row-height, 32px) - 2px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: normal;
