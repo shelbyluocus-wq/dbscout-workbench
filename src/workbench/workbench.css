@@ -18274,11 +18274,6 @@ label:has(input[type="checkbox"]:disabled) {
     min-width: 0;
   }
 
-  .wb-inspector,
-  .wb-pane-divider--right {
-    display: none;
-  }
-
   .wb-sidebar {
     max-width: min(292px, 58vw);
   }

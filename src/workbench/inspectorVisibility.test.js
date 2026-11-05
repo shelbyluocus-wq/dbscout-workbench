@@ -89,11 +89,20 @@ test("pane resize yields the inspector in a narrow window and honours a manual r
   const original = globalThis.localStorage;
   globalThis.localStorage = memoryStorage();
   try {
-    const viewportWidth = ref(1280);
+    const viewportWidth = ref(1090);
     const resize = usePaneResize({ initialCollapsed: false, viewportWidth });
     assert.equal(resize.inspectorCollapsed.value, true);
 
     resize.expandInspector();
+    assert.equal(resize.inspectorCollapsed.value, false);
+    assert.equal(resize.inspectorStyle.value.width, "322px");
+    assert.equal(resize.inspectorStyle.value.opacity, 1);
+
+    resize.toggleInspector();
+    assert.equal(resize.inspectorCollapsed.value, true);
+    assert.equal(resize.inspectorStyle.value.width, "0px");
+
+    resize.toggleInspector();
     assert.equal(resize.inspectorCollapsed.value, false);
 
     viewportWidth.value = 1600;

@@ -27,6 +27,13 @@ function readAllComponents() {
   return files.map((f) => readLocalizedContractSource(path.join(dir, f), "utf8")).join("\n");
 }
 
+test("narrow layouts leave inspector visibility under the pane toggle's control", () => {
+  const styles = read("./workbench.css");
+  const narrowLayout = styles.slice(styles.indexOf("@media (max-width: 1119px)"), styles.indexOf("@media (max-width: 760px)"));
+  assert.ok(narrowLayout.length > 0);
+  assert.doesNotMatch(narrowLayout, /\.wb-(?:inspector|pane-divider--right)[^{]*\{[^}]*display:\s*none/s);
+});
+
 test("main.js mounts the MySQL workbench as the first screen", () => {
   const main = read("../main.js");
 
