@@ -598,8 +598,8 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-titlebar-update-right: 142px;
   --wb-titlebar-agent-right: 176px;
   --wb-titlebar-pin-right: 210px;
-  --wb-titlebar-inspector-toggle-right: 244px;
-  --wb-titlebar-collapsed-controls-clearance: 284px;
+  --wb-titlebar-inspector-toggle-right: 142px;
+  --wb-titlebar-collapsed-controls-clearance: 182px;
   --wb-titlebar-tab-right-clearance: 0px;
   height: 100vh;
   min-height: 720px;
@@ -617,8 +617,8 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-titlebar-update-right: 8px;
   --wb-titlebar-agent-right: 42px;
   --wb-titlebar-pin-right: 76px;
-  --wb-titlebar-inspector-toggle-right: 110px;
-  --wb-titlebar-collapsed-controls-clearance: 150px;
+  --wb-titlebar-inspector-toggle-right: 8px;
+  --wb-titlebar-collapsed-controls-clearance: 48px;
 }
 
 /* In native fullscreen the traffic lights are hidden by macOS, so the
@@ -7223,6 +7223,43 @@ label:has(input[type="checkbox"]:disabled) {
   height: 1px;
   margin-bottom: 3px;
   background: var(--wb-border);
+}
+
+.wb-activity-rail-btn.is-pinned,
+.wb-activity-rail-btn.is-available {
+  color: var(--wb-accent-strong);
+  background: var(--wb-accent-soft);
+}
+
+.wb-activity-rail-btn.is-error {
+  color: var(--wb-danger);
+}
+
+.wb-activity-rail-btn.is-available > svg,
+.wb-activity-rail-btn.is-error > svg,
+.wb-activity-rail-btn.is-checking > svg {
+  fill: currentColor;
+}
+
+.wb-activity-rail-btn.is-checking > svg {
+  animation: wb-update-pulse 1s ease-in-out infinite;
+}
+
+.wb-activity-rail-btn:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.wb-more-review-count {
+  margin-left: auto;
+  color: var(--wb-warning-text);
+  font-size: var(--wb-fs-caption);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-activity-rail-btn.is-checking > svg {
+    animation: none;
+  }
 }
 
 .wb-activity-rail-btn {

@@ -81,7 +81,18 @@ fetches and uses it directly; installed production apps instead install the
 separately published runtime under their application-data directory on first
 AI use.
 
-## AI agent
+## Blackcat MCP and navigation
+
+The built-in AI chat has been removed. External AI tools can still connect through
+Blackcat MCP; its connection/permission dialog and UI navigation run independently
+of the former assistant. Builds ship only the MCP server, not the assistant runner
+or authentication files, and no longer download/update the assistant runtime.
+
+The window pin is below Blackcat MCP in the default left rail. The application
+updater is above Settings at the bottom. Release workspace and relation review
+are in More, which retains the pending-review badge.
+
+### Historical AI agent setup (not shipped)
 
 The AI assistant downloads its managed Node runtime and Claude Code native CLI
 from the configured SVN release directory the first time the AI panel is

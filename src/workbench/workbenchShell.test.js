@@ -1975,25 +1975,25 @@ test("workbench renders a platform-adaptive draggable titlebar on the chrome sur
   assert.match(styles, /\.mysql-workbench\.is-native-macos \.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*left:\s*var\(--wb-macos-traffic-light-clearance\)/s);
 });
 
-test("workbench titlebar can pin the window with a customizable F8 shortcut", () => {
+test("workbench rail can pin the window with a customizable F8 shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const pin = read("./composables/useWindowPin.js");
   const shortcuts = read("./composables/useShortcuts.js");
   const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /import\s+\{[^}]*\bPin\b[^}]*\}\s+from\s+["']lucide-vue-next["']/);
+  assert.match(read("./composables/useActivityRail.js"), /id: "pinWindow", icon: Pin/);
   assert.match(orchestrator, /import\s+\{\s*useWindowPin\s*\}\s+from\s+["']\.\/composables\/useWindowPin\.js["']/);
   assert.match(orchestrator, /const\s+windowPin\s*=\s*useWindowPin\(\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("pinWindow", event\)/);
-  assert.match(orchestrator, /class="wb-pin-entry-button"[\s\S]*:aria-pressed="windowPin\.pinned\.value"[\s\S]*@click\.stop="toggleWindowPin"/);
-  assert.match(orchestrator, /class="wb-pin-entry-button"[\s\S]*class="wb-ai-entry-button"/);
+  assert.match(orchestrator, /pressed: windowPin\.pinned\.value/);
+  assert.match(orchestrator, /pinWindow: toggleWindowPin/);
   assert.match(orchestrator, /"已钉住：窗口将保持在最上层"/);
   assert.match(orchestrator, /"已解除钉住：窗口恢复正常层级"/);
   assert.match(pin, /\.setAlwaysOnTop\(nextPinned\)/);
   assert.match(pin, /\.isAlwaysOnTop\(\)/);
   assert.match(shortcuts, /pinWindow:\s*"F8"/);
   assert.match(shortcuts, /pinWindow:\s*"钉住窗口"/);
-  assert.match(styles, /\.wb-pin-entry-button\.is-pinned\s*\{[^}]*color:\s*var\(--wb-accent-strong\)/s);
+  assert.match(styles, /\.wb-activity-rail-btn\.is-pinned,[\s\S]*?color:\s*var\(--wb-accent-strong\)/);
 });
 
 test("workbench titlebar hosts database controls and inspector collapse", () => {
@@ -3273,8 +3273,8 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(orchestrator, /import\s+UpdateDialog\s+from\s+["']\.\/components\/UpdateDialog\.vue["']/);
   assert.match(orchestrator, /import\s+\{\s*useUpdater\s*\}\s+from\s+["']\.\/composables\/useUpdater\.js["']/);
   assert.match(orchestrator, /const\s+updater\s*=\s*useUpdater\(\)/);
-  assert.match(orchestrator, /class="wb-update-button"/);
-  assert.match(orchestrator, /@click\.stop="openUpdateDialog"/);
+  assert.match(orchestrator, /update: openUpdateDialog/);
+  assert.match(orchestrator, /@select="selectActivityRailEntry"/);
   assert.match(orchestrator, /<UpdateDialog/);
   assert.match(orchestrator, /<UpdateNotice/);
   assert.match(orchestrator, /updater\.startBackgroundListener\(\)/);
@@ -3309,7 +3309,7 @@ test("workbench exposes an in-app updater entry and dialog", () => {
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
-test("workbench exposes a database AI assistant in the inspector area", () => {
+test("legacy assistant modules remain isolated from the shipped workbench", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const panel = read("./components/AgentPanel.vue");
   const header = read("./components/AgentHeader.vue");
@@ -3328,22 +3328,10 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   const lib = read("../../src-tauri/src/lib.rs");
   const commands = read("../../src-tauri/src/commands.rs");
 
-  assert.match(orchestrator, /import\s+AgentPanel\s+from\s+["']\.\/components\/AgentPanel\.vue["']/);
-  assert.match(orchestrator, /import\s+\{\s*useAgent\s*\}\s+from\s+["']\.\/composables\/useAgent\.js["']/);
-  assert.match(orchestrator, /import\s+\{\s*useAgentProjects\s*\}\s+from\s+["']\.\/composables\/useAgentProjects\.js["']/);
-  assert.match(orchestrator, /const\s+agentProjects\s*=\s*useAgentProjects\(invokeWorkbench\)/);
-  assert.match(orchestrator, /const\s+agent\s*=\s*useAgent\(workspace,\s*invokeWorkbench,\s*agentProjects\)/);
-  assert.match(orchestrator, /const\s+inspectorMode\s*=\s*ref\(["']notes["']\)/);
-  assert.match(orchestrator, /class="wb-ai-entry-button"/);
-  assert.match(orchestrator, /@click\.stop="toggleAiAssistant"/);
-  assert.match(orchestrator, /void agent\.ensureRuntime\(\)/);
-  assert.doesNotMatch(orchestrator, /window\.setTimeout\(\(\) => \{\s*void agent\.prewarm/);
-  assert.match(orchestrator, /<AgentPanel/);
-  assert.match(orchestrator, /v-if="inspectorMode === 'ai'"/);
-  assert.match(orchestrator, /<InspectorPanel[\s\S]*v-else/);
-  const aiPanelTag = orchestrator.match(/<AgentPanel[\s\S]*?\/>/)?.[0] || "";
-  assert.match(aiPanelTag, /:projects="agentProjects"/);
-  assert.doesNotMatch(aiPanelTag, /active-status-label/);
+  assert.doesNotMatch(orchestrator, /AgentPanel|useAgent\b|useAgentProjects|toggleAiAssistant|ensureRuntime|agentRuntimeUpdate/);
+  assert.match(orchestrator, /useExternalMcp\(invokeWorkbench\)/);
+  assert.match(orchestrator, /<InspectorPanel/);
+  assert.match(orchestrator, /<BlackcatMcpDialog/);
 
   assert.match(panel, /import\s+AgentHeader\s+from\s+["']\.\/AgentHeader\.vue["']/);
   assert.match(panel, /import\s+AgentSettings\s+from\s+["']\.\/AgentSettings\.vue["']/);
@@ -3532,10 +3520,7 @@ test("workbench exposes a database AI assistant in the inspector area", () => {
   assert.match(styles, /\.wb-ai-config-panel,\s*\n\.wb-ai-history-panel\s*\{[^}]*left:\s*8px/s);
   assert.doesNotMatch(styles, /\.wb-ai-status-pill/);
   assert.doesNotMatch(styles, /\.wb-ai-service-panel/);
-  assert.match(lib, /commands::agent_start_session/);
-  assert.match(lib, /commands::agent_runtime_status/);
-  assert.match(lib, /commands::agent_runtime_check/);
-  assert.match(lib, /commands::agent_runtime_install/);
+  assert.doesNotMatch(lib, /commands::agent_/);
   assert.match(commands, /pub async fn agent_start_session/);
   assert.match(commands, /pub async fn agent_runtime_status/);
   assert.match(commands, /pub async fn agent_runtime_check/);

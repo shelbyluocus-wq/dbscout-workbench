@@ -863,9 +863,8 @@ test("custom row and column highlight color overrides both theme defaults", () =
 });
 
 test("titlebar icon controls expose visible tokenized tooltips", () => {
-  assert.match(orchestratorVue, /class="wb-ai-entry-button"[\s\S]*:title=/);
-  assert.match(orchestratorVue, /class="wb-pin-entry-button"[\s\S]*:title=/);
-  assert.match(orchestratorVue, /class="wb-update-button"[\s\S]*:title=/);
+  assert.doesNotMatch(orchestratorVue, /class="wb-(ai-entry|pin-entry|update)-button"/);
+  assert.match(orchestratorVue, /label: updater\.title\.value/);
   assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最小化"/);
   assert.match(orchestratorVue, /class="wb-titlebar-button"[\s\S]*title="最大化或还原"/);
   assert.match(orchestratorVue, /class="wb-titlebar-button is-close"[\s\S]*title="关闭"/);
@@ -926,7 +925,7 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /grid-template-columns\s*:\s*minmax\(0,\s*1fr\)/);
   assert.match(rootRule, /--wb-titlebar-tab-right-clearance:\s*0px/);
-  assert.match(rootRule, /--wb-titlebar-collapsed-controls-clearance:\s*284px/);
+  assert.match(rootRule, /--wb-titlebar-collapsed-controls-clearance:\s*182px/);
   assert.match(collapsedInspectorWorkbenchRule, /--wb-titlebar-tab-right-clearance:\s*var\(--wb-titlebar-collapsed-controls-clearance\)/);
   assert.doesNotMatch(rootRule, /wb-quick-open-entry/);
   assert.match(titlebarRule, /grid-column\s*:\s*1/);
@@ -1016,7 +1015,7 @@ test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap
   assert.match(draggableTabRule, /cursor\s*:\s*grab/);
 });
 
-test("collapsed inspector toggle docks left of the pin and Agent buttons", () => {
+test("collapsed inspector toggle reclaims space from the removed titlebar actions", () => {
   const workbenchRule = ruleBody(".mysql-workbench");
   const titlebarInspectorRule = ruleBody(".wb-titlebar-inspector-controls");
   const collapsedRule = ruleBody(".wb-titlebar-inspector-controls.is-collapsed");
@@ -1026,7 +1025,7 @@ test("collapsed inspector toggle docks left of the pin and Agent buttons", () =>
 
   assert.match(workbenchRule, /--wb-titlebar-agent-right:\s*176px/);
   assert.match(workbenchRule, /--wb-titlebar-pin-right:\s*210px/);
-  assert.match(workbenchRule, /--wb-titlebar-inspector-toggle-right:\s*244px/);
+  assert.match(workbenchRule, /--wb-titlebar-inspector-toggle-right:\s*142px/);
   assert.match(aiEntryRule, /right\s*:\s*var\(--wb-titlebar-agent-right\)/);
   assert.match(pinEntryRule, /right\s*:\s*var\(--wb-titlebar-pin-right\)/);
   assert.match(orchestratorVue, /Math\.max\(inspectorWidth\.value, INSPECTOR_MIN_WIDTH\)/);

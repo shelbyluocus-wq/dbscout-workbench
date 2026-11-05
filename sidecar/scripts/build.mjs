@@ -15,7 +15,7 @@ const mcpOutFile = "../src-tauri/resources/mcp-server.mjs";
 
 await mkdir(dirname(outFile), { recursive: true });
 
-await build({
+if (!process.argv.includes("--mcp-only")) await build({
   entryPoints: ["./agent-runner.mjs"],
   bundle: true,
   platform: "node",
@@ -25,7 +25,7 @@ await build({
   external: [],
 });
 
-console.log(`Bundled sidecar to ${outFile}`);
+if (!process.argv.includes("--mcp-only")) console.log(`Bundled sidecar to ${outFile}`);
 
 await build({
   entryPoints: ["./mcp-server.mjs"],
@@ -49,7 +49,7 @@ console.log(`Bundled external MCP server to ${mcpOutFile}`);
 // binary into the local resources staging area. Development uses it directly,
 // and `release:agent-runtime` packages it separately; Tauri intentionally does
 // not include this large binary in the main installer.
-const nativeBinarySource = resolveNativeBinarySource();
+const nativeBinarySource = process.argv.includes("--mcp-only") ? null : resolveNativeBinarySource();
 if (nativeBinarySource) {
   const destName =
     process.platform === "win32"
@@ -60,7 +60,7 @@ if (nativeBinarySource) {
   console.log(
     `${result.action === "skipped" ? "Kept existing" : "Copied"} native CLI binary (${(result.size / 1024 / 1024).toFixed(1)} MB) at ${destPath}`
   );
-} else {
+} else if (!process.argv.includes("--mcp-only")) {
   console.warn(
     `No native CLI binary found for ${process.platform}-${process.arch}. ` +
       `Desktop development and AI runtime packaging require this binary.`

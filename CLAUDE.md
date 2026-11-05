@@ -1,5 +1,18 @@
 # CLAUDE.md
 
+## Current navigation and AI scope (2026-11-05)
+
+The window pin lives immediately below Blackcat MCP in the default activity rail;
+the app updater lives above Settings at the bottom. Release workspace and relation
+review live in More; pending relation counts appear on More and its review item.
+The built-in assistant is removed from the shipped workbench: no chat entry/panel,
+assistant initialization, runtime auto-update, exposed assistant Tauri commands,
+or packaged runner/auth files. `useExternalMcp.js` independently owns external MCP
+readiness, UI requests, context and permissions. Historical agent modules remain
+as source only; shared Rust SQL validation/database bridges still support MCP.
+`build:sidecar` builds only MCP; older AI-runtime notes below are historical, not
+the current product or packaging contract. Desktop dev no longer fetches Node.
+
 External MCP navigation: `get_mcp_capabilities` exposes the tool catalog and live
 desktop capabilities/permissions; `list_connections` discovers credential-free
 targets. Context reads fetch fresh viewport/selection state without revealing the

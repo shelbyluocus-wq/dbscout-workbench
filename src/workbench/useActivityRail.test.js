@@ -15,11 +15,11 @@ test("activity rail pins add connection on top, lists the tool group, then pins 
   assert.deepEqual(leadItems.value.map((item) => item.id), ["addConnection"]);
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "releaseFlow", "configRelations", "blackcatMcp"],
+    ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
   );
   assert.deepEqual(
     bottomItems.value.map((item) => item.id),
-    ["settings"],
+    ["update", "settings"],
   );
 });
 
@@ -28,7 +28,7 @@ test("activity rail entries expose icon components, translated labels, and popup
   for (const item of [...leadItems.value, ...items.value, ...bottomItems.value]) {
     assert.ok(["object", "function"].includes(typeof item.icon), `${item.id} should map to a lucide icon component`);
     assert.ok(item.label.length > 0, `${item.id} should have a translated label`);
-    assert.ok(item.popup, `${item.id} should declare its popup surface for aria-haspopup`);
+    if (item.id !== "pinWindow") assert.ok(item.popup, `${item.id} should declare its popup surface for aria-haspopup`);
   }
   assert.equal(ACTIVITY_RAIL_ENTRIES.find((entry) => entry.id === "addConnection").zone, "lead");
 });
@@ -40,7 +40,6 @@ test("activity rail entries carry a one-line tooltip hint", () => {
   assert.equal(hints.databaseFavorites, "Switch to a favorite database");
   assert.match(hints.backupCenter, /snapshot|rollback/i);
   assert.match(hints.tableTransfer, /conversion script/i);
-  assert.match(hints.configRelations, /review|references/i);
   assert.match(hints.blackcatMcp, /external AI|permissions/i);
   assert.match(hints.settings, /theme|font/i);
 });
@@ -58,7 +57,6 @@ test("activity rail labels and tooltips follow the active locale", () => {
     assert.equal(byId(rail.items.value).databaseFavorites.label, "收藏資料庫");
     assert.equal(byId(rail.items.value).backupCenter.label, "備份中心");
     assert.equal(byId(rail.items.value).tableTransfer.label, "一鍵轉表");
-    assert.equal(byId(rail.items.value).configRelations.label, "關聯複核");
     assert.equal(byId(rail.items.value).blackcatMcp.label, "黑貓 MCP");
     assert.equal(byId(rail.items.value).blackcatMcp.hint, "管理外部 AI 的連線和權限");
     assert.equal(byId(rail.bottomItems.value).settings.label, "設定");
@@ -74,7 +72,6 @@ test("activity rail labels and tooltips follow the active locale", () => {
     const zhCN = byId(rail.items.value);
     assert.equal(zhCN.backupCenter.label, "备份中心");
     assert.equal(zhCN.tableTransfer.label, "一键转表");
-    assert.equal(zhCN.configRelations.label, "关联复核");
     assert.equal(zhCN.blackcatMcp.label, "黑猫 MCP");
   } finally {
     language.setLanguage(previousLocale);
@@ -143,10 +140,10 @@ test("activity rail tooltips use Command modifier labels on macOS", () => {
 test("activity rail reflects expanded state for popup entries", () => {
   const open = ref(false);
   const rail = useActivityRail({ expanded: { settings: () => open.value } });
-  assert.equal(rail.bottomItems.value[0].expanded, false);
+  assert.equal(rail.bottomItems.value[1].expanded, false);
   open.value = true;
-  assert.equal(rail.bottomItems.value[0].expanded, true);
-  assert.equal(rail.bottomItems.value[0].controls, "wb-sidebar-settings-sheet");
+  assert.equal(rail.bottomItems.value[1].expanded, true);
+  assert.equal(rail.bottomItems.value[1].controls, "wb-sidebar-settings-sheet");
   assert.equal(rail.items.value[0].expanded, undefined);
 });
 
@@ -160,11 +157,11 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("tableTransfer", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseFlow", "configRelations", "blackcatMcp"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
   );
   assert.equal(
     storage.getItem("dbscout_activity_rail_order"),
-    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseFlow", "configRelations", "blackcatMcp"]),
+    JSON.stringify(["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"]),
   );
 
   // Fixed zones never join the sortable order.
@@ -172,14 +169,14 @@ test("activity rail reorder moves entries and persists the order", () => {
   rail.reorder("settings", "quickOpen", { position: "before" });
   assert.deepEqual(
     rail.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseFlow", "configRelations", "blackcatMcp"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
   );
 
   // A fresh composable on the same storage restores the custom order.
   const restored = useActivityRail({ storage });
   assert.deepEqual(
     restored.items.value.map((item) => item.id),
-    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "releaseFlow", "configRelations", "blackcatMcp"],
+    ["tableTransfer", "quickOpen", "databaseFavorites", "backupCenter", "blackcatMcp", "pinWindow"],
   );
 });
 
@@ -192,7 +189,7 @@ test("activity rail order drops unknown ids and re-inserts missing entries at th
   // Stored ids keep their relative order; missing defaults re-insert at their slot.
   assert.deepEqual(
     items.value.map((item) => item.id),
-    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen", "releaseFlow", "configRelations", "blackcatMcp"],
+    ["tableTransfer", "databaseFavorites", "backupCenter", "quickOpen", "blackcatMcp", "pinWindow"],
   );
 });
 
@@ -203,7 +200,7 @@ test("activity rail ignores corrupt or absent stored order", () => {
     });
     assert.deepEqual(
       rail.items.value.map((item) => item.id),
-      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "releaseFlow", "configRelations", "blackcatMcp"],
+      ["quickOpen", "databaseFavorites", "backupCenter", "tableTransfer", "blackcatMcp", "pinWindow"],
       `stored=${stored}`,
     );
   }
@@ -240,8 +237,8 @@ test("activity rail keeps the rail component inside the workbench before the sid
 
 test("activity rail badges reflect live counts, cap at 99+, and hide at zero", () => {
   const pending = ref(0);
-  const rail = useActivityRail({ badges: { configRelations: () => pending.value } });
-  const entry = () => rail.items.value.find((item) => item.id === "configRelations");
+  const rail = useActivityRail({ badges: { more: () => pending.value } });
+  const entry = () => rail.moreItem.value;
 
   assert.equal(entry().badge, 0);
   assert.equal(entry().badgeText, "");
@@ -265,4 +262,40 @@ test("activity rail badges reflect live counts, cap at 99+, and hide at zero", (
   assert.match(button, /v-if="item\.badgeText"/);
   assert.match(button, /class="wb-activity-rail-badge"/);
   assert.match(button, /v-if="item\.badgeLabel"/);
+});
+
+test("old custom rail order removes relocated entries and places the new pin below MCP", () => {
+  const rail = useActivityRail({ storage: {
+    getItem: () => JSON.stringify(["blackcatMcp", "releaseFlow", "configRelations", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"]),
+  } });
+  assert.deepEqual(rail.items.value.map((item) => item.id), ["blackcatMcp", "pinWindow", "quickOpen", "databaseFavorites", "backupCenter", "tableTransfer"]);
+});
+
+test("rail pin and update states react without rebuilding the rail", () => {
+  const pinned = ref(false);
+  const busy = ref(false);
+  const rail = useActivityRail({ states: {
+    pinWindow: () => ({ pressed: pinned.value, disabled: busy.value }),
+    update: () => ({ busy: busy.value, label: busy.value ? "Checking" : "Updates" }),
+  } });
+  pinned.value = true;
+  busy.value = true;
+  assert.equal(rail.items.value.find((item) => item.id === "pinWindow").pressed, true);
+  assert.equal(rail.items.value.find((item) => item.id === "pinWindow").disabled, true);
+  assert.equal(rail.bottomItems.value[0].label, "Checking");
+  assert.equal(rail.bottomItems.value[0].busy, true);
+});
+
+test("release and relation review move to More while built-in chat is excluded from the product", () => {
+  const workbench = read("MySqlWorkbench.vue");
+  assert.match(workbench, /id: "releaseFlow", icon: Rocket/);
+  assert.match(workbench, /id: "relations", icon: Link2[^\n]*badge: configRelationsBadge\.value/);
+  assert.match(workbench, /id === "releaseFlow"\) openReleaseFlow\(\)/);
+  assert.match(workbench, /id === "relations"\) openConfigRelationsReview\(\)/);
+  assert.doesNotMatch(workbench, /AgentPanel|useAgent\b|useAgentProjects|toggleAiAssistant|handleAvailableRuntimeUpdate/);
+  const config = JSON.parse(read("../../src-tauri/tauri.conf.json"));
+  assert.ok(config.bundle.resources["resources/mcp-server.mjs"]);
+  assert.equal(config.bundle.resources["resources/agent-runner.mjs"], undefined);
+  assert.equal(config.bundle.resources["resources/agent-auth*.json"], undefined);
+  assert.doesNotMatch(read("../../src-tauri/src/lib.rs"), /commands::agent_/);
 });

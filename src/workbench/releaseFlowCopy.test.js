@@ -14,6 +14,7 @@ import { MAINTENANCE_STAGES, SERVER_PHASES } from "./utils/releaseServer.js";
 
 const root = new URL("./", import.meta.url);
 const SOURCES = [
+  "MySqlWorkbench.vue",
   ...readdirSync(new URL("components/", root)).filter((name) => name.startsWith("Release")).map((name) => `components/${name}`),
   "composables/useReleaseFlow.js",
   "composables/useReleaseWorkspace.js",

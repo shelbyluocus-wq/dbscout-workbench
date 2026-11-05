@@ -12,6 +12,10 @@ function hintId(item) {
   <button
     type="button"
     class="wb-activity-rail-btn"
+    :class="item.stateClass"
+    :disabled="item.disabled"
+    :aria-pressed="item.pressed"
+    :aria-busy="item.busy || undefined"
     :aria-label="item.label"
     :aria-describedby="item.hint ? hintId(item) : undefined"
     :aria-keyshortcuts="item.ariaShortcut || undefined"
@@ -20,7 +24,7 @@ function hintId(item) {
     :aria-controls="item.controls || undefined"
     :data-wb-rail-id="item.id"
   >
-    <component :is="item.icon" :size="18" :stroke-width="1.6" aria-hidden="true" />
+    <component :is="item.icon" :size="item.id === 'update' ? 10 : 18" :stroke-width="1.6" :fill="item.pressed ? 'currentColor' : 'none'" aria-hidden="true" />
     <span v-if="item.badgeText" class="wb-activity-rail-badge" aria-hidden="true">{{ item.badgeText }}</span>
     <span class="wb-activity-rail-tip" aria-hidden="true">
       <span class="wb-activity-rail-tip-title">

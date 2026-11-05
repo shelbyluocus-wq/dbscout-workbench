@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "./i18n/index.js";
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, Pin, RefreshCw, Send, Upload, X } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, RefreshCw, Rocket, Send, Upload, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -129,7 +129,6 @@ import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
 import TableDesignEditor from "./components/TableDesignEditor.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
-import AgentPanel from "./components/AgentPanel.vue";
 import PaneDivider from "./components/PaneDivider.vue";
 import QuickOpenPalette from "./components/QuickOpenPalette.vue";
 import ContextMenu from "./components/ContextMenu.vue";
@@ -202,8 +201,7 @@ import { useTheme } from "./composables/useTheme.js";
 import { createColorThemeController } from "./colorThemeController.js";
 import { useFontPreference } from "./composables/useFontPreference.js";
 import { useUpdater } from "./composables/useUpdater.js";
-import { useAgent } from "./composables/useAgent.js";
-import { useAgentProjects } from "./composables/useAgentProjects.js";
+import { useExternalMcp } from "./composables/useExternalMcp.js";
 
 markPerf("workbench.module-loaded");
 
@@ -270,10 +268,6 @@ function withShortcutLabel(action, shortcut) {
   return shortcut ? t("shell.withShortcut", { action, shortcut: formatShortcutForPlatform(shortcut) }) : action;
 }
 const windowPin = useWindowPin();
-const windowPinButtonLabel = computed(() => withShortcutLabel(
-  windowPin.pinned.value ? t("shell.unpinWindow") : t("shell.pinWindow"),
-  shortcutHelper.get("pinWindow"),
-));
 
 // On startup, push the persisted global "open window" binding to the Rust
 // backend so a user-rebound shortcut overrides the hardcoded Alt+Shift+F this
@@ -1127,7 +1121,25 @@ const {
     settings: () => Boolean(sidebarRef.value?.settingsOpen),
   },
   badges: {
-    configRelations: () => configRelationsBadge.value,
+    more: () => configRelationsBadge.value,
+  },
+  states: {
+    pinWindow: () => ({
+      label: t(windowPin.pinned.value ? "shell.unpinWindow" : "shell.pinWindow"),
+      pressed: windowPin.pinned.value,
+      disabled: windowPin.pending.value,
+      busy: windowPin.pending.value,
+      stateClass: { "is-pinned": windowPin.pinned.value },
+    }),
+    update: () => ({
+      label: updater.title.value,
+      busy: updater.isBusy.value,
+      stateClass: {
+        "is-checking": updater.isBusy.value,
+        "is-available": updater.status.value === "available",
+        "is-error": updater.status.value === "error" || updater.status.value === "unavailable",
+      },
+    }),
   },
   actions: {
     addConnection: openConnDialog,
@@ -1135,9 +1147,9 @@ const {
     databaseFavorites: openDatabaseFavorites,
     backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
-    releaseFlow: openReleaseFlow,
-    configRelations: openConfigRelationsReview,
     blackcatMcp: openBlackcatMcp,
+    pinWindow: toggleWindowPin,
+    update: openUpdateDialog,
     settings: openSidebarSettings,
   },
 });
@@ -1149,11 +1161,12 @@ const moreActions = computed(() => {
   const hasDatabase = Boolean(source.connectionId && source.database);
   const writable = hasDatabase && !isReadOnlySource(source);
   return [
+    { id: "releaseFlow", icon: Rocket, label: t("releaseFlow.title"), hint: t("releaseFlow.hint") },
+    { id: "relations", icon: Link2, label: t("shell.configRelations"), hint: t("shell.configRelationsHint"), badge: configRelationsBadge.value },
     { id: "sync", icon: DatabaseZap, label: t("m_623281e9dfdb"), disabled: !writable || !sourceHasCapability("sync", source) },
     { id: "send", icon: Send, label: t("m_8f211e16faf2"), disabled: !writable || !sourceHasCapability("tableCopy", source) },
     { id: "import", icon: Upload, label: t("m_fd7719273970"), disabled: !writable || !sourceHasCapability("import", source) },
     { id: "export", icon: Download, label: t("m_d2fcdde81f06"), disabled: !hasDatabase },
-    { id: "relations", icon: Link2, label: t("shell.configRelations"), disabled: !hasDatabase || !configRelationsAvailable(source.connectionId) },
   ];
 });
 
@@ -1169,7 +1182,8 @@ function selectMoreAction(id) {
   else if (id === "send") tableCopy.open({ ...source, tableNames: source.selectedTableNames });
   else if (id === "import") void openBatchImport(source);
   else if (id === "export") void openBatchExport(source);
-  else if (id === "relations") openConfigRelationsReview(source);
+  else if (id === "relations") openConfigRelationsReview();
+  else if (id === "releaseFlow") openReleaseFlow();
 }
 
 const tableCopy = useTableCopy({
@@ -1327,20 +1341,9 @@ provide(HOME_DATABASE_FAVORITES_CONTEXT, {
   setShortcut: updateFavoriteDatabaseShortcut,
 });
 const updater = useUpdater();
-const agentProjects = useAgentProjects(invokeWorkbench);
-const agent = useAgent(workspace, invokeWorkbench, agentProjects);
+const agent = useExternalMcp(invokeWorkbench);
 watch(
-  () => updater.agentRuntimeUpdate.value,
-  (update) => {
-    if (!update?.available) return;
-    void agent.handleAvailableRuntimeUpdate(update).then((installed) => {
-      if (installed) updater.markAgentRuntimeHandled(update.version);
-    });
-  },
-);
-const inspectorMode = ref("notes");
-watch(
-  () => inspectorSurfaceFor({ mode: inspectorMode.value, tabKind: activeTab.value?.kind }),
+  () => inspectorSurfaceFor({ tabKind: activeTab.value?.kind }),
   (surface) => {
     inspectorSurface.value = surface;
   },
@@ -2126,19 +2129,6 @@ function openUpdateDialog() {
   }
 }
 
-function toggleAiAssistant() {
-  inspectorMode.value = inspectorMode.value === "ai" ? "notes" : "ai";
-  inspectorSurface.value = inspectorSurfaceFor({ mode: inspectorMode.value, tabKind: activeTab.value?.kind });
-  if (inspectorMode.value === "ai") {
-    if (inspectorCollapsed.value) expandInspector();
-    void agent.ensureRuntime();
-  }
-}
-
-function sendAgentMessage() {
-  void agent.send(focusedInspectorTab.value);
-}
-
 let agentWorkbenchActionProcessing = false;
 
 function controlContextSnapshot(tab = activeDataTab.value, detailed = false) {
@@ -2346,31 +2336,6 @@ async function selectAgentRangeAction(action) {
     extendRangeSelection(tab, endRow, endColumn, endRowIndex, endColumnIndex);
   }
   finishRangeSelection();
-}
-
-async function openAgentTableReference(tableName) {
-  const name = String(tableName || "").trim();
-  if (!name) return;
-  const table = workspace.schema.find((item) => normalizeTableName(item) === name);
-  if (!table) {
-    statusText.value = `未找到表：${name}`;
-    return;
-  }
-  await openAgentTableAction({
-    tableName: name,
-    tableComment: normalizeTableComment(table),
-    connectionId: table.connectionId || table.connection_id || selectedConnectionId.value,
-    database: table.database || selectedDatabase.value,
-  });
-}
-
-async function openAgentReference(action) {
-  if (!action || typeof action !== "object") return;
-  if (action.action === "open_table") {
-    await openAgentTableAction(action);
-  } else if (action.action === "focus_column" || action.action === "focus_row" || action.action === "focus_cell") {
-    await focusAgentReferenceAction(action);
-  }
 }
 
 async function openAgentTableAction(action) {
@@ -5351,7 +5316,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", flushWorkspacePersistence);
   tableModifiedTimeAutoRefresh.stop();
   void agent.disposeControlListener();
-  agent.disposeRuntimeListener();
   disposeConnection();
   void disposeGlobalTableSearch();
   void disposeTableSessions();
@@ -5458,52 +5422,6 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <button
-        type="button"
-        class="wb-pin-entry-button"
-        :class="{ 'is-pinned': windowPin.pinned.value }"
-        :disabled="windowPin.pending.value"
-        :title="windowPinButtonLabel"
-        :aria-label="windowPinButtonLabel"
-        :aria-keyshortcuts="shortcutHelper.get('pinWindow') || undefined"
-        :aria-pressed="windowPin.pinned.value"
-        :aria-busy="windowPin.pending.value ? 'true' : undefined"
-        @click.stop="toggleWindowPin"
-      >
-        <Pin
-          :size="16"
-          :stroke-width="1.65"
-          :fill="windowPin.pinned.value ? 'currentColor' : 'none'"
-          aria-hidden="true"
-        />
-      </button>
-
-      <button
-        type="button"
-        class="wb-ai-entry-button"
-        :class="{ 'is-active': inspectorMode === 'ai', 'is-thinking': agent.isBusy.value || agent.isStarting.value }"
-        :title="inspectorMode === 'ai' ? t('m_bf8784deb67a') : t('m_39fd6df90e08')"
-        :aria-label="inspectorMode === 'ai' ? t('m_bf8784deb67a') : t('m_39fd6df90e08')"
-        :aria-pressed="inspectorMode === 'ai'"
-        @click.stop="toggleAiAssistant"
-      >
-        <span class="wb-ai-entry-icon" aria-hidden="true"></span>
-      </button>
-
-      <button
-        type="button"
-        class="wb-update-button"
-        :class="{
-          'is-checking': updater.status.value === 'checking',
-          'is-available': updater.status.value === 'available',
-          'is-error': updater.status.value === 'error' || updater.status.value === 'unavailable',
-        }"
-        :title="updater.title.value"
-        :aria-label="updater.title.value"
-        @click.stop="openUpdateDialog"
-      >
-        <span class="wb-update-dot" aria-hidden="true"></span>
-      </button>
       <div
         v-if="!usesNativeMacWindowControls"
         class="wb-titlebar-controls"
@@ -5712,23 +5630,7 @@ onBeforeUnmount(() => {
         @toggle="toggleInspector()"
       />
 
-      <AgentPanel
-        v-if="inspectorMode === 'ai'"
-        :class="{ 'is-collapsed': inspectorCollapsed }"
-        :style="inspectorStyle"
-        :assistant="agent"
-        :projects="agentProjects"
-        :active-tab="focusedInspectorTab"
-        :schema="workspace.schema"
-        :selected-cell="focusedSelectedCell"
-        :selected-range="focusedSelectedRange"
-        @send="sendAgentMessage"
-        @open-table-reference="openAgentTableReference"
-        @open-reference="openAgentReference"
-        @open-update="openUpdateDialog"
-      />
       <InspectorPanel
-        v-else
         :class="{ 'is-collapsed': inspectorCollapsed }"
         :style="inspectorStyle"
         :active-tab="focusedInspectorTab"

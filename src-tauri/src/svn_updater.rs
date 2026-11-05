@@ -157,14 +157,6 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
     }
 
     let available = compare_versions(&manifest.version, &current_version) == Ordering::Greater;
-    let agent_runtime_update =
-        match crate::agent_runtime::available_update_from_directory(app, &directory) {
-            Ok(update) => update,
-            Err(error) => {
-                eprintln!("[agent-runtime] 无法读取更新信息: {error}");
-                None
-            }
-        };
     Ok(SvnCheckResponse {
         available,
         current_version,
@@ -174,7 +166,7 @@ fn check_locked(app: &AppHandle) -> Result<SvnCheckResponse, String> {
         installer_path: Some(installer_path.to_string_lossy().to_string()),
         directory: Some(directory.to_string_lossy().to_string()),
         needs_directory: false,
-        agent_runtime_update,
+        agent_runtime_update: None,
     })
 }
 

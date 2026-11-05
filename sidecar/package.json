@@ -5,7 +5,7 @@
   "type": "module",
   "main": "agent-runner.mjs",
   "scripts": {
-    "build": "node scripts/build.mjs"
+    "build": "node scripts/build.mjs --mcp-only"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",

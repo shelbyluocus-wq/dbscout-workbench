@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Ellipsis, FileSpreadsheet, Link2, Plug, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, Pin, Plug, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -45,27 +45,15 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     popup: "dialog",
   }),
   Object.freeze({
-    id: "releaseFlow",
-    icon: Rocket,
-    labelKey: "releaseFlow.title",
-    hintKey: "releaseFlow.hint",
-    popup: "dialog",
-  }),
-  Object.freeze({
-    id: "configRelations",
-    icon: Link2,
-    labelKey: "shell.configRelations",
-    hintKey: "shell.configRelationsHint",
-    popup: "dialog",
-  }),
-  Object.freeze({
     id: "blackcatMcp",
     icon: Plug,
     labelKey: "blackcatMcp.title",
     hintKey: "blackcatMcp.hint",
     popup: "dialog",
   }),
+  Object.freeze({ id: "pinWindow", icon: Pin, labelKey: "shell.pinWindow", shortcutAction: "pinWindow" }),
   Object.freeze({ id: "more", icon: Ellipsis, labelKey: "m_38844b135cf7", popup: "menu", controls: "wb-activity-more-menu", zone: "more" }),
+  Object.freeze({ id: "update", icon: Circle, labelKey: "updater.title.idle", popup: "dialog", zone: "bottom" }),
   Object.freeze({
     id: "settings",
     icon: Settings,
@@ -106,7 +94,10 @@ export function resolveActivityRailOrder(stored) {
   const known = new Set(defaultIds);
   const ordered = (Array.isArray(stored) ? stored : []).filter((id) => known.has(String(id)));
   defaultIds.forEach((id, index) => {
-    if (!ordered.includes(id)) ordered.splice(Math.min(index, ordered.length), 0, id);
+    if (!ordered.includes(id)) {
+      const insertion = id === "pinWindow" ? ordered.indexOf("blackcatMcp") + 1 : Math.min(index, ordered.length);
+      ordered.splice(insertion, 0, id);
+    }
   });
   return ordered;
 }
@@ -143,7 +134,7 @@ function storageOrDefault(storage) {
   try { return globalThis.localStorage ?? null; } catch { return null; }
 }
 
-export function useActivityRail({ actions = {}, shortcuts = null, translate = t, expanded = {}, badges = {}, storage = null } = {}) {
+export function useActivityRail({ actions = {}, shortcuts = null, translate = t, expanded = {}, badges = {}, states = {}, storage = null } = {}) {
   const localStorage_ = storageOrDefault(storage);
   const customOrder = ref(readStoredOrder(localStorage_));
 
@@ -171,6 +162,7 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
       badge,
       badgeText: badge > 99 ? "99+" : badge > 0 ? String(badge) : "",
       badgeLabel: badge > 0 ? translate("shell.railBadge", { count: badge }) : "",
+      ...(states[entry.id]?.() || {}),
     };
   }
 

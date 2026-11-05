@@ -11,7 +11,6 @@ import {
   findAvailablePort,
 } from "./dev-port.mjs";
 import { privateBuildEnvironment } from "./build-privacy.mjs";
-import { ensureNode } from "./ensure-node.mjs";
 import { ensureSvn } from "./ensure-svn.mjs";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,9 +20,6 @@ const requestedPort = Number(process.env.VITE_DEV_PORT || process.env.PORT || DE
 const port = await findAvailablePort({ start: requestedPort, host });
 const devUrl = buildDevServerUrl(host, port);
 
-// Development keeps using the gitignored local Node runtime even though
-// production installers obtain it from the separately published AI package.
-await ensureNode();
 await ensureSvn();
 
 writeFileSync(
