@@ -17,6 +17,7 @@ import {
   isDatabaseExpanded,
   revealConnection,
   revealDatabase,
+  settleDatabaseExpansion,
   toggleConnectionExpansion,
   toggleDatabaseExpansion,
   collapseAllConnections,
@@ -335,6 +336,7 @@ watch(
 watch(
   () => [props.selectedConnectionId, props.selectedDatabase],
   ([connectionId, database], [previousConnectionId, previousDatabase]) => {
+    settleDatabaseExpansion(treeState, connectionId, database);
     if (!connectionId || !database) return;
     if (connectionId === previousConnectionId && database === previousDatabase) return;
     nextTick(() => {
@@ -365,6 +367,19 @@ watch(
     });
   },
 );
+
+// The highlighted "current" database follows the active tab right away; the
+// selected source catches up in the background (tabSourceSync), and covers
+// tabs without a database of their own.
+const currentDatabaseKey = computed(() => {
+  const tab = props.activeTab;
+  if (tab?.database) return databaseRowKey(tab.connectionId || props.selectedConnectionId, tab.database);
+  return props.selectedDatabase ? databaseRowKey(props.selectedConnectionId, props.selectedDatabase) : "";
+});
+
+function isCurrentDatabase(connectionId, database) {
+  return currentDatabaseKey.value === databaseRowKey(connectionId, database);
+}
 
 function databaseRowKey(connectionId, database) {
   return `${String(connectionId || "")}\u001f${String(database || "")}`;
@@ -809,8 +824,9 @@ defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, setting
                 <button
                   :ref="(element) => setDatabaseRowRef(connection.id, database, element)"
                   class="wb-tree-row wb-database-item"
-                  :class="[{ active: database === selectedDatabase }, dragRowClass('database', database)]"
+                  :class="[{ active: isCurrentDatabase(connection.id, database) }, dragRowClass('database', database)]"
                   :title="databaseTooltip(connection.id, database)"
+                  :aria-current="isCurrentDatabase(connection.id, database) ? 'true' : undefined"
                   :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
                   draggable="true"
                   @dragstart.stop="startSidebarDrag('database', database, $event)"
@@ -821,6 +837,13 @@ defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, setting
                   @keydown="handleDatabaseKeydown($event, connection.id, database)"
                   @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
+                  <svg v-if="isCurrentDatabase(connection.id, database)" class="wb-current-db-halo" aria-hidden="true" focusable="false">
+                    <rect class="wb-current-db-halo-track" x="0" y="0" width="100%" height="100%" rx="5.5" pathLength="100" />
+                    <rect class="wb-current-db-halo-trail is-long" x="0" y="0" width="100%" height="100%" rx="5.5" pathLength="100" />
+                    <rect class="wb-current-db-halo-trail is-mid" x="0" y="0" width="100%" height="100%" rx="5.5" pathLength="100" />
+                    <rect class="wb-current-db-halo-trail is-short" x="0" y="0" width="100%" height="100%" rx="5.5" pathLength="100" />
+                    <rect class="wb-current-db-halo-head" x="0" y="0" width="100%" height="100%" rx="5.5" pathLength="100" />
+                  </svg>
                   <span class="wb-tree-chevron" :class="{ 'is-open': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) }" aria-hidden="true"></span>
                   <component :is="databaseTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                   <span class="wb-alias-copy" :class="{ 'has-alias': getDatabaseAlias(connection.id, database) }">

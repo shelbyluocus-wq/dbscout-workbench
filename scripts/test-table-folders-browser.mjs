@@ -88,8 +88,16 @@ try {
 
   // Drag a table from the sidebar onto the folder.
   const sidebarTable = page.locator(`.wb-table-item[data-table-name="${names[3]}"]`);
-  if (!(await sidebarTable.isVisible())) await page.getByRole("button", { name: "展開資料庫欄" }).click();
+  if (!(await sidebarTable.isVisible())) {
+    const showSidebar = page.getByRole("button", { name: "展開資料庫欄" });
+    if (await showSidebar.isVisible()) await showSidebar.click();
+    // Table lists start collapsed: open the current database's branch.
+    const currentDatabase = page.locator('.wb-database-item[aria-current="true"]');
+    if ((await currentDatabase.getAttribute("aria-expanded")) !== "true") await currentDatabase.click();
+  }
   await sidebarTable.waitFor();
+  // Let the branch finish unfolding so the drag starts on the intended row.
+  await page.waitForFunction(() => !document.querySelector(".wb-branch-enter-active, .wb-branch-leave-active"));
   await sidebarTable.scrollIntoViewIfNeeded();
   await sidebarTable.dragTo(folder("英雄養成"));
   await waitForNotice("已加入 1 張表到「英雄養成」");

@@ -1,46 +1,72 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  createSidebarTreeState,
+  isConnectionExpanded,
+  isDatabaseExpanded,
+  revealConnection,
+  revealDatabase,
+  settleDatabaseExpansion,
+  toggleConnectionExpansion,
+  toggleDatabaseExpansion,
+} from "./sidebarTreeState.js";
 
-test("an active database branch can be collapsed and expanded without changing selection", async () => {
-  const module = await import("./sidebarTreeState.js").catch(() => null);
-  assert.ok(module, "sidebar tree expansion state module is required");
+const source = ["mysql-main", "game_db", "mysql-main", "game_db"];
 
-  const state = module.createSidebarTreeState();
-  const source = ["mysql-main", "game_db", "mysql-main", "game_db"];
+test("database table lists start collapsed and open only on request", () => {
+  const state = createSidebarTreeState();
 
-  assert.equal(module.isDatabaseExpanded(state, ...source), true);
-  assert.equal(module.toggleDatabaseExpansion(state, ...source), true);
-  assert.equal(module.isDatabaseExpanded(state, ...source), false);
-  assert.equal(module.toggleDatabaseExpansion(state, ...source), true);
-  assert.equal(module.isDatabaseExpanded(state, ...source), true);
+  assert.equal(isDatabaseExpanded(state, ...source), false);
+  assert.equal(toggleDatabaseExpansion(state, ...source), true);
+  assert.equal(isDatabaseExpanded(state, ...source), true);
+  assert.equal(toggleDatabaseExpansion(state, ...source), true);
+  assert.equal(isDatabaseExpanded(state, ...source), false);
 });
 
-test("collapsing the active connection temporarily hides its selected database branch", async () => {
-  const module = await import("./sidebarTreeState.js").catch(() => null);
-  assert.ok(module, "sidebar tree expansion state module is required");
+test("only the selected database can be toggled", () => {
+  const state = createSidebarTreeState();
 
-  const state = module.createSidebarTreeState();
-
-  assert.equal(module.isConnectionExpanded(state, "mysql-main", "mysql-main"), true);
-  assert.equal(module.isDatabaseExpanded(state, "mysql-main", "game_db", "mysql-main", "game_db"), true);
-  module.toggleConnectionExpansion(state, "mysql-main", "mysql-main");
-  assert.equal(module.isConnectionExpanded(state, "mysql-main", "mysql-main"), false);
-  assert.equal(module.isDatabaseExpanded(state, "mysql-main", "game_db", "mysql-main", "game_db"), false);
-  module.toggleConnectionExpansion(state, "mysql-main", "mysql-main");
-  assert.equal(module.isDatabaseExpanded(state, "mysql-main", "game_db", "mysql-main", "game_db"), true);
+  assert.equal(toggleDatabaseExpansion(state, "mysql-main", "other_db", "mysql-main", "game_db"), false);
+  assert.equal(isDatabaseExpanded(state, "mysql-main", "other_db", "mysql-main", "game_db"), false);
 });
 
-test("selecting a previously collapsed source branch reveals it again", async () => {
-  const module = await import("./sidebarTreeState.js").catch(() => null);
-  assert.ok(module, "sidebar tree expansion state module is required");
+test("collapsing the active connection temporarily hides its opened database branch", () => {
+  const state = createSidebarTreeState();
+  revealDatabase(state, "mysql-main", "game_db");
 
-  const state = module.createSidebarTreeState();
-  module.toggleConnectionExpansion(state, "mysql-main", "mysql-main");
-  module.toggleDatabaseExpansion(state, "mysql-main", "game_db", "mysql-main", "game_db");
+  assert.equal(isConnectionExpanded(state, "mysql-main", "mysql-main"), true);
+  assert.equal(isDatabaseExpanded(state, ...source), true);
+  toggleConnectionExpansion(state, "mysql-main", "mysql-main");
+  assert.equal(isConnectionExpanded(state, "mysql-main", "mysql-main"), false);
+  assert.equal(isDatabaseExpanded(state, ...source), false);
+  toggleConnectionExpansion(state, "mysql-main", "mysql-main");
+  assert.equal(isDatabaseExpanded(state, ...source), true);
+});
 
-  module.revealConnection(state, "mysql-main");
-  module.revealDatabase(state, "mysql-main", "game_db");
+test("clicking a database opens it and keeps it open once it becomes selected", () => {
+  const state = createSidebarTreeState();
+  revealConnection(state, "mysql-main");
+  revealDatabase(state, "mysql-main", "game_db");
 
-  assert.equal(module.isConnectionExpanded(state, "mysql-main", "mysql-main"), true);
-  assert.equal(module.isDatabaseExpanded(state, "mysql-main", "game_db", "mysql-main", "game_db"), true);
+  settleDatabaseExpansion(state, "mysql-main", "game_db");
+  assert.equal(isDatabaseExpanded(state, ...source), true);
+});
+
+test("switching to another database's tab never unfolds a table list, even on the way back", () => {
+  const state = createSidebarTreeState();
+  revealDatabase(state, "mysql-main", "game_db");
+
+  settleDatabaseExpansion(state, "mysql-main", "log_db");
+  assert.equal(isDatabaseExpanded(state, "mysql-main", "log_db", "mysql-main", "log_db"), false);
+
+  settleDatabaseExpansion(state, "mysql-main", "game_db");
+  assert.equal(isDatabaseExpanded(state, ...source), false);
+});
+
+test("staying on the same database keeps a manually opened branch", () => {
+  const state = createSidebarTreeState();
+  toggleDatabaseExpansion(state, ...source);
+
+  settleDatabaseExpansion(state, "mysql-main", "game_db");
+  assert.equal(isDatabaseExpanded(state, ...source), true);
 });

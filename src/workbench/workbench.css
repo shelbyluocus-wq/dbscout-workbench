@@ -9975,10 +9975,104 @@ label:has(input[type="checkbox"]:disabled) {
   line-height: 16px;
 }
 
+/* 当前库（跟随激活标签页）：比悬停更深的底色 + 加粗文字 + 静态描边，
+   不只靠颜色区分；外圈再叠一道沿圆角边框绕行的柔和光环。 */
 .wb-database-item.active {
+  --wb-current-db-tint: color-mix(in srgb, var(--wb-accent) 13%, transparent);
+  --wb-current-db-ring: color-mix(in srgb, var(--wb-accent) 34%, transparent);
+  --wb-current-db-glow: var(--wb-accent);
   color: var(--wb-accent-strong);
-  font-weight: 620;
-  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
+  font-weight: 650;
+  background: linear-gradient(var(--wb-current-db-tint), var(--wb-current-db-tint)), var(--wb-chrome-surface);
+}
+
+/* 深色主题的强调色更浅、底色更暗，需要更高的混合比才能与悬停态拉开层级。 */
+.mysql-workbench[data-theme="dark"] .wb-database-item.active {
+  --wb-current-db-tint: color-mix(in srgb, var(--wb-accent) 22%, transparent);
+  --wb-current-db-ring: color-mix(in srgb, var(--wb-accent) 42%, transparent);
+}
+
+/* 光环画在 1px 边框的中线上；pathLength=100 让每段光带按周长比例绕行，
+   与行宽无关。每圈 ease-out：起步快、收尾慢，0 与 -100 位置重合，循环无跳变。
+   尾迹由三段同头对齐、长度递增的半透明光带叠出由亮到淡的渐隐。 */
+.wb-current-db-halo {
+  position: absolute;
+  inset: -0.5px;
+  width: calc(100% + 1px);
+  height: calc(100% + 1px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.wb-current-db-halo rect {
+  fill: none;
+  stroke: var(--wb-current-db-glow);
+}
+
+.wb-current-db-halo .wb-current-db-halo-track {
+  stroke: var(--wb-current-db-ring);
+  stroke-width: 1px;
+}
+
+.wb-current-db-halo-trail,
+.wb-current-db-halo-head {
+  animation: 3.2s cubic-bezier(0.25, 0.5, 0.55, 0.85) infinite;
+}
+
+.wb-current-db-halo-trail {
+  stroke-width: 2.5px;
+  opacity: 0.2;
+}
+
+.wb-current-db-halo-head {
+  stroke-dasharray: 6 94;
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  opacity: 0.85;
+  animation-name: wb-current-db-halo-head;
+}
+
+/* 各段光带前端与光头对齐：起点退后 (长度 - 6)，一起绕完整一圈（-100）。 */
+.wb-current-db-halo-trail.is-short {
+  stroke-dasharray: 10 90;
+  animation-name: wb-current-db-halo-short;
+}
+
+.wb-current-db-halo-trail.is-mid {
+  stroke-dasharray: 18 82;
+  animation-name: wb-current-db-halo-mid;
+}
+
+.wb-current-db-halo-trail.is-long {
+  stroke-dasharray: 30 70;
+  animation-name: wb-current-db-halo-long;
+}
+
+@keyframes wb-current-db-halo-head {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -100; }
+}
+
+@keyframes wb-current-db-halo-short {
+  from { stroke-dashoffset: 4; }
+  to { stroke-dashoffset: -96; }
+}
+
+@keyframes wb-current-db-halo-mid {
+  from { stroke-dashoffset: 12; }
+  to { stroke-dashoffset: -88; }
+}
+
+@keyframes wb-current-db-halo-long {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: -76; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-current-db-halo-trail,
+  .wb-current-db-halo-head {
+    display: none;
+  }
 }
 
 /* 本地别名：主标签显示别名，真实名以次要小字紧随其后。连接节点与数据库节点共用。 */

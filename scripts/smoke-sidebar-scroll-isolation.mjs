@@ -34,6 +34,9 @@ async function boot(page, databaseOrder) {
   await page.locator(".mysql-workbench").waitFor({ state: "visible" });
   const gameDatabase = page.locator(".wb-database-item", { hasText: "game_db" }).first();
   await gameDatabase.waitFor({ state: "visible" });
+  // Table lists start collapsed; opening one is the user's choice.
+  assert.equal(await gameDatabase.getAttribute("aria-expanded"), "false");
+  await gameDatabase.click();
   assert.equal(await gameDatabase.getAttribute("aria-expanded"), "true");
   await page.locator(".wb-table-scroll").waitFor({ state: "visible" });
   await page.locator(".wb-table-item[data-table-name]").first().waitFor({ state: "visible" });

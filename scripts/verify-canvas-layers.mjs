@@ -37,9 +37,15 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
 async function ensureSidebarExpanded() {
   if (await page.locator(".wb-tree-row.wb-table-item:visible").count()) return;
-  const toggle = page.locator(".wb-titlebar-sidebar .wb-topbar-collapse-btn").first();
-  assert.ok(await toggle.count(), "侧栏折叠时应存在展开按钮");
-  await toggle.click();
+  // Table lists start collapsed: open the current database's branch.
+  const currentDatabase = page.locator('.wb-database-item[aria-current="true"]').first();
+  if (!(await currentDatabase.isVisible())) {
+    const toggle = page.locator(".wb-titlebar-sidebar .wb-topbar-collapse-btn").first();
+    assert.ok(await toggle.count(), "侧栏折叠时应存在展开按钮");
+    await toggle.click();
+    await currentDatabase.waitFor({ state: "visible" });
+  }
+  if ((await currentDatabase.getAttribute("aria-expanded")) !== "true") await currentDatabase.click();
   await page.locator(".wb-tree-row.wb-table-item:visible").first().waitFor({ state: "visible" });
 }
 
