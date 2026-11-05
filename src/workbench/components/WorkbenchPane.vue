@@ -13,6 +13,7 @@ import { createSelectionStatsScan, indexOptimisticValuesForTable } from "../util
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { insertRowIdFromKey } from "../utils/gridRowIdentity.js";
 import { createRowIndex } from "../utils/rowIndex.js";
+import { gridViewportSnapshot, scrollControlGrid } from "../utils/controlNavigation.js";
 import {
   distanceToTableWindowEnd,
   distanceToTableWindowStart,
@@ -472,6 +473,32 @@ function selectVisualCellAt(tab, visualRowIndex, columnIndex) {
   if (!row || !column) return;
   selectCell(tab, row, columnName(column), visualRowIndex, columnIndex, { focusGrid: false });
   scrollCellIntoView(entry.dataIndex, columnIndex);
+}
+
+// Agent-driven range selection: the grid binds to THIS pane's editor instance,
+// so external select_range actions must run through the pane's own
+// start/extend/finish functions (the orchestrator-level useGridEditor instance
+// only feeds the inspector, not the cells). Scrolls the anchor cell into view.
+function selectRangeAt(tab, range = {}) {
+  if (!tab) return;
+  const startRowIndex = Number.isInteger(range.startRowIndex) ? range.startRowIndex : 0;
+  const startColumnIndex = Number.isInteger(range.startColumnIndex) ? range.startColumnIndex : 0;
+  const endRowIndex = Number.isInteger(range.endRowIndex) ? range.endRowIndex : startRowIndex;
+  const endColumnIndex = Number.isInteger(range.endColumnIndex) ? range.endColumnIndex : startColumnIndex;
+  const startRow = range.startRow || tabRowAt(tab, startRowIndex);
+  const endRow = range.endRow || tabRowAt(tab, endRowIndex);
+  const startColumn = String(range.startColumn || columnName(tab?.columns?.[startColumnIndex]) || "");
+  const endColumn = String(range.endColumn || columnName(tab?.columns?.[endColumnIndex]) || startColumn);
+  if (!startRow || !endRow || !startColumn || !endColumn) return;
+  commitEditingBeforeSelectionChange();
+  clearRowSelection(tab);
+  clearSelection();
+  startRangeSelection(tab, startRow, startColumn, startRowIndex, startColumnIndex);
+  if (endRowIndex !== startRowIndex || endColumnIndex !== startColumnIndex) {
+    extendRangeSelection(tab, endRow, endColumn, endRowIndex, endColumnIndex);
+  }
+  finishRangeSelection();
+  scrollCellIntoView(startRowIndex, startColumnIndex);
 }
 
 function selectCurrentRowColumn(targetColumn) {
@@ -1574,6 +1601,26 @@ async function replaceListMatch({ match, query, replacement, caseSensitive } = {
   return { ok: true, replaced: next.replacedCount, newValue: next.text };
 }
 
+async function scrollAgentGrid(action) {
+  const tab = activeDataTab.value;
+  if (!tab) throw new Error("当前没有数据表");
+  if (editingCell.value || tab.insertDrafts?.length) throw new Error("请先完成当前编辑或新增行，再让 AI 滚动表格");
+  gridPagingSuspended = true;
+  try {
+    await scrollControlGrid({
+      tab, direction: action.direction, screens: action.screens,
+      getWrap: () => gridWrapRef.value,
+      restore: restoreGridScroll, nextTick,
+      fetchPage: props.fetchPage, loadNextPage: props.loadNextPage,
+      loadPreviousPage: props.loadPreviousPage, jumpToTableBoundary: props.jumpToTableBoundary,
+      rowHeight: rowHeight.value, rowCount: () => tabRowCount(tab),
+    });
+    rememberGridScrollPosition(gridWrapRef.value);
+  } finally {
+    gridPagingSuspended = false;
+  }
+}
+
 function emitPaneState() {
   emit("state-change", {
     paneId: props.pane.id,
@@ -1603,9 +1650,12 @@ function emitPaneState() {
     resetGridScroll,
     selectCellAt,
     selectVisualCellAt,
+    selectRangeAt,
     selectCurrentRowColumn,
     selectInsertCell,
     scrollColumnIntoView,
+    scrollAgentGrid,
+    controlViewport: () => gridViewportSnapshot(gridWrapRef.value, activeDataTab.value),
     applyFreezeTarget,
     reorderGridColumns,
     resetGridColumnOrder,

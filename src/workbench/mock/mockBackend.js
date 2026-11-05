@@ -30,6 +30,12 @@ const mockSessions = new Map();
 const perfRows = new Map();
 const mockTableSearchJobs = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
+// Dev-only: emit an external-MCP `control-workbench-action` UI action as if the
+// Rust control server forwarded it (e.g. `__DBSCOUT_SIMULATE_UI_ACTION__("open_table", { table: "player" })`).
+globalThis.__DBSCOUT_SIMULATE_UI_ACTION__ = (action, args = {}) => {
+  emitMockEvent("control-workbench-action", { requestId: `sim-${Date.now()}`, action, ...args });
+};
+
 let mockExternalMcpEnabled = true;
 let mockExternalMcpPermissions = { navigate: true, writeData: true, schema: true, manageTables: true };
 let mockExternalMcpContext = {};
@@ -1446,7 +1452,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     mockExternalMcpContext = { ...(payload.context || {}) };
     return null;
   }
-  if (command === "control_complete_ui_action") return null;
+  if (command === "control_complete_ui_action") {
+    emitMockEvent("control-ui-result", payload);
+    return null;
+  }
   if (command === "read_clipboard_text") {
     const readText = globalThis.navigator?.clipboard?.readText;
     if (typeof readText !== "function") throw new Error("读取剪贴板失败");

@@ -40,6 +40,8 @@ pub(crate) trait RevealWindowOps {
     fn reveal_show(&self);
     fn reveal_unminimize(&self);
     fn reveal_focus(&self);
+    fn reveal_is_visible(&self) -> bool;
+    fn reveal_is_minimized(&self) -> bool;
 }
 
 impl<R: Runtime> RevealWindowOps for WebviewWindow<R> {
@@ -54,6 +56,14 @@ impl<R: Runtime> RevealWindowOps for WebviewWindow<R> {
     fn reveal_focus(&self) {
         let _ = self.set_focus();
     }
+
+    fn reveal_is_visible(&self) -> bool {
+        self.is_visible().unwrap_or(false)
+    }
+
+    fn reveal_is_minimized(&self) -> bool {
+        self.is_minimized().unwrap_or(false)
+    }
 }
 
 pub(crate) fn reveal_window<W: RevealWindowOps>(window: &W) {
@@ -65,6 +75,23 @@ pub(crate) fn reveal_window<W: RevealWindowOps>(window: &W) {
 pub(crate) fn reveal_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         reveal_window(&window);
+    }
+}
+
+/// Surface the window only when it is hidden (tray) or minimized, and never
+/// steal focus. External-UI actions use this so an AI driving the workbench
+/// does not pop the window over whatever the user is doing.
+pub(crate) fn reveal_window_passive<W: RevealWindowOps>(window: &W) {
+    if window.reveal_is_visible() && !window.reveal_is_minimized() {
+        return;
+    }
+    window.reveal_show();
+    window.reveal_unminimize();
+}
+
+pub(crate) fn reveal_main_window_passive<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        reveal_window_passive(&window);
     }
 }
 
@@ -122,6 +149,14 @@ mod tests {
         fn reveal_focus(&self) {
             self.calls.borrow_mut().push("focus");
         }
+
+        fn reveal_is_visible(&self) -> bool {
+            self.calls.borrow().contains(&"visible")
+        }
+
+        fn reveal_is_minimized(&self) -> bool {
+            self.calls.borrow().contains(&"minimized")
+        }
     }
 
     #[test]
@@ -131,5 +166,23 @@ mod tests {
         reveal_window(&window);
 
         assert_eq!(window.calls(), vec!["show", "unminimize", "focus"]);
+    }
+
+    #[test]
+    fn passive_reveal_leaves_a_visible_window_alone_and_never_focuses() {
+        let window = FakeWindow::new();
+        window.calls.borrow_mut().push("visible");
+        reveal_window_passive(&window);
+        assert_eq!(window.calls(), vec!["visible"]);
+
+        let hidden = FakeWindow::new();
+        reveal_window_passive(&hidden);
+        assert_eq!(hidden.calls(), vec!["show", "unminimize"]);
+
+        let minimized = FakeWindow::new();
+        minimized.calls.borrow_mut().push("visible");
+        minimized.calls.borrow_mut().push("minimized");
+        reveal_window_passive(&minimized);
+        assert_eq!(minimized.calls(), vec!["visible", "minimized", "show", "unminimize"]);
     }
 }

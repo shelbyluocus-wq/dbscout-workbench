@@ -1449,10 +1449,17 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
 
   function normalizeWorkbenchAction(payload) {
     const action = String(payload.action || "").trim();
-    const supported = new Set(["open_table", "focus_column", "focus_row", "focus_cell", "refresh_table"]);
+    const supported = new Set(["open_table", "focus_column", "focus_row", "focus_cell", "refresh_table", "select_database", "open_sql", "select_range", "scroll_table", "get_view_state"]);
     if (!supported.has(action)) return null;
     const tableName = String(payload.tableName || payload.table || "").trim();
-    if (!tableName) return null;
+    const needsTable = !["select_database", "open_sql", "get_view_state"].includes(action);
+    if (needsTable && !tableName) return null;
+    if (action === "select_database" && !String(payload.database || "").trim()) return null;
+    if (action === "open_sql" && !String(payload.sql || "").trim()) return null;
+    if (action === "select_range") {
+      if (!String(payload.startColumn || "").trim()) return null;
+      if (!String(payload.startRowKey || "").trim() && !(payload.startRowIdentity && typeof payload.startRowIdentity === "object")) return null;
+    }
     const normalized = {
       requestId: String(payload.requestId || `workbench-action-${Date.now()}-${Math.random().toString(16).slice(2)}`),
       action,
@@ -1460,7 +1467,12 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
       database: String(payload.database || ""),
       tableName,
       tableComment: String(payload.tableComment || payload.table_comment || ""),
+      ...(payload.demoStep ? { demoStep: String(payload.demoStep) } : {}),
     };
+    if (action === "scroll_table") {
+      normalized.direction = String(payload.direction || "");
+      normalized.screens = Number(payload.screens ?? 1);
+    }
     if (action === "focus_column" || action === "focus_cell") {
       normalized.columnName = String(payload.columnName || payload.column || "").trim();
       if (!normalized.columnName) return null;
@@ -1469,6 +1481,23 @@ export function useAgent(workspace, invokeWorkbench, projectContext = null) {
       normalized.rowKey = String(payload.rowKey || payload.row_key || "").trim();
       normalized.rowIdentity = normalizeRowIdentity(payload.rowIdentity || payload.row_identity);
       if (!normalized.rowKey && !normalized.rowIdentity) return null;
+    }
+    if (action === "open_table") {
+      if (typeof payload.filter === "string") normalized.filter = payload.filter;
+      if (typeof payload.filterMode === "string") normalized.filterMode = payload.filterMode;
+      if (payload.sort && typeof payload.sort === "object") normalized.sort = { ...payload.sort };
+    }
+    if (action === "open_sql") {
+      normalized.sql = String(payload.sql || "");
+      normalized.run = payload.run === true;
+    }
+    if (action === "select_range") {
+      normalized.startRowKey = String(payload.startRowKey || "");
+      normalized.startRowIdentity = normalizeRowIdentity(payload.startRowIdentity);
+      normalized.startColumn = String(payload.startColumn || "");
+      normalized.endRowKey = String(payload.endRowKey || "");
+      normalized.endRowIdentity = normalizeRowIdentity(payload.endRowIdentity);
+      normalized.endColumn = String(payload.endColumn || "");
     }
     return normalized;
   }

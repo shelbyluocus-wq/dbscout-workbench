@@ -1,5 +1,13 @@
 # AGENTS.md
 
+External MCP navigation: `get_mcp_capabilities` exposes the tool catalog and live
+desktop capabilities/permissions; `list_connections` discovers credential-free
+targets. Context reads fetch fresh viewport/selection state without revealing the
+window. `scroll_table` browses actual grids; complete-primary-key focus can open a
+separate exact-key tab without clearing the original filters. Batch actions default
+to compact results and fast execution; optional demo mode labels/pauses steps.
+See `docs/local-control-connections.md` for limits and verification commands.
+
 This file provides guidance to Codex (codex.ai/code) when working with code in this repository.
 
 > A near-identical `CLAUDE.md` exists for Claude Code. When you change project

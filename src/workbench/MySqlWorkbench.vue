@@ -98,6 +98,7 @@ import {
 import { isCustomColumnOrder } from "./utils/columnOrder.js";
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
+import { primaryKeyFilter } from "./utils/controlNavigation.js";
 import { gridRowKey } from "./utils/gridRowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
 import { applyCommittedCellToTab } from "./utils/committedCellSync.js";
@@ -148,6 +149,8 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
+import { requestSqlRun } from "./utils/sqlRunRequests.js";
+import { applyAgentTableViewState } from "./utils/agentTableView.js";
 import ConfigRelationsDialog from "./components/ConfigRelationsDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import HomeDatabaseFavorites from "./components/HomeDatabaseFavorites.vue";
@@ -429,6 +432,7 @@ const focusedPaneState = reactive({
   resetGridScroll: null,
   selectCellAt: null,
   selectVisualCellAt: null,
+  selectRangeAt: null,
   selectCurrentRowColumn: null,
   selectInsertCell: null,
   scrollColumnIntoView: null,
@@ -2136,7 +2140,7 @@ function sendAgentMessage() {
 
 let agentWorkbenchActionProcessing = false;
 
-function controlContextSnapshot(tab = activeDataTab.value) {
+function controlContextSnapshot(tab = activeDataTab.value, detailed = false) {
   const connectionId = String(tab?.connectionId || selectedConnectionId.value || "");
   const connection = connections.value.find((item) => item.id === connectionId);
   return {
@@ -2148,6 +2152,40 @@ function controlContextSnapshot(tab = activeDataTab.value) {
     page: Number(tab?.page || 1),
     loadedRowCount: tab ? tabRows(tab).length : 0,
     columns: Array.isArray(tab?.columns) ? tab.columns.map((column) => columnName(column)) : [],
+    tabId: tab?.id || activeTab.value?.id || "",
+    filter: tab?.filter || "",
+    filterMode: tab?.filterMode || "",
+    relationFilter: tab?.relationFilter || null,
+    sort: tab?.sort || null,
+    loading: Boolean(tab?.loading),
+    loadingMore: Boolean(tab?.loadingMore || tab?.loadingPrevious),
+    searchComplete: tab?.searchResultMode ? tab.searchResultComplete === true : null,
+    hasMore: Boolean(tab?.hasMore),
+    totalRows: tab?.totalRows ?? null,
+    totalRowsExact: tab?.totalRowsExact === true,
+    rowWindowOffset: tab?.rowWindowOffset || 0,
+    ...(detailed ? {
+      capturedAt: new Date().toISOString(),
+      selectedCell: focusedPaneState.selectedCell ? {
+        tabId: focusedPaneState.selectedCell.tabId,
+        rowKey: focusedPaneState.selectedCell.rowKey,
+        columnName: focusedPaneState.selectedCell.column,
+        rowIndex: focusedPaneState.selectedCell.rowIndex,
+        columnIndex: focusedPaneState.selectedCell.columnIndex,
+      } : null,
+      selectedRange: focusedPaneState.selectedRange ? {
+        tabId: focusedPaneState.selectedRange.tabId,
+        anchor: focusedPaneState.selectedRange.anchor,
+        focus: focusedPaneState.selectedRange.focus,
+        toggledCellCount: focusedPaneState.selectedRange.toggledCells?.length || 0,
+      } : null,
+      viewport: tab?.id === focusedPaneState.activeDataTab?.id ? focusedPaneState.controlViewport?.() || null : null,
+      tabs: workspace.tabs.map((item) => ({
+        id: item.id, kind: item.kind || "data", connectionId: item.connectionId,
+        database: item.database, tableName: item.tableName, filter: item.filter || "",
+        filterMode: item.filterMode, sort: item.sort || null, relationFilter: item.relationFilter || null,
+      })),
+    } : {}),
   };
 }
 
@@ -2164,7 +2202,19 @@ async function processNextAgentWorkbenchAction() {
   agentWorkbenchActionProcessing = true;
   let message = "";
   try {
-    if (action.action === "open_table") {
+    if (action.action !== "get_view_state" && focusedPaneState.isEditing?.()) {
+      throw new Error("请先完成当前单元格编辑，再让 AI 操作界面");
+    }
+    if (action.demoStep) statusText.value = `MCP ${action.demoStep} · ${action.tableName || action.database || action.action}`;
+    if (action.action === "get_view_state") {
+      message = "已读取当前界面状态";
+    } else if (action.action === "scroll_table") {
+      await openAgentTableAction(action);
+      await nextTick();
+      if (!focusedPaneState.scrollAgentGrid) throw new Error("当前表格尚未就绪");
+      await focusedPaneState.scrollAgentGrid(action);
+      message = `已滚动表格：${action.tableName} · ${action.direction}`;
+    } else if (action.action === "open_table") {
       await openAgentTableAction(action);
       message = `已打开表：${action.tableName}`;
     } else if (action.action === "focus_column" || action.action === "focus_row" || action.action === "focus_cell") {
@@ -2173,12 +2223,50 @@ async function processNextAgentWorkbenchAction() {
     } else if (action.action === "refresh_table") {
       await refreshAgentTableAction(action);
       message = `已刷新表：${action.tableName}`;
+    } else if (action.action === "select_database") {
+      const targetConnectionId = action.connectionId || selectedConnectionId.value;
+      // Real database lists live in useConnection: `databases` holds the
+      // selected connection's list, `databasesByConnection` caches other
+      // connections' lists (both are arrays of plain strings).
+      const cached = targetConnectionId === selectedConnectionId.value
+        ? databases.value
+        : databasesByConnection[targetConnectionId];
+      const list = Array.isArray(cached) && cached.length
+        ? cached
+        : await fetchDatabasesForConnection(targetConnectionId);
+      const exists = (Array.isArray(list) ? list : []).some(
+        (name) => String(name) === String(action.database),
+      );
+      if (!exists) throw new Error(`连接中不存在数据库：${action.database}`);
+      await selectDatabaseWithHome({ connectionId: targetConnectionId, database: action.database });
+      message = `已切换数据库：${action.database}`;
+    } else if (action.action === "open_sql") {
+      const tab = openSqlQuery({
+        values: {
+          connectionId: action.connectionId || selectedConnectionId.value,
+          database: action.database || selectedDatabase.value,
+          sql: action.sql,
+        },
+      });
+      if (!tab) throw new Error("打开 SQL 查询失败");
+      if (action.run) {
+        const outcome = await requestSqlRun(tab, {});
+        if (outcome.status !== "ok") throw new Error(outcome.error || "SQL 执行失败");
+        message = `已打开 SQL 查询并执行：${outcome.rowCount} 行`;
+      } else {
+        message = "已打开 SQL 查询";
+      }
+    } else if (action.action === "select_range") {
+      await selectAgentRangeAction(action);
+      message = `已选中区域：${action.tableName}`;
     }
+    await nextTick();
+    if (action.demoStep) statusText.value = `MCP ${action.demoStep} · ${message}`;
     try {
       await agent.completeControlWorkbenchAction(action, {
         ok: true,
         message,
-        context: controlContextSnapshot(),
+        context: controlContextSnapshot(activeDataTab.value, true),
       });
     } catch {
       // The action itself succeeded even if the external caller disconnected.
@@ -2190,7 +2278,7 @@ async function processNextAgentWorkbenchAction() {
       await agent.completeControlWorkbenchAction(action, {
         ok: false,
         message: reason,
-        context: controlContextSnapshot(),
+        context: controlContextSnapshot(activeDataTab.value, true),
       });
     } catch {
       // The MCP caller may already have timed out; keep the workbench usable.
@@ -2210,6 +2298,54 @@ watch(
     void processNextAgentWorkbenchAction();
   },
 );
+
+async function selectAgentRangeAction(action) {
+  const tab = await openAgentTableAction(action);
+  await nextTick();
+  const columnIndexOf = (name) => {
+    const index = tab.columns.findIndex((column) => columnName(column) === name);
+    if (index < 0) throw new Error(`未找到列：${name}`);
+    return index;
+  };
+  const startColumnIndex = columnIndexOf(action.startColumn);
+  const endColumnIndex = action.endColumn ? columnIndexOf(action.endColumn) : startColumnIndex;
+  const startRowIndex = resolveAgentActionRowIndex(tab, {
+    rowKey: action.startRowKey,
+    rowIdentity: action.startRowIdentity,
+  });
+  if (startRowIndex < 0) throw new Error(`未找到起始行：${action.tableName}`);
+  const endRowIndex = (action.endRowKey || action.endRowIdentity)
+    ? resolveAgentActionRowIndex(tab, { rowKey: action.endRowKey, rowIdentity: action.endRowIdentity })
+    : startRowIndex;
+  if (endRowIndex < 0) throw new Error(`未找到结束行：${action.tableName}`);
+  const startRow = tabRowAt(tab, startRowIndex);
+  const endRow = tabRowAt(tab, endRowIndex);
+  if (!startRow || !endRow) throw new Error(`未找到行：${action.tableName}`);
+  const startColumn = columnName(tab.columns[startColumnIndex]);
+  const endColumn = columnName(tab.columns[endColumnIndex]);
+  // The visible grid binds to each pane's own useGridEditor instance; prefer the
+  // focused pane's selectRangeAt so the highlight actually renders. The
+  // orchestrator-level functions remain a fallback (they still feed the
+  // inspector's selection state).
+  if (typeof focusedPaneState.selectRangeAt === "function") {
+    focusedPaneState.selectRangeAt(tab, {
+      startRow,
+      startColumn,
+      startRowIndex,
+      startColumnIndex,
+      endRow,
+      endColumn,
+      endRowIndex,
+      endColumnIndex,
+    });
+    return;
+  }
+  startRangeSelection(tab, startRow, startColumn, startRowIndex, startColumnIndex);
+  if (endRowIndex !== startRowIndex || endColumnIndex !== startColumnIndex) {
+    extendRangeSelection(tab, endRow, endColumn, endRowIndex, endColumnIndex);
+  }
+  finishRangeSelection();
+}
 
 async function openAgentTableReference(tableName) {
   const name = String(tableName || "").trim();
@@ -2247,7 +2383,28 @@ async function openAgentTableAction(action) {
     (!connectionId || !item.connectionId || item.connectionId === connectionId)
   );
   focusedPaneState.captureActiveTableViewState?.();
-  const openedTab = await openTable({
+  // filter/filterMode/sort are applied post-open through
+  // applyAgentTableViewState (a single path for fresh and already-open tabs).
+  // Passing them via openTable's initialState only sets display fields — the
+  // backend never sees the filter because usesBackendFilter stays false.
+  const viewState = {};
+  if (typeof action.filter === "string") viewState.filter = action.filter;
+  if (typeof action.filterMode === "string") viewState.filterMode = action.filterMode;
+  if (action.sort && typeof action.sort === "object") viewState.sort = { ...action.sort };
+  const current = focusedPaneState.activeDataTab;
+  const matchesTarget = (candidate) => candidate?.tableName === name
+    && candidate.connectionId === connectionId && candidate.database === database;
+  const existing = action.action !== "open_table"
+    ? (matchesTarget(current) ? current : workspace.tabs.find((candidate) => matchesTarget(candidate) && !candidate.hitResultMode))
+    : null;
+  let reusedTab = null;
+  if (existing?.sessionId && !existing.loadError && !existing.loading) {
+    if (existing.id !== current?.id) await activateTab(existing.id);
+    await nextTick();
+    if (focusedPaneState.activeDataTab?.id !== existing.id) throw new Error("切换表格已取消，未执行后续定位");
+    reusedTab = existing;
+  }
+  const openedTab = reusedTab || await openTable({
     ...(table || {}),
     tableName: table ? normalizeTableName(table) : name,
     tableComment: table ? normalizeTableComment(table) : String(action.tableComment || ""),
@@ -2262,6 +2419,14 @@ async function openAgentTableAction(action) {
   ) || null;
   if (!tab) throw new Error(`打开表失败：${name}`);
   if (tab.loadError) throw new Error(`打开表失败：${tab.loadError}`);
+  if (Object.keys(viewState).length) {
+    await applyAgentTableViewState(tab, viewState, {
+      loadSearchResultPage,
+      loadNextSearchResultPage,
+      applySort,
+      fetchPage,
+    });
+  }
   statusText.value = `已打开表：${name}`;
   return tab;
 }
@@ -2286,13 +2451,26 @@ async function refreshAgentTableAction(action) {
 }
 
 async function focusAgentReferenceAction(action) {
-  const tab = await openAgentTableAction(action);
+  let tab = await openAgentTableAction(action);
+  if (action.columnName && !tab.columns.some((column) => columnName(column) === action.columnName)) {
+    throw new Error(`未找到列：${action.columnName}`);
+  }
+  if (action.rowIdentity) primaryKeyFilter(tab, action.rowIdentity);
+  if (action.action !== "focus_column" && resolveAgentActionRowIndex(tab, action) < 0) {
+    const relationFilter = primaryKeyFilter(tab, action.rowIdentity);
+    tab = await openTable({
+      connectionId: tab.connectionId, database: tab.database, tableName: tab.tableName,
+      tableComment: tab.tableComment, readOnly: tab.readOnly,
+    }, { paneId: workspace.focusedPaneId, initialState: { hitResultMode: true, relationFilter } });
+    if (!tab || tab.loadError) throw new Error(String(tab?.loadError || "主键定位失败"));
+  }
   await nextTick();
   const targetTab = tab || activeDataTab.value;
   if (!targetTab) throw new Error(`打开表失败：${action.tableName}`);
   const columnIndex = action.columnName
     ? targetTab.columns.findIndex((column) => columnName(column) === action.columnName)
     : 0;
+  if (action.columnName && columnIndex < 0) throw new Error(`未找到列：${action.columnName}`);
   const rowIndex = resolveAgentActionRowIndex(targetTab, action);
   if (action.action === "focus_column") {
     if (columnIndex >= 0) {
@@ -2309,7 +2487,7 @@ async function focusAgentReferenceAction(action) {
     return;
   }
   if (rowIndex < 0) {
-    statusText.value = `未找到行：${action.tableName}`;
+    statusText.value = `未找到行：${action.tableName}；主键记录可能已删除，原标签筛选保持不变`;
     throw new Error(statusText.value);
   }
   const targetColumnIndex = columnIndex >= 0 ? columnIndex : 0;

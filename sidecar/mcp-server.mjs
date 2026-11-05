@@ -3,6 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
 import { appExecutableFromArgs, ControlClient } from "./controlClient.mjs";
+import { runUiActionBatch } from "./uiActionBatch.mjs";
 import { executeExternalImport, previewExternalImport } from "./externalImport.mjs";
 
 const control = new ControlClient({ appExecutable: appExecutableFromArgs() });
@@ -61,11 +62,44 @@ register(
   "get_workbench_context",
   {
     title: "获取黑猫当前界面",
-    description: "返回黑猫当前连接、数据库、已打开表、当前页和已加载字段。",
+    description: "黑猫 MCP 操作入口：获取当前界面/current context/state、连接、数据库、打开标签、筛选排序、选中单元格、可见行列、加载状态和权限。读取数据用 read_table_page，浏览滚动用 scroll_table，连续操作用 run_ui_actions。",
     inputSchema: z.object({}),
     annotations: readOnlyAnnotations,
   },
   () => control.request("get_context")
+);
+
+register(
+  "list_connections",
+  {
+    title: "列出黑猫连接",
+    description: "发现黑猫已配置的数据库连接及 connectionId、名称、引擎、主机和端口；不返回密码，不切换界面。跨连接操作先调用，不猜连接 ID。",
+    inputSchema: z.object({}),
+    annotations: readOnlyAnnotations,
+  },
+  () => control.request("get_connections")
+);
+
+register(
+  "get_mcp_capabilities",
+  {
+    title: "黑猫 MCP 能力与使用入口",
+    description: "发现黑猫 MCP 支持什么、如何操作、当前版本与权限。首次接入、找不到工具、调用失败或升级后优先调用。包含工具参数说明和常用流程。",
+    inputSchema: z.object({}),
+    annotations: readOnlyAnnotations,
+  },
+  async () => ({
+    context: await control.request("get_context"),
+    tools: toolRegistrations.map(({ name, config }) => ({
+      name, description: config.description, inputSchema: z.toJSONSchema(config.inputSchema),
+    })),
+    workflows: {
+      browse: ["get_workbench_context", "list_connections", "list_tables", "open_table", "scroll_table"],
+      locate: "focus_row/focus_cell：传完整 rowIdentity；未加载时在独立主键精确筛选标签定位，保留原标签筛选。",
+      read: "read_table_page：使用 nextOffset 分页；搜索结构用 search_schema，不要空关键字。",
+      batch: "run_ui_actions：fast 默认无等待；demo 每步停留；compact 默认精简，full 排错。",
+    },
+  })
 );
 
 dbTool(
@@ -259,11 +293,96 @@ register(
   "open_table",
   {
     title: "在黑猫中打开表",
-    description: "把黑猫窗口切到前台并打开指定表；成功响应表示首屏数据已经可用。",
-    inputSchema: z.object({ ...contextFields, table: z.string().min(1) }),
+    description: "打开指定表，隐藏窗口仅被动显示、不抢焦点；成功表示首屏数据可用，不代表动画播放完成。支持筛选排序。",
+    inputSchema: z.object({
+      ...contextFields,
+      table: z.string().min(1),
+      filter: z.string().optional().describe("打开后应用的筛选关键字；空字符串清除筛选"),
+      filterMode: z.enum(["exact", "continuous", "fuzzy"]).optional().describe("筛选匹配方式，缺省沿用黑猫当前设置"),
+      sort: z.object({ column: z.string(), descending: z.boolean().optional() }).optional().describe("打开后应用的排序"),
+    }),
     annotations: uiAnnotations,
   },
   (args) => control.request("ui_action", { action: "open_table", args })
+);
+register(
+  "select_database",
+  {
+    title: "切换黑猫当前数据库",
+    description: "把黑猫界面切到指定连接的数据库，等同于在侧栏选择该库。",
+    inputSchema: z.object({
+      connectionId: z.string().min(1).optional().describe("连接 ID；省略时使用当前连接"),
+      database: z.string().min(1),
+    }),
+    annotations: uiAnnotations,
+  },
+  (args) => control.request("ui_action", { action: "select_database", args })
+);
+register(
+  "open_sql",
+  {
+    title: "在黑猫中打开 SQL 查询",
+    description: "新建 SQL 查询标签并预填 SQL。run=true 时直接执行，仅限只读查询（写操作请用 run_write_query）。",
+    inputSchema: z.object({
+      ...contextFields,
+      sql: z.string().min(1),
+      run: z.boolean().optional().describe("true 时执行只读查询并返回状态与行数"),
+    }),
+    annotations: uiAnnotations,
+  },
+  (args) => control.request("ui_action", { action: "open_sql", args })
+);
+register(
+  "select_range",
+  {
+    title: "在黑猫表中选中区域",
+    description: "打开表并选中起止行列构成的矩形区域；行必须在已加载页内。",
+    inputSchema: z.object({
+      ...contextFields,
+      table: z.string().min(1),
+      startRowKey: z.string().optional(),
+      startRowIdentity: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional(),
+      endRowKey: z.string().optional(),
+      endRowIdentity: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional(),
+      startColumn: z.string().min(1),
+      endColumn: z.string().optional(),
+    }),
+    annotations: uiAnnotations,
+  },
+  (args) => control.request("ui_action", { action: "select_range", args })
+);
+register(
+  "scroll_table",
+  {
+    title: "滚动黑猫表格",
+    description: "真实滚动表格：上下左右一屏或多屏、首行/末行；必要时加载目标窗口，不改变筛选排序。返回实际可见范围。",
+    inputSchema: z.object({
+      ...contextFields,
+      table: z.string().min(1),
+      direction: z.enum(["up", "down", "left", "right", "top", "bottom"]),
+      screens: z.number().int().min(1).max(5).optional().default(1),
+    }),
+    annotations: uiAnnotations,
+  },
+  (args) => control.request("ui_action", { action: "scroll_table", args })
+);
+register(
+  "run_ui_actions",
+  {
+    title: "批量执行黑猫界面动作",
+    description: "连续操作黑猫：按顺序执行 1-20 个动作（open_table、focus_*、scroll_table、select_database、open_sql、select_range、refresh_table、reveal_window）。遇错即停，不回滚已完成动作。默认精简结果与最终界面；demo 逐步停留，fast 不等待。",
+    inputSchema: z.object({
+      steps: z.array(z.object({
+        action: z.string().min(1),
+        args: z.record(z.string(), z.unknown()).optional().default({}),
+      })).min(1).max(20),
+      mode: z.enum(["fast", "demo"]).optional().default("fast"),
+      pauseMs: z.number().int().min(100).max(3000).optional().default(600),
+      detail: z.enum(["compact", "full"]).optional().default("compact"),
+    }),
+    annotations: uiAnnotations,
+  },
+  async ({ steps, ...options }) => runUiActionBatch(control, steps, options)
 );
 register(
   "focus_column",
@@ -282,8 +401,8 @@ register(
 register(
   "focus_row",
   {
-    title: "在黑猫中定位已加载行",
-    description: "打开表并定位当前已加载页中的行；rowIdentity 使用主键字段对象。",
+    title: "在黑猫中按主键定位行",
+    description: "按完整主键 rowIdentity 定位记录；MySQL/演示库未加载时打开独立主键精确筛选标签，不清除原标签筛选。其他引擎和 rowKey 仅用于已加载行；复合主键必须完整。",
     inputSchema: z.object({
       ...contextFields,
       table: z.string().min(1),
@@ -298,7 +417,7 @@ register(
   "focus_cell",
   {
     title: "在黑猫中定位单元格",
-    description: "打开表并定位当前已加载页中的指定行和字段。",
+    description: "按完整主键 rowIdentity 定位记录和字段；MySQL/演示库未加载时在独立精确筛选标签定位，保留原视图。其他引擎和 rowKey 仅用于已加载行。",
     inputSchema: z.object({
       ...contextFields,
       table: z.string().min(1),
@@ -314,7 +433,7 @@ register(
   "reveal_workbench",
   {
     title: "显示黑猫窗口",
-    description: "显示并聚焦黑猫主窗口。",
+    description: "被动显示黑猫主窗口，不抢占用户正在使用的应用焦点。",
     inputSchema: z.object({}),
     annotations: uiAnnotations,
   },

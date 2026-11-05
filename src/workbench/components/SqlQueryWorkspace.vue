@@ -1,12 +1,13 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, ref, watch } from "vue";
+import { nextTick, computed, ref, watch } from "vue";
 import {
   AlignLeft, BookOpen, CircleStop, Database, FileInput, FileOutput, FlaskConical,
   Play, PlayCircle, RotateCcw, Save, ShieldCheck, SplitSquareVertical,
 } from "lucide-vue-next";
 
 import { useConfirm } from "../composables/useConfirm.js";
+import { resolveSqlRun } from "../utils/sqlRunRequests.js";
 import { useSqlQuery } from "../composables/useSqlQuery.js";
 import { sqlResultPane, sqlResultStatusText } from "../sqlExecutionState.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
@@ -35,6 +36,26 @@ const query = useSqlQuery({
   onSchemaChanged: () => emit("schema-changed", props.tab),
 });
 const editorRef = query.editorRef;
+
+// External-UI run requests: consume the one-shot marker, execute, report back.
+watch(
+  () => props.tab?.agentRunRequest,
+  async (request) => {
+    if (!request?.id || props.tab.agentRunRequest?.id !== request.id) return;
+    props.tab.agentRunRequest = null;
+    await nextTick();
+    try {
+      const result = await query.execute(editorRef.value?.executionContext?.(false));
+      resolveSqlRun(request.id, {
+        status: "ok",
+        rowCount: Number(result?.rowCount ?? result?.rows?.length ?? props.tab.resultSets?.[0]?.rowCount ?? 0),
+      });
+    } catch (error) {
+      resolveSqlRun(request.id, { status: "error", error: String(error?.message || error || "SQL 执行失败") });
+    }
+  },
+  { immediate: true },
+);
 const resizeStart = ref(null);
 const hasTransaction = computed(() => Boolean(props.tab.transactionSessionId));
 const resultTabs = computed(() => props.tab.resultSets || []);

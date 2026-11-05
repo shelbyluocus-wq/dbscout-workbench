@@ -63,6 +63,11 @@ const UI_ACTIONS: &[&str] = &[
     "focus_cell",
     "reveal_window",
     "refresh_table",
+    "select_database",
+    "open_sql",
+    "select_range",
+    "scroll_table",
+    "get_view_state",
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,7 +123,7 @@ enum McpPermission {
 impl McpPermission {
     fn label(self) -> &'static str {
         match self {
-            McpPermission::Navigate => "打开和定位表",
+            McpPermission::Navigate => "操作黑猫界面",
             McpPermission::WriteData => "修改数据",
             McpPermission::Schema => "修改表结构",
             McpPermission::ManageTables => "复制、重命名和删除表",
@@ -242,7 +247,8 @@ fn required_permission(request: &ControlRequest) -> Option<McpPermission> {
             _ => None,
         },
         ControlRequest::UiAction { action, .. } => match action.as_str() {
-            "open_table" | "focus_column" | "focus_row" | "focus_cell" | "reveal_window" => {
+            "open_table" | "focus_column" | "focus_row" | "focus_cell" | "reveal_window"
+            | "select_database" | "open_sql" | "select_range" | "scroll_table" => {
                 Some(McpPermission::Navigate)
             }
             _ => None,
@@ -277,7 +283,7 @@ fn build_ui_action_payload(
         return Err(format!("unsupported ui action: {action}"));
     }
     let table_name = arg_str(args, &["tableName", "table"]);
-    if action != "reveal_window" && table_name.is_empty() {
+    if !matches!(action, "reveal_window" | "select_database" | "open_sql" | "get_view_state") && table_name.is_empty() {
         return Err("missing or invalid argument: tableName/table".to_string());
     }
     let mut connection_id = arg_str(args, &["connectionId", "connection_id"]);
@@ -296,6 +302,22 @@ fn build_ui_action_payload(
         "tableName": table_name,
         "tableComment": arg_str(args, &["tableComment", "table_comment"]),
     });
+    if let Some(step) = args.get("demoStep").and_then(Value::as_str) {
+        payload["demoStep"] = Value::String(step.chars().take(16).collect());
+    }
+    if action == "scroll_table" {
+        let direction = arg_str(args, &["direction"]);
+        if !["up", "down", "left", "right", "top", "bottom"].contains(&direction.as_str()) {
+            return Err("direction 必须是 up/down/left/right/top/bottom".to_string());
+        }
+        let screens = match args.get("screens") {
+            None => 1,
+            Some(value) => value.as_u64().filter(|value| (1..=5).contains(value))
+                .ok_or("screens 必须是 1-5 的整数")?,
+        };
+        payload["direction"] = Value::String(direction);
+        payload["screens"] = serde_json::json!(screens);
+    }
     if action == "focus_column" || action == "focus_cell" {
         let column_name = arg_str(args, &["columnName", "column"]);
         if column_name.is_empty() {
@@ -317,6 +339,53 @@ fn build_ui_action_payload(
         if let Some(identity) = row_identity {
             payload["rowIdentity"] = identity;
         }
+    }
+    if action == "open_table" {
+        if let Some(filter) = args.get("filter").and_then(Value::as_str) {
+            payload["filter"] = Value::String(filter.to_string());
+        }
+        if let Some(mode) = args.get("filterMode").or_else(|| args.get("filter_mode")).and_then(Value::as_str) {
+            payload["filterMode"] = Value::String(mode.to_string());
+        }
+        if let Some(sort) = args.get("sort").filter(|value| value.is_object()) {
+            payload["sort"] = sort.clone();
+        }
+    }
+    if action == "select_database" {
+        if database.is_empty() {
+            return Err("missing or invalid argument: database".to_string());
+        }
+    }
+    if action == "open_sql" {
+        let sql = arg_str(args, &["sql", "query"]);
+        if sql.is_empty() {
+            return Err("missing or invalid argument: sql".to_string());
+        }
+        let sql = if args.get("run").and_then(Value::as_bool) == Some(true) {
+            crate::agent::sql_guard::validate_read_only_sql(&sql, crate::agent::sql_guard::ReadOnlyLimit::None)
+                .map_err(|_| "界面里只能直接执行只读查询；修改数据请用 run_write_query".to_string())?
+        } else {
+            sql
+        };
+        payload["sql"] = Value::String(sql);
+        payload["run"] = Value::Bool(args.get("run").and_then(Value::as_bool) == Some(true));
+    }
+    if action == "select_range" {
+        let start_key = arg_str(args, &["startRowKey", "start_row_key"]);
+        let start_identity = args.get("startRowIdentity").or_else(|| args.get("start_row_identity")).filter(|value| value.is_object()).cloned();
+        if start_key.is_empty() && start_identity.is_none() {
+            return Err("missing or invalid argument: startRowKey/startRowIdentity".to_string());
+        }
+        let start_column = arg_str(args, &["startColumn", "start_column"]);
+        if start_column.is_empty() {
+            return Err("missing or invalid argument: startColumn".to_string());
+        }
+        payload["startRowKey"] = Value::String(start_key);
+        if let Some(identity) = start_identity { payload["startRowIdentity"] = identity; }
+        payload["startColumn"] = Value::String(start_column);
+        payload["endRowKey"] = Value::String(arg_str(args, &["endRowKey", "end_row_key"]));
+        if let Some(identity) = args.get("endRowIdentity").or_else(|| args.get("end_row_identity")).filter(|value| value.is_object()) { payload["endRowIdentity"] = identity.clone(); }
+        payload["endColumn"] = Value::String(arg_str(args, &["endColumn", "end_column"]));
     }
     Ok(payload)
 }
@@ -731,7 +800,7 @@ async fn run_db_tool(app: &AppHandle, func: &str, args: Value) -> Result<Value, 
 async fn run_ui_action(app: &AppHandle, action: &str, args: Value) -> Result<Value, String> {
     let (selected_connection_id, selected_database) = selected_runtime_context(app).await;
     if action == "reveal_window" {
-        window_reveal::reveal_main_window(app);
+        window_reveal::reveal_main_window_passive(app);
         return Ok(serde_json::json!({ "action": action, "status": "done" }));
     }
     let payload =
@@ -746,8 +815,8 @@ async fn run_ui_action(app: &AppHandle, action: &str, args: Value) -> Result<Val
     // with navigation off it must not pull the window forward either — this
     // also covers the internal refresh triggered by import_table_xlsx.
     let permissions = *app.state::<ControlServerState>().permissions.read().await;
-    if action != "refresh_table" || permissions.navigate {
-        window_reveal::reveal_main_window(app);
+    if action != "get_view_state" && (action != "refresh_table" || permissions.navigate) {
+        window_reveal::reveal_main_window_passive(app);
     }
     let (sender, receiver) = oneshot::channel();
     let control = app.state::<ControlServerState>();
@@ -804,6 +873,7 @@ async fn current_context(app: &AppHandle) -> Result<Value, String> {
         "tableCount": rt.schema.len(),
     });
     drop(rt);
+    let view = run_ui_action(app, "get_view_state", serde_json::json!({})).await?;
     if let Some(target) = context.as_object_mut() {
         if let Some(ui) = app
             .state::<ControlServerState>()
@@ -817,6 +887,14 @@ async fn current_context(app: &AppHandle) -> Result<Value, String> {
                     target.insert(key.clone(), value.clone());
                 }
             }
+        }
+        target.insert(
+            "appVersion".to_string(),
+            Value::String(app.package_info().version.to_string()),
+        );
+        target.insert("uiActions".to_string(), serde_json::json!(UI_ACTIONS));
+        if let Some(snapshot) = view.get("context").and_then(Value::as_object) {
+            target.extend(snapshot.clone());
         }
         target.insert(
             "externalMcpEnabled".to_string(),
@@ -1221,7 +1299,7 @@ pub async fn control_complete_ui_action(
     context: Option<Value>,
     state: State<'_, ControlServerState>,
 ) -> Result<(), String> {
-    if let Some(context) = context.clone().filter(Value::is_object) {
+    if let Some(context) = context.clone().filter(|value| value.is_object()) {
         *state.ui_context.write().await = context;
     }
     let sender = state
@@ -1248,6 +1326,25 @@ pub async fn control_complete_ui_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_extensions_validate_and_require_navigation_permission() {
+        for action in ["scroll_table", "select_range", "select_database", "open_sql"] {
+            let request = ControlRequest::UiAction { id: "test".into(), action: action.into(), args: serde_json::json!({}) };
+            assert_eq!(required_permission(&request), Some(McpPermission::Navigate));
+        }
+        let args = serde_json::json!({"table":"items", "direction":"down", "screens":2, "demoStep":"1/2"});
+        let payload = build_ui_action_payload("scroll_table", &args, "server", "db").unwrap();
+        assert_eq!(payload["direction"], "down");
+        assert_eq!(payload["screens"], 2);
+        assert_eq!(payload["demoStep"], "1/2");
+        for args in [serde_json::json!({"table":"items", "direction":"bad"}), serde_json::json!({"table":"items", "direction":"down", "screens":0})] {
+            assert!(build_ui_action_payload("scroll_table", &args, "", "").is_err());
+        }
+        assert!(build_ui_action_payload("get_view_state", &serde_json::json!({}), "", "").is_ok());
+        let request = ControlRequest::UiAction { id: "test".into(), action: "get_view_state".into(), args: serde_json::json!({}) };
+        assert_eq!(required_permission(&request), None);
+    }
 
     #[test]
     fn external_mcp_is_enabled_by_default() {
@@ -1481,7 +1578,7 @@ mod tests {
 
     #[test]
     fn permission_labels_match_the_dialog_group_names() {
-        assert_eq!(McpPermission::Navigate.label(), "打开和定位表");
+        assert_eq!(McpPermission::Navigate.label(), "操作黑猫界面");
         assert_eq!(McpPermission::WriteData.label(), "修改数据");
         assert_eq!(McpPermission::Schema.label(), "修改表结构");
         assert_eq!(McpPermission::ManageTables.label(), "复制、重命名和删除表");
@@ -1531,6 +1628,23 @@ mod tests {
         let config = parse_control_config(r#"{"enabled":true}"#).unwrap();
         assert!(config.enabled);
         assert_eq!(config.permissions, McpPermissions::default());
+    }
+
+    #[test]
+    fn new_ui_action_payloads_validate_and_passthrough() {
+        let p = build_ui_action_payload("select_database", &serde_json::json!({"database":"game_db"}), "c", "d").unwrap();
+        assert_eq!(p["database"], "game_db");
+        assert!(build_ui_action_payload("select_database", &serde_json::json!({}), "c", "").is_err());
+        let p = build_ui_action_payload("open_sql", &serde_json::json!({"sql":"SELECT 1","run":true}), "", "").unwrap();
+        assert_eq!(p["sql"], "SELECT 1");
+        assert!(build_ui_action_payload("open_sql", &serde_json::json!({"sql":"DELETE FROM t","run":true}), "", "").is_err());
+        assert!(build_ui_action_payload("open_sql", &serde_json::json!({"sql":"DELETE FROM t"}), "", "").is_ok());
+        let p = build_ui_action_payload("open_table", &serde_json::json!({"table":"hero","filter":"等级","filterMode":"fuzzy","sort":{"column":"id","descending":true}}), "", "").unwrap();
+        assert_eq!(p["filter"], "等级");
+        assert_eq!(p["sort"]["column"], "id");
+        let p = build_ui_action_payload("select_range", &serde_json::json!({"table":"hero","startRowKey":"id=1","startColumn":"name"}), "", "").unwrap();
+        assert_eq!(p["startColumn"], "name");
+        assert!(build_ui_action_payload("select_range", &serde_json::json!({"table":"hero","startColumn":"name"}), "", "").is_err());
     }
 
     #[test]

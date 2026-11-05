@@ -24,6 +24,12 @@ const serverOptions = {
 function assertCuratedTools(tools) {
   const names = tools.map((tool) => tool.name);
   assert.ok(names.includes("open_table"));
+  for (const name of ["get_workbench_context", "get_mcp_capabilities", "list_connections", "scroll_table", "run_ui_actions"]) {
+    assert.ok(names.includes(name), `${name} must be discoverable`);
+  }
+  const batch = tools.find((tool) => tool.name === "run_ui_actions");
+  assert.equal(batch.inputSchema.properties.mode.default, "fast");
+  assert.equal(batch.inputSchema.properties.detail.default, "compact");
   assert.ok(names.includes("export_table_xlsx"));
   assert.ok(names.includes("preview_import_xlsx"));
   assert.ok(names.includes("import_table_xlsx"));
@@ -140,6 +146,16 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
       env: { ...process.env, DBSCOUT_CONTROL_ENDPOINT: discovery },
     }));
     const context = { connectionId: "mysql-explicit", database: "explicit_db" };
+    const capabilities = await client.callTool({ name: "get_mcp_capabilities", arguments: {} });
+    assert.notEqual(capabilities.isError, true);
+    const capabilityCatalog = JSON.parse(capabilities.content[0].text);
+    assert.ok(capabilityCatalog.tools.some((tool) => tool.name === "scroll_table" && tool.inputSchema.properties.direction));
+    assert.equal(requests.at(-1).op, "get_context");
+    await client.callTool({ name: "list_connections", arguments: {} });
+    assert.equal(requests.at(-1).op, "get_connections");
+    await client.callTool({ name: "scroll_table", arguments: { ...context, table: "items", direction: "down" } });
+    assert.equal(requests.at(-1).action, "scroll_table");
+    assert.equal(requests.at(-1).args.screens, 1);
     const calls = [
       ["run_write_query", { ...context, sql: "UPDATE items SET label='new' WHERE id=1" }],
       ["rename_table", { ...context, table: "items", newName: "items_old" }],

@@ -3,7 +3,7 @@ pub(crate) mod db_bridge;
 pub mod profile;
 pub mod project;
 mod protocol;
-mod sql_guard;
+pub(crate) mod sql_guard;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
