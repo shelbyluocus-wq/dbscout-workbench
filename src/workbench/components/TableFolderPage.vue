@@ -13,7 +13,8 @@ import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlat
 import { isContextMenuKey, isDeleteCommandKey, nextListSelection } from "../utils/listSelection.js";
 import { focusMenuItem, handleMenuKeydown } from "../utils/menuKeyboard.js";
 import { isFolderDropCandidate, readFolderDrop, writeFolderDrag, writeTableDrag } from "../utils/tableDragPayload.js";
-import { filterTablesByKeywords } from "../utils/tableKeywordSearch.js";
+import { filterTablesByKeywords, matchTableKeywords, parseSearchKeywords } from "../utils/tableKeywordSearch.js";
+import { highlightSearchRanges } from "../utils/searchMatch.js";
 
 // One database's table folders as a workbench page: folders on the left, the
 // tables a folder refers to on the right. Tables join a folder by dragging
@@ -61,8 +62,17 @@ const rowOrder = computed(() => folderRows.value.map((row) => row.name));
 const selectedSet = computed(() => new Set(selectedNames.value));
 const pickRows = computed(() => {
   const present = new Set(currentFolder.value?.tableNames || []);
+  const keywords = parseSearchKeywords(pickQuery.value);
   return filterTablesByKeywords(tables.value, pickQuery.value)
-    .map((table) => ({ ...table, present: present.has(table.name) }));
+    .map((table) => {
+      const match = matchTableKeywords(table, keywords);
+      return {
+        ...table,
+        present: present.has(table.name),
+        nameHtml: highlightSearchRanges(table.name, match.nameRanges),
+        commentHtml: highlightSearchRanges(table.comment, match.commentRanges),
+      };
+    });
 });
 const pickSet = computed(() => new Set(pickSelection.value));
 const deleteKeyLabel = computed(() => formatShortcutForPlatform(isMacOSPlatform() ? "Backspace" : "Delete"));
@@ -540,8 +550,8 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
           @click="togglePick(row, $event)"
         >
           <span class="wb-folder-check" aria-hidden="true"><Check v-if="row.present || pickSet.has(row.name)" :size="12" /></span>
-          <span class="wb-folder-table">{{ row.name }}</span>
-          <span class="wb-folder-comment">{{ row.comment }}</span>
+          <span class="wb-folder-table" v-html="row.nameHtml"></span>
+          <span class="wb-folder-comment" v-html="row.commentHtml"></span>
         </li>
         <li v-if="tablesLoading && !pickRows.length" class="wb-folder-empty">{{ t("tableFolders.loadingTables") }}</li>
         <li v-else-if="!pickRows.length" class="wb-folder-empty">{{ t("m_4034e355eb62") }}</li>

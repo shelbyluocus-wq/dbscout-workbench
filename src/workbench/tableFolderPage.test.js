@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { createWorkspaceState, openTableFoldersTab } from "./workspaceState.js";
 import { buildWorkspaceSnapshot, parseWorkspaceSnapshot } from "./utils/workspacePersistence.js";
 import { computed, ref } from "vue";
-import { filterTablesByKeywords } from "./utils/tableKeywordSearch.js";
+import { filterTablesByKeywords, matchTableKeywords, parseSearchKeywords } from "./utils/tableKeywordSearch.js";
+import { highlightSearchRanges } from "./utils/searchMatch.js";
 import {
   FOLDER_DRAG_MIME,
   isFolderDropCandidate,
@@ -27,7 +28,9 @@ function dataTransfer() {
 
 test("folder picker uses home keyword matching and ranking without losing membership", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
-  assert.match(source, /import \{ filterTablesByKeywords \} from "\.\.\/utils\/tableKeywordSearch\.js"/);
+  assert.match(source, /import \{[^}]*filterTablesByKeywords[^}]*\} from "\.\.\/utils\/tableKeywordSearch\.js"/);
+  assert.match(source, /class="wb-folder-table" v-html="row.nameHtml"/);
+  assert.match(source, /class="wb-folder-comment" v-html="row.commentHtml"/);
   const expression = source.match(/const pickRows = computed\(\(\) => \{([\s\S]*?)\n\}\);/);
   assert.ok(expression);
   const tables = ref([
@@ -39,8 +42,8 @@ test("folder picker uses home keyword matching and ranking without losing member
   ]);
   const currentFolder = ref({ tableNames: ["hero_prop"] });
   const pickQuery = ref("");
-  const evaluate = new Function("tables", "currentFolder", "pickQuery", "filterTablesByKeywords", expression[1]);
-  const rows = computed(() => evaluate(tables, currentFolder, pickQuery, filterTablesByKeywords));
+  const evaluate = new Function("tables", "currentFolder", "pickQuery", "filterTablesByKeywords", "matchTableKeywords", "parseSearchKeywords", "highlightSearchRanges", expression[1]);
+  const rows = computed(() => evaluate(tables, currentFolder, pickQuery, filterTablesByKeywords, matchTableKeywords, parseSearchKeywords, highlightSearchRanges));
 
   for (const query of ["", "  ", "HERO", "hero 配置", "配置　HERO hero", "hero missing"]) {
     pickQuery.value = query;
@@ -53,6 +56,16 @@ test("folder picker uses home keyword matching and ranking without losing member
   assert.deepEqual(rows.value.map((row) => row.name), ["superhero", "hero_prop", "hero", "misc"]);
   currentFolder.value = { tableNames: ["hero"] };
   assert.deepEqual(rows.value.filter((row) => row.present).map((row) => row.name), ["hero"]);
+  assert.equal(rows.value.find((row) => row.name === "hero_prop").nameHtml, "<mark>hero</mark>_prop");
+  assert.equal(rows.value.find((row) => row.name === "hero_prop").commentHtml, "<mark>配置</mark>");
+
+  tables.value = [{ name: "Hero_<tag>", comment: '配置 <img src="x"> & 文本' }];
+  pickQuery.value = "HERO　配置 hero";
+  assert.equal(rows.value[0].nameHtml, "<mark>Hero</mark>_&lt;tag&gt;");
+  assert.equal(rows.value[0].commentHtml, '<mark>配置</mark> &lt;img src=&quot;x&quot;&gt; &amp; 文本');
+  pickQuery.value = "  ";
+  assert.equal(rows.value[0].nameHtml, "Hero_&lt;tag&gt;");
+  assert.ok(!rows.value[0].commentHtml.includes("<mark>"));
 });
 
 test("each database has one folder page, brought forward when opened again", () => {

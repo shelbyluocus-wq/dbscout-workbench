@@ -16195,7 +16195,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-dbhome-object-name-button mark,
-.wb-dbhome-object-comment-text mark {
+.wb-dbhome-object-comment-text mark,
+.wb-folder-picker .wb-folder-table mark,
+.wb-folder-picker .wb-folder-comment mark {
   padding: 0 1px;
   border-radius: 2px;
   background: var(--wb-mark-surface);
