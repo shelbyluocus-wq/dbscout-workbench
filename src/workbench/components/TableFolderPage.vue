@@ -4,6 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { AppWindow, ArrowLeft, Check, Folder, FolderOpen, Pencil, Plus, Search, Star, Table2, Trash2, X } from "lucide-vue-next";
 
 import { useTableFolderContext } from "../composables/tableFolderContext.js";
+import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
+import { databaseTableIconComponent } from "./databaseDecorationIcons.js";
 import {
   FAVORITES_FOLDER_KIND,
   TABLE_FOLDER_NAME_MAX_LENGTH,
@@ -48,6 +50,13 @@ const pickAnchor = ref("");
 const menu = ref({ open: false, x: 0, y: 0, kind: "", folderId: "", tableNames: [] });
 
 const scope = computed(() => ({ connectionId: String(props.tab.connectionId || ""), database: String(props.tab.database || "") }));
+const { getDatabaseDecoration } = useDatabaseDecorations();
+const databaseDecoration = computed(() => getDatabaseDecoration(scope.value.connectionId, scope.value.database));
+const tableIcon = computed(() => databaseTableIconComponent(databaseDecoration.value));
+const databaseDecorationStyle = computed(() => ({
+  "--wb-folder-icon-color": databaseDecoration.value?.color || undefined,
+  "--wb-folder-table-color": databaseTextColorCss(databaseDecoration.value?.textColor) || undefined,
+}));
 const folders = computed(() => store.foldersFor(scope.value.connectionId, scope.value.database));
 const currentFolder = computed(() => (
   folders.value.find((folder) => folder.id === props.tab.folderId) || folders.value[0] || null
@@ -431,7 +440,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
 </script>
 
 <template>
-  <section ref="rootRef" class="wb-folder-page" :aria-label="t('tableFolders.title')">
+  <section ref="rootRef" class="wb-folder-page" :style="databaseDecorationStyle" :aria-label="t('tableFolders.title')">
     <template v-if="view === 'folder'">
       <nav class="wb-folder-sidebar" :aria-label="t('tableFolders.folderList')">
         <ul class="wb-folder-list">
@@ -517,7 +526,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
             @contextmenu.prevent.stop="onRowContextMenu($event, row)"
             @dragstart="onRowDragStart($event, row)"
           >
-            <Table2 :size="15" aria-hidden="true" class="wb-folder-row-icon" />
+            <component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon" />
             <span class="wb-folder-table">{{ row.name }}</span>
             <span v-if="row.missing" class="wb-folder-missing">{{ t("tableFolders.missing") }}</span>
             <span v-else class="wb-folder-comment">{{ row.comment }}</span>
@@ -550,6 +559,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
           @click="togglePick(row, $event)"
         >
           <span class="wb-folder-check" aria-hidden="true"><Check v-if="row.present || pickSet.has(row.name)" :size="12" /></span>
+          <component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon" />
           <span class="wb-folder-table" v-html="row.nameHtml"></span>
           <span class="wb-folder-comment" v-html="row.commentHtml"></span>
         </li>

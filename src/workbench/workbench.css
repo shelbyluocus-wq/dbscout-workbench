@@ -24272,14 +24272,14 @@ button.wb-table-mention:active {
 
 .wb-folder-row-icon {
   flex: 0 0 auto;
-  color: var(--wb-secondary-text);
+  color: var(--wb-folder-icon-color, var(--wb-secondary-text));
 }
 
 .wb-folder-table {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--wb-identifier-text);
+  color: var(--wb-folder-table-color, var(--wb-identifier-text));
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
