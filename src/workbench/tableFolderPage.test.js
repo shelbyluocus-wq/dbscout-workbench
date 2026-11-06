@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { createWorkspaceState, openTableFoldersTab } from "./workspaceState.js";
 import { buildWorkspaceSnapshot, parseWorkspaceSnapshot } from "./utils/workspacePersistence.js";
+import { computed, ref } from "vue";
+import { filterTablesByKeywords } from "./utils/tableKeywordSearch.js";
 import {
   FOLDER_DRAG_MIME,
   isFolderDropCandidate,
@@ -21,6 +24,36 @@ function dataTransfer() {
     getData(type) { return data.get(type) || ""; },
   };
 }
+
+test("folder picker uses home keyword matching and ranking without losing membership", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  assert.match(source, /import \{ filterTablesByKeywords \} from "\.\.\/utils\/tableKeywordSearch\.js"/);
+  const expression = source.match(/const pickRows = computed\(\(\) => \{([\s\S]*?)\n\}\);/);
+  assert.ok(expression);
+  const tables = ref([
+    { name: "misc", comment: "hero 配置" },
+    { name: "superhero", comment: "配置" },
+    { name: "hero_prop", comment: "配置" },
+    { name: "hero", comment: "配置" },
+    { name: "hero_log", comment: "日志" },
+  ]);
+  const currentFolder = ref({ tableNames: ["hero_prop"] });
+  const pickQuery = ref("");
+  const evaluate = new Function("tables", "currentFolder", "pickQuery", "filterTablesByKeywords", expression[1]);
+  const rows = computed(() => evaluate(tables, currentFolder, pickQuery, filterTablesByKeywords));
+
+  for (const query of ["", "  ", "HERO", "hero 配置", "配置　HERO hero", "hero missing"]) {
+    pickQuery.value = query;
+    const homeTables = tables.value.map(({ name, comment }) => ({ tableName: name, tableComment: comment }));
+    assert.deepEqual(rows.value.map((row) => row.name), filterTablesByKeywords(homeTables, query).map((table) => table.tableName), query);
+    for (const row of rows.value) assert.equal(row.present, row.name === "hero_prop");
+  }
+
+  pickQuery.value = "hero 配置";
+  assert.deepEqual(rows.value.map((row) => row.name), ["superhero", "hero_prop", "hero", "misc"]);
+  currentFolder.value = { tableNames: ["hero"] };
+  assert.deepEqual(rows.value.filter((row) => row.present).map((row) => row.name), ["hero"]);
+});
 
 test("each database has one folder page, brought forward when opened again", () => {
   const state = createWorkspaceState();

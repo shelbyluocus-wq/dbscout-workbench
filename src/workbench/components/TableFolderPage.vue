@@ -13,6 +13,7 @@ import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlat
 import { isContextMenuKey, isDeleteCommandKey, nextListSelection } from "../utils/listSelection.js";
 import { focusMenuItem, handleMenuKeydown } from "../utils/menuKeyboard.js";
 import { isFolderDropCandidate, readFolderDrop, writeFolderDrag, writeTableDrag } from "../utils/tableDragPayload.js";
+import { filterTablesByKeywords } from "../utils/tableKeywordSearch.js";
 
 // One database's table folders as a workbench page: folders on the left, the
 // tables a folder refers to on the right. Tables join a folder by dragging
@@ -59,10 +60,8 @@ const folderRows = computed(() => (currentFolder.value?.tableNames || []).map((n
 const rowOrder = computed(() => folderRows.value.map((row) => row.name));
 const selectedSet = computed(() => new Set(selectedNames.value));
 const pickRows = computed(() => {
-  const query = pickQuery.value.trim().toLocaleLowerCase();
   const present = new Set(currentFolder.value?.tableNames || []);
-  return tables.value
-    .filter((table) => !query || `${table.name} ${table.comment}`.toLocaleLowerCase().includes(query))
+  return filterTablesByKeywords(tables.value, pickQuery.value)
     .map((table) => ({ ...table, present: present.has(table.name) }));
 });
 const pickSet = computed(() => new Set(pickSelection.value));
