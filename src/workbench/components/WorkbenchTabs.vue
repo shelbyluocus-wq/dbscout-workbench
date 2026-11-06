@@ -188,7 +188,7 @@ function tabDatabaseDecorationStyle(tab) {
 // Table tabs render as two stacked lines (table name over database name)
 // whenever there is a database to show; everything else stays single-line.
 function hasTabSubtitle(tab) {
-  return (isTableLikeTab(tab) || tabKind(tab) === "folders") && !tab.opening && Boolean(tabDatabaseLabel(tab));
+  return isTableLikeTab(tab) && !tab.opening && Boolean(tabDatabaseLabel(tab));
 }
 
 function tabSourceTitle(tab) {

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { createWorkspaceState, openTableFoldersTab } from "./workspaceState.js";
+import { createWorkspaceState, openTableFoldersTab, setTableFolderScope } from "./workspaceState.js";
 import { buildWorkspaceSnapshot, parseWorkspaceSnapshot } from "./utils/workspacePersistence.js";
 import { computed, ref } from "vue";
 import { filterTablesByKeywords, matchTableKeywords, parseSearchKeywords } from "./utils/tableKeywordSearch.js";
@@ -81,19 +81,85 @@ test("folder picker uses home keyword matching and ranking without losing member
   assert.ok(!rows.value[0].commentHtml.includes("<mark>"));
 });
 
-test("each database has one folder page, brought forward when opened again", () => {
+test("the folder page switches databases without creating indistinguishable tabs", () => {
   const state = createWorkspaceState();
   const first = openTableFoldersTab(state, { connectionId: "demo", database: "game" });
   assert.equal(first.kind, "folders");
   assert.equal(state.activeTabId, first.id);
   const other = openTableFoldersTab(state, { connectionId: "demo", database: "other" });
-  assert.notEqual(other.id, first.id);
+  assert.equal(other.id, first.id);
+  assert.equal(other.database, "other");
   const again = openTableFoldersTab(state, { connectionId: "demo", database: "game", folderId: "fld-1" });
   assert.equal(again.id, first.id);
   assert.equal(again.folderId, "fld-1");
   assert.equal(state.activeTabId, first.id);
-  assert.equal(state.tabs.filter((tab) => tab.kind === "folders").length, 2);
+  assert.equal(state.tabs.filter((tab) => tab.kind === "folders").length, 1);
   assert.equal(openTableFoldersTab(state, { connectionId: "demo", database: "" }), null);
+});
+
+test("switching databases remembers each scope's folder, including same-named databases", () => {
+  const state = createWorkspaceState();
+  const tab = openTableFoldersTab(state, { connectionId: "first", database: "game", folderId: "items" });
+  setTableFolderScope(tab, { connectionId: "second", database: "game" });
+  assert.equal(tab.folderId, "");
+  tab.folderId = "heroes";
+  setTableFolderScope(tab, { connectionId: "first", database: "game" });
+  assert.equal(tab.folderId, "items");
+  setTableFolderScope(tab, { connectionId: "second", database: "game" });
+  assert.equal(tab.folderId, "heroes");
+});
+
+test("folder database switch appears above favorites and its tab has no database subtitle", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const tabs = readFileSync(new URL("./components/WorkbenchTabs.vue", import.meta.url), "utf8");
+  assert.ok(source.indexOf('class="wb-folder-database"') < source.indexOf('class="wb-folder-list"'));
+  const hasSubtitle = new Function("isTableLikeTab", "tabDatabaseLabel", "tab", tabs.match(/function hasTabSubtitle\(tab\) \{([\s\S]*?)\n\}/)[1]);
+  assert.equal(hasSubtitle(() => false, () => "game", { kind: "folders" }), false);
+  assert.equal(hasSubtitle(() => true, () => "game", { kind: "data" }), true);
+});
+
+test("a slow folder list cannot overwrite a newer database's list or loading state", async () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const body = source.match(/async function loadTables\(\) \{([\s\S]*?)\n\}/)[1];
+  const scope = ref({ connectionId: "demo", database: "first" });
+  const scopeKey = computed(() => JSON.stringify(scope.value));
+  const pending = [];
+  const context = { loadTables: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) };
+  const tables = ref([]);
+  const loaded = ref(false);
+  const loading = ref(false);
+  const errors = [];
+  const load = new Function("context", "scope", "scopeKey", "tables", "tablesLoaded", "tablesLoading", "notify", `let tableLoadVersion = 0; return async function () {${body}}`)(context, scope, scopeKey, tables, loaded, loading, (...args) => errors.push(args));
+  const first = load();
+  scope.value = { connectionId: "demo", database: "second" };
+  const second = load();
+  pending[0].resolve([{ name: "old" }]);
+  await first;
+  assert.deepEqual(tables.value, []);
+  assert.equal(loading.value, true);
+  pending[1].resolve([{ name: "new" }]);
+  await second;
+  assert.deepEqual(tables.value, [{ name: "new" }]);
+  assert.equal(loading.value, false);
+  assert.equal(loaded.value, true);
+  const stale = load();
+  scope.value = { connectionId: "demo", database: "first" };
+  const latest = load();
+  pending[3].resolve([]);
+  await latest;
+  pending[2].reject(new Error("old request failed"));
+  await stale;
+  assert.deepEqual(tables.value, []);
+  assert.deepEqual(errors, []);
+});
+
+test("missing tables are reported only after a successful list, including an empty database", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const expression = source.match(/missing: (.*),/)[1];
+  const isMissing = new Function("tablesLoaded", "tableByName", "name", `return ${expression}`);
+  assert.equal(isMissing(ref(false), ref(new Map()), "goodsprop"), false);
+  assert.equal(isMissing(ref(true), ref(new Map()), "goodsprop"), true);
+  assert.equal(isMissing(ref(true), ref(new Map([["goodsprop", {}]])), "goodsprop"), false);
 });
 
 test("the folder page is saved with the workspace, on its folder", () => {

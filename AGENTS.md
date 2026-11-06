@@ -94,7 +94,8 @@ capabilities:
   on first use, with
   read-only DB tools auto-approved, database writes gated behind user approval,
   and approved local XLSX/text artifact generation in a dedicated output folder.
-- **Table folders** — a page per database (a tab, like the database home,
+- **Table folders** — one reusable page with a database switch above Favorites
+  and no database subtitle on its tab (like the database home,
   opened from the activity rail below favorite databases or the macOS Tools
   menu) groups that database's tables into named folders by reference only:
   tables are never moved or copied. Folders sit on the left with a + icon

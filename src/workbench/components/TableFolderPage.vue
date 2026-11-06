@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
 import { AppWindow, ArrowLeft, Check, Folder, FolderOpen, Pencil, Plus, Search, Star, Table2, Trash2, X } from "lucide-vue-next";
 
 import { useTableFolderContext } from "../composables/tableFolderContext.js";
@@ -50,6 +50,26 @@ const pickAnchor = ref("");
 const menu = ref({ open: false, x: 0, y: 0, kind: "", folderId: "", tableNames: [] });
 
 const scope = computed(() => ({ connectionId: String(props.tab.connectionId || ""), database: String(props.tab.database || "") }));
+const scopeKey = computed(() => JSON.stringify(scope.value));
+const databaseGroups = computed(() => {
+  const groups = (unref(context?.databaseGroups) || []).map((group) => ({ ...group, databases: [...group.databases] }));
+  let current = groups.find((group) => group.connectionId === scope.value.connectionId);
+  if (!current) {
+    current = { connectionId: scope.value.connectionId, label: scope.value.connectionId, databases: [] };
+    groups.unshift(current);
+  }
+  if (!current.databases.includes(scope.value.database)) current.databases.unshift(scope.value.database);
+  return groups;
+});
+let tableLoadVersion = 0;
+
+function switchDatabase(event) {
+  context?.switchDatabase?.(props.tab, JSON.parse(event.target.value));
+}
+
+function loadDatabases() {
+  void context?.loadDatabases?.();
+}
 const { getDatabaseDecoration } = useDatabaseDecorations();
 const databaseDecoration = computed(() => getDatabaseDecoration(scope.value.connectionId, scope.value.database));
 const tableIcon = computed(() => databaseTableIconComponent(databaseDecoration.value));
@@ -65,7 +85,7 @@ const tableByName = computed(() => new Map(tables.value.map((table) => [table.na
 const folderRows = computed(() => (currentFolder.value?.tableNames || []).map((name) => ({
   name,
   comment: tableByName.value.get(name)?.comment || "",
-  missing: tablesLoaded.value && tables.value.length > 0 && !tableByName.value.has(name),
+  missing: tablesLoaded.value && !tableByName.value.has(name),
 })));
 const rowOrder = computed(() => folderRows.value.map((row) => row.name));
 const selectedSet = computed(() => new Set(selectedNames.value));
@@ -98,14 +118,18 @@ function notify(tone, message) {
 
 async function loadTables() {
   if (!context?.loadTables || !scope.value.database) return;
+  const version = ++tableLoadVersion;
+  const requestedScope = scopeKey.value;
   tablesLoading.value = true;
   try {
-    tables.value = await context.loadTables(scope.value);
+    const loaded = await context.loadTables({ ...scope.value });
+    if (version !== tableLoadVersion || requestedScope !== scopeKey.value) return;
+    tables.value = loaded;
     tablesLoaded.value = true;
   } catch (error) {
-    notify("error", String(error?.message || error));
+    if (version === tableLoadVersion && requestedScope === scopeKey.value) notify("error", String(error?.message || error));
   } finally {
-    tablesLoading.value = false;
+    if (version === tableLoadVersion) tablesLoading.value = false;
   }
 }
 
@@ -429,12 +453,23 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  tableLoadVersion += 1;
   document.removeEventListener("pointerdown", onDocumentPointerDown, true);
   document.removeEventListener("keydown", onDocumentKeydown, true);
 });
 
 watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
+  tables.value = [];
   tablesLoaded.value = false;
+  selectedNames.value = [];
+  selectionAnchor.value = "";
+  pickSelection.value = [];
+  pickAnchor.value = "";
+  view.value = "folder";
+  cancelRename();
+  closeMenu();
+  dropTargetId.value = "";
+  contentDropActive.value = false;
   void loadTables();
 });
 </script>
@@ -443,6 +478,13 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
   <section ref="rootRef" class="wb-folder-page" :style="databaseDecorationStyle" :aria-label="t('tableFolders.title')">
     <template v-if="view === 'folder'">
       <nav class="wb-folder-sidebar" :aria-label="t('tableFolders.folderList')">
+        <select class="wb-folder-database" :value="scopeKey" :aria-label="t('m_9fa99195c7c0')" :title="scope.database" @focus="loadDatabases" @change="switchDatabase">
+          <optgroup v-for="group in databaseGroups" :key="group.connectionId" :label="group.label">
+            <option v-for="database in group.databases" :key="database" :value="JSON.stringify({ connectionId: group.connectionId, database })">
+              {{ context?.databaseLabel?.(group.connectionId, database) || database }}
+            </option>
+          </optgroup>
+        </select>
         <ul class="wb-folder-list">
           <li v-for="folder in folders" :key="folder.id">
             <div v-if="renamingId === folder.id" class="wb-folder-item is-selected">

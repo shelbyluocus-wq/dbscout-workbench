@@ -1,6 +1,7 @@
 import { t as translate } from "../i18n/index.js";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
-import { openTableFoldersTab } from "../workspaceState.js";
+import { computed, unref } from "vue";
+import { openTableFoldersTab, setTableFolderScope } from "../workspaceState.js";
 import { currentWindowRole, isTableFolderWindowRole } from "../utils/windowRole.js";
 
 export const TABLE_FOLDER_WINDOW_OPEN_EVENT = "table-folder-window-open";
@@ -23,6 +24,13 @@ export function useTableFolders({
   workspace,
   selectedConnectionId,
   selectedDatabase,
+  connections = [],
+  databases = [],
+  databasesByConnection = {},
+  loadDatabases = async () => {},
+  databaseLabel = (_connectionId, database) => database,
+  connectionLabel = (_connectionId, label) => label,
+  onScopeChange = () => {},
   openTable,
   openTables,
   notify,
@@ -34,7 +42,7 @@ export function useTableFolders({
   // The database shown in the sidebar needs no round trip.
   async function loadTables(scope) {
     if (!scope?.database) return [];
-    if (sameScope(scope, { connectionId: selectedConnectionId.value, database: selectedDatabase.value }) && workspace.schema.length) {
+    if (sameScope(scope, workspace) && workspace.schema.length && workspace.schema.every((table) => sameScope(scope, table))) {
       return tableRows(workspace.schema);
     }
     return tableRows(await invokeWorkbench("list_tables", { ...scope, priority: "visible" }));
@@ -98,6 +106,19 @@ export function useTableFolders({
 
   const context = Object.freeze({
     loadTables,
+    loadDatabases,
+    databaseLabel,
+    databaseGroups: computed(() => (unref(connections) || []).map((connection) => ({
+      connectionId: connection.id,
+      label: connectionLabel(connection.id, connection.label || connection.id),
+      databases: connection.id === selectedConnectionId.value
+        ? unref(databases) || []
+        : unref(databasesByConnection)[connection.id] || [],
+    }))),
+    switchDatabase(tab, scope) {
+      setTableFolderScope(tab, scope);
+      onScopeChange(tab);
+    },
     openWindow,
     openHere,
     openTables: openFolderTables,

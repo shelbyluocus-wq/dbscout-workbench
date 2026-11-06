@@ -24049,6 +24049,21 @@ button.wb-table-mention:active {
   list-style: none;
 }
 
+.wb-folder-database {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: calc(100% - 16px);
+  height: 30px;
+  margin: 0 8px 8px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-table-surface);
+  color: var(--wb-text);
+  font: inherit;
+  text-overflow: ellipsis;
+}
+
 .wb-folder-item {
   display: flex;
   align-items: center;

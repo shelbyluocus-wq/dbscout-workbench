@@ -5,13 +5,14 @@
 // new window (a browser tab in the preview) and restored with the tab.
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 
 const base = process.env.DBSCOUT_TABLE_FOLDERS_TEST_URL || "http://127.0.0.1:1431";
 const screenshots = process.env.DBSCOUT_TABLE_FOLDERS_SCREENSHOTS || "output/playwright";
 await mkdir(screenshots, { recursive: true });
 
-const browser = await chromium.launch({ headless: true, ...(process.env.DBSCOUT_BROWSER_CHANNEL ? { channel: process.env.DBSCOUT_BROWSER_CHANNEL } : {}) });
+const browserType = process.env.DBSCOUT_BROWSER_ENGINE === "webkit" ? webkit : chromium;
+const browser = await browserType.launch({ headless: true, ...(process.env.DBSCOUT_BROWSER_CHANNEL ? { channel: process.env.DBSCOUT_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
 const page = await context.newPage();
 const errors = [];
@@ -134,6 +135,34 @@ try {
   await menu.getByRole("menuitem", { name: /從資料夾移除/ }).click();
   assert.equal(await folderRows.count(), 3);
   const kept = await folderTableNames();
+
+  const foldersTab = page.locator('.wb-tab[data-kind="folders"]');
+  const databaseSwitch = folderPage.locator(".wb-folder-database");
+  const originalScope = await databaseSwitch.inputValue();
+  await databaseSwitch.focus();
+  await page.waitForFunction(() => document.querySelectorAll(".wb-folder-database option").length > 1);
+  const otherScope = await databaseSwitch.locator("option").evaluateAll((options, original) => options.find((option) => JSON.parse(option.value).database !== JSON.parse(original).database).value, originalScope);
+  await databaseSwitch.selectOption(otherScope);
+  await folderPage.getByRole("button", { name: "添加表" }).click();
+  await page.waitForFunction(() => !document.querySelector(".wb-folder-picker .wb-folder-empty")?.textContent.includes("載入"));
+  await page.keyboard.press("Escape");
+  await databaseSwitch.selectOption(originalScope);
+  await page.waitForFunction(() => document.querySelector(".wb-folder-header h2")?.textContent === "英雄養成");
+  await folderPage.getByRole("button", { name: "添加表" }).click();
+  await folderPage.locator(".wb-folder-picker .wb-folder-row").first().waitFor();
+  await page.keyboard.press("Escape");
+  assert.deepEqual(await folderTableNames(), kept);
+  assert.equal(await folderPage.locator(".wb-folder-row.is-missing").count(), 0);
+  assert.equal(await foldersTab.locator(".wb-tab-db").count(), 0);
+  assert.equal(await foldersTab.count(), 1);
+  await page.screenshot({ path: `${screenshots}/table-folders-database-switch.png`, animations: "disabled" });
+  await folderRows.first().dblclick();
+  await page.locator(`.wb-tab.active[data-kind="data"]`).waitFor();
+  await foldersTab.click();
+  await folderPage.getByRole("button", { name: "添加表" }).click();
+  await folderPage.locator(".wb-folder-picker .wb-folder-row").first().waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await folderPage.locator(".wb-folder-row.is-missing").count(), 0);
 
   // Open in a new window. The main window's saved tabs stay as they were.
   await page.waitForTimeout(500);

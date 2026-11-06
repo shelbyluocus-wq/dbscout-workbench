@@ -281,17 +281,31 @@ function createTableFoldersTab({ id, connectionId, database, folderId = "" }) {
   };
 }
 
-// One table folder page per database: opening it again brings that tab
-// forward wherever it is.
+export function setTableFolderScope(tab, { connectionId = "", database = "", folderId } = {}) {
+  if (!tab || !database) return;
+  const sourceKey = databaseKey(connectionId, database);
+  const changed = tab.connectionId !== connectionId || tab.database !== database;
+  if (changed) {
+    tab.folderIdsByScope ||= {};
+    tab.folderIdsByScope[tab.databaseKey] = tab.folderId;
+  }
+  Object.assign(tab, {
+    connectionId,
+    database,
+    databaseKey: sourceKey,
+    tabKey: tabKey("folders", sourceKey),
+    folderId: folderId ?? (changed ? tab.folderIdsByScope[sourceKey] || "" : tab.folderId),
+  });
+}
+
 export function openTableFoldersTab(state, { connectionId = "", database = "", folderId = "" } = {}, { activate = true, paneId = "" } = {}) {
   if (!state) return null;
   const safeConnectionId = String(connectionId || "").trim();
   const safeDatabase = String(database || "").trim();
   if (!safeDatabase) return null;
-  const key = tabKey("folders", databaseKey(safeConnectionId, safeDatabase));
-  const existing = state.tabs.find((tab) => tab.kind === "folders" && tab.tabKey === key);
+  const existing = state.tabs.find((tab) => tab.kind === "folders");
   if (existing) {
-    if (folderId) existing.folderId = String(folderId);
+    setTableFolderScope(existing, { connectionId: safeConnectionId, database: safeDatabase, ...(folderId ? { folderId: String(folderId) } : {}) });
     const ownerPane = Object.values(state.panes || {}).find((pane) => pane.tabIds?.includes(existing.id));
     if (activate) addTabToPane(state, ownerPane?.id || ensurePane(state, paneId).id, existing.id, { activate: true });
     return existing;
