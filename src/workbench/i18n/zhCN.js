@@ -3,6 +3,7 @@ import { releaseFlowZhCN } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
   "m_a49b9e3cc423": "展开全部连接",
+  "tabs.overflow": "更多标签（{count}）",
   "m_809ec93960dd": "折叠全部连接",
   "m_695704a261cb": "展开全部",
   "m_2fabdc5d8190": "折叠全部",

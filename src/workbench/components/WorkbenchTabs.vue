@@ -1,8 +1,8 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
-import { computed, ref } from "vue";
-import { House } from "lucide-vue-next";
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { ChevronDown, House } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
@@ -11,6 +11,7 @@ import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
+import { partitionTabs } from "../utils/tabOverflow.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 
 const props = defineProps({
@@ -279,7 +280,80 @@ function onTabBarDoubleClick() {
 }
 
 const tabListRef = ref(null);
-useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
+const tabBarRef = ref(null);
+const overflowButtonRef = ref(null);
+const overflowMenuRef = ref(null);
+const availableWidth = ref(0);
+const overflowOpen = ref(false);
+const overflowStyle = ref({});
+const tabPartition = computed(() => partitionTabs(previewTabs.value, props.activeTabId, availableWidth.value));
+const visibleTabs = computed(() => tabPartition.value.visible);
+const overflowTabs = computed(() => tabPartition.value.overflow);
+useTabReorderMotion(tabListRef, visibleTabs, draggingTabId);
+
+function closeOverflow(restoreFocus = false) {
+  overflowOpen.value = false;
+  if (restoreFocus) overflowButtonRef.value?.focus();
+}
+
+async function toggleOverflow() {
+  if (overflowOpen.value) return closeOverflow();
+  const bounds = overflowButtonRef.value?.getBoundingClientRect();
+  if (!bounds) return;
+  overflowStyle.value = {
+    top: `${bounds.bottom + 4}px`,
+    right: `${Math.max(8, window.innerWidth - bounds.right)}px`,
+    maxHeight: `${Math.max(80, window.innerHeight - bounds.bottom - 12)}px`,
+  };
+  overflowOpen.value = true;
+  await nextTick();
+  overflowMenuRef.value?.querySelector('button:not(:disabled)')?.focus();
+}
+
+async function selectOverflowTab(tab) {
+  closeOverflow();
+  activateTab(tab);
+  await nextTick();
+  tabListRef.value?.querySelector('.wb-tab.active')?.focus();
+}
+
+function onOverflowKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeOverflow(true);
+    return;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const buttons = [...overflowMenuRef.value.querySelectorAll('button:not(:disabled)')];
+  const current = buttons.indexOf(document.activeElement);
+  const index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+    : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+  buttons[index]?.focus();
+}
+
+function dismissOverflow(event) {
+  if (!overflowMenuRef.value?.contains(event.target) && !overflowButtonRef.value?.contains(event.target)) closeOverflow();
+}
+
+let resizeObserver;
+watch(() => props.activeTabId, () => closeOverflow());
+watch(() => overflowTabs.value.length, (count) => { if (!count) closeOverflow(); });
+onMounted(() => {
+  resizeObserver = new ResizeObserver(([entry]) => {
+    availableWidth.value = Math.max(0, entry.contentRect.width - 16);
+    closeOverflow();
+  });
+  resizeObserver.observe(tabBarRef.value);
+  document.addEventListener("pointerdown", dismissOverflow);
+  document.addEventListener("focusin", dismissOverflow);
+});
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  document.removeEventListener("pointerdown", dismissOverflow);
+  document.removeEventListener("focusin", dismissOverflow);
+});
 </script>
 
 <template>
@@ -294,7 +368,7 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
   >
     <div ref="tabListRef" class="wb-tab-list" data-tauri-drag-region>
       <div
-        v-for="tab in previewTabs"
+        v-for="tab in visibleTabs"
         :key="tab.id"
         class="wb-tab"
         :class="tabClass(tab)"
@@ -384,5 +458,47 @@ useTabReorderMotion(tabListRef, previewTabs, draggingTabId);
         </button>
       </div>
     </div>
+    <button
+      v-if="overflowTabs.length"
+      ref="overflowButtonRef"
+      type="button"
+      class="wb-tab-overflow-button"
+      :aria-label="t('tabs.overflow', { count: overflowTabs.length })"
+      :title="t('tabs.overflow', { count: overflowTabs.length })"
+      aria-haspopup="menu"
+      :aria-expanded="overflowOpen"
+      @click.stop="toggleOverflow"
+      @dblclick.stop
+      @keydown.down.prevent="toggleOverflow"
+      @keydown.esc.stop="closeOverflow(true)"
+    >
+      <ChevronDown :size="16" aria-hidden="true" />
+      <span>{{ overflowTabs.length }}</span>
+    </button>
+    <Teleport to="body">
+      <div
+        v-if="overflowOpen"
+        ref="overflowMenuRef"
+        class="wb-tab-overflow-menu"
+        :style="overflowStyle"
+        role="menu"
+        :aria-label="t('tabs.overflow', { count: overflowTabs.length })"
+        @keydown="onOverflowKeydown"
+        @contextmenu.prevent.stop
+      >
+        <button
+          v-for="tab in overflowTabs"
+          :key="tab.id"
+          type="button"
+          role="menuitem"
+          :disabled="tab.opening"
+          :title="tabSourceTitle(tab)"
+          @click="selectOverflowTab(tab)"
+        >
+          <span>{{ tab.tableName || tabTitle(tab) }}{{ tabKind(tab) === 'design' ? ` · ${t('m_56c255e19858')}` : '' }}{{ tab.dirty ? ' •' : '' }}</span>
+          <small v-if="tab.database">{{ tab.connectionId }} · {{ tabDatabaseLabel(tab) }}</small>
+        </button>
+      </div>
+    </Teleport>
   </section>
 </template>

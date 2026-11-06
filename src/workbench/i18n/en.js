@@ -3,6 +3,7 @@ import { releaseFlowEn } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
   "m_a49b9e3cc423": "Expand all connections",
+  "tabs.overflow": "More tabs ({count})",
   "m_809ec93960dd": "Collapse all connections",
   "m_695704a261cb": "Expand all",
   "m_2fabdc5d8190": "Collapse all",

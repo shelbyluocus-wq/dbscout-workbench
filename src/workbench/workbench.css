@@ -11032,6 +11032,76 @@ label:has(input[type="checkbox"]:disabled) {
   padding-inline: var(--wb-tab-curve-size);
 }
 
+.wb-tab-overflow-button {
+  display: inline-flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  -webkit-app-region: no-drag;
+}
+
+.wb-tab-overflow-menu {
+  position: fixed;
+  z-index: 1000;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.wb-tab-overflow-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  text-align: left;
+}
+
+.wb-tab-overflow-menu button > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-tab-overflow-menu small {
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-tab-overflow-button:hover,
+.wb-tab-overflow-menu button:hover:not(:disabled) {
+  background: var(--wb-list-hover);
+}
+
+.wb-tab-overflow-button:focus-visible,
+.wb-tab-overflow-menu button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-tab-overflow-menu button:disabled {
+  opacity: 0.5;
+}
+
 .wb-tab {
   --wb-active-tab-surface: var(--wb-workspace-mist-raised);
   position: relative;
