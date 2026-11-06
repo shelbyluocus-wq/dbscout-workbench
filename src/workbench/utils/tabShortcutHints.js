@@ -1,3 +1,5 @@
+import { detectDesktopPlatform } from "./desktopPlatform.js";
+
 const HOME_COMBO = "Ctrl+`";
 const HOME_CODE = "Backquote";
 const MAX_NUMBERED_TABS = 9;
@@ -30,15 +32,21 @@ export function assignTabShortcutHints(tabs = []) {
   return hints;
 }
 
-export function isTabShortcutEvent(event) {
+export function isTabShortcutModifierHeld(event, platform = detectDesktopPlatform()) {
+  return platform === "macos"
+    ? Boolean(event?.metaKey && !event?.ctrlKey)
+    : Boolean(event?.ctrlKey || event?.metaKey);
+}
+
+export function isTabShortcutEvent(event, platform = detectDesktopPlatform()) {
   if (!event || event.isComposing) return false;
-  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return false;
+  if (!isTabShortcutModifierHeld(event, platform) || event.shiftKey || event.altKey) return false;
   if (event.code === HOME_CODE) return true;
   return /^Digit[1-9]$/.test(String(event.code || ""));
 }
 
-export function resolveTabShortcutEvent(event, tabs = []) {
-  if (!isTabShortcutEvent(event)) return null;
+export function resolveTabShortcutEvent(event, tabs = [], platform = detectDesktopPlatform()) {
+  if (!isTabShortcutEvent(event, platform)) return null;
   const hints = assignTabShortcutHints(tabs);
   const matched = hints.find((hint) => hint.code === event.code);
   if (matched) return matched;

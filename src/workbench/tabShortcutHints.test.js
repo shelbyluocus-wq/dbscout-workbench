@@ -56,32 +56,50 @@ test("assignTabShortcutHints skips opening tabs and stops after nine numbered ta
   assert.equal(hints.some((hint) => hint.tabId === "tab-10"), false);
 });
 
-test("isTabShortcutEvent accepts physical Backquote and Digit keys with Ctrl or Command", () => {
-  assert.equal(isTabShortcutEvent(hintEvent("Backquote", { key: "·" })), true);
-  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2" })), true);
-  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", ctrl: false, meta: true })), true);
-  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", shift: true })), false);
-  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", alt: true })), false);
-  assert.equal(isTabShortcutEvent(hintEvent("Numpad1", { key: "1" })), false);
-  assert.equal(isTabShortcutEvent(hintEvent("Backquote", { key: "`", composing: true })), false);
+test("Windows tab shortcuts accept physical Backquote and Digit keys with Ctrl or Command", () => {
+  assert.equal(isTabShortcutEvent(hintEvent("Backquote", { key: "·" }), "windows"), true);
+  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2" }), "windows"), true);
+  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", ctrl: false, meta: true }), "windows"), true);
+  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", shift: true }), "windows"), false);
+  assert.equal(isTabShortcutEvent(hintEvent("Digit2", { key: "2", alt: true }), "windows"), false);
+  assert.equal(isTabShortcutEvent(hintEvent("Numpad1", { key: "1" }), "windows"), false);
+  assert.equal(isTabShortcutEvent(hintEvent("Backquote", { key: "`", composing: true }), "windows"), false);
 });
 
 test("resolveTabShortcutEvent maps Backquote to home even when event.key is not a backtick", () => {
-  const home = resolveTabShortcutEvent(hintEvent("Backquote", { key: "·" }), tabs);
+  const home = resolveTabShortcutEvent(hintEvent("Backquote", { key: "·" }), tabs, "windows");
   assert.equal(home?.tabId, "home");
   assert.equal(home?.combo, "Ctrl+`");
 
-  const second = resolveTabShortcutEvent(hintEvent("Digit2", { key: "2" }), tabs);
+  const second = resolveTabShortcutEvent(hintEvent("Digit2", { key: "2" }), tabs, "windows");
   assert.equal(second?.tabId, "sql");
 
-  assert.equal(resolveTabShortcutEvent(hintEvent("Digit8", { key: "8" }), tabs), null);
-  assert.equal(resolveTabShortcutEvent(hintEvent("Numpad1", { key: "1" }), tabs), null);
+  assert.equal(resolveTabShortcutEvent(hintEvent("Digit8", { key: "8" }), tabs, "windows"), null);
+  assert.equal(resolveTabShortcutEvent(hintEvent("Numpad1", { key: "1" }), tabs, "windows"), null);
+});
+
+test("macOS tab shortcuts require Command and reject physical Control", () => {
+  const numberedTabs = Array.from({ length: 9 }, (_, index) => ({ id: `tab-${index + 1}`, kind: "data" }));
+  for (const code of ["Backquote", ...numberedTabs.map((_, index) => `Digit${index + 1}`)]) {
+    const commandEvent = hintEvent(code, { ctrl: false, meta: true });
+    assert.equal(isTabShortcutEvent(commandEvent, "macos"), true);
+    assert.ok(resolveTabShortcutEvent(commandEvent, numberedTabs, "macos"));
+    for (const meta of [false, true]) {
+      const controlEvent = hintEvent(code, { ctrl: true, meta });
+      assert.equal(isTabShortcutEvent(controlEvent, "macos"), false);
+      assert.equal(resolveTabShortcutEvent(controlEvent, numberedTabs, "macos"), null);
+    }
+    assert.equal(isTabShortcutEvent(hintEvent(code), "windows"), true);
+    assert.equal(isTabShortcutEvent(hintEvent(code, { ctrl: false }), "macos"), false);
+    assert.equal(isTabShortcutEvent({ ...commandEvent, shiftKey: true }, "macos"), false);
+    assert.equal(isTabShortcutEvent({ ...commandEvent, altKey: true }, "macos"), false);
+  }
 });
 
 test("resolveTabShortcutEvent still names the home action when no home tab is open", () => {
   const result = resolveTabShortcutEvent(hintEvent("Backquote", { key: "`" }), [
     { id: "orders", kind: "data" },
-  ]);
+  ], "windows");
   assert.deepEqual(result, { tabId: "", combo: "Ctrl+`", code: "Backquote" });
 });
 

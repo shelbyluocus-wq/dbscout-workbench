@@ -1,16 +1,11 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
-
-function isModifierKey(key) {
-  return key === "Control" || key === "Meta";
-}
-
-function modifierHeld(event) {
-  return Boolean(event?.ctrlKey || event?.metaKey);
-}
+import { detectDesktopPlatform } from "../utils/desktopPlatform.js";
+import { isTabShortcutModifierHeld } from "../utils/tabShortcutHints.js";
 
 export function createTabShortcutHintController({
   target = globalThis.window,
   documentTarget = globalThis.document,
+  platform = detectDesktopPlatform(),
 } = {}) {
   const hintsVisible = ref(false);
 
@@ -19,15 +14,11 @@ export function createTabShortcutHintController({
   }
 
   function onKeydown(event) {
-    hintsVisible.value = modifierHeld(event);
+    hintsVisible.value = isTabShortcutModifierHeld(event, platform);
   }
 
   function onKeyup(event) {
-    if (isModifierKey(event?.key) || !modifierHeld(event)) {
-      hide();
-      return;
-    }
-    hintsVisible.value = true;
+    hintsVisible.value = isTabShortcutModifierHeld(event, platform);
   }
 
   function onBlur() {

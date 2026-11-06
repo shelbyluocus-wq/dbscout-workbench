@@ -22,11 +22,12 @@ function createTarget() {
   };
 }
 
-test("holding Ctrl or Command shows tab shortcut hints until the modifier is released", () => {
+test("holding Ctrl or Command on Windows shows tab shortcut hints until the modifier is released", () => {
   const target = createTarget();
   const hints = createTabShortcutHintController({
     target,
     documentTarget: target,
+    platform: "windows",
   });
   hints.bind();
 
@@ -53,6 +54,7 @@ test("window blur and hidden documents clear leftover tab shortcut hints", () =>
   const hints = createTabShortcutHintController({
     target,
     documentTarget,
+    platform: "windows",
   });
   hints.bind();
 
@@ -69,4 +71,29 @@ test("window blur and hidden documents clear leftover tab shortcut hints", () =>
   hints.unbind();
   assert.equal(target.listeners.get("keydown")?.length || 0, 0);
   assert.equal(hints.hintsVisible.value, false);
+});
+
+test("macOS shows tab shortcut hints only while Command is held without Control", () => {
+  const target = createTarget();
+  const hints = createTabShortcutHintController({ target, documentTarget: target, platform: "macos" });
+  hints.bind();
+
+  target.emit("keydown", { key: "Control", ctrlKey: true });
+  assert.equal(hints.hintsVisible.value, false);
+  target.emit("keydown", { key: "1", ctrlKey: true });
+  assert.equal(hints.hintsVisible.value, false);
+  target.emit("keyup", { key: "Control", ctrlKey: false });
+  assert.equal(hints.hintsVisible.value, false);
+  target.emit("keydown", { key: "Meta", metaKey: true });
+  assert.equal(hints.hintsVisible.value, true);
+  target.emit("keyup", { key: "1", metaKey: true });
+  assert.equal(hints.hintsVisible.value, true);
+  target.emit("keydown", { key: "Control", ctrlKey: true, metaKey: true });
+  assert.equal(hints.hintsVisible.value, false);
+  target.emit("keyup", { key: "Control", ctrlKey: false, metaKey: true });
+  assert.equal(hints.hintsVisible.value, true);
+  target.emit("keyup", { key: "Meta", metaKey: false });
+  assert.equal(hints.hintsVisible.value, false);
+
+  hints.unbind();
 });
