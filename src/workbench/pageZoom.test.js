@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createPageZoom, createPageZoomWheelHandler, pageZoomAction } from "./utils/pageZoom.js";
+import { createPageZoom, createPageZoomWheelHandler, pageZoomAction, PAGE_ZOOM_STORAGE_KEY } from "./utils/pageZoom.js";
 import { buildNativeAppMenuModel } from "./utils/nativeAppMenuModel.js";
 import { translateIn } from "./i18n/index.js";
 
@@ -129,6 +129,100 @@ test("native failure does not advance the scale and the next shortcut can retry"
   assert.equal(zoom.scale, 1.1);
 });
 
+function zoomStorage(initial) {
+  const values = new Map(initial == null ? [] : [[PAGE_ZOOM_STORAGE_KEY, initial]]);
+  return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+}
+
+test("zoom survives a new controller and reset persists the default", async () => {
+  const storage = zoomStorage();
+  const options = { applyZoom: async () => {}, getStorage: () => storage };
+  const first = createPageZoom(options);
+  await first.run("zoomIn");
+  await first.run("zoomIn");
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1.2");
+  const calls = [];
+  const reopened = createPageZoom({ ...options, applyZoom: async (scale) => calls.push(scale) });
+  await reopened.restore();
+  await reopened.restore();
+  assert.deepEqual(calls, [1.2]);
+  await reopened.run("zoomOut");
+  assert.equal(reopened.scale, 1.1);
+  await reopened.run("zoomReset");
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1");
+  const afterReset = createPageZoom(options);
+  await afterReset.restore();
+  assert.equal(afterReset.scale, 1);
+});
+
+test("missing or invalid saved zoom falls back to 100% without native work", async () => {
+  for (const saved of [null, "", "garbage", "NaN", "Infinity", "0", "0.4", "2.1"]) {
+    const zoom = createPageZoom({
+      getStorage: () => zoomStorage(saved),
+      applyZoom: async () => assert.fail("must keep default"),
+    });
+    await zoom.restore();
+    assert.equal(zoom.scale, 1);
+  }
+  for (const saved of ["0.5", "2"]) {
+    const zoom = createPageZoom({ getStorage: () => zoomStorage(saved), applyZoom: async () => {} });
+    await zoom.restore();
+    assert.equal(zoom.scale, Number(saved));
+  }
+});
+
+test("unavailable storage never blocks zoom", async () => {
+  for (const getStorage of [
+    () => { throw new Error("storage blocked"); },
+    () => ({ getItem: () => "1.2", setItem: () => { throw new Error("full"); } }),
+  ]) {
+    const zoom = createPageZoom({ getStorage, applyZoom: async () => {}, onError: () => assert.fail() });
+    await zoom.restore();
+    await zoom.run("zoomIn");
+    assert.ok(zoom.scale > 1);
+  }
+});
+
+test("restore serializes with immediate shortcuts and saves the latest intent", async () => {
+  const storage = zoomStorage("1.4");
+  const calls = [];
+  let finishRestore;
+  const zoom = createPageZoom({ getStorage: () => storage, applyZoom: async (scale) => {
+    calls.push(scale);
+    if (calls.length === 1) await new Promise((resolve) => { finishRestore = resolve; });
+  } });
+  const pending = zoom.restore();
+  await Promise.resolve();
+  zoom.run("zoomIn");
+  finishRestore();
+  await pending;
+  assert.deepEqual(calls, [1.4, 1.5]);
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1.5");
+});
+
+test("failed native restore preserves saved preference and allows retry", async () => {
+  const storage = zoomStorage("1.4");
+  let fail = true;
+  const zoom = createPageZoom({ getStorage: () => storage, applyZoom: async () => {
+    if (fail) throw new Error("native failed");
+  } });
+  await zoom.restore();
+  assert.equal(zoom.scale, 1);
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1.4");
+  fail = false;
+  await zoom.run("zoomIn");
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1.1");
+});
+
+test("immediate reset cancels queued restoration and persists 100%", async () => {
+  const storage = zoomStorage("1.4");
+  const zoom = createPageZoom({ getStorage: () => storage, applyZoom: async () => assert.fail() });
+  zoom.restore();
+  await zoom.run("zoomReset");
+  assert.equal(zoom.scale, 1);
+  assert.equal(storage.getItem(PAGE_ZOOM_STORAGE_KEY), "1");
+});
+
 test("native menu exposes localized, deduplicated zoom actions", () => {
   for (const locale of ["zh-CN", "zh-TW", "en"]) {
     const model = buildNativeAppMenuModel({ t: (key) => translateIn(locale, key) });
@@ -151,6 +245,7 @@ test("desktop grants zoom permission and routes zoom before modal shortcut block
   assert.ok(handler.indexOf("pageZoomAction(event") < handler.indexOf("dialogLayerManager.hasActiveModalLayer()"));
   assert.match(handler, /zoomAction && isTauriRuntime\(\)/);
   assert.match(source, /getCurrentWebview\(\).setZoom\(scale\)/);
+  assert.match(source, /if \(isTauriRuntime\(\)\) void pageZoom.restore\(\);/);
   assert.match(source, /addEventListener\("wheel", handlePageZoomWheel, \{ capture: true, passive: false \}\)/);
   assert.match(source, /removeEventListener\("wheel", handlePageZoomWheel, true\)/);
 });

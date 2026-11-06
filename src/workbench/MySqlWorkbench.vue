@@ -4766,6 +4766,7 @@ const pageZoom = createPageZoom({
   onChange: (percent) => setStatus(t("pageZoom.changed", { percent })),
   onError: (error) => setStatus(t("pageZoom.failed", { error: String(error?.message || error) }), { tone: "error" }),
 });
+if (isTauriRuntime()) void pageZoom.restore();
 
 const handlePageZoomWheel = createPageZoomWheelHandler({
   platform: isMacOSPlatform() ? "macos" : "windows",

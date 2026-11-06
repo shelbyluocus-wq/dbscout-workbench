@@ -1,5 +1,6 @@
 export const PAGE_ZOOM_MIN = 0.5;
 export const PAGE_ZOOM_MAX = 2;
+export const PAGE_ZOOM_STORAGE_KEY = "dbscout.page-zoom.v1";
 
 export function pageZoomAction(event, platform) {
   if (event.defaultPrevented || event.isComposing || event.altKey) return null;
@@ -35,10 +36,17 @@ export function createPageZoomWheelHandler({ platform, run, enabled = () => true
   };
 }
 
-export function createPageZoom({ applyZoom, onChange = () => {}, onError = () => {} }) {
+export function createPageZoom({ applyZoom, onChange = () => {}, onError = () => {}, getStorage = () => globalThis.localStorage }) {
   let applied = 1;
   let requested = 1;
   let pending = null;
+  let restored = false;
+
+  function save() {
+    try {
+      getStorage()?.setItem(PAGE_ZOOM_STORAGE_KEY, String(applied));
+    } catch {}
+  }
 
   async function flush() {
     while (applied !== requested) {
@@ -46,6 +54,7 @@ export function createPageZoom({ applyZoom, onChange = () => {}, onError = () =>
       try {
         await applyZoom(target);
         applied = target;
+        save();
         onChange(Math.round(applied * 100));
       } catch (error) {
         requested = applied;
@@ -54,15 +63,33 @@ export function createPageZoom({ applyZoom, onChange = () => {}, onError = () =>
     }
   }
 
-  function run(action) {
-    if (!["zoomIn", "zoomOut", "zoomReset"].includes(action)) return Promise.resolve();
-    requested = action === "zoomReset" ? 1 : Math.min(PAGE_ZOOM_MAX, Math.max(PAGE_ZOOM_MIN,
-      Math.round((requested + (action === "zoomIn" ? 0.1 : -0.1)) * 10) / 10));
+  function schedule() {
     if (!pending) {
       pending = Promise.resolve().then(flush).finally(() => { pending = null; });
     }
     return pending;
   }
 
-  return { run, get scale() { return applied; } };
+  function restore() {
+    if (restored) return pending || Promise.resolve();
+    restored = true;
+    try {
+      const saved = Number(getStorage()?.getItem(PAGE_ZOOM_STORAGE_KEY));
+      if (Number.isFinite(saved) && saved >= PAGE_ZOOM_MIN && saved <= PAGE_ZOOM_MAX) {
+        requested = Math.round(saved * 10) / 10;
+      }
+    } catch {}
+    return schedule();
+  }
+
+  function run(action) {
+    if (!["zoomIn", "zoomOut", "zoomReset"].includes(action)) return Promise.resolve();
+    restored = true;
+    requested = action === "zoomReset" ? 1 : Math.min(PAGE_ZOOM_MAX, Math.max(PAGE_ZOOM_MIN,
+      Math.round((requested + (action === "zoomIn" ? 0.1 : -0.1)) * 10) / 10));
+    if (requested === applied) save();
+    return schedule();
+  }
+
+  return { run, restore, get scale() { return applied; } };
 }
