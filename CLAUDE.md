@@ -117,10 +117,11 @@ capabilities:
   star toggles (earlier flat favorites migrate into it). Tables join a
   folder by dragging (sidebar tables, a folder's own rows, or a whole folder
   dropped onto another folder, which adds the tables it holds now) or
-  through inline checkboxes: the main pane always lists the selected database's
-  tables, with search and current-folder membership checked. Checking adds a
-  reference immediately; unchecking removes only the reference. There is no
-  separate Add tables page or Submit step. Missing folder references stay visible.
+  through Add tables: entering from the rail/menu defaults to All tables with no
+  folder selected. Selecting a folder shows only its references, including missing
+  tables. Add tables returns to the same All tables view with the target retained;
+  checkboxes select additions and Submit adds them then returns to the folder.
+  Cancel or selecting another folder discards pending picks. No separate picker page.
   Rename (F2) and
   delete (Delete, confirmed) live in the folder's right-click menu with
   open here / in a new window; a table row's menu opens or removes it. The

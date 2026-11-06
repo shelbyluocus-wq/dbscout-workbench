@@ -24221,6 +24221,12 @@ button.wb-table-mention:active {
   background: var(--wb-list-hover);
 }
 
+.wb-folder-all {
+  flex: 0 0 auto;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+}
+
 .wb-folder-item.is-selected {
   background: var(--wb-list-selected);
   color: var(--wb-text);

@@ -306,7 +306,7 @@ export function openTableFoldersTab(state, { connectionId = "", database = "", f
   if (!safeDatabase) return null;
   const existing = state.tabs.find((tab) => tab.kind === "folders");
   if (existing) {
-    setTableFolderScope(existing, { connectionId: safeConnectionId, database: safeDatabase, ...(folderId ? { folderId: String(folderId) } : {}) });
+    setTableFolderScope(existing, { connectionId: safeConnectionId, database: safeDatabase, folderId: String(folderId) });
     const ownerPane = Object.values(state.panes || {}).find((pane) => pane.tabIds?.includes(existing.id));
     if (activate) addTabToPane(state, ownerPane?.id || ensurePane(state, paneId).id, existing.id, { activate: true });
     return existing;

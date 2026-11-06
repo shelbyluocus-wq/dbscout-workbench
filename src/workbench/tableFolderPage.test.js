@@ -26,52 +26,45 @@ function dataTransfer() {
   };
 }
 
-test("the main folder list includes database tables and missing references without a picker page", () => {
+test("all tables is the default and folder views only contain their own references", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /openPicker|closePicker|submitPicks|wb-folder-picker|view ===/);
-  assert.match(source, /type="checkbox"[\s\S]*?:checked="row.present"[\s\S]*?@change="toggleMembership\(row\)"/);
-  const expression = source.match(/const folderRows = computed\(\(\) => \[([\s\S]*?)\n\]\);/)[1];
+  assert.doesNotMatch(source, /wb-folder-picker|folders\.value\[0\]/);
+  assert.match(source, /v-if="addingFolder && !currentFolder"/);
+  const expression = source.match(/const folderRows = computed\(\(\) => ([\s\S]*?)\n\}\)\)\);/)[1] + "\n}))";
   const currentFolder = ref({ tableNames: ["hero", "removed"] });
-  const pickRows = ref([{ name: "hero", present: true }, { name: "goods", present: false }]);
   const tableByName = ref(new Map([["hero", {}], ["goods", {}]]));
   const tablesLoaded = ref(true);
-  const pickQuery = ref("");
-  const evaluate = new Function("pickRows", "currentFolder", "tableByName", "tablesLoaded", "pickQuery", "filterTablesByKeywords", "highlightSearchRanges", "matchTableKeywords", "parseSearchKeywords", `return [${expression}]`);
-  const rows = () => evaluate(pickRows, currentFolder, tableByName, tablesLoaded, pickQuery, filterTablesByKeywords, highlightSearchRanges, matchTableKeywords, parseSearchKeywords);
-  assert.deepEqual(rows().map((row) => row.name), ["hero", "goods", "removed"]);
-  assert.equal(rows()[2].missing, true);
+  const evaluate = new Function("currentFolder", "tableByName", "tablesLoaded", `return ${expression}`);
+  const rows = () => evaluate(currentFolder, tableByName, tablesLoaded);
+  assert.deepEqual(rows().map((row) => row.name), ["hero", "removed"]);
+  assert.equal(rows()[1].missing, true);
   currentFolder.value = { tableNames: [] };
-  assert.deepEqual(rows().map((row) => row.name), ["hero", "goods"]);
-  currentFolder.value = { tableNames: ["removed"] };
-  pickRows.value = [];
-  pickQuery.value = "hero";
   assert.deepEqual(rows(), []);
+  const visible = source.match(/const visibleRows = computed\(\(\) => (.*)\);/)[1];
+  const selectRows = new Function("currentFolder", "folderRows", "pickRows", `return ${visible}`);
+  assert.deepEqual(selectRows(ref(null), ref([]), ref([{ name: "goods" }])), [{ name: "goods" }]);
+  assert.deepEqual(selectRows(currentFolder, ref([]), ref([{ name: "goods" }])), []);
 });
 
-test("checkboxes immediately change only the current folder's references", () => {
+test("adding uses the all-tables view and submits only to its retained target folder", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
-  const body = source.match(/function toggleMembership\(row\) \{([\s\S]*?)\n\}/)[1];
-  const currentFolder = ref({ id: "first", tableNames: ["hero", "missing"] });
+  const body = source.match(/function submitPicks\(\) \{([\s\S]*?)\n\}/)[1];
+  const addingFolder = ref({ id: "first", tableNames: ["hero"] });
   const scope = ref({ connectionId: "demo", database: "game" });
-  const tableByName = ref(new Map([["hero", {}], ["goods", {}]]));
+  const tables = ref([{ name: "hero" }, { name: "goods" }]);
+  const pickSelection = ref(["goods", "stale"]);
+  const pickSet = computed(() => new Set(pickSelection.value));
   const calls = [];
-  const store = {
-    removeTables: (...args) => calls.push(["remove", ...args]),
-    addTables: (...args) => calls.push(["add", ...args]),
-  };
-  const toggle = new Function("currentFolder", "store", "scope", "tableByName", `return function(row) {${body}}`)(currentFolder, store, scope, tableByName);
-  toggle({ name: "hero" });
-  toggle({ name: "missing" });
-  toggle({ name: "goods" });
-  toggle({ name: "unknown" });
-  currentFolder.value = { id: "second", tableNames: [] };
-  toggle({ name: "hero" });
-  assert.deepEqual(calls, [
-    ["remove", "first", ["hero"]],
-    ["remove", "first", ["missing"]],
-    ["add", "first", ["goods"], scope.value],
-    ["add", "second", ["hero"], scope.value],
-  ]);
+  const store = { addTables: (...args) => calls.push(args) };
+  const returned = [];
+  const submit = new Function("addingFolder", "pickSelection", "tables", "pickSet", "store", "scope", "reportAdded", "selectFolder", body);
+  submit(addingFolder, pickSelection, tables, pickSet, store, scope, () => {}, (folder) => returned.push(folder.id));
+  assert.deepEqual(calls, [["first", ["goods"], scope.value]]);
+  assert.deepEqual(returned, ["first"]);
+  addingFolder.value = null;
+  submit(addingFolder, pickSelection, tables, pickSet, store, scope, () => {}, () => {});
+  assert.equal(calls.length, 1);
+  assert.match(source, /function startAdding\(\) \{[\s\S]*?selectFolder\(null\);\s*addingFolderId\.value = folder\.id;/);
 });
 
 test("new folder button spans the sidebar row and centers its icon", () => {
@@ -103,7 +96,7 @@ test("inline table search uses home keyword matching and ranking without losing 
   ]);
   const currentFolder = ref({ tableNames: ["hero_prop"] });
   const pickQuery = ref("");
-  const evaluate = new Function("tables", "currentFolder", "pickQuery", "filterTablesByKeywords", "matchTableKeywords", "parseSearchKeywords", "highlightSearchRanges", expression[1]);
+  const evaluate = new Function("tables", "addingFolder", "pickQuery", "filterTablesByKeywords", "matchTableKeywords", "parseSearchKeywords", "highlightSearchRanges", expression[1]);
   const rows = computed(() => evaluate(tables, currentFolder, pickQuery, filterTablesByKeywords, matchTableKeywords, parseSearchKeywords, highlightSearchRanges));
 
   for (const query of ["", "  ", "HERO", "hero 配置", "配置　HERO hero", "hero missing"]) {
@@ -140,6 +133,7 @@ test("the folder page switches databases without creating indistinguishable tabs
   const again = openTableFoldersTab(state, { connectionId: "demo", database: "game", folderId: "fld-1" });
   assert.equal(again.id, first.id);
   assert.equal(again.folderId, "fld-1");
+  assert.equal(openTableFoldersTab(state, { connectionId: "demo", database: "game" }).folderId, "");
   assert.equal(state.activeTabId, first.id);
   assert.equal(state.tabs.filter((tab) => tab.kind === "folders").length, 1);
   assert.equal(openTableFoldersTab(state, { connectionId: "demo", database: "" }), null);

@@ -34,7 +34,7 @@ function folder(name) {
 }
 
 async function folderTableNames() {
-  return folderRows.filter({ has: page.locator('input:checked') }).locator(".wb-folder-table").allTextContents();
+  return folderRows.locator(".wb-folder-table").allTextContents();
 }
 
 async function waitForNotice(text) {
@@ -57,6 +57,12 @@ try {
   await folderPage.waitFor();
   assert.equal((await page.locator(".wb-tab.active .wb-tab-name").textContent()).trim(), "表格資料夾");
   assert.match(await folderItems.first().textContent(), /收藏/);
+  assert.equal(await folderPage.locator('.wb-folder-list [aria-current="true"]').count(), 0);
+  assert.equal(await folderPage.locator('.wb-folder-header h2').textContent(), '全部表');
+  assert.ok((await folderTableNames()).length >= names.length);
+  assert.equal(await folderPage.getByRole('checkbox').count(), 0);
+  await folderPage.screenshot({ path: `${screenshots}/table-folders-all.png`, animations: "disabled" });
+  await folder("收藏").click();
   assert.deepEqual((await folderTableNames()).sort(), names.slice(0, 2).sort());
   // A clean page: no counts, no footer, no visible rename/delete buttons.
   assert.equal(await folderPage.locator(".wb-folder-item small").count(), 0);
@@ -70,21 +76,33 @@ try {
   await rename.fill("英雄養成");
   await rename.press("Enter");
   assert.equal(await folderPage.locator(".wb-folder-header h2").textContent(), "英雄養成");
-  assert.ok(await folderRows.count() >= names.length);
+  assert.match(await folderPage.locator(".wb-folder-empty").textContent(), /拖到這裡/);
   assert.deepEqual(await folderTableNames(), []);
 
+  await folderPage.getByRole('button', { name: '添加表', exact: true }).click();
+  assert.equal(await folderPage.locator('.wb-folder-list .is-selected').count(), 0);
+  assert.ok(await folderRows.count() >= names.length);
+  await folderPage.screenshot({ path: `${screenshots}/table-folders-add-inline.png`, animations: "disabled" });
   assert.equal(await folderPage.locator('.wb-folder-picker').count(), 0);
   const search = folderPage.locator(".wb-folder-search input");
   await search.fill(names[2]);
   const membership = folderPage.locator(`.wb-folder-row[data-table-name="${names[2]}"] input[type="checkbox"]`);
   await membership.check();
-  assert.deepEqual(await folderTableNames(), [names[2]]);
+  assert.equal(await membership.isChecked(), true);
   await membership.uncheck();
-  assert.deepEqual(await folderTableNames(), []);
+  assert.equal(await membership.isChecked(), false);
   await membership.focus();
   await membership.press("Space");
   assert.equal(await membership.isChecked(), true);
   await search.fill("");
+  await folderPage.getByRole('button', { name: '提交（1）', exact: true }).click();
+  assert.deepEqual(await folderTableNames(), [names[2]]);
+  assert.equal(await folderPage.getByRole('checkbox').count(), 0);
+  await folderPage.getByRole('button', { name: '添加表', exact: true }).click();
+  assert.equal(await membership.isDisabled(), true);
+  await folderPage.locator(`.wb-folder-row[data-table-name="${names[3]}"] input`).check();
+  await folderPage.getByRole('button', { name: '取消', exact: true }).click();
+  assert.deepEqual(await folderTableNames(), [names[2]]);
 
   // Drag the favorites folder onto it: its tables join.
   await folder("收藏").dragTo(folder("英雄養成"));
@@ -147,7 +165,7 @@ try {
 
   // Remove a table from the folder through its menu.
   await folder("英雄養成").click();
-  await folderRows.filter({ has: page.locator('input:checked') }).first().click({ button: "right" });
+  await folderRows.first().click({ button: "right" });
   await menu.getByRole("menuitem", { name: /從資料夾移除/ }).click();
   assert.equal((await folderTableNames()).length, 3);
   const kept = await folderTableNames();
@@ -205,6 +223,13 @@ try {
   const tabOrderAfter = await page.locator(".wb-tab .wb-tab-name").allTextContents();
   assert.notDeepEqual(tabOrderAfter, tabOrderBefore);
   assert.deepEqual([...tabOrderAfter].sort(), [...tabOrderBefore].sort());
+  assert.deepEqual(await folderTableNames(), kept);
+
+  await page.locator('[data-wb-rail-id="tableFolders"]').click();
+  assert.equal(await folderPage.locator('.wb-folder-header h2').textContent(), '全部表');
+  assert.equal(await folderPage.locator('.wb-folder-list [aria-current="true"]').count(), 0);
+  assert.equal(await folderPage.getByRole('checkbox').count(), 0);
+  await folder("英雄養成").click();
   assert.deepEqual(await folderTableNames(), kept);
 
   assert.deepEqual(errors, []);
