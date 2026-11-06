@@ -26,6 +26,19 @@ function dataTransfer() {
   };
 }
 
+test("new folder button spans the sidebar row and centers its icon", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./workbench.css", import.meta.url), "utf8");
+  const rule = css.match(/\.wb-folder-add\s*\{([^}]+)\}/)?.[1];
+  assert.ok(rule);
+  assert.match(rule, /place-items:\s*center/);
+  assert.match(rule, /align-self:\s*stretch/);
+  assert.match(rule, /flex:\s*0 0 auto/);
+  assert.match(rule, /margin:\s*4px 8px 0/);
+  assert.doesNotMatch(rule, /(?:^|;)\s*width:/);
+  assert.match(source, /<button[^>]*class="wb-folder-add"[^>]*@click="createFolder"/);
+});
+
 test("folder picker uses home keyword matching and ranking without losing membership", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
   assert.match(source, /import \{[^}]*filterTablesByKeywords[^}]*\} from "\.\.\/utils\/tableKeywordSearch\.js"/);
