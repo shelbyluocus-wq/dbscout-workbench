@@ -105,10 +105,22 @@ try {
   assert.deepEqual((await folderTableNames()).sort(), [...names].sort());
   await folderPage.screenshot({ path: `${screenshots}/table-folders-page.png`, animations: "disabled" });
 
+  await folderPage.locator(`.wb-folder-row[data-table-name="${names[0]}"]`).dblclick();
+  const tableTab = page.locator('.wb-tab[data-kind="data"]', { hasText: names[0] });
+  await tableTab.waitFor();
+  const foldersTab = page.locator('.wb-tab[data-kind="folders"]');
+  await foldersTab.click();
+
   // Rename and delete live in the folder's right-click menu.
   await folderPage.locator(".wb-folder-add").click();
   await rename.fill("活動");
   await rename.press("Enter");
+  await tableTab.dragTo(folderPage.locator(".wb-folder-content"));
+  assert.deepEqual(await folderTableNames(), [names[0]]);
+  assert.equal(await tableTab.count(), 1);
+  await tableTab.dragTo(folder("活動"));
+  assert.deepEqual(await folderTableNames(), [names[0]]);
+  await page.screenshot({ path: `${screenshots}/table-folders-tab-drop.png`, animations: "disabled" });
   await folder("活動").click({ button: "right" });
   await menu.waitFor();
   await page.screenshot({ path: `${screenshots}/table-folders-menu.png`, animations: "disabled" });
@@ -136,7 +148,6 @@ try {
   assert.equal(await folderRows.count(), 3);
   const kept = await folderTableNames();
 
-  const foldersTab = page.locator('.wb-tab[data-kind="folders"]');
   const databaseSwitch = folderPage.locator(".wb-folder-database");
   const originalScope = await databaseSwitch.inputValue();
   await databaseSwitch.focus();
@@ -190,6 +201,13 @@ try {
   await page.locator(".wb-tab", { hasText: "表格資料夾" }).click();
   await folderPage.waitFor();
   assert.equal(await folderPage.locator(".wb-folder-header h2").textContent(), "英雄養成");
+
+  const tabOrderBefore = await page.locator(".wb-tab .wb-tab-name").allTextContents();
+  await tableTab.dragTo(foldersTab, { targetPosition: { x: 10, y: 20 } });
+  const tabOrderAfter = await page.locator(".wb-tab .wb-tab-name").allTextContents();
+  assert.notDeepEqual(tabOrderAfter, tabOrderBefore);
+  assert.deepEqual([...tabOrderAfter].sort(), [...tabOrderBefore].sort());
+  assert.deepEqual(await folderTableNames(), kept);
 
   assert.deepEqual(errors, []);
   console.log("table folders browser test passed");

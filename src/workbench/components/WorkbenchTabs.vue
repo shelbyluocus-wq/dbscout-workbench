@@ -11,6 +11,7 @@ import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
+import { writeTableDrag } from "../utils/tableDragPayload.js";
 import { partitionTabs } from "../utils/tabOverflow.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 
@@ -51,12 +52,18 @@ function tabDropPosition(event) {
 }
 
 function startTabDrag(tabId, event) {
-  if (props.tabs.find((tab) => tab.id === tabId)?.opening) return;
+  const tab = props.tabs.find((tab) => tab.id === tabId);
+  if (!tab || tab.opening) return;
   draggingTabId.value = tabId;
   dragTargetTabId.value = "";
   dragTargetPosition.value = "before";
   if (!event?.dataTransfer) return;
-  event.dataTransfer.effectAllowed = "move";
+  const canCopyTable = !tab.createMode && isTableLikeTab(tab) && tab.tableName && writeTableDrag(event, {
+    connectionId: tab.connectionId,
+    database: tab.database,
+    tableNames: [tab.tableName],
+  });
+  event.dataTransfer.effectAllowed = canCopyTable ? "copyMove" : "move";
   event.dataTransfer.setData("application/x-dbscout-tab", tabId);
   event.dataTransfer.setData("application/x-dbscout-pane", props.paneId);
   event.dataTransfer.setData("text/plain", tabId);

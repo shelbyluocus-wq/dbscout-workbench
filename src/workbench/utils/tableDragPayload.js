@@ -1,6 +1,3 @@
-// Tables dragged between lists (the sidebar, a table folder's contents) and
-// folders dropped onto folders. One MIME type each, so unrelated drags such
-// as tab reordering never land in a folder.
 export const TABLE_DRAG_MIME = "application/x-dbscout-tables";
 export const FOLDER_DRAG_MIME = "application/x-dbscout-table-folder";
 
