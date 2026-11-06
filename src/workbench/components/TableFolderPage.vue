@@ -27,6 +27,7 @@ const context = useTableFolderContext();
 const rootRef = ref(null);
 const menuRef = ref(null);
 const renameInputRef = ref(null);
+const addButtonRef = ref(null);
 const tables = ref([]);
 const tablesLoaded = ref(false);
 const tablesLoading = ref(false);
@@ -146,15 +147,21 @@ function startAdding() {
 }
 
 function togglePick(row) {
-  if (!addingFolder.value || row.present) return;
+  if (currentFolder.value) return;
   pickSelection.value = pickSet.value.has(row.name)
     ? pickSelection.value.filter((name) => name !== row.name)
     : [...pickSelection.value, row.name];
 }
 
-function submitPicks() {
-  const folder = addingFolder.value;
-  if (!folder || !pickSelection.value.length) return;
+function showAddTargets(event) {
+  if (currentFolder.value || !pickSelection.value.length) return;
+  const rect = event.currentTarget.getBoundingClientRect();
+  openMenu({ kind: "addTarget", x: rect.right - 200, y: rect.bottom + 4 }, { keyboard: true });
+}
+
+function submitPicks(folderId) {
+  const folder = folders.value.find((item) => item.id === folderId);
+  if (currentFolder.value || !folder || !pickSelection.value.length) return;
   const names = tables.value.map((table) => table.name).filter((name) => pickSet.value.has(name));
   reportAdded(folder, store.addTables(folder.id, names, scope.value));
   selectFolder(folder);
@@ -385,7 +392,7 @@ function onContentDragLeave(event) {
 // ── Menu ─────────────────────────────────────────────────────────────────
 function openMenu({ kind, folderId = "", tableNames = [], x, y }, { keyboard = false } = {}) {
   const width = 200;
-  const height = kind === "folder" ? 168 : 84;
+  const height = kind === "addTarget" ? Math.min(folders.value.length * 32 + 40, 360) : kind === "folder" ? 168 : 84;
   menu.value = {
     open: true,
     kind,
@@ -403,7 +410,10 @@ function onFolderContextMenu(event, folder) {
 }
 
 function closeMenu() {
-  if (menu.value.open) menu.value = { ...menu.value, open: false };
+  if (!menu.value.open) return;
+  const returnToAdd = menu.value.kind === "addTarget";
+  menu.value = { ...menu.value, open: false };
+  if (returnToAdd) void nextTick(() => addButtonRef.value?.focus());
 }
 
 function onMenuKeydown(event) {
@@ -518,7 +528,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
         @drop="dropInto(currentFolder, $event)"
       >
         <header class="wb-folder-header">
-          <h2>{{ currentFolder ? folderLabel(currentFolder) : addingFolder ? t('tableFolders.pickTitle', { name: folderLabel(addingFolder) }) : t('m_f974e44668ed') }}</h2>
+          <h2>{{ currentFolder ? folderLabel(currentFolder) : t('m_f974e44668ed') }}</h2>
           <label v-if="!currentFolder" class="wb-folder-search">
             <Search :size="14" aria-hidden="true" />
             <input v-model="pickQuery" type="search" :placeholder="t('tableFolders.search')" :aria-label="t('tableFolders.search')" />
@@ -531,10 +541,10 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
               <AppWindow :size="15" aria-hidden="true" />{{ t("tableFolders.openWindow") }}
             </button>
           </div>
-          <div v-else-if="addingFolder" class="wb-folder-actions">
-            <button type="button" @click="selectFolder(addingFolder)">{{ t("tableFolders.cancel") }}</button>
-            <button type="button" class="is-primary" :disabled="!pickSelection.length" @click="submitPicks">
-              {{ pickSelection.length ? t("tableFolders.submitCount", { count: pickSelection.length }) : t("tableFolders.submit") }}
+          <div v-else class="wb-folder-actions">
+            <button v-if="addingFolder" type="button" @click="selectFolder(addingFolder)">{{ t("tableFolders.cancel") }}</button>
+            <button ref="addButtonRef" type="button" class="is-primary" :disabled="!pickSelection.length" aria-haspopup="menu" :aria-expanded="menu.open && menu.kind === 'addTarget'" @click="showAddTargets">
+              <Plus :size="15" aria-hidden="true" />{{ pickSelection.length ? t("tableFolders.addCount", { count: pickSelection.length }) : t("tableFolders.add") }}
             </button>
           </div>
         </header>
@@ -555,11 +565,10 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
             @dragstart="onRowDragStart($event, row)"
           >
             <input
-              v-if="addingFolder && !currentFolder"
+              v-if="!currentFolder"
               class="wb-folder-check"
               type="checkbox"
-              :checked="row.present || pickSet.has(row.name)"
-              :disabled="row.present"
+              :checked="pickSet.has(row.name)"
               :aria-label="`${t('tableFolders.addTables')}: ${row.name}`"
               @click.stop
               @dblclick.stop
@@ -583,14 +592,22 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
         v-if="menu.open"
         ref="menuRef"
         class="wb-context-menu wb-folder-menu"
+        :class="{ 'wb-folder-target-menu': menu.kind === 'addTarget' }"
         :style="menuStyle"
         role="menu"
         tabindex="-1"
-        :aria-label="t('m_1a94fed1be72')"
+        :aria-label="menu.kind === 'addTarget' ? t('tableFolders.chooseTarget') : t('m_1a94fed1be72')"
         @keydown="onMenuKeydown"
         @contextmenu.prevent.stop
       >
-        <template v-if="menu.kind === 'folder' && menuFolder">
+        <template v-if="menu.kind === 'addTarget'">
+          <li class="wb-folder-target-heading" role="presentation">{{ t("tableFolders.chooseTarget") }}</li>
+          <button v-for="folder in folders" :key="folder.id" type="button" role="menuitem" @click="submitPicks(folder.id)">
+            <component :is="folder.kind === 'favorites' ? Star : Folder" :size="14" class="wb-context-icon" aria-hidden="true" />
+            <span class="wb-folder-name">{{ folderLabel(folder) }}</span>
+          </button>
+        </template>
+        <template v-else-if="menu.kind === 'folder' && menuFolder">
           <button type="button" role="menuitem" :disabled="!menuFolder.tableNames.length" @click="openInWindow(menuFolder)">
             <AppWindow :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("tableFolders.openWindow") }}
           </button>

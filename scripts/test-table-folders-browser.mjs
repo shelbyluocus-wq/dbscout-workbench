@@ -60,7 +60,8 @@ try {
   assert.equal(await folderPage.locator('.wb-folder-list [aria-current="true"]').count(), 0);
   assert.equal(await folderPage.locator('.wb-folder-header h2').textContent(), '全部表');
   assert.ok((await folderTableNames()).length >= names.length);
-  assert.equal(await folderPage.getByRole('checkbox').count(), 0);
+  assert.ok(await folderPage.getByRole('checkbox').count() >= names.length);
+  assert.equal(await folderPage.getByRole('button', { name: '添加', exact: true }).isDisabled(), true);
   await folderPage.screenshot({ path: `${screenshots}/table-folders-all.png`, animations: "disabled" });
   await folder("收藏").click();
   assert.deepEqual((await folderTableNames()).sort(), names.slice(0, 2).sort());
@@ -95,11 +96,12 @@ try {
   await membership.press("Space");
   assert.equal(await membership.isChecked(), true);
   await search.fill("");
-  await folderPage.getByRole('button', { name: '提交（1）', exact: true }).click();
+  await folderPage.getByRole('button', { name: '添加（1）', exact: true }).click();
+  await menu.getByRole('menuitem', { name: '英雄養成', exact: true }).click();
   assert.deepEqual(await folderTableNames(), [names[2]]);
   assert.equal(await folderPage.getByRole('checkbox').count(), 0);
   await folderPage.getByRole('button', { name: '添加表', exact: true }).click();
-  assert.equal(await membership.isDisabled(), true);
+  assert.equal(await membership.isDisabled(), false);
   await folderPage.locator(`.wb-folder-row[data-table-name="${names[3]}"] input`).check();
   await folderPage.getByRole('button', { name: '取消', exact: true }).click();
   assert.deepEqual(await folderTableNames(), [names[2]]);
@@ -228,7 +230,17 @@ try {
   await page.locator('[data-wb-rail-id="tableFolders"]').click();
   assert.equal(await folderPage.locator('.wb-folder-header h2').textContent(), '全部表');
   assert.equal(await folderPage.locator('.wb-folder-list [aria-current="true"]').count(), 0);
-  assert.equal(await folderPage.getByRole('checkbox').count(), 0);
+  assert.ok(await folderPage.getByRole('checkbox').count() >= names.length);
+  const defaultPick = folderPage.locator(`.wb-folder-row[data-table-name="${names[3]}"] input`);
+  await defaultPick.check();
+  await folderPage.getByRole('button', { name: '添加（1）', exact: true }).click();
+  await menu.waitFor();
+  await page.screenshot({ path: `${screenshots}/table-folders-choose-target.png`, animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  assert.equal(await defaultPick.isChecked(), true);
+  await folderPage.getByRole('button', { name: '添加（1）', exact: true }).click();
+  await menu.getByRole('menuitem', { name: '收藏', exact: true }).click();
+  assert.deepEqual((await folderTableNames()).sort(), [names[0], names[1], names[3]].sort());
   await folder("英雄養成").click();
   assert.deepEqual(await folderTableNames(), kept);
 

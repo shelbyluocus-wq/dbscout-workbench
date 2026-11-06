@@ -119,9 +119,11 @@ capabilities:
   dropped onto another folder, which adds the tables it holds now) or
   through Add tables: entering from the rail/menu defaults to All tables with no
   folder selected. Selecting a folder shows only its references, including missing
-  tables. Add tables returns to the same All tables view with the target retained;
-  checkboxes select additions and Submit adds them then returns to the folder.
-  Cancel or selecting another folder discards pending picks. No separate picker page.
+  tables. All tables always offers checkboxes; Add opens a destination-folder menu
+  including Favorites, and choosing a folder adds the references then shows it.
+  A folder's Add tables returns to that same view, with its origin retained for
+  Cancel, but the destination is still chosen after Add. Dismissing the menu keeps
+  picks; switching folders or databases clears them. No separate picker page.
   Rename (F2) and
   delete (Delete, confirmed) live in the folder's right-click menu with
   open here / in a new window; a table row's menu opens or removes it. The

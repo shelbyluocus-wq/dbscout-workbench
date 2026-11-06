@@ -29,7 +29,7 @@ function dataTransfer() {
 test("all tables is the default and folder views only contain their own references", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
   assert.doesNotMatch(source, /wb-folder-picker|folders\.value\[0\]/);
-  assert.match(source, /v-if="addingFolder && !currentFolder"/);
+  assert.match(source, /v-if="!currentFolder"\s+class="wb-folder-check"/);
   const expression = source.match(/const folderRows = computed\(\(\) => ([\s\S]*?)\n\}\)\)\);/)[1] + "\n}))";
   const currentFolder = ref({ tableNames: ["hero", "removed"] });
   const tableByName = ref(new Map([["hero", {}], ["goods", {}]]));
@@ -46,10 +46,11 @@ test("all tables is the default and folder views only contain their own referenc
   assert.deepEqual(selectRows(currentFolder, ref([]), ref([{ name: "goods" }])), []);
 });
 
-test("adding uses the all-tables view and submits only to its retained target folder", () => {
+test("adding submits only to the chosen folder in the current database", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
-  const body = source.match(/function submitPicks\(\) \{([\s\S]*?)\n\}/)[1];
-  const addingFolder = ref({ id: "first", tableNames: ["hero"] });
+  const body = source.match(/function submitPicks\(folderId\) \{([\s\S]*?)\n\}/)[1];
+  const folders = ref([{ id: "first", tableNames: ["hero"] }, { id: "second", tableNames: [] }]);
+  const currentFolder = ref(null);
   const scope = ref({ connectionId: "demo", database: "game" });
   const tables = ref([{ name: "hero" }, { name: "goods" }]);
   const pickSelection = ref(["goods", "stale"]);
@@ -57,14 +58,31 @@ test("adding uses the all-tables view and submits only to its retained target fo
   const calls = [];
   const store = { addTables: (...args) => calls.push(args) };
   const returned = [];
-  const submit = new Function("addingFolder", "pickSelection", "tables", "pickSet", "store", "scope", "reportAdded", "selectFolder", body);
-  submit(addingFolder, pickSelection, tables, pickSet, store, scope, () => {}, (folder) => returned.push(folder.id));
-  assert.deepEqual(calls, [["first", ["goods"], scope.value]]);
-  assert.deepEqual(returned, ["first"]);
-  addingFolder.value = null;
-  submit(addingFolder, pickSelection, tables, pickSet, store, scope, () => {}, () => {});
+  const submit = new Function("folderId", "folders", "currentFolder", "pickSelection", "tables", "pickSet", "store", "scope", "reportAdded", "selectFolder", body);
+  submit("second", folders, currentFolder, pickSelection, tables, pickSet, store, scope, () => {}, (folder) => returned.push(folder.id));
+  assert.deepEqual(calls, [["second", ["goods"], scope.value]]);
+  assert.deepEqual(returned, ["second"]);
+  submit("other-database-folder", folders, currentFolder, pickSelection, tables, pickSet, store, scope, () => {}, () => {});
+  currentFolder.value = folders.value[0];
+  submit("first", folders, currentFolder, pickSelection, tables, pickSet, store, scope, () => {}, () => {});
   assert.equal(calls.length, 1);
   assert.match(source, /function startAdding\(\) \{[\s\S]*?selectFolder\(null\);\s*addingFolderId\.value = folder\.id;/);
+});
+
+test("default all-tables view supports choosing tables before a destination exists", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const body = source.match(/function togglePick\(row\) \{([\s\S]*?)\n\}/)[1];
+  const currentFolder = ref(null);
+  const picks = ref([]);
+  const pickSet = computed(() => new Set(picks.value));
+  const toggle = new Function("row", "currentFolder", "pickSelection", "pickSet", body);
+  toggle({ name: "hero", present: true }, currentFolder, picks, pickSet);
+  assert.deepEqual(picks.value, ["hero"]);
+  toggle({ name: "hero" }, currentFolder, picks, pickSet);
+  assert.deepEqual(picks.value, []);
+  currentFolder.value = { id: "folder" };
+  toggle({ name: "hero" }, currentFolder, picks, pickSet);
+  assert.deepEqual(picks.value, []);
 });
 
 test("new folder button spans the sidebar row and centers its icon", () => {

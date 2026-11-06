@@ -24582,6 +24582,18 @@ button.wb-table-mention:active {
   list-style: none;
 }
 
+.wb-folder-target-menu {
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+}
+
+.wb-folder-target-heading {
+  padding: 6px 10px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  list-style: none;
+}
+
 .wb-folder-menu button.is-danger:hover,
 .wb-folder-menu button.is-danger:focus-visible {
   color: var(--wb-danger);
