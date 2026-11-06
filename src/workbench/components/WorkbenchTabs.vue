@@ -345,7 +345,18 @@ function dismissOverflow(event) {
 }
 
 let resizeObserver;
-watch(() => props.activeTabId, () => closeOverflow());
+watch(() => props.activeTabId, async (tabId, previousTabId) => {
+  const focused = document.activeElement;
+  const focusedTab = focused?.closest?.(".wb-tab");
+  const shouldMoveFocus = tabListRef.value?.contains(focusedTab)
+    && focusedTab?.dataset.tabId === previousTabId;
+  closeOverflow();
+  if (!shouldMoveFocus) return;
+  await nextTick();
+  if (props.activeTabId !== tabId) return;
+  if (document.activeElement !== focused && document.activeElement !== document.body) return;
+  tabListRef.value?.querySelector(".wb-tab.active")?.focus({ preventScroll: true });
+});
 watch(() => overflowTabs.value.length, (count) => { if (!count) closeOverflow(); });
 onMounted(() => {
   resizeObserver = new ResizeObserver(([entry]) => {
@@ -380,6 +391,7 @@ onBeforeUnmount(() => {
         class="wb-tab"
         :class="tabClass(tab)"
         :data-kind="tabKind(tab)"
+        :data-tab-id="tab.id"
         role="button"
         :tabindex="tab.opening ? -1 : 0"
         :aria-disabled="tab.opening ? 'true' : 'false'"
