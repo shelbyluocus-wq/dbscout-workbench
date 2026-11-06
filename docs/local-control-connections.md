@@ -1,5 +1,61 @@
 # Local control: connection discovery
 
+## Creating an empty table
+
+The database home context menu offers **Create table** on blank space and existing
+rows, for writable MySQL connections only. It opens the existing design editor
+with a name field and an initial integer `ID` primary key (not auto-increment).
+Users can change the columns, ordered composite primary key, defaults and comments,
+review the SQL, then confirm creation. Drafts survive tab changes and workspace
+restore, but preview authority does not. Closing an edited draft asks before
+discarding it. The completed draft becomes a normal design tab.
+
+External MCP uses the same backend:
+
+1. `preview_create_table`: explicit `connectionId`, `database`, `table`, and `draft`.
+   New columns require `originalName: ""`. Returns SQL, warnings and `previewSignature`
+   without writing data. Names are ASCII identifiers, at most 64 characters.
+2. Show the target, fields and warnings to the user and obtain authorization.
+3. `create_table`: send exactly the same scope and draft plus `previewSignature`
+   and `confirmed: true`. This requires the existing **修改表结构** MCP permission.
+4. A `table-created` desktop event refreshes the currently selected database home;
+   it does not navigate away from another database. Use `open_table` if navigation
+   is wanted, or `select_database` when the target database is not selected.
+
+Only an empty InnoDB table is created; database charset defaults are inherited.
+Secondary indexes, foreign keys, generated fields and auto-increment are not part
+of this draft format. An existing table or view is rejected both before execution
+and by native `CREATE TABLE` itself (no `IF NOT EXISTS`, replacement or drop).
+The preview digest binds the scope and definition; it is not a user-approval token.
+The calling AI must obtain authorization rather than infer it from the digest.
+
+Real DDL requires a pending audit entry before execution. DDL and the local audit
+store cannot be committed atomically. An execution/network failure retains the
+pending entry and asks the user to verify the table, rather than claiming rollback.
+If creation succeeds but audit completion or schema readback fails, the result
+truthfully reports `applied: true` with warnings. There is no automatic backup,
+transaction undo, compensating drop, or silent retry. Demo/browser fixtures are
+simulated and do not prove successful creation against a live MySQL server.
+
+Regression commands:
+
+```sh
+node --test src/workbench/createTable.test.js src/workbench/useTableDesign.test.js
+node --test sidecar/mcp-server.test.mjs
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib table_create
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib control_
+node scripts/test-create-table-browser.mjs
+```
+
+The browser test requires a running frontend at port 1431, or
+`DBSCOUT_CREATE_TABLE_TEST_URL`, and writes screenshots under `/tmp/blackcat-create-table`
+unless `DBSCOUT_CREATE_TABLE_SCREENSHOTS` is set. Rebuilding/installing the desktop
+and reconnecting the external MCP host are separate delivery steps.
+`DBSCOUT_BROWSER_ENGINE=webkit` and `DBSCOUT_CREATE_TABLE_THEME=dark` exercise the
+WebKit/dark variant. The test separately reports WebKit's existing ResizeObserver
+delivery warnings (also reproducible on the unchanged home while resizing);
+other page errors still fail the test.
+
 ## External MCP navigation
 
 Start with `get_mcp_capabilities` for the sidecar tool catalog, parameter schemas,

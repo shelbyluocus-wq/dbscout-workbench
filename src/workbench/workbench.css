@@ -16537,6 +16537,12 @@ label:has(input[type="checkbox"]:disabled) {
   resize: vertical;
 }
 
+.wb-create-table-name input {
+  min-width: 0;
+  max-width: 420px;
+  padding: 6px 8px;
+}
+
 .wb-design-grid-wrap {
   flex: 0 1 auto;
   min-height: 0;

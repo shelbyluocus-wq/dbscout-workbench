@@ -59,6 +59,7 @@ const emit = defineEmits([
   "row-contextmenu",
   "detail-contextmenu",
   "open-design",
+  "create-table",
   "design-applied",
   "export",
   "import",
@@ -238,6 +239,7 @@ onBeforeUnmount(finishResize);
         @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
         @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
+        @create-table="(...args) => emit('create-table', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
@@ -328,6 +330,7 @@ onBeforeUnmount(finishResize);
         @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
         @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
         @open-design="(...args) => emit('open-design', ...args)"
+        @create-table="(...args) => emit('create-table', ...args)"
         @design-applied="emit('design-applied', $event)"
         @export="emit('export', $event)"
         @import="emit('import', $event)"
@@ -408,6 +411,7 @@ onBeforeUnmount(finishResize);
     @row-contextmenu="(...args) => emit('row-contextmenu', ...args)"
     @detail-contextmenu="(...args) => emit('detail-contextmenu', ...args)"
     @open-design="(...args) => emit('open-design', ...args)"
+    @create-table="(...args) => emit('create-table', ...args)"
     @design-applied="emit('design-applied', $event)"
     @export="emit('export', $event)"
     @import="emit('import', $event)"

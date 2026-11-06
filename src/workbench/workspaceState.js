@@ -3,6 +3,7 @@ import { matchTableSearch } from "./utils/tableSearch.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import { normalizeRelationFilter, normalizeRelationOrigin, relationFilterKey } from "./utils/relationFilter.js";
 import { GRID_FIELD_COMMENT_HEIGHT, GRID_ROW_HEIGHT } from "./constants.js";
+import { initialCreateTableDraft } from "./utils/createTable.js";
 import {
   appendTabRows,
   ensureTabRowStore,
@@ -585,6 +586,19 @@ export function openTableTab(
   tab.relationOrigin = normalizeRelationOrigin(relationOrigin);
   state.tabs.push(tab);
   addTabToPane(state, pane.id, tab.id, { activate });
+  return tab;
+}
+
+export function openCreateTableTab(state, { connectionId, database, draft = null } = {}, { activate = true, paneId = "" } = {}) {
+  if (!state || !connectionId || !database) return null;
+  const id = `tab-${state.nextTabSeq++}`;
+  const tab = createDesignTab({ id, connectionId, database, tableName: `__new_table_${id}` });
+  tab.createMode = true;
+  tab.design = initialCreateTableDraft();
+  tab.draft = draft ? JSON.parse(JSON.stringify(draft)) : initialCreateTableDraft();
+  tab.dirty = Boolean(draft);
+  state.tabs.push(tab);
+  addTabToPane(state, ensurePane(state, paneId).id, id, { activate });
   return tab;
 }
 

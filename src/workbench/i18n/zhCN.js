@@ -3,6 +3,18 @@ import { releaseFlowZhCN } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
   "m_a49b9e3cc423": "展开全部连接",
+  "createTable.title": "创建表",
+  "createTable.name": "表名",
+  "createTable.namePlaceholder": "例如 rewardprop",
+  "createTable.invalidName": "表名须以字母或下划线开头，仅含字母、数字、下划线，最多 64 字符",
+  "createTable.review": "预览并创建",
+  "createTable.confirm": "确认创建空表",
+  "createTable.created": "空表已创建",
+  "createTable.refreshFailed": "表已创建，但列表刷新失败，请手动刷新：{message}",
+  "createTable.discardTitle": "放弃建表草稿？",
+  "createTable.discardMessage": "表尚未创建。关闭后将丢弃这个草稿。",
+  "createTable.discard": "放弃草稿",
+  "createTable.keep": "继续编辑",
   "tabs.overflow": "更多标签（{count}）",
   "m_809ec93960dd": "折叠全部连接",
   "m_695704a261cb": "展开全部",

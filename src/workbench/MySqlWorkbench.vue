@@ -29,6 +29,7 @@ import {
   openTableFoldersTab,
   openSqlQueryTab,
   openTableDesignTab,
+  openCreateTableTab,
   openTableTab,
   renameTableTab,
 } from "./workspaceState.js";
@@ -875,6 +876,17 @@ async function resumeSearchAfterTableRefresh(tab) {
 
 let unlistenValueSearchProgress = null;
 let unlistenSqlExecution = null;
+let unlistenTableCreated = null;
+
+function handleTableCreatedEvent(event) {
+  const source = event?.payload || event || {};
+  if (source.connectionId === selectedConnectionId.value && source.database === selectedDatabase.value) {
+    void conn.loadTables(source).catch((error) => {
+      setStatus(t("createTable.refreshFailed", { message: String(error?.message || error) }), { tone: "warning" });
+    });
+  }
+  setStatus(source.warnings?.length ? source.warnings.join("；") : t("createTable.created"), { tone: source.warnings?.length ? "warning" : "success" });
+}
 
 function handleSqlExecutionEvent(event) {
   const payload = event?.payload || event || {};
@@ -885,6 +897,10 @@ function handleSqlExecutionEvent(event) {
 }
 
 async function ensureSqlExecutionListener() {
+  if (!unlistenTableCreated) {
+    const unlisten = await listenWorkbenchEvent("table-created", handleTableCreatedEvent);
+    unlistenTableCreated = typeof unlisten === "function" ? unlisten : null;
+  }
   if (unlistenSqlExecution) return;
   const unlisten = await listenWorkbenchEvent("sql-execution-event", handleSqlExecutionEvent);
   unlistenSqlExecution = typeof unlisten === "function" ? unlisten : null;
@@ -1532,7 +1548,7 @@ async function copyTextToClipboard(text) {
 }
 
 async function copyTabName({ tab, x = 0, y = 0 } = {}) {
-  const tableName = String(tab?.tableName || "").trim();
+  const tableName = String((tab?.createMode ? tab.draft?.tableName : tab?.tableName) || "").trim();
   if (!tableName) return;
   try {
     const copied = await copyTextToClipboard(tableName);
@@ -1861,6 +1877,13 @@ async function guardTabDepartures(tabs) {
       .map((tab) => [tab.id, tab]),
   ).values()];
   for (const tab of candidates) {
+    if (tab.createMode) {
+      if (tab.saving) return false;
+      if (tab.dirty && !(await confirmDialogConfirm({
+        title: t("createTable.discardTitle"), message: t("createTable.discardMessage"),
+        confirmText: t("createTable.discard"), cancelText: t("createTable.keep"), danger: true,
+      }))) return false;
+    }
     if (tab.kind === "sql") sqlDocumentStore.upsertFromTab(tab);
     if (!(await guardSqlTabDeparture(tab))) return false;
   }
@@ -2061,6 +2084,10 @@ async function splitPane(paneId, direction) {
   const newPane = splitPaneInLayout(workspace, paneId, direction);
   if (!newPane) return;
   focusPane(newPane.id);
+  if (sourceTab?.createMode) {
+    openDatabaseHomeTab(workspace, { connectionId: sourceTab.connectionId, database: sourceTab.database }, { paneId: newPane.id, activate: true });
+    return;
+  }
   const source = sourceFromTab(sourceTab);
   if (source?.kind === "home") {
     openDatabaseHomeTab(workspace, source, { paneId: newPane.id, activate: true });
@@ -3762,6 +3789,11 @@ async function refreshHome(tab = null) {
   }
 }
 
+function openCreateTable(source, paneId = workspace.focusedPaneId) {
+  if (!source?.connectionId || !source?.database || isReadOnlySource(source) || !sourceHasCapability("tableDesign", source)) return null;
+  return openCreateTableTab(workspace, source, { paneId });
+}
+
 function openTableDesign(tableLike = null, paneId = workspace.focusedPaneId) {
   // A home tab means "open the design for every selected table" (the home
   // page supports Ctrl/Shift multi-selection); resolve it to a target list.
@@ -3852,6 +3884,7 @@ async function handleTableDesignApplied(event = {}, options = {}) {
       setStatus(t("relations.error", { message: String(error?.message || error) }), { tone: "warning" });
     });
   }
+  if (event.created) return true;
   const appliedSchema = event.schema || event.result?.schema || event.result || null;
   const affectedTabs = findTableDataTabs(workspace, source);
   try {
@@ -4976,6 +5009,11 @@ watch(
   },
 );
 
+watch(
+  () => workspace.tabs.map((tab) => tab?.createMode ? tab.draft : null),
+  () => workspacePersistence.schedule(),
+);
+
 function flushWorkspacePersistenceWhenHidden() {
   if (document.visibilityState === "hidden") flushWorkspacePersistence();
 }
@@ -5060,6 +5098,14 @@ async function restoreSavedTabs() {
         restoredHome.selectedTableNames = Array.isArray(savedTab.selectedTableNames) ? [...savedTab.selectedTableNames] : [];
         restoredHome.focusedTableName = savedTab.focusedTableName || restoredHome.selectedTableNames.at(-1) || "";
         savedToRestoredTabId.set(savedTab.id, restoredHome.id);
+      }
+      continue;
+    }
+    if (savedTab.kind === "design" && savedTab.createMode) {
+      const source = { connectionId: currentConnectionId, database: currentDatabase };
+      if (!isReadOnlySource(source) && sourceHasCapability("tableDesign", source)) {
+        const restored = openCreateTableTab(workspace, { ...source, draft: savedTab.draft }, { activate: false, paneId });
+        if (restored) savedToRestoredTabId.set(savedTab.id, restored.id);
       }
       continue;
     }
@@ -5386,6 +5432,8 @@ onBeforeUnmount(() => {
   unlistenValueSearchProgress = null;
   unlistenSqlExecution?.();
   unlistenSqlExecution = null;
+  unlistenTableCreated?.();
+  unlistenTableCreated = null;
 });
 </script>
 
@@ -5641,6 +5689,7 @@ onBeforeUnmount(() => {
           @row-contextmenu="openActiveRowContextMenu"
           @detail-contextmenu="openDetailContextMenu"
           @open-design="openTableDesign"
+          @create-table="openCreateTable"
           @design-applied="handleTableDesignApplied"
           @sql-schema-changed="() => conn.loadTables({ connectionId: selectedConnectionId, database: selectedDatabase })"
           @export="exportTable"

@@ -611,7 +611,7 @@ fn effective_draft(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Col
     out
 }
 
-fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<(), String> {
+pub(crate) fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> Result<(), String> {
     validate_identifier(&current.table_name)?;
     if draft.columns.is_empty() {
         return Err("table must keep at least one column".into());
@@ -737,7 +737,7 @@ fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesignDraft) -> 
 
 /// A blank `ColumnDesignMeta` used as the "current" state for newly-added
 /// columns so the shared definition helpers have something to diff against.
-fn empty_column_meta() -> ColumnDesignMeta {
+pub(crate) fn empty_column_meta() -> ColumnDesignMeta {
     ColumnDesignMeta {
         ordinal: 0,
         column_name: String::new(),
@@ -902,7 +902,7 @@ fn resolved_primary_key_ordinals(draft: &TableDesignDraft) -> HashMap<usize, u32
     explicit
 }
 
-fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
+pub(crate) fn primary_key_final_names_from_draft(draft: &TableDesignDraft) -> Vec<String> {
     let ordinals = resolved_primary_key_ordinals(draft);
     let mut primary_keys = draft
         .columns

@@ -40,6 +40,7 @@ mod sync_guard;
 mod sync_verification;
 mod system_fonts;
 mod table_copy;
+mod table_create;
 pub mod table_count;
 mod table_design_validation;
 mod table_replace;
@@ -257,6 +258,8 @@ pub fn run() {
             commands::get_table_schemas,
             commands::get_table_schema,
             commands::get_table_design,
+            table_create::preview_create_table,
+            table_create::create_table,
             commands::preview_table_design_change,
             commands::cancel_table_design_validation,
             commands::apply_table_design_change,

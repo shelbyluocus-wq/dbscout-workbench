@@ -6,6 +6,7 @@ import {
   validateTableDesignDraft,
 } from "../utils/tableDesign.js";
 import { columnsForPaste } from "../utils/tableDesignClipboard.js";
+import { initialCreateTableDraft, validateCreateTableDraft, createTablePayload } from "../utils/createTable.js";
 
 function sourceIdentity(source = {}) {
   const raw = unref(source) || {};
@@ -164,8 +165,11 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   const cleanSignature = ref(draftSignature(draft));
   let loadRequestId = 0;
   let applyRequestId = 0;
+  let applyingTarget = null;
   const instanceToken = {};
   let activePreviewOperation = null;
+  const creating = computed(() => Boolean(sourceObject(source)?.createMode));
+  const validateDraft = () => creating.value ? validateCreateTableDraft(draft) : validateTableDesignDraft(draft);
 
   const dirty = computed(() => draftSignature(draft) !== cleanSignature.value);
 
@@ -192,26 +196,28 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   function hydrateFromSource(target = currentSourceObject()) {
     if (!target) return false;
     invalidateSourcePreview(target, { persist: false });
-    const savedOriginal = storedDesignDraft(target.design || target.original);
+    const savedOriginal = creating.value ? storedDraft(target.design || target.original) : storedDesignDraft(target.design || target.original);
     const savedDraft = storedDraft(target.draft);
     if (!savedOriginal && !savedDraft) {
       target.previewing = false;
       return false;
     }
 
-    const nextOriginal = savedOriginal || savedDraft;
+    const nextOriginal = savedOriginal || (creating.value ? initialCreateTableDraft() : savedDraft);
+    const savedPreview = clonePreview(target.preview);
+    const savedError = String(target.error || "");
+    loading.value = Boolean(target.loading);
+    saving.value = Boolean(target.saving);
+    previewing.value = false;
     original.value = cloneDraft(nextOriginal);
     schema.value = target.schema || null;
     cleanSignature.value = draftSignature(nextOriginal);
     replaceDraft(draft, savedDraft || nextOriginal);
     validationErrors.value = validateTableDesignDraft(draft);
-    preview.value = clonePreview(target.preview);
+    preview.value = savedPreview;
     previewOpen.value = hasPreview(preview.value);
-    loading.value = Boolean(target.loading);
-    previewing.value = false;
     target.previewing = false;
-    saving.value = Boolean(target.saving);
-    error.value = String(target.error || "");
+    error.value = savedError;
     persistState(target);
     return true;
   }
@@ -323,6 +329,16 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     invalidateSourcePreview(target, { persist: false });
     const identity = sourceIdentity(source);
     const requestSourceKey = sourceKey(identity);
+    if (creating.value) {
+      if (hydrateFromSource(target)) return cloneDraft(draft);
+      const initial = initialCreateTableDraft();
+      original.value = cloneDraft(initial);
+      replaceDraft(draft, initial);
+      cleanSignature.value = draftSignature(initial);
+      validationErrors.value = { valid: true, columns: [], messages: [] };
+      persistState(target);
+      return cloneDraft(draft);
+    }
     if (!force && hydrateFromSource(target)) {
       return cloneDraft(draft);
     }
@@ -370,7 +386,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     const identity = sourceIdentity(source);
     const requestSourceKey = sourceKey(identity);
     error.value = "";
-    const validation = validateTableDesignDraft(draft);
+    const validation = validateDraft();
     validationErrors.value = validation;
     if (!validation.valid) {
       clearPreview();
@@ -392,8 +408,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     persistState(target);
     try {
       const result = await invokeWorkbench(
-        "preview_table_design_change",
-        {
+        creating.value ? "preview_create_table" : "preview_table_design_change",
+        creating.value ? { request: createTablePayload(identity, draft) } : {
           ...buildTableDesignPayload(identity, draft),
           validationId: operation.validationId,
         },
@@ -447,10 +463,12 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   }
 
   async function applyDesign() {
+    if (saving.value) return null;
     const target = currentSourceObject();
     const identity = sourceIdentity(source);
     const requestSourceKey = sourceKey(identity);
     const requestId = ++applyRequestId;
+    const wasCreating = creating.value;
     const signatures = buildApplySignatures(preview.value);
     const conflicts = previewConflicts(preview.value);
     if (conflicts.length) {
@@ -467,6 +485,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     }
 
     saving.value = true;
+    applyingTarget = target;
     error.value = "";
     markSourceSaving(target);
     persistState(target);
@@ -475,23 +494,47 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
         ...buildTableDesignPayload(identity, draft),
         ...signatures,
       };
-      const result = await invokeWorkbench("apply_table_design_change", payload);
-      if (!isCurrentApply(requestId, target, requestSourceKey)) return null;
+      const result = await invokeWorkbench(wasCreating ? "create_table" : "apply_table_design_change", wasCreating ? {
+        request: { ...createTablePayload(identity, draft), previewSignature: signatures.previewSignature, confirmed: true },
+      } : payload);
+      const current = isCurrentApply(requestId, target, requestSourceKey);
+      if (!current && !wasCreating) return null;
       const returnedSchema = result?.schema || result;
-      schema.value = returnedSchema;
       const normalized = normalizeTableDesign(returnedSchema);
+      if (wasCreating && target) {
+        target.design = cloneDraft(normalized);
+        target.draft = cloneDraft(normalized);
+        target.schema = returnedSchema;
+        target.dirty = false;
+        target.saving = false;
+        target.preview = emptyPreview();
+        target.error = "";
+      }
+      if (!current) {
+        if (wasCreating && target) finishCreatedSource(target, normalized.tableName);
+        onApplied?.({ result, schema: returnedSchema, source: { ...identity, tableName: normalized.tableName }, created: wasCreating, tabId: target?.id });
+        return result;
+      }
+      schema.value = returnedSchema;
       original.value = cloneDraft(normalized);
       replaceDraft(draft, normalized);
       cleanSignature.value = draftSignature(draft);
       validationErrors.value = validateTableDesignDraft(draft);
       clearPreview({ persist: false });
-      onApplied?.({ result, schema: returnedSchema, source: identity });
+      if (wasCreating && target) finishCreatedSource(target, normalized.tableName);
+      onApplied?.({ result, schema: returnedSchema, source: { ...identity, tableName: normalized.tableName }, created: wasCreating, tabId: target?.id });
       return result;
     } catch (saveError) {
+      if (wasCreating && target) {
+        target.error = String(saveError?.message || saveError);
+        target.preview = emptyPreview();
+        target.saving = false;
+      }
       if (!isCurrentApply(requestId, target, requestSourceKey)) return null;
       error.value = String(saveError?.message || saveError);
       throw saveError;
     } finally {
+      applyingTarget = null;
       finishSourceSaving(target, requestSourceKey);
       if (requestId === applyRequestId) {
         saving.value = false;
@@ -500,7 +543,22 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     }
   }
 
+  function finishCreatedSource(target, tableName) {
+    target.createMode = false;
+    target.tableName = tableName;
+    target.tableKey = sourceKey(sourceIdentity(target));
+    target.tabKey = ["design", target.tableKey].join("\u001f");
+  }
+
   hydrateFromSource();
+
+  watch(
+    () => currentSourceObject()?.saving,
+    (pending) => {
+      const target = currentSourceObject();
+      if (!pending && saving.value && target && applyingTarget !== target) hydrateFromSource(target);
+    },
+  );
 
   watch(
     () => draftSignature(draft),
@@ -620,6 +678,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   }
 
   return {
+    creating,
     loading,
     previewing,
     saving,

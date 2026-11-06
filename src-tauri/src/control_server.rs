@@ -270,7 +270,7 @@ fn required_permission(request: &ControlRequest) -> Option<McpPermission> {
                 None
             }
             "run_write_query" => Some(McpPermission::WriteData),
-            "apply_table_design_change" => Some(McpPermission::Schema),
+            "apply_table_design_change" | "create_table" => Some(McpPermission::Schema),
             "copy_tables" | "rename_table" | "drop_tables" => Some(McpPermission::ManageTables),
             _ => None,
         },
@@ -1644,6 +1644,7 @@ mod tests {
             required_permission(&db_tool("apply_table_design_change")),
             Some(McpPermission::Schema)
         );
+        assert_eq!(required_permission(&db_tool("create_table")), Some(McpPermission::Schema));
         for func in ["copy_tables", "rename_table", "drop_tables"] {
             assert_eq!(
                 required_permission(&db_tool(func)),

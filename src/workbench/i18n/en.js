@@ -2,6 +2,18 @@
 import { releaseFlowEn } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
+  "createTable.title": "Create table",
+  "createTable.name": "Name",
+  "createTable.namePlaceholder": "e.g. rewardprop",
+  "createTable.invalidName": "Use up to 64 letters, digits or underscores, starting with a letter or underscore",
+  "createTable.review": "Preview and create",
+  "createTable.confirm": "Create empty table",
+  "createTable.created": "Empty table created",
+  "createTable.refreshFailed": "Table created, but the list could not refresh. Refresh manually: {message}",
+  "createTable.discardTitle": "Discard table draft?",
+  "createTable.discardMessage": "The table has not been created. Closing discards this draft.",
+  "createTable.discard": "Discard draft",
+  "createTable.keep": "Keep editing",
   "m_a49b9e3cc423": "Expand all connections",
   "tabs.overflow": "More tabs ({count})",
   "m_809ec93960dd": "Collapse all connections",

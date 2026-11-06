@@ -92,6 +92,7 @@ const emit = defineEmits([
   "row-contextmenu",
   "detail-contextmenu",
   "open-design",
+  "create-table",
   "design-applied",
   "export",
   "import",
@@ -1980,6 +1981,7 @@ onMounted(() => emitPaneState());
       :can-close-pane="rootPaneCount > 1"
       @open-table="emit('open-home-table', $event, pane.id)"
       @open-design="emit('open-design', $event, pane.id)"
+      @create-table="emit('create-table', $event, pane.id)"
       @copy-tables="emit('copy-home-tables', $event)"
       @paste-tables="emit('paste-home-tables', $event)"
       @rename-table="emit('rename-home-table', $event)"
@@ -2012,6 +2014,7 @@ onMounted(() => emitPaneState());
         </button>
       </div>
       <TableDesignEditor
+        :key="activeDesignTab.id"
         :source="activeDesignTab"
         :invoke-workbench="invokeWorkbench"
         :is-focused="isFocused"

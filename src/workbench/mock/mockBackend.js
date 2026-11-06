@@ -17,6 +17,8 @@ import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText, replaceSearchText } from "../utils/searchMatch.js";
 import { columnConstraint, validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { validateTableDesignConversion } from "../utils/tableDesignCompatibility.js";
+import { normalizeTableDesign } from "../utils/tableDesign.js";
+import { validateCreateTableDraft } from "../utils/createTable.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
 import { compareSortValues } from "../utils/naturalSort.js";
@@ -1677,6 +1679,40 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return (payload.tableNames || payload.table_names || []).map((tableName) =>
       designFor(resolvedTable(connectionId, database, tableName))
     );
+  }
+  if (command === "preview_create_table" || command === "create_table") {
+    const request = payload.request || {};
+    const { connectionId, database, tableName, draft } = request;
+    if (!connectionId || !database) throw new Error("必须明确指定连接和数据库");
+    if (!mockConnections.some((connection) => connection.id === connectionId)) throw new Error("连接不存在");
+    rejectMockMongo(connectionId, "创建表");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能创建表");
+    const names = tableSchemaFor(connectionId, database).map((table) => table.table_name);
+    if (names.some((name) => name.toLowerCase() === String(tableName).toLowerCase())) throw new Error("同名表已存在，不能覆盖；请更换表名");
+    if (!draft?.columns?.length || draft.columns.some((column) => column.originalName)) throw new Error("新字段 originalName 必须为空");
+    const table = tableFromDraft({ table_name: tableName, columns: [] }, draft);
+    const validation = validateCreateTableDraft(normalizeTableDesign(table));
+    if (!validation.valid) throw new Error(validation.messages.join("；"));
+    const source = { connectionId, database, tableName };
+    const signature = previewSignatureFor(source, "create-table-v1", draft);
+    const definitions = table.columns.map((column) => `${sqlIdent(column.column_name)} ${columnSql(column)}`);
+    const keys = table.columns.filter((column) => column.is_primary_key).sort((left, right) => (primaryKeyOrdinal(left) || 0) - (primaryKeyOrdinal(right) || 0));
+    if (keys.length) definitions.push(`PRIMARY KEY (${keys.map((column) => sqlIdent(column.column_name)).join(", ")})`);
+    const preview = {
+      signature, previewSignature: signature, sourceSignature: signature, schemaSignature: signature,
+      statements: [`CREATE TABLE ${sqlIdent(database)}.${sqlIdent(tableName)} (\n  ${definitions.join(",\n  ")}\n) ENGINE=InnoDB COMMENT=${sqlString(table.table_comment)}`],
+      warnings: ["仅创建空表，不覆盖已有表；DDL 不支持事务撤销"], conflicts: [], hasChanges: true,
+      humanDescriptions: [`创建空表 ${database}.${tableName}，共 ${table.columns.length} 个字段`],
+    };
+    if (command === "preview_create_table") return preview;
+    if (request.confirmed !== true || request.previewSignature !== signature) throw new Error("必须重新预览并确认创建表");
+    const applied = appliedDesignBaseline(table);
+    schemaOverrides.set(sourceKey(connectionId, database, tableName), applied);
+    rowCache.set(sourceKey(connectionId, database, tableName), []);
+    mockDatabaseSchemas[`${connectionId}/${database}`] = [...names, tableName];
+    recordMockDdlAudit({ ...source, preview });
+    emitMockEvent("table-created", { ...source, warnings: [] });
+    return { applied: true, schema: designFor(applied), statements: preview.statements, warnings: [] };
   }
   if (command === "get_table_design") {
     const { connectionId, database } = resolveContext(payload);

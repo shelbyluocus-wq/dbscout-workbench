@@ -3,6 +3,18 @@
 import { releaseFlowZhTW } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
+  "createTable.title": "建立資料表",
+  "createTable.name": "表名",
+  "createTable.namePlaceholder": "例如 rewardprop",
+  "createTable.invalidName": "表名須以字母或底線開頭，僅含字母、數字、底線，最多 64 字元",
+  "createTable.review": "預覽並建立",
+  "createTable.confirm": "確認建立空表",
+  "createTable.created": "空表已建立",
+  "createTable.refreshFailed": "資料表已建立，但清單重新整理失敗，請手動重新整理：{message}",
+  "createTable.discardTitle": "放棄建表草稿？",
+  "createTable.discardMessage": "資料表尚未建立。關閉後將丟棄這個草稿。",
+  "createTable.discard": "放棄草稿",
+  "createTable.keep": "繼續編輯",
   "m_a49b9e3cc423": "展開全部連線",
   "tabs.overflow": "更多分頁（{count}）",
   "m_809ec93960dd": "收合全部連線",

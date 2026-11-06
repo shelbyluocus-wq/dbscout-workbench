@@ -7,6 +7,7 @@ import {
   FolderOpen,
   MessageSquareText,
   Pencil,
+  Plus,
   RefreshCw,
   Send,
   TableProperties,
@@ -56,6 +57,7 @@ const props = defineProps({
 const emit = defineEmits([
   "open-table",
   "open-design",
+  "create-table",
   "copy-tables",
   "paste-tables",
   "rename-table",
@@ -1024,6 +1026,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         @contextmenu.prevent.stop
         @keydown="handleContextMenuKeydown"
       >
+        <button type="button" role="menuitem" :disabled="busy || !canTableDesign || !tab.database" @click="emit('create-table', tableSourceContext); closeMenu()"><Plus :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('createTable.title') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>

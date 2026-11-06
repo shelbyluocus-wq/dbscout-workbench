@@ -99,6 +99,7 @@ register(
       locate: "focus_row/focus_cell：传完整 rowIdentity；未加载时在独立主键精确筛选标签定位，保留原标签筛选。",
       read: "read_table_page：使用 nextOffset 分页；搜索结构用 search_schema，不要空关键字。",
       batch: "run_ui_actions：fast 默认无等待；demo 每步停留；compact 默认精简，full 排错。",
+      createTable: "preview_create_table → 向用户展示目标、字段及警告 → create_table（相同草稿、previewSignature、confirmed=true）→ select_database / open_table；仅 MySQL 空表，不覆盖同名表，受修改表结构权限控制。",
       relations: ["get_relation_overview", "get_record_relations", "read_reference_rows", "start_reference_scan", "get_reference_scan", "search_relation_code", "read_relation_code", "test_relation_rule_page", "preview_relation_rule", "apply_relation_rule"],
       relationSafety: "只支持 MySQL。查询已有关系无需新权限；项目代码、后台扫描、修改本地规则分别授权，默认关闭。候选命中不是引用证明；区分直接、间接、动态未知和查漏失败。保存规则需用户确认；不修改游戏库，不执行配置函数。用 focus_cell + rowIdentity 打开命中行。",
     },
@@ -207,6 +208,16 @@ const designDraft = z.object({
   })).min(1).describe("完整目标字段列表；省略现有字段表示删除该字段"),
 });
 
+const createDraft = designDraft.extend({
+  tableComment: z.string().max(2048),
+  columns: z.array(designDraft.shape.columns.element.extend({
+    originalName: z.literal("").describe("新字段必须传空字符串"),
+    name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    defaultMode: z.enum(["none", "null", "value", "expression"]),
+    comment: z.string().max(1024),
+  }).strict()).min(1).max(256),
+}).strict();
+
 function writeTool(name, description, inputSchema) {
   register(name, {
     title: name,
@@ -225,6 +236,16 @@ dbTool(
   "get_table_design",
   "读取完整表设计，含字段类型、长度、默认值、主键、注释及结构签名。修改结构前先读取。",
   z.object({ ...explicitContextFields, table: z.string().min(1) })
+);
+dbTool(
+  "preview_create_table",
+  "预览在指定 MySQL 数据库从零创建空表：校验字段、主键、类型和默认值，检查同名表，返回 SQL 与 previewSignature；不写数据库。每个字段 originalName 必须为空；不支持自增、外键和普通索引。先向用户展示目标库、表名、字段和警告，再确认创建。",
+  z.object({ ...explicitContextFields, table: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), draft: createDraft })
+);
+writeTool(
+  "create_table",
+  "创建经过预览并经用户明确授权的 MySQL 空表；需修改表结构权限。目标、草稿和 previewSignature 必须与预览一致。任何同名表或视图都拒绝，绝不覆盖；不支持任意 SQL，不自动回滚或删除。创建后使用 select_database 刷新首页，open_table 打开新表。",
+  z.object({ ...explicitContextFields, table: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), draft: createDraft, previewSignature: z.string().min(1), confirmed: confirmedField })
 );
 dbTool(
   "preview_table_design_change",

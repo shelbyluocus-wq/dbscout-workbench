@@ -117,6 +117,8 @@ export function buildWorkspaceSnapshot({
     database: tab.database || "",
     tableName: tab.tableName || "",
     tableComment: tab.tableComment || "",
+    createMode: tab.kind === "design" && tab.createMode ? true : undefined,
+    draft: tab.kind === "design" && tab.createMode && tab.draft ? JSON.parse(JSON.stringify(tab.draft)) : undefined,
     filter: tab.filter || "",
     filterMode: normalizeTableFilterMode(tab.filterMode),
     ...savedRelation(tab),
@@ -235,6 +237,10 @@ export function parseWorkspaceSnapshot(parsed) {
               readOnly: Boolean(tab.readOnly || tab.read_only),
             };
             if (kind === "folders") saved.folderId = String(tab.folderId || "");
+            if (kind === "design" && tab.createMode === true) {
+              saved.createMode = true;
+              saved.draft = tab.draft && Array.isArray(tab.draft.columns) ? JSON.parse(JSON.stringify(tab.draft)) : null;
+            }
             if (kind === "sql") Object.assign(saved, {
               title: String(tab.title || ""),
               documentId: String(tab.documentId || ""),

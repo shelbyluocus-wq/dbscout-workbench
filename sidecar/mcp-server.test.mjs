@@ -42,7 +42,7 @@ function assertCuratedTools(tools) {
   assert.ok(names.includes("import_table_xlsx"));
   assert.ok(names.includes("run_read_query"));
   assert.ok(names.includes("read_table_page"));
-  for (const name of ["run_write_query", "apply_table_design_change", "copy_tables", "rename_table", "drop_tables"]) {
+  for (const name of ["run_write_query", "apply_table_design_change", "create_table", "copy_tables", "rename_table", "drop_tables"]) {
     const tool = tools.find((entry) => entry.name === name);
     assert.ok(tool, `${name} must be exposed`);
     assert.equal(tool.annotations.readOnlyHint, false);
@@ -51,7 +51,7 @@ function assertCuratedTools(tools) {
     assert.ok(tool.inputSchema.required.includes(name === "copy_tables" ? "targetDatabase" : "database"));
     assert.ok(tool.inputSchema.required.includes(name === "copy_tables" ? "targetConnectionId" : "connectionId"));
   }
-  for (const name of ["get_table_design", "preview_table_design_change"]) {
+  for (const name of ["get_table_design", "preview_table_design_change", "preview_create_table"]) {
     assert.equal(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint, true);
   }
   for (const name of ["preview_table_design_change", "apply_table_design_change"]) {
@@ -164,6 +164,10 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
     assert.equal(requests.at(-1).action, "scroll_table");
     assert.equal(requests.at(-1).args.screens, 1);
     const calls = [
+      ["create_table", {
+        ...context, table: "new_items", previewSignature: "create-preview",
+        draft: { tableComment: "empty table", columns: [{ originalName: "", name: "id", type: "int", nullable: false, primaryKey: true, defaultMode: "none", comment: "" }] },
+      }],
       ["run_write_query", { ...context, sql: "UPDATE items SET label='new' WHERE id=1" }],
       ["rename_table", { ...context, table: "items", newName: "items_old" }],
       ["drop_tables", { ...context, tables: ["items"] }],
@@ -195,6 +199,20 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
       assert.deepEqual(requests.at(-1).args, { ...args, confirmed: true });
     }
     const designArgs = calls.find(([name]) => name === "apply_table_design_change")[1];
+    const createArgs = calls.find(([name]) => name === "create_table")[1];
+    const countBeforeInvalid = requests.length;
+    for (const args of [
+      { ...createArgs, previewSignature: undefined },
+      { ...createArgs, connectionId: undefined },
+      { ...createArgs, table: "bad;DROP" },
+      { ...createArgs, draft: { ...createArgs.draft, columns: [{ ...createArgs.draft.columns[0], originalName: "id" }] } },
+      { ...createArgs, draft: { ...createArgs.draft, columns: [{ ...createArgs.draft.columns[0], autoIncrement: true }] } },
+    ]) {
+      assert.equal((await client.callTool({ name: "create_table", arguments: { ...args, confirmed: true } })).isError, true);
+    }
+    assert.equal(requests.length, countBeforeInvalid);
+    assert.notEqual((await client.callTool({ name: "preview_create_table", arguments: createArgs })).isError, true);
+    assert.equal(requests.at(-1).func, "preview_create_table");
     for (const unsigned of [true, false]) {
       const args = structuredClone(designArgs);
       args.draft.columns[0].unsigned = unsigned;

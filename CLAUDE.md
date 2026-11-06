@@ -458,6 +458,17 @@ npm run tauri -- dev
 
 ### On-demand AI runtime (agent sidecar)
 
+Database home context menus (blank space and table rows) offer Create table for
+writable MySQL sources. `table_create.rs` shares draft validation with the design
+editor; `preview_create_table` is read-only and `create_table` requires the exact
+preview signature and `confirmed=true`, under the existing MCP schema permission.
+Creation never overwrites a table/view and adds no data; it supports columns and
+ordered primary keys, not secondary indexes or auto-increment. DDL is audited but
+not transactionally undoable. Creation drafts persist without preview authority;
+successful creation turns the draft into a normal design tab. The `table-created`
+event refreshes the current database home without switching the user's database.
+See `docs/local-control-connections.md` and `scripts/test-create-table-browser.mjs`.
+
 The external Blackcat MCP endpoint exposes data mutations through
 `run_write_query` (single INSERT/UPDATE/DELETE/REPLACE), table copy/rename/drop,
 and table design through `get_table_design`, `preview_table_design_change` and

@@ -5,10 +5,13 @@ use crate::commands;
 use crate::perf::PerfContext;
 use crate::types::*;
 
-pub const READ_TOOLS: &[&str] = &["get_table_design", "preview_table_design_change"];
+pub const READ_TOOLS: &[&str] = &[
+    "get_table_design", "preview_table_design_change", "preview_create_table",
+];
 pub const WRITE_TOOLS: &[&str] = &[
     "run_write_query",
     "apply_table_design_change",
+    "create_table",
     "copy_tables",
     "rename_table",
     "drop_tables",
@@ -30,7 +33,7 @@ pub fn validate_request(func: &str, args: &Value) -> Result<(), String> {
         required_string(args, field)?;
     }
     match func {
-        "get_table_design" | "preview_table_design_change" | "apply_table_design_change" | "rename_table" => {
+        "get_table_design" | "preview_table_design_change" | "apply_table_design_change" | "rename_table" | "preview_create_table" | "create_table" => {
             required_string(args, "table")?;
         }
         "run_write_query" => {
@@ -55,6 +58,9 @@ pub fn validate_request(func: &str, args: &Value) -> Result<(), String> {
         for field in ["schemaSignature", "sourceSignature", "previewSignature"] {
             required_string(args, field)?;
         }
+    }
+    if func == "create_table" {
+        required_string(args, "previewSignature")?;
     }
     if func == "copy_tables" {
         match args.get("mode").and_then(Value::as_str) {
@@ -84,6 +90,26 @@ fn serialize(value: impl serde::Serialize) -> Result<Value, String> {
 pub async fn run(app: &AppHandle, func: &str, args: Value) -> Result<Value, String> {
     validate_request(func, &args)?;
     let state = app.state::<AppState>();
+    if matches!(func, "preview_create_table" | "create_table") {
+        let definition = crate::table_create::CreateTableRequest {
+            connection_id: required_string(&args, "connectionId")?,
+            database: required_string(&args, "database")?,
+            table_name: required_string(&args, "table")?,
+            draft: serde_json::from_value(args["draft"].clone())
+                .map_err(|error| format!("无效的建表草稿：{error}"))?,
+        };
+        return if func == "preview_create_table" {
+            serialize(crate::table_create::preview_create_table(definition, state).await?)
+        } else {
+            serialize(crate::table_create::create_table(
+                crate::table_create::ApplyCreateTableRequest {
+                    definition,
+                    preview_signature: required_string(&args, "previewSignature")?,
+                    confirmed: true,
+                }, app.clone(), state,
+            ).await?)
+        };
+    }
     if func == "copy_tables" {
         let request = CopyTablesRequest {
             source_connection_id: required_string(&args, "sourceConnectionId")?,
@@ -175,5 +201,19 @@ mod tests {
         args["tables"] = json!(["items`"]);
         assert!(validate_request("drop_tables", &args).is_err());
         assert!(validate_request("unknown", &args).is_err());
+    }
+
+    #[test]
+    fn create_requires_preview_confirmation_and_explicit_scope() {
+        let mut args = json!({"connectionId":"c","database":"game","table":"items"});
+        assert!(validate_request("preview_create_table", &args).is_ok());
+        assert!(validate_request("create_table", &args).is_err());
+        args["confirmed"] = json!(true);
+        assert!(validate_request("create_table", &args).is_err());
+        args["previewSignature"] = json!("signature");
+        assert!(validate_request("create_table", &args).is_ok());
+        args["database"] = json!("");
+        assert!(validate_request("preview_create_table", &args).is_err());
+        assert!(validate_request("create_table", &args).is_err());
     }
 }

@@ -197,7 +197,7 @@ function tabSourceTitle(tab) {
   if (tabKind(tab) === "folders") return `${t('tableFolders.title')}\n${tabDatabaseLabel(tab)}`;
   if (tabKind(tab) === "sql") return tab.filePath || `${tab.connectionId || ""}/${tab.database || ""}`;
   const display = formatTableTabTitle(tab, databaseLabel(tab.connectionId, tab.database));
-  const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.tableName}`;
+  const source = `${tab.connectionId || ""}/${tab.database || ""}.${tab.createMode ? (tab.draft?.tableName || "") : tab.tableName}`;
   const detail = display && display !== source ? `${display}\n${source}` : source;
   return tab.opening ? t('m_88ce9bfd24f4', { detail }) : detail;
 }
@@ -392,7 +392,7 @@ onBeforeUnmount(() => {
         <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
           <template v-if="hasTabSubtitle(tab)">
             <span class="wb-tab-line wb-tab-line-primary">
-              <span class="wb-tab-name">{{ tab.tableName || tabTitle(tab) }}</span>
+              <span class="wb-tab-name">{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}</span>
               <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
               <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
             </span>
@@ -495,7 +495,7 @@ onBeforeUnmount(() => {
           :title="tabSourceTitle(tab)"
           @click="selectOverflowTab(tab)"
         >
-          <span>{{ tab.tableName || tabTitle(tab) }}{{ tabKind(tab) === 'design' ? ` · ${t('m_56c255e19858')}` : '' }}{{ tab.dirty ? ' •' : '' }}</span>
+          <span>{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}{{ tabKind(tab) === 'design' ? ` · ${t('m_56c255e19858')}` : '' }}{{ tab.dirty ? ' •' : '' }}</span>
           <small v-if="tab.database">{{ tab.connectionId }} · {{ tabDatabaseLabel(tab) }}</small>
         </button>
       </div>

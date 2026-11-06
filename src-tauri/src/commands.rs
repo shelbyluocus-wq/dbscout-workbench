@@ -155,7 +155,7 @@ fn stale_schema_keys(
         .collect()
 }
 
-fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
+pub(crate) fn invalidate_table_schema(state: &AppState, connection_id: &str, database: &str, table: &str) {
     state
         .schema_cache
         .invalidate_table(&crate::schema_cache::SchemaCacheKey::new(
@@ -453,7 +453,7 @@ fn connection_connected(connection: &RuntimeConnection, mysql_pool_connected: bo
     }
 }
 
-fn demo_row_key(database: &str, table_name: &str) -> String {
+pub(crate) fn demo_row_key(database: &str, table_name: &str) -> String {
     format!("{database}\x1f{table_name}")
 }
 
@@ -653,7 +653,7 @@ fn emit_search_values_progress(
     let _ = window.emit(SEARCH_VALUES_PROGRESS_EVENT, payload);
 }
 
-fn demo_schema_for_runtime(
+pub(crate) fn demo_schema_for_runtime(
     overrides: &HashMap<String, Vec<TableMeta>>,
     profile: Option<DemoProfile>,
     database: &str,

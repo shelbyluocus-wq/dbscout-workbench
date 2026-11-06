@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
@@ -31,6 +31,7 @@ const props = defineProps({
 const emit = defineEmits(["applied"]);
 
 const {
+  creating,
   loading,
   previewing,
   saving,
@@ -57,6 +58,7 @@ const {
 });
 
 const sourceTitle = computed(() => {
+  if (creating.value) return [props.source?.database, draft.tableName].filter(Boolean).join(".");
   const database = props.source?.database ? `${props.source.database}.` : "";
   return `${database}${props.source?.tableName || props.source?.table_name || props.source?.name || ""}`;
 });
@@ -108,11 +110,12 @@ async function handleSave() {
 }
 
 async function handleConfirmApply() {
+  const wasCreating = creating.value;
   try {
     const result = await applyDesign();
     if (!result) return;
     previewOpen.value = false;
-    showSuccess("表设计保存成功");
+    showSuccess(wasCreating ? t("createTable.created") : "表设计保存成功");
   } catch {
     // Error text is already exposed through the composable state.
   }
@@ -163,6 +166,7 @@ async function exportErrors() {
 }
 
 const editorRef = ref(null);
+const tableNameInput = ref(null);
 const selectedIndexes = ref([]);
 const selectionAnchor = ref(null);
 
@@ -356,7 +360,11 @@ function clearRowSelection() {
   selectionAnchor.value = null;
 }
 
-onMounted(() => refreshDesign({ notify: false }));
+onMounted(async () => {
+  await refreshDesign({ notify: false });
+  await nextTick();
+  if (creating.value && props.isFocused) tableNameInput.value?.focus();
+});
 watch(sourceKey, () => {
   clearRowSelection();
   refreshDesign({ notify: false });
@@ -591,7 +599,7 @@ const colDefs = [
   <section
     ref="editorRef"
     class="wb-design-editor"
-    :aria-label="t('m_b5b964561870')"
+    :aria-label="creating ? t('createTable.title') : t('m_b5b964561870')"
     tabindex="-1"
   >
     <div class="wb-design-toast-layer" aria-live="polite" aria-atomic="true">
@@ -604,20 +612,20 @@ const colDefs = [
     </div>
     <header class="wb-design-header">
       <div class="wb-design-title">
-        <strong>{{ t('m_d9a122ddc940') }}</strong>
+        <strong>{{ creating ? t('createTable.title') : t('m_d9a122ddc940') }}</strong>
         <span :title="sourceTitle">{{ sourceTitle }}</span>
         <em v-if="dirty" class="wb-design-dirty">{{ t('m_6a1be012c99c') }}</em>
       </div>
       <div class="wb-design-actions">
-        <button type="button" :disabled="loading || previewing || saving" @click="refreshDesign">{{ t('m_aee887434131') }}</button>
+        <button v-if="!creating" type="button" :disabled="loading || previewing || saving" @click="refreshDesign">{{ t('m_aee887434131') }}</button>
         <button type="button" :disabled="loading || previewing || saving || !dirty" @click="resetDraft">{{ t('m_cb5d682bac3d') }}</button>
         <button type="button" :disabled="loading || saving" @click="handlePreview">{{ previewing ? t('m_4e7a87eb2805') : t('m_5b294b6e8ed8') }}</button>
-        <button type="button" class="wb-design-primary" :disabled="loading || previewing || saving || !dirty" @click="handleSave">{{ previewing ? t('m_93108108fea5') : t('m_a3030bf8f16d') }}</button>
+        <button type="button" class="wb-design-primary" :disabled="loading || previewing || saving || !dirty" @click="handleSave">{{ creating ? t('createTable.review') : previewing ? t('m_93108108fea5') : t('m_a3030bf8f16d') }}</button>
       </div>
     </header>
 
     <div v-if="loading" class="wb-design-state">{{ t('m_3f6fb13a558d') }}</div>
-    <div v-else class="wb-design-body">
+    <div v-else class="wb-design-body" :inert="saving || undefined">
       <p v-if="previewing" class="wb-design-state" role="status" aria-live="polite">{{ t('m_66642c2f5c7c') }}</p>
       <p v-if="error" class="wb-design-error" role="alert">{{ error }}</p>
       <div v-if="previewHasConflicts" class="wb-design-conflict-banner" role="alert">
@@ -629,6 +637,10 @@ const colDefs = [
         <span v-for="message in validationErrors.messages" :key="message">{{ message }}</span>
       </div>
 
+      <label v-if="creating" class="wb-design-comment wb-create-table-name">
+        <span>{{ t('createTable.name') }}</span>
+        <input ref="tableNameInput" v-model="draft.tableName" name="newTableName" :disabled="saving" maxlength="64" :placeholder="t('createTable.namePlaceholder')" :aria-label="t('createTable.name')" spellcheck="false" />
+      </label>
       <label class="wb-design-comment">
         <span>{{ t('m_a00092e726d4') }}</span>
         <textarea v-model="draft.tableComment" name="tableComment" rows="2" :placeholder="t('m_687694cbea0f')"></textarea>
@@ -849,6 +861,7 @@ const colDefs = [
           <button type="button" @click="exportErrors">{{ t('m_15730403e341') }}</button>
           <button type="button" :disabled="saving" @click="closePreviewDialog">{{ t('m_2cd0f3be8738') }}</button>
           <button v-if="preview.conflicts?.length" type="button" class="wb-design-danger" :disabled="saving || Boolean(preview.conflicts?.length)" @click="handleConfirmApply">{{ t('m_0656d19dd4a5') }}</button>
+          <button v-else-if="creating" type="button" class="wb-design-primary" :disabled="saving" @click="handleConfirmApply">{{ t('createTable.confirm') }}</button>
           <button v-else type="button" class="wb-design-danger" :disabled="saving" @click="handleConfirmApply">{{ t('m_881f5971987d') }}</button>
         </footer>
       </section>
