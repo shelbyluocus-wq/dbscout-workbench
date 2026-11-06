@@ -21,11 +21,12 @@ const props = defineProps({
   paneId: { type: String, default: "" },
   canClosePane: { type: Boolean, default: false },
   showShortcutHints: { type: Boolean, default: false },
+  connections: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(["activate-tab", "close-tab", "close-pane", "tab-contextmenu", "reorder-tab", "copy-tab-name"]);
 
-const { databaseLabel } = useAliases();
+const { databaseLabel, connectionLabel } = useAliases();
 const { getDatabaseDecoration } = useDatabaseDecorations();
 
 const draggingTabId = ref("");
@@ -175,6 +176,24 @@ function tabDatabaseLabel(tab) {
   return databaseLabel(tab.connectionId, tab.database) || String(tab.database || "");
 }
 
+function tabConnectionLabel(tab) {
+  const id = String(tab.connectionId || "");
+  if (!id) return "";
+  const connection = props.connections.find((item) => String(item.id) === id);
+  return connectionLabel(id, connection?.label || id);
+}
+
+function tabMenuName(tab) {
+  if (tab.createMode) return tab.draft?.tableName || t('createTable.title');
+  return isTableLikeTab(tab) ? (tab.tableName || tabTitle(tab)) : tabTitle(tab);
+}
+
+function tabMenuTag(tab) {
+  if (tabKind(tab) === "design") return t('m_56c255e19858');
+  if (tabKind(tab) === "sql") return `SQL${tab.dirty ? " •" : ""}`;
+  return tab.relationFilter ? t('relations.tabTag') : "";
+}
+
 function tabDatabaseDecoration(tab) {
   return getDatabaseDecoration(tab.connectionId, tab.database);
 }
@@ -293,6 +312,7 @@ const overflowMenuRef = ref(null);
 const availableWidth = ref(0);
 const overflowOpen = ref(false);
 const overflowStyle = ref({});
+const overflowTheme = ref("light");
 const tabPartition = computed(() => partitionTabs(previewTabs.value, props.activeTabId, availableWidth.value));
 const visibleTabs = computed(() => tabPartition.value.visible);
 const overflowTabs = computed(() => tabPartition.value.overflow);
@@ -307,8 +327,9 @@ async function toggleOverflow() {
   if (overflowOpen.value) return closeOverflow();
   const bounds = overflowButtonRef.value?.getBoundingClientRect();
   if (!bounds) return;
+  overflowTheme.value = tabBarRef.value?.closest?.("[data-theme]")?.getAttribute("data-theme") || "light";
   overflowStyle.value = {
-    top: `${bounds.bottom + 4}px`,
+    top: `${bounds.bottom + 6}px`,
     right: `${Math.max(8, window.innerWidth - bounds.right)}px`,
     maxHeight: `${Math.max(80, window.innerHeight - bounds.bottom - 12)}px`,
   };
@@ -497,26 +518,54 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="overflowOpen"
-        ref="overflowMenuRef"
-        class="wb-tab-overflow-menu"
-        :style="overflowStyle"
-        role="menu"
-        :aria-label="t('tabs.overflow', { count: overflowTabs.length })"
-        @keydown="onOverflowKeydown"
-        @contextmenu.prevent.stop
+        class="wb-tab-overflow-layer wb-floating-themed"
+        :data-theme="overflowTheme"
       >
-        <button
-          v-for="tab in overflowTabs"
-          :key="tab.id"
-          type="button"
-          role="menuitem"
-          :disabled="tab.opening"
-          :title="tabSourceTitle(tab)"
-          @click="selectOverflowTab(tab)"
+        <div
+          ref="overflowMenuRef"
+          class="wb-tab-overflow-menu"
+          :style="overflowStyle"
+          role="menu"
+          :aria-label="t('tabs.overflow', { count: overflowTabs.length })"
+          @keydown="onOverflowKeydown"
+          @contextmenu.prevent.stop
         >
-          <span>{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}{{ tabKind(tab) === 'design' ? ` · ${t('m_56c255e19858')}` : '' }}{{ tab.dirty ? ' •' : '' }}</span>
-          <small v-if="tab.database">{{ tab.connectionId }} · {{ tabDatabaseLabel(tab) }}</small>
-        </button>
+          <div class="wb-tab-overflow-head" aria-hidden="true">{{ t('tabs.overflow', { count: overflowTabs.length }) }}</div>
+          <div class="wb-tab-overflow-list">
+            <button
+              v-for="tab in overflowTabs"
+              :key="tab.id"
+              type="button"
+              role="menuitem"
+              class="wb-tab-overflow-item"
+              :disabled="tab.opening"
+              :title="tabSourceTitle(tab)"
+              @click="selectOverflowTab(tab)"
+            >
+              <span class="wb-tab-overflow-line">
+                <span class="wb-tab-overflow-name">{{ tabMenuName(tab) }}</span>
+                <small v-if="tabMenuTag(tab)" class="wb-tab-overflow-tag">{{ tabMenuTag(tab) }}</small>
+              </span>
+              <span v-if="tab.database" class="wb-tab-overflow-line wb-tab-overflow-source" :style="tabDatabaseDecorationStyle(tab)">
+                <component
+                  :is="tabDatabaseIcon(tab)"
+                  v-if="tabDatabaseDecoration(tab)"
+                  :size="11"
+                  :stroke-width="1.6"
+                  class="wb-tab-db-icon is-decorated"
+                  aria-hidden="true"
+                />
+                <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+                  <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
+                  <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
+                  <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
+                </svg>
+                <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+                <span v-if="tabConnectionLabel(tab)" class="wb-tab-overflow-connection">{{ tabConnectionLabel(tab) }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
     </Teleport>
   </section>

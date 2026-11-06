@@ -133,12 +133,9 @@
   --wb-tab-active: rgba(255, 255, 255, 0.94);
   --wb-tab-active-border: rgba(45, 55, 72, 0.2);
   --wb-home-tab-surface: rgba(45, 55, 72, 0.045);
-  --wb-glass-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(250, 251, 253, 0.7) 100%);
-  --wb-glass-haze-strength: 30%;
-  --wb-glass-border: rgba(255, 255, 255, 0.9);
-  --wb-glass-edge: rgba(45, 55, 72, 0.08);
+  --wb-glass-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(250, 251, 252, 0.88) 100%);
+  --wb-glass-haze-strength: 20%;
   --wb-glass-highlight: rgba(255, 255, 255, 0.95);
-  --wb-glass-shadow: 0 10px 28px -14px rgba(30, 41, 72, 0.22), 0 2px 6px -2px rgba(30, 41, 72, 0.06);
   --wb-tab-close-text: #343941;
   --wb-tab-close-text-hover: #111827;
   --wb-tab-close-hover: rgba(74, 85, 104, 0.16);
@@ -335,12 +332,9 @@ html[data-wb-theme="dark"] {
   --wb-tab-active: rgba(32, 32, 34, 0.98);
   --wb-tab-active-border: rgba(148, 163, 184, 0.28);
   --wb-home-tab-surface: rgba(255, 255, 255, 0.045);
-  --wb-glass-surface: linear-gradient(180deg, rgba(40, 42, 48, 0.78) 0%, rgba(26, 27, 31, 0.72) 100%);
-  --wb-glass-haze-strength: 17%;
-  --wb-glass-border: rgba(255, 255, 255, 0.08);
-  --wb-glass-edge: rgba(0, 0, 0, 0.4);
+  --wb-glass-surface: linear-gradient(180deg, rgba(38, 39, 44, 0.92) 0%, rgba(27, 28, 32, 0.88) 100%);
+  --wb-glass-haze-strength: 12%;
   --wb-glass-highlight: rgba(255, 255, 255, 0.07);
-  --wb-glass-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.3);
   --wb-tab-close-text: #c8ced8;
   --wb-tab-close-text-hover: #f2f4f7;
   --wb-tab-close-hover: rgba(148, 163, 184, 0.18);
@@ -11062,58 +11056,157 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: no-drag;
 }
 
-.wb-tab-overflow-menu {
-  position: fixed;
-  z-index: 1000;
-  width: 300px;
-  max-width: calc(100vw - 16px);
-  overflow-y: auto;
-  padding: 4px;
-  border-radius: 8px;
-  background: var(--wb-menu-surface);
-  color: var(--wb-text);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
-}
-
-.wb-tab-overflow-menu button {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  text-align: left;
-}
-
-.wb-tab-overflow-menu button > * {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-tab-overflow-menu small {
-  color: var(--wb-secondary-text);
-  font-size: var(--wb-fs-caption);
-}
-
-.wb-tab-overflow-button:hover,
-.wb-tab-overflow-menu button:hover:not(:disabled) {
+.wb-tab-overflow-button:hover:not(:disabled),
+.wb-tab-overflow-button[aria-expanded="true"] {
+  border-color: transparent;
   background: var(--wb-list-hover);
+  color: var(--wb-text);
 }
 
-.wb-tab-overflow-button:focus-visible,
-.wb-tab-overflow-menu button:focus-visible {
+.wb-tab-overflow-button:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
 }
 
-.wb-tab-overflow-menu button:disabled {
+/* Carries the teleported menu's theme tokens without taking part in layout. */
+.wb-tab-overflow-layer {
+  display: contents;
+}
+
+.wb-tab-overflow-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  overflow: hidden;
+  border: 1px solid var(--wb-floating-border);
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: var(--wb-floating-shadow-strong);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  transform-origin: top right;
+  animation: wb-menu-in var(--wb-duration-fast) var(--wb-ease-out);
+}
+
+.wb-tab-overflow-head {
+  flex: 0 0 auto;
+  padding: 9px 14px 8px;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.wb-tab-overflow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wb-tab-overflow-item {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  min-height: 0;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wb-text);
+  text-align: left;
+  transition: background-color var(--wb-duration-fast) ease;
+}
+
+.wb-tab-overflow-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.wb-tab-overflow-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--wb-fs-body);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.wb-tab-overflow-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: var(--wb-fs-micro);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.wb-tab-overflow-source {
+  color: var(--wb-type-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 450;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.wb-tab-overflow-source .wb-tab-db {
+  flex: 0 1 auto;
+}
+
+.wb-tab-overflow-connection {
+  flex: 0 10 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  text-overflow: ellipsis;
+}
+
+.wb-tab-overflow-connection::before {
+  content: "·";
+  margin-right: 5px;
+  opacity: 0.7;
+}
+
+.wb-tab-overflow-item:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--wb-list-hover);
+}
+
+.wb-tab-overflow-item:focus-visible {
+  border-color: color-mix(in srgb, var(--wb-accent) 45%, transparent);
+  background: var(--wb-list-selected);
+  outline: none;
+}
+
+.wb-tab-overflow-item:active:not(:disabled) {
+  background: var(--wb-list-selected-hover);
+}
+
+.wb-tab-overflow-item:disabled {
+  color: var(--wb-text);
   opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-tab-overflow-menu {
+    animation: none;
+  }
 }
 
 .wb-tab {
@@ -17583,8 +17676,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 /* ── Cell detail panel (below the table, #2/#3) ─────────────────────── */
-/* A rounded frosted-glass card floating under the grid: two soft color hazes
-   over a translucent gradient, blurred against whatever sits behind it. The
+/* A frosted-glass region flush with the pane under the grid (no inset card or
+   backing around it): two soft color hazes over a translucent gradient. The
    haze colors and positions follow the time of day (--wb-ambient-*, set by
    useCellDetailAmbient); the fallbacks are the daytime look. */
 .wb-cell-detail {
@@ -17595,28 +17688,23 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   flex-direction: column;
   min-height: 0;
-  margin: 6px 8px 8px;
   overflow: hidden;
-  border: 1px solid var(--wb-glass-border);
-  border-radius: 14px;
+  border-top: 1px solid var(--wb-line);
   background:
     radial-gradient(
       120% 170% at var(--wb-ambient-ax, 10%) var(--wb-ambient-ay, 0%),
-      color-mix(in srgb, var(--wb-ambient-a, #8fb8ff) var(--wb-glass-haze-strength), transparent) 0%,
-      transparent 58%
+      color-mix(in srgb, var(--wb-ambient-a, #9db6cc) var(--wb-glass-haze-strength), transparent) 0%,
+      transparent 70%
     ),
     radial-gradient(
       100% 150% at var(--wb-ambient-bx, 90%) var(--wb-ambient-by, 100%),
-      color-mix(in srgb, var(--wb-ambient-b, #c8b6ff) var(--wb-glass-haze-strength), transparent) 0%,
-      transparent 62%
+      color-mix(in srgb, var(--wb-ambient-b, #a8c0bc) calc(var(--wb-glass-haze-strength) * 0.7), transparent) 0%,
+      transparent 70%
     ),
     var(--wb-glass-surface);
-  box-shadow:
-    inset 0 1px 0 var(--wb-glass-highlight),
-    0 0 0 1px var(--wb-glass-edge),
-    var(--wb-glass-shadow);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--wb-glass-highlight);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
 }
 
 .wb-cell-detail.is-resizing {
@@ -24076,6 +24164,11 @@ button.wb-table-mention:active {
 }
 :root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar {
   background: var(--wb-vibrancy-titlebar);
+}
+/* Collapsed, the slot is just the toggle beside the traffic lights; tinting
+   it alone would leave a lighter square in the opaque title bar. */
+:root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar.is-collapsed {
+  background: transparent;
 }
 
 /* External-AI activity glow: soft inner edge ring + status pill. */

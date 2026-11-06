@@ -1814,6 +1814,7 @@ onMounted(() => emitPaneState());
         :pane-id="pane.id"
         :can-close-pane="rootPaneCount > 1"
         :show-shortcut-hints="isFocused && showShortcutHints"
+        :connections="connections"
         @activate-tab="activateTab"
         @close-tab="closeTab"
         @close-pane="emit('close-pane', pane.id)"

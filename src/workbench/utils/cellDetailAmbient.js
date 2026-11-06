@@ -3,17 +3,18 @@
 
 export const MINUTES_PER_DAY = 1440;
 
-// [minute of day, primary haze, secondary haze]
+// [minute of day, primary haze, secondary haze]. Deliberately muted: the
+// time of day should read as a change of light, never as color.
 export const AMBIENT_KEYFRAMES = [
-  [0, "#5562d8", "#7d55d6"],
-  [300, "#6a6fd8", "#b46fc0"],
-  [390, "#ff9e8a", "#f5b3d4"],
-  [540, "#8fb8ff", "#a4e2ff"],
-  [720, "#6cc4ff", "#8eeed6"],
-  [930, "#ffcf7a", "#9fd2ff"],
-  [1080, "#ff8f5e", "#ff74a6"],
-  [1170, "#b07cff", "#ff8fb4"],
-  [1290, "#6274e6", "#9b6bdf"],
+  [0, "#7d86b0", "#8c88a8"],
+  [300, "#878cb0", "#9a92aa"],
+  [390, "#bda89e", "#b8acb4"],
+  [540, "#a2b2c6", "#aabcc2"],
+  [720, "#9db6cc", "#a8c0bc"],
+  [930, "#c0b49c", "#a6b6c6"],
+  [1080, "#bba092", "#b39ca4"],
+  [1170, "#a198b8", "#ac9cb0"],
+  [1290, "#848cb4", "#958eb2"],
 ];
 
 export function normalizeMinutes(value) {
