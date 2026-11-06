@@ -3173,6 +3173,13 @@ test("tauri main window uses custom web chrome by default", () => {
   assert.ok(main.minHeight >= 720);
 });
 
+test("home pill stays vertically centered with the arrows and window controls", () => {
+  const styles = read("./workbench.css");
+  assert.match(cssRuleBody(styles, '.wb-tab[data-kind="home"]'), /margin-bottom:\s*calc\(\(var\(--wb-titlebar-height\) - 30px\) \/ 2\)/);
+  assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /place-items:\s*center/);
+  assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /height:\s*var\(--wb-titlebar-height\)/);
+});
+
 test("tauri macOS window uses native traffic lights over the integrated titlebar", () => {
   const baseConfig = JSON.parse(read("../../src-tauri/tauri.conf.json"));
   const macConfig = JSON.parse(read("../../src-tauri/tauri.macos.conf.json"));
@@ -3183,7 +3190,9 @@ test("tauri macOS window uses native traffic lights over the integrated titlebar
   assert.equal(macMain.decorations, true);
   assert.equal(macMain.titleBarStyle, "Overlay");
   assert.equal(macMain.hiddenTitle, true);
-  assert.deepEqual(macMain.trafficLightPosition, { x: 13, y: 22 });
+  assert.equal(macMain.trafficLightPosition, undefined);
+  assert.doesNotMatch(read("../../src-tauri/src/table_folder_windows.rs"), /\.traffic_light_position\(/);
+  assert.match(read("../../src-tauri/src/macos_appearance.rs"), /titlebar_height \/ 2\.0/);
   assert.equal(macMain.maximized, false);
   assert.equal(macMain.transparent, true);
   assert.equal(baseConfig.app.macOSPrivateApi, true);

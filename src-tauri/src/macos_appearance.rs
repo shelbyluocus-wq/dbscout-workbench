@@ -84,6 +84,72 @@ pub async fn macos_accent_color() -> String {
     accent_hex_for(None).to_string()
 }
 
+#[tauri::command]
+pub fn macos_align_traffic_lights(
+    window: tauri::WebviewWindow,
+    titlebar_height: f64,
+) -> Result<(), String> {
+    if !titlebar_height.is_finite() || !(20.0..=160.0).contains(&titlebar_height) {
+        return Err("Invalid titlebar height".into());
+    }
+    #[cfg(target_os = "macos")]
+    window
+        .with_webview(move |webview| unsafe {
+            use objc2_app_kit::{NSWindow, NSWindowButton, NSWindowStyleMask};
+            use objc2_foundation::NSPoint;
+
+            let Some(native_window) = webview.ns_window().cast::<NSWindow>().as_ref() else {
+                return;
+            };
+            if native_window
+                .styleMask()
+                .contains(NSWindowStyleMask::FullScreen)
+            {
+                return;
+            }
+            let Some(close) = native_window.standardWindowButton(NSWindowButton::CloseButton) else {
+                return;
+            };
+            let Some(container) = close.superview().and_then(|view| view.superview()) else {
+                return;
+            };
+            let mut frame = container.frame();
+            frame.size.height = titlebar_height;
+            frame.origin.y = native_window.frame().size.height - titlebar_height;
+            container.setFrame(frame);
+            let center = NSPoint::new(
+                0.0,
+                native_window.frame().size.height - titlebar_height / 2.0,
+            );
+            let spacing = native_window
+                .standardWindowButton(NSWindowButton::MiniaturizeButton)
+                .map(|button| button.frame().origin.x - close.frame().origin.x)
+                .unwrap_or(20.0);
+            for (index, kind) in [
+                NSWindowButton::CloseButton,
+                NSWindowButton::MiniaturizeButton,
+                NSWindowButton::ZoomButton,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if let Some(button) = native_window.standardWindowButton(kind) {
+                    if let Some(parent) = button.superview() {
+                        let local_center = parent.convertPoint_fromView(center, None);
+                        let mut origin = button.frame().origin;
+                        origin.x = 13.0 + index as f64 * spacing;
+                        origin.y = local_center.y - button.frame().size.height / 2.0;
+                        button.setFrameOrigin(origin);
+                    }
+                }
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{accent_hex_for, normalize_double_click_action};

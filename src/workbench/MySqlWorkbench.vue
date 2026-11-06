@@ -61,6 +61,7 @@ import {
 import { tabRowAt, tabRowCount, tabRows } from "./rowStore.js";
 import { createHomeTablePasteCoordinator } from "./homeTablePasteCoordinator.js";
 import { invokeWorkbench, isTauriRuntime, listenWorkbenchEvent } from "./utils/tauriBridge.js";
+import { useMacosTrafficLights } from "./composables/useMacosTrafficLights.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "./utils/desktopPlatform.js";
 import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
 import { useTableFolderStore } from "./composables/tableFolderStore.js";
@@ -4762,9 +4763,15 @@ const pageZoom = createPageZoom({
   applyZoom: async (scale) => {
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
     await getCurrentWebview().setZoom(scale);
+    syncMacosTrafficLights(scale);
   },
   onChange: (percent) => setStatus(t("pageZoom.changed", { percent })),
   onError: (error) => setStatus(t("pageZoom.failed", { error: String(error?.message || error) }), { tone: "error" }),
+});
+const syncMacosTrafficLights = useMacosTrafficLights({
+  enabled: usesNativeMacWindowControls,
+  getScale: () => pageZoom.scale,
+  invoke: invokeWorkbench,
 });
 if (isTauriRuntime()) void pageZoom.restore();
 

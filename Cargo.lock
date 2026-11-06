@@ -1041,6 +1041,8 @@ dependencies = [
  "fontdb",
  "futures-util",
  "mongodb",
+ "objc2-app-kit",
+ "objc2-foundation",
  "reqwest",
  "rfd",
  "roxmltree",

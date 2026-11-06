@@ -337,6 +337,7 @@ pub fn run() {
             commands::unregister_global_shortcut,
             macos_appearance::macos_titlebar_double_click_action,
             macos_appearance::macos_accent_color,
+            macos_appearance::macos_align_traffic_lights,
             sql_console::start_sql_execution,
             sql_console::cancel_sql_execution,
             sql_console::begin_sql_transaction,

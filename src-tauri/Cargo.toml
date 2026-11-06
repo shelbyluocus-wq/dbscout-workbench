@@ -41,3 +41,7 @@ zip = { version = "7.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWindow", "NSView", "NSButton", "NSControl", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }

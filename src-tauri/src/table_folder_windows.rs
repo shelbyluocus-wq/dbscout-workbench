@@ -147,7 +147,6 @@ pub async fn open_table_folder_window(
         .decorations(true)
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(tauri::LogicalPosition::new(13.0, 22.0))
         .transparent(true)
         .shadow(true);
     #[cfg(not(target_os = "macos"))]
