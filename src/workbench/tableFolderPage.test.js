@@ -26,6 +26,54 @@ function dataTransfer() {
   };
 }
 
+test("the main folder list includes database tables and missing references without a picker page", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /openPicker|closePicker|submitPicks|wb-folder-picker|view ===/);
+  assert.match(source, /type="checkbox"[\s\S]*?:checked="row.present"[\s\S]*?@change="toggleMembership\(row\)"/);
+  const expression = source.match(/const folderRows = computed\(\(\) => \[([\s\S]*?)\n\]\);/)[1];
+  const currentFolder = ref({ tableNames: ["hero", "removed"] });
+  const pickRows = ref([{ name: "hero", present: true }, { name: "goods", present: false }]);
+  const tableByName = ref(new Map([["hero", {}], ["goods", {}]]));
+  const tablesLoaded = ref(true);
+  const pickQuery = ref("");
+  const evaluate = new Function("pickRows", "currentFolder", "tableByName", "tablesLoaded", "pickQuery", "filterTablesByKeywords", "highlightSearchRanges", "matchTableKeywords", "parseSearchKeywords", `return [${expression}]`);
+  const rows = () => evaluate(pickRows, currentFolder, tableByName, tablesLoaded, pickQuery, filterTablesByKeywords, highlightSearchRanges, matchTableKeywords, parseSearchKeywords);
+  assert.deepEqual(rows().map((row) => row.name), ["hero", "goods", "removed"]);
+  assert.equal(rows()[2].missing, true);
+  currentFolder.value = { tableNames: [] };
+  assert.deepEqual(rows().map((row) => row.name), ["hero", "goods"]);
+  currentFolder.value = { tableNames: ["removed"] };
+  pickRows.value = [];
+  pickQuery.value = "hero";
+  assert.deepEqual(rows(), []);
+});
+
+test("checkboxes immediately change only the current folder's references", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  const body = source.match(/function toggleMembership\(row\) \{([\s\S]*?)\n\}/)[1];
+  const currentFolder = ref({ id: "first", tableNames: ["hero", "missing"] });
+  const scope = ref({ connectionId: "demo", database: "game" });
+  const tableByName = ref(new Map([["hero", {}], ["goods", {}]]));
+  const calls = [];
+  const store = {
+    removeTables: (...args) => calls.push(["remove", ...args]),
+    addTables: (...args) => calls.push(["add", ...args]),
+  };
+  const toggle = new Function("currentFolder", "store", "scope", "tableByName", `return function(row) {${body}}`)(currentFolder, store, scope, tableByName);
+  toggle({ name: "hero" });
+  toggle({ name: "missing" });
+  toggle({ name: "goods" });
+  toggle({ name: "unknown" });
+  currentFolder.value = { id: "second", tableNames: [] };
+  toggle({ name: "hero" });
+  assert.deepEqual(calls, [
+    ["remove", "first", ["hero"]],
+    ["remove", "first", ["missing"]],
+    ["add", "first", ["goods"], scope.value],
+    ["add", "second", ["hero"], scope.value],
+  ]);
+});
+
 test("new folder button spans the sidebar row and centers its icon", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
   const css = readFileSync(new URL("./workbench.css", import.meta.url), "utf8");
@@ -39,7 +87,7 @@ test("new folder button spans the sidebar row and centers its icon", () => {
   assert.match(source, /<button[^>]*class="wb-folder-add"[^>]*@click="createFolder"/);
 });
 
-test("folder picker uses home keyword matching and ranking without losing membership", () => {
+test("inline table search uses home keyword matching and ranking without losing membership", () => {
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
   assert.match(source, /import \{[^}]*filterTablesByKeywords[^}]*\} from "\.\.\/utils\/tableKeywordSearch\.js"/);
   assert.match(source, /class="wb-folder-table" v-html="row.nameHtml"/);

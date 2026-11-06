@@ -16321,8 +16321,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-dbhome-object-name-button mark,
 .wb-dbhome-object-comment-text mark,
-.wb-folder-picker .wb-folder-table mark,
-.wb-folder-picker .wb-folder-comment mark {
+.wb-folder-content .wb-folder-table mark,
+.wb-folder-content .wb-folder-comment mark {
   padding: 0 1px;
   border-radius: 2px;
   background: var(--wb-mark-surface);
@@ -24235,7 +24235,7 @@ button.wb-table-mention:active {
 .wb-folder-item:focus-visible,
 .wb-folder-row:focus-visible,
 .wb-folder-add:focus-visible,
-.wb-folder-back:focus-visible {
+.wb-folder-check:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: -2px;
 }
@@ -24295,16 +24295,11 @@ button.wb-table-mention:active {
   color: var(--wb-text);
 }
 
-.wb-folder-content,
-.wb-folder-picker {
+.wb-folder-content {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-}
-
-.wb-folder-picker {
-  grid-column: 1 / -1;
 }
 
 .wb-folder-content.is-drop-target {
@@ -24340,8 +24335,7 @@ button.wb-table-mention:active {
   gap: 6px;
 }
 
-.wb-folder-actions button,
-.wb-folder-picker-footer button {
+.wb-folder-actions button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -24356,26 +24350,22 @@ button.wb-table-mention:active {
   cursor: pointer;
 }
 
-.wb-folder-actions button:hover:not(:disabled),
-.wb-folder-picker-footer button:hover:not(:disabled) {
+.wb-folder-actions button:hover:not(:disabled) {
   background: var(--wb-control-hover);
 }
 
-.wb-folder-actions button.is-primary,
-.wb-folder-picker-footer button.is-primary {
+.wb-folder-actions button.is-primary {
   border-color: transparent;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
   font-weight: 650;
 }
 
-.wb-folder-actions button.is-primary:hover:not(:disabled),
-.wb-folder-picker-footer button.is-primary:hover:not(:disabled) {
+.wb-folder-actions button.is-primary:hover:not(:disabled) {
   background: var(--wb-accent-control-hover);
 }
 
-.wb-folder-actions button:disabled,
-.wb-folder-picker-footer button:disabled {
+.wb-folder-actions button:disabled {
   cursor: default;
   opacity: 0.5;
 }
@@ -24404,22 +24394,12 @@ button.wb-table-mention:active {
   background: var(--wb-list-hover);
 }
 
-.wb-folder-row.is-selected,
-.wb-folder-row.is-checked:not(.is-present) {
+.wb-folder-row.is-selected {
   background: var(--wb-list-selected);
 }
 
 .wb-folder-row.is-selected:hover {
   background: var(--wb-list-selected-hover);
-}
-
-.wb-folder-row.is-pickable {
-  cursor: pointer;
-}
-
-.wb-folder-row.is-present {
-  cursor: default;
-  opacity: 0.55;
 }
 
 .wb-folder-row-icon {
@@ -24428,8 +24408,9 @@ button.wb-table-mention:active {
 }
 
 .wb-folder-table {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
+  max-width: 45%;
   overflow: hidden;
   color: var(--wb-folder-table-color, var(--wb-identifier-text));
   font-weight: 550;
@@ -24458,44 +24439,18 @@ button.wb-table-mention:active {
 }
 
 .wb-folder-check {
-  display: inline-grid;
   flex: 0 0 auto;
-  place-items: center;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 4px;
-  background: var(--wb-field-surface);
-}
-
-.wb-folder-row.is-checked .wb-folder-check {
-  border-color: transparent;
-  background: var(--wb-accent-control);
-  color: var(--wb-accent-control-text);
-}
-
-.wb-folder-back {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--wb-secondary-text);
+  margin: 0;
+  accent-color: var(--wb-accent-control);
   cursor: pointer;
-}
-
-.wb-folder-back:hover {
-  background: var(--wb-control-hover);
-  color: var(--wb-text);
 }
 
 .wb-folder-search {
   display: flex;
   flex: 0 1 280px;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
@@ -24516,14 +24471,9 @@ button.wb-table-mention:active {
   font: inherit;
 }
 
-.wb-folder-picker-footer {
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 14px;
-  box-shadow: inset 0 1px 0 var(--wb-line);
-  background: var(--wb-chrome-surface);
+.wb-folder-search:focus-within {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
 }
 
 .wb-folder-empty {

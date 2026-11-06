@@ -1,6 +1,5 @@
 // Table folders end to end in the browser preview: the page opens as a tab,
 // favorites are its first folder, folders are created with the + icon,
-// filled through the table picker and by dragging (sidebar tables, folder
 // onto folder), renamed and deleted from the right-click menu, opened in a
 // new window (a browser tab in the preview) and restored with the tab.
 import assert from "node:assert/strict";
@@ -35,7 +34,7 @@ function folder(name) {
 }
 
 async function folderTableNames() {
-  return folderRows.locator(".wb-folder-table").allTextContents();
+  return folderRows.filter({ has: page.locator('input:checked') }).locator(".wb-folder-table").allTextContents();
 }
 
 async function waitForNotice(text) {
@@ -71,16 +70,21 @@ try {
   await rename.fill("英雄養成");
   await rename.press("Enter");
   assert.equal(await folderPage.locator(".wb-folder-header h2").textContent(), "英雄養成");
-  assert.match(await folderPage.locator(".wb-folder-empty").textContent(), /拖到這裡/);
+  assert.ok(await folderRows.count() >= names.length);
+  assert.deepEqual(await folderTableNames(), []);
 
-  // Add tables: pick, then submit.
-  await folderPage.getByRole("button", { name: "添加表" }).click();
-  const picker = folderPage.locator(".wb-folder-picker");
-  await picker.waitFor();
-  await picker.locator(".wb-folder-search input").fill(names[2]);
-  await picker.locator(".wb-folder-row", { hasText: names[2] }).first().click();
-  await picker.getByRole("button", { name: "提交（1）" }).click();
+  assert.equal(await folderPage.locator('.wb-folder-picker').count(), 0);
+  const search = folderPage.locator(".wb-folder-search input");
+  await search.fill(names[2]);
+  const membership = folderPage.locator(`.wb-folder-row[data-table-name="${names[2]}"] input[type="checkbox"]`);
+  await membership.check();
   assert.deepEqual(await folderTableNames(), [names[2]]);
+  await membership.uncheck();
+  assert.deepEqual(await folderTableNames(), []);
+  await membership.focus();
+  await membership.press("Space");
+  assert.equal(await membership.isChecked(), true);
+  await search.fill("");
 
   // Drag the favorites folder onto it: its tables join.
   await folder("收藏").dragTo(folder("英雄養成"));
@@ -143,9 +147,9 @@ try {
 
   // Remove a table from the folder through its menu.
   await folder("英雄養成").click();
-  await folderRows.first().click({ button: "right" });
+  await folderRows.filter({ has: page.locator('input:checked') }).first().click({ button: "right" });
   await menu.getByRole("menuitem", { name: /從資料夾移除/ }).click();
-  assert.equal(await folderRows.count(), 3);
+  assert.equal((await folderTableNames()).length, 3);
   const kept = await folderTableNames();
 
   const databaseSwitch = folderPage.locator(".wb-folder-database");
@@ -154,14 +158,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".wb-folder-database option").length > 1);
   const otherScope = await databaseSwitch.locator("option").evaluateAll((options, original) => options.find((option) => JSON.parse(option.value).database !== JSON.parse(original).database).value, originalScope);
   await databaseSwitch.selectOption(otherScope);
-  await folderPage.getByRole("button", { name: "添加表" }).click();
-  await page.waitForFunction(() => !document.querySelector(".wb-folder-picker .wb-folder-empty")?.textContent.includes("載入"));
-  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector(".wb-folder-content .wb-folder-empty")?.textContent.includes("載入"));
   await databaseSwitch.selectOption(originalScope);
   await page.waitForFunction(() => document.querySelector(".wb-folder-header h2")?.textContent === "英雄養成");
-  await folderPage.getByRole("button", { name: "添加表" }).click();
-  await folderPage.locator(".wb-folder-picker .wb-folder-row").first().waitFor();
-  await page.keyboard.press("Escape");
+  await folderRows.first().waitFor();
   assert.deepEqual(await folderTableNames(), kept);
   assert.equal(await folderPage.locator(".wb-folder-row.is-missing").count(), 0);
   assert.equal(await foldersTab.locator(".wb-tab-db").count(), 0);
@@ -170,9 +170,7 @@ try {
   await folderRows.first().dblclick();
   await page.locator(`.wb-tab.active[data-kind="data"]`).waitFor();
   await foldersTab.click();
-  await folderPage.getByRole("button", { name: "添加表" }).click();
-  await folderPage.locator(".wb-folder-picker .wb-folder-row").first().waitFor();
-  await page.keyboard.press("Escape");
+  await folderRows.first().waitFor();
   assert.equal(await folderPage.locator(".wb-folder-row.is-missing").count(), 0);
 
   // Open in a new window. The main window's saved tabs stay as they were.
@@ -190,7 +188,7 @@ try {
     return expected.every((name) => tabs.includes(name));
   }, kept);
   assert.equal(await popup.title(), "英雄養成 - Blackcat");
-  assert.equal((await popup.locator(".wb-tab.active .wb-tab-name").textContent()).trim(), kept[0]);
+  assert.ok(kept.includes((await popup.locator(".wb-tab.active .wb-tab-name").textContent()).trim()));
   await popup.screenshot({ path: `${screenshots}/table-folders-window.png`, animations: "disabled" });
   await popup.waitForTimeout(600);
   await popup.close();

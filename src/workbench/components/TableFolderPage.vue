@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
-import { AppWindow, ArrowLeft, Check, Folder, FolderOpen, Pencil, Plus, Search, Star, Table2, Trash2, X } from "lucide-vue-next";
+import { AppWindow, Folder, FolderOpen, Pencil, Plus, Search, Star, Table2, Trash2, X } from "lucide-vue-next";
 
 import { useTableFolderContext } from "../composables/tableFolderContext.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
@@ -18,10 +18,6 @@ import { isFolderDropCandidate, readFolderDrop, writeFolderDrag, writeTableDrag 
 import { filterTablesByKeywords, matchTableKeywords, parseSearchKeywords } from "../utils/tableKeywordSearch.js";
 import { highlightSearchRanges } from "../utils/searchMatch.js";
 
-// One database's table folders as a workbench page: folders on the left, the
-// tables a folder refers to on the right. Tables join a folder by dragging
-// (from the sidebar, from another folder, or a whole folder onto a folder) or
-// through the table picker. Rare actions live in right-click menus.
 const props = defineProps({
   tab: { type: Object, required: true },
 });
@@ -31,9 +27,6 @@ const context = useTableFolderContext();
 const rootRef = ref(null);
 const menuRef = ref(null);
 const renameInputRef = ref(null);
-const pickSearchRef = ref(null);
-
-const view = ref("folder"); // "folder" | "pick"
 const tables = ref([]);
 const tablesLoaded = ref(false);
 const tablesLoading = ref(false);
@@ -45,8 +38,6 @@ const renameError = ref("");
 const dropTargetId = ref("");
 const contentDropActive = ref(false);
 const pickQuery = ref("");
-const pickSelection = ref([]);
-const pickAnchor = ref("");
 const menu = ref({ open: false, x: 0, y: 0, kind: "", folderId: "", tableNames: [] });
 
 const scope = computed(() => ({ connectionId: String(props.tab.connectionId || ""), database: String(props.tab.database || "") }));
@@ -82,11 +73,19 @@ const currentFolder = computed(() => (
   folders.value.find((folder) => folder.id === props.tab.folderId) || folders.value[0] || null
 ));
 const tableByName = computed(() => new Map(tables.value.map((table) => [table.name, table])));
-const folderRows = computed(() => (currentFolder.value?.tableNames || []).map((name) => ({
-  name,
-  comment: tableByName.value.get(name)?.comment || "",
-  missing: tablesLoaded.value && !tableByName.value.has(name),
-})));
+const folderRows = computed(() => [
+  ...pickRows.value,
+  ...filterTablesByKeywords((currentFolder.value?.tableNames || [])
+    .filter((name) => !tableByName.value.has(name))
+    .map((name) => ({
+      name,
+      comment: "",
+      present: true,
+      missing: tablesLoaded.value && !tableByName.value.has(name),
+      nameHtml: highlightSearchRanges(name, matchTableKeywords({ name }, parseSearchKeywords(pickQuery.value)).nameRanges),
+      commentHtml: "",
+    })), pickQuery.value),
+]);
 const rowOrder = computed(() => folderRows.value.map((row) => row.name));
 const selectedSet = computed(() => new Set(selectedNames.value));
 const pickRows = computed(() => {
@@ -103,7 +102,6 @@ const pickRows = computed(() => {
       };
     });
 });
-const pickSet = computed(() => new Set(pickSelection.value));
 const deleteKeyLabel = computed(() => formatShortcutForPlatform(isMacOSPlatform() ? "Backspace" : "Delete"));
 const menuFolder = computed(() => store.getFolder(menu.value.folderId) || folders.value.find((folder) => folder.id === menu.value.folderId) || null);
 const menuStyle = computed(() => ({ left: `${menu.value.x}px`, top: `${menu.value.y}px` }));
@@ -281,6 +279,13 @@ function removeRows(names) {
   if (next) void nextTick(() => rootRef.value?.querySelector?.(`.wb-folder-row[data-table-name="${CSS.escape(next)}"]`)?.focus());
 }
 
+function toggleMembership(row) {
+  const folder = currentFolder.value;
+  if (!folder) return;
+  if (folder.tableNames.includes(row.name)) store.removeTables(folder.id, [row.name]);
+  else if (tableByName.value.has(row.name)) store.addTables(folder.id, [row.name], scope.value);
+}
+
 function onRowKeydown(event, row) {
   if (event.key === "Enter") {
     event.preventDefault();
@@ -363,49 +368,6 @@ function onContentDragLeave(event) {
   if (!event.currentTarget.contains(event.relatedTarget)) contentDropActive.value = false;
 }
 
-// ── Table picker ─────────────────────────────────────────────────────────
-function openPicker() {
-  pickQuery.value = "";
-  pickSelection.value = [];
-  pickAnchor.value = "";
-  view.value = "pick";
-  if (!tablesLoaded.value && !tablesLoading.value) void loadTables();
-  void nextTick(() => pickSearchRef.value?.focus());
-}
-
-function closePicker() {
-  view.value = "folder";
-}
-
-function togglePick(row, event) {
-  if (row.present) return;
-  const order = pickRows.value.filter((item) => !item.present).map((item) => item.name);
-  if (event?.shiftKey && pickAnchor.value) {
-    pickSelection.value = nextListSelection({ order, selected: pickSelection.value, anchor: pickAnchor.value, name: row.name, event: { shiftKey: true, ctrlKey: true } }).selected;
-    return;
-  }
-  pickSelection.value = pickSet.value.has(row.name)
-    ? pickSelection.value.filter((name) => name !== row.name)
-    : [...pickSelection.value, row.name];
-  pickAnchor.value = row.name;
-}
-
-function submitPicks() {
-  const folder = currentFolder.value;
-  if (!folder || !pickSelection.value.length) return;
-  const names = tables.value.map((table) => table.name).filter((name) => pickSet.value.has(name));
-  reportAdded(folder, store.addTables(folder.id, names, scope.value));
-  closePicker();
-}
-
-function onPickKeydown(event) {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    closePicker();
-  }
-}
-
 // ── Menu ─────────────────────────────────────────────────────────────────
 function openMenu({ kind, folderId = "", tableNames = [], x, y }, { keyboard = false } = {}) {
   const width = 200;
@@ -463,9 +425,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
   tablesLoaded.value = false;
   selectedNames.value = [];
   selectionAnchor.value = "";
-  pickSelection.value = [];
-  pickAnchor.value = "";
-  view.value = "folder";
+  pickQuery.value = "";
   cancelRename();
   closeMenu();
   dropTargetId.value = "";
@@ -476,7 +436,6 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
 
 <template>
   <section ref="rootRef" class="wb-folder-page" :style="databaseDecorationStyle" :aria-label="t('tableFolders.title')">
-    <template v-if="view === 'folder'">
       <nav class="wb-folder-sidebar" :aria-label="t('tableFolders.folderList')">
         <select class="wb-folder-database" :value="scopeKey" :aria-label="t('m_9fa99195c7c0')" :title="scope.database" @focus="loadDatabases" @change="switchDatabase">
           <optgroup v-for="group in databaseGroups" :key="group.connectionId" :label="group.label">
@@ -541,23 +500,22 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
       >
         <header class="wb-folder-header">
           <h2>{{ folderLabel(currentFolder) }}</h2>
+          <label class="wb-folder-search">
+            <Search :size="14" aria-hidden="true" />
+            <input v-model="pickQuery" type="search" :placeholder="t('tableFolders.search')" :aria-label="t('tableFolders.search')" />
+          </label>
           <div class="wb-folder-actions">
-            <button type="button" @click="openPicker">
-              <Plus :size="15" aria-hidden="true" />{{ t("tableFolders.addTables") }}
-            </button>
             <button type="button" class="is-primary" :disabled="!currentFolder.tableNames.length" @click="openInWindow()">
               <AppWindow :size="15" aria-hidden="true" />{{ t("tableFolders.openWindow") }}
             </button>
           </div>
         </header>
-        <ul v-if="folderRows.length" class="wb-folder-rows" role="listbox" aria-multiselectable="true">
+        <ul v-if="folderRows.length" class="wb-folder-rows">
           <li
             v-for="row in folderRows"
             :key="row.name"
             class="wb-folder-row"
             :class="{ 'is-selected': selectedSet.has(row.name), 'is-missing': row.missing }"
-            role="option"
-            :aria-selected="selectedSet.has(row.name) ? 'true' : 'false'"
             :data-table-name="row.name"
             :title="row.missing ? t('tableFolders.missingHint') : undefined"
             tabindex="0"
@@ -568,53 +526,25 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
             @contextmenu.prevent.stop="onRowContextMenu($event, row)"
             @dragstart="onRowDragStart($event, row)"
           >
+            <input
+              class="wb-folder-check"
+              type="checkbox"
+              :checked="row.present"
+              :aria-label="`${row.present ? t('tableFolders.removeFromFolder') : t('tableFolders.addTables')}: ${row.name}`"
+              @click.stop
+              @dblclick.stop
+              @keydown.stop
+              @change="toggleMembership(row)"
+            />
             <component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon" />
-            <span class="wb-folder-table">{{ row.name }}</span>
+            <span class="wb-folder-table" v-html="row.nameHtml"></span>
             <span v-if="row.missing" class="wb-folder-missing">{{ t("tableFolders.missing") }}</span>
-            <span v-else class="wb-folder-comment">{{ row.comment }}</span>
+            <span v-else class="wb-folder-comment" v-html="row.commentHtml"></span>
           </li>
         </ul>
-        <p v-else class="wb-folder-empty">{{ t("tableFolders.emptyFolder") }}</p>
+        <p v-else-if="tablesLoading" class="wb-folder-empty" role="status">{{ t("tableFolders.loadingTables") }}</p>
+        <p v-else class="wb-folder-empty">{{ t("m_4034e355eb62") }}</p>
       </section>
-    </template>
-
-    <section v-else class="wb-folder-picker" :aria-label="t('tableFolders.pickTitle', { name: folderLabel(currentFolder) })" @keydown="onPickKeydown">
-      <header class="wb-folder-header">
-        <button type="button" class="wb-folder-back" :title="t('tableFolders.back')" :aria-label="t('tableFolders.back')" @click="closePicker">
-          <ArrowLeft :size="16" />
-        </button>
-        <h2>{{ t("tableFolders.pickTitle", { name: folderLabel(currentFolder) }) }}</h2>
-        <label class="wb-folder-search">
-          <Search :size="14" aria-hidden="true" />
-          <input ref="pickSearchRef" v-model="pickQuery" type="search" :placeholder="t('tableFolders.search')" :aria-label="t('tableFolders.search')" />
-        </label>
-      </header>
-      <ul class="wb-folder-rows" role="listbox" aria-multiselectable="true">
-        <li
-          v-for="row in pickRows"
-          :key="row.name"
-          class="wb-folder-row is-pickable"
-          :class="{ 'is-checked': row.present || pickSet.has(row.name), 'is-present': row.present }"
-          role="option"
-          :aria-selected="row.present || pickSet.has(row.name) ? 'true' : 'false'"
-          :aria-disabled="row.present ? 'true' : undefined"
-          @click="togglePick(row, $event)"
-        >
-          <span class="wb-folder-check" aria-hidden="true"><Check v-if="row.present || pickSet.has(row.name)" :size="12" /></span>
-          <component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon" />
-          <span class="wb-folder-table" v-html="row.nameHtml"></span>
-          <span class="wb-folder-comment" v-html="row.commentHtml"></span>
-        </li>
-        <li v-if="tablesLoading && !pickRows.length" class="wb-folder-empty">{{ t("tableFolders.loadingTables") }}</li>
-        <li v-else-if="!pickRows.length" class="wb-folder-empty">{{ t("m_4034e355eb62") }}</li>
-      </ul>
-      <footer class="wb-folder-picker-footer">
-        <button type="button" @click="closePicker">{{ t("tableFolders.cancel") }}</button>
-        <button type="button" class="is-primary" :disabled="!pickSelection.length" @click="submitPicks">
-          {{ pickSelection.length ? t("tableFolders.submitCount", { count: pickSelection.length }) : t("tableFolders.submit") }}
-        </button>
-      </footer>
-    </section>
 
     <Teleport to="body">
       <menu
@@ -649,7 +579,7 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
           <button type="button" role="menuitem" @click="openRows(menu.tableNames)">
             <Table2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("tableFolders.openTables") }}<kbd class="wb-context-shortcut" aria-hidden="true">Enter</kbd>
           </button>
-          <button type="button" role="menuitem" @click="removeRows(menu.tableNames)">
+          <button type="button" role="menuitem" :disabled="!menu.tableNames.some((name) => currentFolder?.tableNames.includes(name))" @click="removeRows(menu.tableNames)">
             <X :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("tableFolders.removeFromFolder") }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ deleteKeyLabel }}</kbd>
           </button>
         </template>

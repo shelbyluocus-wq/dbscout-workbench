@@ -6,13 +6,13 @@ import { parse, compileScript, compileTemplate } from "@vue/compiler-sfc";
 const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
 const css = readFileSync(new URL("./workbench.css", import.meta.url), "utf8");
 
-test("folder contents and picker use the scoped shared database decoration", () => {
+test("inline folder table list uses the scoped shared database decoration", () => {
   assert.match(source, /getDatabaseDecoration\(scope\.value\.connectionId, scope\.value\.database\)/);
   assert.match(source, /computed\(\(\) => databaseTableIconComponent\(databaseDecoration\.value\)\)/);
   assert.match(source, /"--wb-folder-icon-color": databaseDecoration\.value\?\.color \|\| undefined/);
   assert.match(source, /"--wb-folder-table-color": databaseTextColorCss\(databaseDecoration\.value\?\.textColor\) \|\| undefined/);
   assert.match(source, /class="wb-folder-page" :style="databaseDecorationStyle"/);
-  assert.equal(source.match(/<component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon"/g)?.length, 2);
+  assert.equal(source.match(/<component :is="tableIcon" :size="15" aria-hidden="true" class="wb-folder-row-icon"/g)?.length, 1);
 });
 
 test("folder decoration preserves defaults, comment styling and missing-table state", () => {

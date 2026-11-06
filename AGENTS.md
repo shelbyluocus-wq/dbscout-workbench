@@ -103,7 +103,11 @@ capabilities:
   star toggles (earlier flat favorites migrate into it). Tables join a
   folder by dragging (sidebar tables, a folder's own rows, or a whole folder
   dropped onto another folder, which adds the tables it holds now) or
-  through Add tables, a picker page that adds on Submit. Rename (F2) and
+  through inline checkboxes: the main pane always lists the selected database's
+  tables, with search and current-folder membership checked. Checking adds a
+  reference immediately; unchecking removes only the reference. There is no
+  separate Add tables page or Submit step. Missing folder references stay visible.
+  Rename (F2) and
   delete (Delete, confirmed) live in the folder's right-click menu with
   open here / in a new window; a table row's menu opens or removes it. The
   page shows no counts or hints; tables the database no longer has are
