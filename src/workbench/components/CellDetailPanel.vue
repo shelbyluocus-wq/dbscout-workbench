@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
+import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
 
 const props = defineProps({
   selectedCell: { type: Object, default: null },
@@ -42,6 +43,7 @@ const isResizing = ref(false);
 // 收起/展开与 JSON 格式化偏好（含 localStorage 持久化）由独立模块持有，
 // 组件只消费 state 与 toggle/notify 方法。
 const visibility = createCellDetailVisibility();
+const { ambientStyle } = useCellDetailAmbient();
 let removeDragListeners = null;
 
 const selectedCellKey = computed(() =>
@@ -367,6 +369,7 @@ onBeforeUnmount(finishResize);
     ref="rootRef"
     class="wb-cell-detail"
     :class="{ 'is-resizing': isResizing, 'is-collapsed': isPanelCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
+    :style="ambientStyle"
     :aria-label="t('m_946f88c2a713')"
   >
     <div
@@ -420,8 +423,8 @@ onBeforeUnmount(finishResize);
           :title="toggleLabel"
           @click.stop="togglePanel"
         >
-          <ChevronUp v-if="isPanelCollapsed" class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
-          <ChevronDown v-else class="wb-cell-detail-chevron" :size="13" aria-hidden="true" />
+          <ChevronUp v-if="isPanelCollapsed" class="wb-cell-detail-chevron" :size="18" :stroke-width="2" aria-hidden="true" />
+          <ChevronDown v-else class="wb-cell-detail-chevron" :size="18" :stroke-width="2" aria-hidden="true" />
         </button>
       </div>
     </div>

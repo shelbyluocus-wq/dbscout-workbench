@@ -1255,8 +1255,8 @@ test("cell detail collapse bar uses theme tokens and pane-collapse motion", () =
   const contentRule = ruleBody(".wb-cell-detail-content");
   const resizingContentRule = ruleBody(".wb-cell-detail.is-resizing .wb-cell-detail-content");
 
-  // 27px bar + 1px border-top on .wb-cell-detail = the 28px collapsed strip.
-  assert.match(headerRule, /height:\s*27px/);
+  // The collapsed glass card is just this 32px title bar.
+  assert.match(headerRule, /height:\s*32px/);
   assert.match(headerRule, /color:\s*var\(--wb-quiet-text\)/);
   assert.match(collapsedHoverRule, /background:\s*var\(--wb-control-hover\)/);
   assert.match(collapsedHoverRule, /color:\s*var\(--wb-text\)/);

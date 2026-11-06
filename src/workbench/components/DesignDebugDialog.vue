@@ -20,6 +20,8 @@ import {
   readCurrentValues,
   resolveModeTarget,
 } from "../composables/designDebug.js";
+import { cellDetailAmbientPreview as ambient } from "../composables/useCellDetailAmbient.js";
+import { MINUTES_PER_DAY, formatMinutes } from "../utils/cellDetailAmbient.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -242,6 +244,35 @@ function onKeydown(event) {
             <button type="button" class="is-right" :aria-label="t('m_a0d36517ab7a')" @click="nudgeFill('x', 1)">→</button>
           </div>
           <p class="wb-design-debug-fill-hint">{{ t('m_e9a3aa5cc13d') }} {{ FILL_HANDLE_OFFSET_RANGE.min }}～{{ FILL_HANDLE_OFFSET_RANGE.max }}</p>
+        </div>
+
+        <div class="wb-design-debug-ambient">
+          <label class="wb-design-debug-row">
+            <span class="wb-design-debug-label">{{ t('designDebug.ambientTime') }}</span>
+            <input
+              type="range"
+              min="0"
+              :max="MINUTES_PER_DAY - 1"
+              step="1"
+              :value="Math.floor(ambient.minutes.value)"
+              :aria-label="t('designDebug.ambientTime')"
+              @input="ambient.setMinutes($event.target.valueAsNumber)"
+            />
+            <code class="wb-design-debug-value">{{ formatMinutes(ambient.minutes.value) }}</code>
+          </label>
+          <div class="wb-design-debug-ambient-actions">
+            <button
+              type="button"
+              :aria-pressed="String(ambient.playing.value)"
+              @click="ambient.playing.value ? ambient.pause() : ambient.play()"
+            >{{ ambient.playing.value ? t('designDebug.ambientPause') : t('designDebug.ambientPlay') }}</button>
+            <button
+              type="button"
+              :disabled="!ambient.previewing.value"
+              @click="ambient.followSystem()"
+            >{{ t('designDebug.ambientFollow') }}</button>
+            <span v-if="!ambient.previewing.value" class="wb-design-debug-mode">{{ t('designDebug.ambientSystem') }}</span>
+          </div>
         </div>
       </div>
 
