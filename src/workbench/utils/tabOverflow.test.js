@@ -36,6 +36,15 @@ test("wide panes show all tabs and empty panes have no overflow", () => {
   assert.deepEqual(partitionTabs([], "", 0), { visible: [], overflow: [] });
 });
 
+test("overflow reserves space for the home icon and visible label", () => {
+  const shortTabs = tabs.slice(0, 3);
+  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 318), { visible: shortTabs, overflow: [] });
+  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 317), {
+    visible: shortTabs.slice(0, 2),
+    overflow: shortTabs.slice(2),
+  });
+});
+
 test("switching to an overflow tab swaps visibility without reordering tabs", () => {
   const original = [...tabs];
   const first = partitionTabs(tabs, "tab-0", 600);

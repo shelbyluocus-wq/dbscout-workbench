@@ -1,5 +1,5 @@
 export function partitionTabs(tabs, activeTabId, availableWidth) {
-  const widthOf = (tab) => tab.kind === "home" ? 64 : 112;
+  const widthOf = (tab) => tab.kind === "home" ? 88 : 112;
   const requiredWidth = tabs.reduce((width, tab) => width + widthOf(tab) + 2, 0);
   if (requiredWidth <= availableWidth) return { visible: tabs, overflow: [] };
   let remaining = Math.max(0, availableWidth - 48);

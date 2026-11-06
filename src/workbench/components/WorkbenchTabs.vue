@@ -415,7 +415,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else-if="tabKind(tab) === 'home'">
             <House class="wb-tab-home-icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
-            <span class="wb-tab-name wb-visually-hidden">{{ tabTitle(tab) }}</span>
+            <span class="wb-tab-name">{{ tabTitle(tab) }}</span>
           </template>
           <template v-else>
             <span v-if="tab.opening" class="wb-tab-opening-spinner" aria-hidden="true"></span>

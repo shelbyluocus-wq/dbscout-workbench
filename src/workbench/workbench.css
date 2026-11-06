@@ -11136,9 +11136,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab[data-kind="home"] {
   --wb-active-tab-surface: var(--wb-chrome-surface);
-  flex: 0 0 64px;
-  min-width: 64px;
-  max-width: 64px;
+  flex: 0 0 88px;
+  min-width: 88px;
+  max-width: 88px;
   padding: 0 5px;
   justify-content: center;
 }
@@ -22122,9 +22122,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab[data-kind="home"].can-close-pane {
-  flex-basis: 82px;
-  min-width: 82px;
-  max-width: 82px;
+  flex-basis: 112px;
+  min-width: 112px;
+  max-width: 112px;
   justify-content: flex-start;
   padding: 0 29px 0 9px;
 }

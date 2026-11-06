@@ -262,7 +262,7 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
 });
 
-test("homepage tab aligns with the grid row-number column", () => {
+test("homepage tab shows its icon and label with room for the pane close button", () => {
   const rootRule = ruleBody(":root");
   const paneTabStripRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
   const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
@@ -272,8 +272,13 @@ test("homepage tab aligns with the grid row-number column", () => {
   assert.match(rootRule, /--wb-row-index-width\s*:\s*38px/);
   assert.match(paneTabStripRule, /padding\s*:\s*4px 0 0\s*;/);
   assert.match(paneTabListRule, /padding-left\s*:\s*0/);
-  assert.match(homeTabRule, /flex\s*:\s*0 0 64px/);
-  assert.match(homeTabRule, /min-width\s*:\s*64px/);
+  assert.match(homeTabRule, /flex\s*:\s*0 0 88px/);
+  assert.match(homeTabRule, /min-width\s*:\s*88px/);
+  assert.match(ruleBody('.wb-tab[data-kind="home"].can-close-pane'), /min-width\s*:\s*112px/);
+  const homeTemplate = tabsVue.match(/<template v-else-if="tabKind\(tab\) === 'home'">([\s\S]*?)<\/template>/)?.[1] || "";
+  assert.match(homeTemplate, /<House\b/);
+  assert.match(homeTemplate, /<span class="wb-tab-name">\{\{ tabTitle\(tab\) \}\}<\/span>/);
+  assert.doesNotMatch(homeTemplate, /wb-visually-hidden/);
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
