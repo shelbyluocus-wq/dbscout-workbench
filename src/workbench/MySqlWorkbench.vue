@@ -5381,6 +5381,7 @@ function scheduleDeferredUpdateCheck() {
 onMounted(async () => {
   markPerf("workbench.mounted");
   tableModifiedTimeAutoRefresh.start();
+  if (!isFolderWindow) tableTransfer.startCleanup();
   if (!isFolderWindow) void updater.startBackgroundListener();
   void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);

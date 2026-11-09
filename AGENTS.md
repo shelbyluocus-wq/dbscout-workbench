@@ -140,8 +140,14 @@ capabilities:
   pane's left/top/right edges and floats "<connection name> · <database label>"
   (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
-- **One-click table transfer** — an activity-rail entry below the backup
-  center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
+- **One-click table transfer** — templates retain generated packages for 7 days by default (0 disables
+  cleanup, configurable up to 3650 days). The main window checks 30 seconds
+  after startup and hourly while running. Cleanup shares the transfer job lock,
+  only removes expired timestamp packages in the script work directory or one
+  child level, keeps the newest package per container, and skips project paths,
+  links/reparse points, versioned trees and recently modified package contents.
+  Shared work directories use the longest retention, with disabling taking priority.
+  An activity-rail entry below the backup center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
   the conversion script
   (Windows: `.exe/.bat/.cmd/.lnk`; macOS: Bash `.sh/.command`, manually selected;
   `.lnk` resolved via PowerShell COM, script stdin is

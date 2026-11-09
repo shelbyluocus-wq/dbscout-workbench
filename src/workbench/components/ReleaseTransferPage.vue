@@ -181,6 +181,22 @@ function setStrategy(value) {
         <dt>{{ t('releaseFlow.transfer.target') }}</dt>
         <dd><span class="wb-rf-code">{{ assetsFolder }}</span></dd>
       </div>
+      <div v-if="transfer" class="wb-rf-fact">
+        <dt><label for="wb-release-transfer-retention">{{ t('tableTransfer.retention') }}</label></dt>
+        <dd>
+          <input
+            id="wb-release-transfer-retention"
+            type="number"
+            min="0"
+            max="3650"
+            step="1"
+            :value="selected.retentionDays ?? 7"
+            :disabled="busy || transferBusy"
+            @change="transfer.updateTemplate(selected.id, { retentionDays: $event.target.value }); $event.target.value = selected.retentionDays"
+          />
+          <span class="wb-rf-hint">{{ t('tableTransfer.retentionHint') }}</span>
+        </dd>
+      </div>
     </dl>
     <p class="wb-rf-hint">{{ t('releaseFlow.transfer.shared') }}</p>
   </section>

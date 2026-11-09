@@ -38,7 +38,12 @@ const PRESET_TEMPLATES = Object.freeze([
 ]);
 
 const PRESET_IDS = new Set(PRESET_TEMPLATES.map((preset) => preset.id));
-const PERSISTED_TEMPLATE_FIELDS = Object.freeze(["id", "name", "scriptPath", "projectRoot", "conflictStrategy"]);
+const PERSISTED_TEMPLATE_FIELDS = Object.freeze(["id", "name", "scriptPath", "projectRoot", "conflictStrategy", "retentionDays"]);
+
+function sanitizeRetentionDays(value) {
+  const days = Number(value);
+  return value !== null && value !== "" && Number.isInteger(days) && days >= 0 && days <= 3650 ? days : 7;
+}
 
 function sanitizeConflictStrategy(value) {
   if (value === "mine" || value === "manual") return value;
@@ -60,6 +65,7 @@ function sanitizeTemplate(entry) {
     scriptPath: String(entry?.scriptPath || "").trim(),
     projectRoot: String(entry?.projectRoot || preset?.projectRoot || "").trim(),
     conflictStrategy: sanitizeConflictStrategy(entry?.conflictStrategy),
+    retentionDays: sanitizeRetentionDays(entry?.retentionDays),
   };
 }
 
@@ -161,6 +167,8 @@ export function useTableTransfer({
   listen = null,
   storage = globalThis.localStorage,
   createJobId = defaultJobId,
+  schedule = globalThis.setTimeout,
+  unschedule = globalThis.clearTimeout,
 } = {}) {
   const templates = shallowRef(readTemplates(storage));
   const activeTemplateId = shallowRef(readActiveTemplateId(storage, templates.value));
@@ -175,6 +183,35 @@ export function useTableTransfer({
     errorMessage: "",
   });
   let unlistenProgress = null;
+  let cleanupTimer = null;
+  let cleanupStarted = false;
+  let cleanupBusy = false;
+  const cleanupMessage = shallowRef("");
+
+  async function cleanupOutputs() {
+    if (!invokeWorkbench || isRunning.value || cleanupBusy) return;
+    cleanupBusy = true;
+    try {
+      const summary = await invokeWorkbench("table_transfer_cleanup", {
+        templates: readTemplates(storage),
+      });
+      cleanupMessage.value = summary?.errors?.join("\n") || "";
+    } catch (error) {
+      cleanupMessage.value = errorMessage(error);
+    } finally {
+      cleanupBusy = false;
+    }
+  }
+
+  function startCleanup() {
+    if (cleanupStarted) return;
+    cleanupStarted = true;
+    const tick = async () => {
+      await cleanupOutputs();
+      if (cleanupStarted) cleanupTimer = schedule(tick, 60 * 60 * 1000);
+    };
+    cleanupTimer = schedule(tick, 30 * 1000);
+  }
 
   const activeTemplate = computed(
     () =>
@@ -212,8 +249,9 @@ export function useTableTransfer({
       scriptPath = target.scriptPath,
       projectRoot = target.projectRoot,
       conflictStrategy = target.conflictStrategy,
+      retentionDays = target.retentionDays,
     } = patch;
-    const updated = sanitizeTemplate({ ...target, scriptPath, projectRoot, conflictStrategy });
+    const updated = sanitizeTemplate({ ...target, scriptPath, projectRoot, conflictStrategy, retentionDays });
     commitTemplates(templates.value.map((template) => (template.id === id ? updated : template)));
   }
 
@@ -448,6 +486,9 @@ export function useTableTransfer({
   }
 
   function dispose() {
+    cleanupStarted = false;
+    if (cleanupTimer !== null) unschedule(cleanupTimer);
+    cleanupTimer = null;
     if (flushTimer) {
       clearTimeout(flushTimer);
       flushTimer = null;
@@ -469,6 +510,9 @@ export function useTableTransfer({
     isRunning,
     canRun,
     stageLabel,
+    cleanupMessage,
+    cleanupOutputs,
+    startCleanup,
     setActiveTemplate,
     updateTemplate,
     validateTemplateName,

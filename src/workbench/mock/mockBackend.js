@@ -2292,6 +2292,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       };
     });
   }
+  if (command === "table_transfer_cleanup") {
+    return { deleted: 0, errors: [] };
+  }
   if (command === "table_transfer_run") {
     const req = payload?.request || payload || {};
     const jobId = String(req.jobId || "");

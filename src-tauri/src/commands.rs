@@ -263,6 +263,14 @@ pub async fn table_transfer_discover_paths(
 }
 
 #[tauri::command]
+pub async fn table_transfer_cleanup(
+    state: State<'_, AppState>,
+    templates: Vec<crate::table_transfer::cleanup::CleanupTemplate>,
+) -> Result<crate::table_transfer::cleanup::CleanupResult, String> {
+    crate::table_transfer::cleanup::run(&state.table_transfer, templates).await
+}
+
+#[tauri::command]
 pub async fn table_transfer_run(
     app: AppHandle,
     window: Window,

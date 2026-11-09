@@ -21,6 +21,8 @@ use crate::types::{
 };
 use crate::work_scheduler::WorkCancellation;
 
+pub mod cleanup;
+
 pub const TABLE_TRANSFER_PROGRESS_EVENT: &str = "table-transfer-progress";
 
 const STAGE_SCRIPT: &str = "script";
@@ -1649,12 +1651,12 @@ mod tests {
 
     static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    struct TestTempDir {
+    pub(super) struct TestTempDir {
         path: PathBuf,
     }
 
     impl TestTempDir {
-        fn create(prefix: &str) -> Self {
+        pub(super) fn create(prefix: &str) -> Self {
             let timestamp = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -1668,7 +1670,7 @@ mod tests {
             Self { path }
         }
 
-        fn path(&self) -> &Path {
+        pub(super) fn path(&self) -> &Path {
             &self.path
         }
     }

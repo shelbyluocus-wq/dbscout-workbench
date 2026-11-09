@@ -391,6 +391,22 @@ async function deleteActiveTemplate() {
             </div>
           </div>
           <div class="wb-table-transfer-field">
+            <label class="wb-table-transfer-label" for="wb-transfer-retention">{{ t('tableTransfer.retention') }}</label>
+            <div>
+              <input
+                id="wb-transfer-retention"
+                type="number"
+                min="0"
+                max="3650"
+                step="1"
+                :value="activeTemplate.retentionDays"
+                :disabled="isRunning"
+                @change="transfer.updateTemplate(activeTemplate.id, { retentionDays: $event.target.value }); $event.target.value = activeTemplate.retentionDays"
+              />
+              <p v-if="transfer.cleanupMessage.value" role="status" class="wb-table-transfer-cleanup-error">{{ t('tableTransfer.cleanupFailed') }} {{ transfer.cleanupMessage.value }}</p>
+            </div>
+          </div>
+          <div class="wb-table-transfer-field">
             <span class="wb-table-transfer-label">{{ t('m_60a33016fc13') }}</span>
             <div class="wb-table-transfer-strategy" role="radiogroup" :aria-label="t('m_930b09549775')">
               <label>
@@ -466,6 +482,37 @@ async function deleteActiveTemplate() {
 </template>
 
 <style scoped>
+#wb-transfer-retention {
+  width: 100px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 4px;
+  background: var(--wb-cell-editor);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+}
+
+#wb-transfer-retention:disabled {
+  color: var(--wb-disabled);
+}
+
+label[for="wb-transfer-retention"] {
+  align-self: start;
+  padding-top: 7px;
+}
+
+.wb-table-transfer-cleanup-error {
+  margin: 6px 0 0;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-table-transfer-cleanup-error {
+  color: var(--wb-danger-text);
+  overflow-wrap: anywhere;
+}
+
 .wb-table-transfer-dialog {
   display: flex;
   flex-direction: column;

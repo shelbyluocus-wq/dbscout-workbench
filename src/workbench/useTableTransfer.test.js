@@ -23,6 +23,74 @@ function createStorage(initial = {}) {
   };
 }
 
+test("output retention defaults, validates, and persists per template", () => {
+  const storage = createStorage();
+  const transfer = useTableTransfer({ storage });
+  assert.equal(transfer.activeTemplate.value.retentionDays, 7);
+  for (const value of [0, 1, 30, 3650]) {
+    transfer.updateTemplate("juesheng-1", { retentionDays: String(value) });
+    assert.equal(useTableTransfer({ storage }).activeTemplate.value.retentionDays, value);
+  }
+  for (const value of ["", null, -1, 1.5, 3651, "bad"]) {
+    transfer.updateTemplate("juesheng-1", { retentionDays: value });
+    assert.equal(transfer.activeTemplate.value.retentionDays, 7);
+  }
+  transfer.updateTemplate("juesheng-1", { retentionDays: 14 });
+  transfer.updateTemplate("juesheng-1", { scriptPath: "/tmp/gen.sh" });
+  assert.equal(transfer.activeTemplate.value.retentionDays, 14);
+  assert.equal(transfer.templates.value[1].retentionDays, 7);
+  assert.equal(transfer.addTemplate("test").template.retentionDays, 7);
+});
+
+test("cleanup starts in the background, repeats hourly, reads current settings and stops on dispose", async () => {
+  const storage = createStorage();
+  const scheduled = [];
+  const cancelled = [];
+  const calls = [];
+  const transfer = useTableTransfer({
+    storage,
+    schedule: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
+    unschedule: (timer) => cancelled.push(timer),
+    invokeWorkbench: async (command, payload) => { calls.push({ command, payload }); return { errors: [] }; },
+  });
+  transfer.startCleanup();
+  transfer.startCleanup();
+  assert.equal(calls.length, 0);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delay, 30000);
+  const otherWindow = useTableTransfer({ storage });
+  otherWindow.updateTemplate("juesheng-1", { retentionDays: 0 });
+  await scheduled[0].callback();
+  assert.equal(calls[0].command, "table_transfer_cleanup");
+  assert.equal(calls[0].payload.templates[0].retentionDays, 0);
+  assert.equal(scheduled[1].delay, 3600000);
+  transfer.dialog.status = "running";
+  await scheduled[1].callback();
+  assert.equal(calls.length, 1);
+  transfer.dispose();
+  assert.deepEqual(cancelled, [3]);
+});
+
+test("cleanup serializes requests, reports errors and does not change transfer status", async () => {
+  let finish;
+  let calls = 0;
+  const transfer = useTableTransfer({ storage: createStorage(), invokeWorkbench: () => {
+    calls += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  } });
+  const pending = transfer.cleanupOutputs();
+  await transfer.cleanupOutputs();
+  assert.equal(calls, 1);
+  finish({ errors: ["permission denied"] });
+  await pending;
+  assert.equal(transfer.cleanupMessage.value, "permission denied");
+  assert.equal(transfer.dialog.status, "idle");
+  const retry = transfer.cleanupOutputs();
+  finish({ errors: [] });
+  await retry;
+  assert.equal(transfer.cleanupMessage.value, "");
+});
+
 function createEventBus() {
   const listeners = [];
   return {
@@ -220,6 +288,7 @@ test("user templates are added with their own name and survive a reload", () => 
     scriptPath: "E:\\branch\\gen.bat",
     projectRoot: "E:\\branch\\jswz",
     conflictStrategy: "mine",
+    retentionDays: 7,
   });
 });
 

@@ -225,6 +225,7 @@ pub fn run() {
             commands::table_transfer_pick_project_dir,
             commands::table_transfer_discover_paths,
             commands::table_transfer_run,
+            commands::table_transfer_cleanup,
             commands::table_transfer_cancel,
             config_relations::commands::config_relations_overview,
             config_relations::commands::config_relations_table,
