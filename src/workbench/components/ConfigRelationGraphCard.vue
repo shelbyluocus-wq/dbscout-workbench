@@ -447,6 +447,13 @@ button.wb-relation-graph-card-table:focus-visible {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-relation-graph-card-action.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
 .wb-relation-graph-card-action.is-quiet {
   margin-left: auto;
   border-color: transparent;

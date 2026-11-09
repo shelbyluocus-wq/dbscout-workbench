@@ -107,7 +107,7 @@ const entries = computed(() => [...auto.value.log].reverse());
   border: 1px solid color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
   border-radius: 12px;
   background: var(--wb-accent-soft);
-  --wb-rf-auto-tone: var(--wb-accent);
+  --wb-rf-auto-tone: var(--wb-accent-strong);
 }
 
 .wb-rf-auto-bar.is-paused {

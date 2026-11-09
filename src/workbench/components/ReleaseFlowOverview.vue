@@ -177,7 +177,7 @@ function scopeDisabled(scope) {
 }
 
 .wb-rf-scope-check {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-rf-ready {

@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readLocalizedContractSource(join(__dirname, "workbench.css"), "utf8");
+const releaseFlowCss = readLocalizedContractSource(join(__dirname, "releaseFlow.css"), "utf8");
+const releaseWorkspaceCss = readLocalizedContractSource(join(__dirname, "releaseWorkspace.css"), "utf8");
 const orchestratorVue = readLocalizedContractSource(join(__dirname, "MySqlWorkbench.vue"), "utf8");
 const paneVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchPane.vue"), "utf8");
 const splitLayoutVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSplitLayout.vue"), "utf8");
@@ -1055,9 +1057,9 @@ test("readability tokens keep metadata and disabled text legible in both themes"
   assert.match(rootRule, /--wb-field-placeholder:\s*#5f6670/);
   assert.match(rootRule, /--wb-quiet-text:\s*#4f5661/);
   assert.match(rootRule, /--wb-remark-text:\s*#3f4650/);
-  assert.match(darkRule, /--wb-disabled:\s*#9ba3af/);
+  assert.match(darkRule, /--wb-disabled:\s*#868c95/);
   assert.match(darkRule, /--wb-field-placeholder:\s*#a9b0ba/);
-  assert.match(darkRule, /--wb-quiet-text:\s*#a8b0ba/);
+  assert.match(darkRule, /--wb-quiet-text:\s*#a2a9b3/);
   assert.match(darkRule, /--wb-remark-text:\s*#c2c8d0/);
   assert.match(disabledDangerRule, /background:\s*var\(--wb-danger-surface\)/);
   assert.match(disabledDangerRule, /color:\s*var\(--wb-danger-text\)/);
@@ -1070,6 +1072,45 @@ test("readability tokens keep metadata and disabled text legible in both themes"
     /class="wb-dialog-primary"\s*:disabled="!copy\.canExecute\.value \|\| isBusy"/,
   );
   assert.doesNotMatch(tableCopyDialogVue, /wb-database-sync-danger/);
+});
+
+test("contrast pass keeps accent text on accent-strong, danger fills on danger-control, and disabled on a flat color", () => {
+  // Filled accent controls pair their background with the matching text token.
+  assert.match(ruleBody(".wb-grid-error-retry"), /background:\s*var\(--wb-accent-control\)/);
+  assert.match(ruleBody(".wb-grid-error-retry"), /color:\s*var\(--wb-accent-control-text\)/);
+  assert.match(ruleBody(".wb-grid-error-retry:hover:not(:disabled)"), /background:\s*var\(--wb-accent-control-hover\)/);
+  // Filled danger controls use the dedicated danger-control tokens in both themes.
+  for (const selector of [".wb-dialog-primary.danger", ".wb-activity-rail-badge", ".wb-design-danger"]) {
+    assert.match(ruleBody(selector), /background:\s*var\(--wb-danger-control\)/, selector);
+    assert.match(ruleBody(selector), /color:\s*var\(--wb-danger-control-text\)/, selector);
+  }
+  assert.match(ruleBody(".wb-design-danger:hover:not(:disabled)"), /background:\s*var\(--wb-danger-control-hover\)/);
+  // Disabled state is a flat --wb-disabled color, never an opacity dim on top.
+  const globalDisabled = ruleBody("button:disabled");
+  assert.match(globalDisabled, /color:\s*var\(--wb-disabled\)/);
+  assert.doesNotMatch(globalDisabled, /opacity\s*:/);
+  const bodyIn = (source, selector) => {
+    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+    let match;
+    while ((match = rulePattern.exec(source))) {
+      const selectors = match[1].replace(/\/\*[\s\S]*?\*\//g, "").split(",").map((part) => part.trim()).filter(Boolean);
+      if (selectors.includes(selector)) return match[2];
+    }
+    return "";
+  };
+  for (const [selector, source] of [
+    [".wb-sql-toolbar button:disabled", css],
+    [".wb-context-menu button:disabled", css],
+    [".wb-toolbar-action-menu-item:disabled", css],
+    [".wb-grid-boundary-pill:disabled", css],
+    [".wb-tab-overflow-item:disabled", css],
+    [".wb-rf-rail-item:disabled", releaseWorkspaceCss],
+    [".wb-rf-btn.is-primary:disabled", releaseFlowCss],
+  ]) {
+    const body = bodyIn(source, selector);
+    assert.ok(body, `missing ${selector} rule`);
+    assert.doesNotMatch(body, /opacity\s*:/, `${selector} must not dim with opacity`);
+  }
 });
 
 test("grid and inspector typography favor long-session readability", () => {
@@ -1153,7 +1194,7 @@ test("table design primary keys use a distinct numbered key treatment", () => {
 });
 
 test("table design comment edit hover stays restrained in light mode", () => {
-  const hoverRule = ruleBody('.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover');
+  const hoverRule = ruleBody('.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover:not(:disabled)');
 
   assert.match(hoverRule, /border-color\s*:\s*color-mix\(in srgb,\s*var\(--wb-accent\) 58%,\s*transparent\)/);
   assert.match(hoverRule, /background\s*:\s*color-mix\(in srgb,\s*var\(--wb-accent\) 14%,\s*var\(--wb-cell-editor\)\)/);
@@ -1287,9 +1328,9 @@ test("confirm dialog danger button binds the class the stylesheet actually style
   // `.wb-database-sync-danger`), so the component must bind `danger`.
   assert.doesNotMatch(confirmVue, /wb-dialog-danger/);
   assert.match(confirmVue, /:class="\{ danger \}"/);
-  assert.match(ruleBody(".wb-dialog-primary.danger"), /background:\s*var\(--wb-danger\)/);
-  assert.match(ruleBody(".wb-dialog-primary.danger"), /color:\s*#fff/);
-  assert.match(ruleBody(".wb-dialog-primary.danger:hover:not(:disabled)"), /color-mix\(in srgb, var\(--wb-danger\) 86%, #000\)/);
+  assert.match(ruleBody(".wb-dialog-primary.danger"), /background:\s*var\(--wb-danger-control\)/);
+  assert.match(ruleBody(".wb-dialog-primary.danger"), /color:\s*var\(--wb-danger-control-text\)/);
+  assert.match(ruleBody(".wb-dialog-primary.danger:hover:not(:disabled)"), /background:\s*var\(--wb-danger-control-hover\)/);
 });
 
 test("batch export keeps its pending cancel action legible while preventing duplicate requests", () => {
@@ -1351,7 +1392,7 @@ test("database display separates icon and name colors with theme-following defau
   assert.match(ruleBody(".wb-database-color-setting"), /grid-template-columns:\s*86px minmax\(0, 1fr\)/);
   for (const [name, light, dark] of [
     ["slate", "#475569", "#cbd5e1"],
-    ["teal", "#0f766e", "#5eead4"],
+    ["teal", "#0d6d65", "#5eead4"],
     ["blue", "#1d4ed8", "#93c5fd"],
     ["violet", "#6d28d9", "#c4b5fd"],
     ["amber", "#92400e", "#fbbf24"],

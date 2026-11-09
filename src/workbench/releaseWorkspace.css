@@ -154,7 +154,7 @@
   padding: 1px 7px 1px 5px;
   border-radius: 999px;
   background: var(--wb-accent-soft);
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   font-size: var(--wb-fs-caption);
   font-weight: 650;
 }
@@ -251,8 +251,7 @@
 }
 
 .wb-rf-rail-item:disabled {
-  color: var(--wb-quiet-text);
-  opacity: 0.7;
+  color: var(--wb-disabled);
 }
 
 .wb-rf-rail-label {
@@ -382,7 +381,7 @@
 }
 
 .wb-rf-choice-name svg {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-rf-choice-state {
@@ -840,7 +839,7 @@
 
 .wb-rf-history-log summary {
   width: fit-content;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   font-size: var(--wb-fs-body);
   cursor: pointer;
 }
@@ -950,7 +949,7 @@
 
 .wb-rf-combobox-option svg {
   flex: none;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-rf-combobox-empty {

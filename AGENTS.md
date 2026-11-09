@@ -56,6 +56,15 @@ Interface text uses six tokens defined in `workbench.css` `:root`:
 `font-size` in CSS, `<style>` blocks, or inline styles — use a token;
 `src/workbench/typographyTokens.test.js` enforces it.
 
+### Text color & contrast
+
+Text drawn in the accent color uses `--wb-accent-strong`; `--wb-accent` itself
+is for fills, borders and focus rings only. Filled danger buttons use the
+`--wb-danger-control*` tokens. Disabled controls use the `--wb-disabled` color
+with no opacity stacking — never dim text with `opacity`. State de-emphasis
+uses quiet text tokens rather than opacity. `src/workbench/themeContrast.test.js`
+enforces token contrast across all color themes and light/dark modes.
+
 ## Project Overview
 
 DB Scout Workbench (product name **Blackcat**, `com.dbscout.workbench`) is a

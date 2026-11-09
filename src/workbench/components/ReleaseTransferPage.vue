@@ -235,7 +235,7 @@ function setStrategy(value) {
 
 .wb-rf-template-check {
   margin-left: auto;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-rf-template .wb-rf-code {

@@ -444,6 +444,13 @@ function onRowClick(event) {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-relation-card-action.is-confirm:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
 .wb-relation-card.is-rejected .wb-relation-card-title {
   color: var(--wb-secondary-text);
   font-weight: 500;

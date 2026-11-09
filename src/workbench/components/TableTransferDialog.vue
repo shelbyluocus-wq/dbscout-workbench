@@ -546,7 +546,7 @@ async function deleteActiveTemplate() {
 }
 
 .wb-table-transfer-tab:disabled {
-  opacity: 0.6;
+  color: var(--wb-disabled);
   cursor: default;
 }
 
@@ -689,7 +689,7 @@ async function deleteActiveTemplate() {
 }
 
 .wb-table-transfer-path button:disabled {
-  opacity: 0.6;
+  color: var(--wb-disabled);
   cursor: default;
 }
 

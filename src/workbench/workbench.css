@@ -58,7 +58,7 @@
   --wb-remark-text: #3f4650;
   --wb-database-text: #1a1c20;
   --wb-database-name-slate: #475569;
-  --wb-database-name-teal: #0f766e;
+  --wb-database-name-teal: #0d6d65;
   --wb-database-name-blue: #1d4ed8;
   --wb-database-name-violet: #6d28d9;
   --wb-database-name-amber: #92400e;
@@ -67,6 +67,9 @@
   --wb-database-name-green: #166534;
   --wb-quiet-text: #4f5661;
   --wb-danger: #c42b2b;
+  --wb-danger-control: #c42b2b;
+  --wb-danger-control-hover: #a82424;
+  --wb-danger-control-text: #ffffff;
   --wb-scrollbar-size: 10px;
   --wb-scrollbar-track: transparent;
   --wb-scrollbar-thumb: rgba(0, 0, 0, 0.22);
@@ -165,7 +168,7 @@
   --wb-insert-unsaved-accent: color-mix(in srgb, var(--wb-warning-border) 78%, var(--wb-accent));
   --wb-insert-selected: color-mix(in srgb, var(--wb-accent) 8%, var(--wb-insert-active));
   --wb-index-surface: #f1f2f4;
-  --wb-empty-text: #6b6f76;
+  --wb-empty-text: #646870;
   --wb-empty-surface:
     linear-gradient(to right, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
     linear-gradient(to bottom, rgba(100, 105, 115, 0.1) 1px, transparent 1px) 0 0 / 22px 22px,
@@ -177,8 +180,8 @@
   --wb-danger-border: #f5c6cb;
   --wb-warning-surface: #fff8e1;
   --wb-warning-border: #f0c040;
-  --wb-warning-text: #8a6d00;
-  --wb-success-text: #237045;
+  --wb-warning-text: #775c00;
+  --wb-success-text: #1f6640;
   --wb-success-surface: rgba(46, 125, 79, 0.12);
   --wb-success-border: rgba(46, 125, 79, 0.35);
   --wb-mark-surface: rgba(255, 196, 0, 0.55);
@@ -275,7 +278,7 @@ html[data-wb-theme="dark"] {
   /* 深色下 7% 几乎不可见，提高到 16%：可见但克制 */
   --wb-null-cell-tint: color-mix(in srgb, var(--wb-quiet-text) 16%, transparent);
   --wb-text: #e2e4e8;
-  --wb-muted: #8a8d94;
+  --wb-muted: #aab0b8;
   --wb-identifier-text: #e8eaed;
   --wb-type-text: #94a3b8;
   --wb-remark-text: #c2c8d0;
@@ -289,8 +292,11 @@ html[data-wb-theme="dark"] {
   --wb-database-name-orange: #fdba74;
   --wb-database-name-rose: #fda4af;
   --wb-database-name-green: #86efac;
-  --wb-quiet-text: #a8b0ba;
+  --wb-quiet-text: #a2a9b3;
   --wb-danger: #f87171;
+  --wb-danger-control: #dc2626;
+  --wb-danger-control-hover: #b91c1c;
+  --wb-danger-control-text: #ffffff;
   --wb-scrollbar-thumb: rgba(255, 255, 255, 0.18);
   --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
   --wb-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
@@ -310,13 +316,13 @@ html[data-wb-theme="dark"] {
   --wb-control: rgba(35, 35, 37, 0.92);
   --wb-control-hover: rgba(45, 45, 47, 0.98);
   --wb-control-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  --wb-disabled: #9ba3af;
+  --wb-disabled: #868c95;
   --wb-pane-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
   --wb-pane-header: rgba(30, 30, 35, 0.85);
   --wb-tree-surface: rgba(13, 13, 15, 0.65);
   --wb-tree-text: #b0b4b8;
   --wb-tree-guide: rgba(255, 255, 255, 0.08);
-  --wb-secondary-text: #9ca0a8;
+  --wb-secondary-text: #aab0b8;
   --wb-window-control-text: #c8ced8;
   --wb-window-control-text-hover: #f7f8fa;
   --wb-window-control-hover: rgba(148, 163, 184, 0.14);
@@ -404,7 +410,7 @@ html[data-wb-theme="dark"] {
   --wb-code-string: #eabb73;
   --wb-code-number: #c89cff;
   --wb-code-keyword: #ff8fa7;
-  --wb-code-comment: #6b6f76;
+  --wb-code-comment: #8b9099;
   /* Quick Open 浮层遮罩与阴影（深色，更暗以突出浮层） */
   --wb-quick-open-overlay: rgba(0, 0, 0, 0.6);
   --wb-quick-open-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
@@ -469,7 +475,6 @@ button:active:not(:disabled) {
 button:disabled {
   cursor: default;
   color: var(--wb-disabled);
-  opacity: 0.65;
 }
 
 .mysql-workbench * {
@@ -880,7 +885,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-pin-entry-button:disabled {
   cursor: wait;
-  opacity: 0.62;
+  color: var(--wb-disabled);
 }
 
 .wb-ai-entry-icon {
@@ -1093,7 +1098,7 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 5px;
   background: transparent;
   box-shadow: none;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   font-size: var(--wb-fs-title);
   font-weight: 400;
   line-height: 1;
@@ -1198,7 +1203,12 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sql-toolbar button.is-danger:not(:disabled) { color: var(--wb-danger); }
-.wb-sql-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.wb-sql-toolbar button:disabled { color: var(--wb-disabled); cursor: not-allowed; }
+.wb-sql-toolbar button.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+}
 
 .wb-sql-toolbar label {
   display: inline-flex;
@@ -1284,7 +1294,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sql-code-editor .cm-content ::selection { background: var(--wb-row-selected) !important; }
 .wb-sql-code-editor .cm-cursor { border-left-color: var(--wb-text); }
 .wb-sql-code-editor .cm-matchingBracket { outline: 1px solid var(--wb-accent); background: var(--wb-accent-soft); color: var(--wb-text); }
-.wb-sql-code-editor .cm-nonmatchingBracket { outline: 1px solid var(--wb-error-border); background: var(--wb-error-bg); color: var(--wb-error-text); }
+.wb-sql-code-editor .cm-nonmatchingBracket { outline: 1px solid var(--wb-danger-border); background: var(--wb-danger-surface); color: var(--wb-danger-text); }
 .wb-sql-code-editor .cm-searchMatch { outline: 1px solid color-mix(in srgb, var(--wb-warning-border) 72%, transparent); background: var(--wb-sql-match); }
 .wb-sql-code-editor .cm-searchMatch.cm-searchMatch-selected { outline-color: var(--wb-accent); background: var(--wb-row-selected); }
 .wb-sql-code-editor .cm-selectionMatch { background: var(--wb-sql-match); }
@@ -1399,7 +1409,7 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 .wb-sql-output-tabs button.active { border-bottom-color: var(--wb-accent); color: var(--wb-text); }
-.wb-sql-output-tabs button:disabled { opacity: 0.4; }
+.wb-sql-output-tabs button:disabled { color: var(--wb-disabled); }
 .wb-sql-output-tabs small { min-width: 16px; padding: 0 4px; border-radius: 7px; background: var(--wb-accent-soft); }
 .wb-sql-result-set-tabs { display: flex; margin-left: 14px; border-left: 1px solid var(--wb-border); }
 
@@ -1822,7 +1832,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-replace-feedback.is-success {
-  color: var(--wb-success-text, var(--wb-success, #2f7d32));
+  color: var(--wb-success-text);
 }
 
 .wb-replace-feedback.is-error {
@@ -2247,13 +2257,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 /* 危险操作主按钮：删除、覆盖同步等。hover 加深而非变灰。 */
 .wb-dialog-primary.danger {
-  background: var(--wb-danger);
-  color: #fff;
+  background: var(--wb-danger-control);
+  color: var(--wb-danger-control-text);
 }
 
 .wb-dialog-primary.danger:hover:not(:disabled),
 .wb-dialog-primary.danger:focus-visible {
-  background: color-mix(in srgb, var(--wb-danger) 86%, #000);
+  background: var(--wb-danger-control-hover);
 }
 
 /* 禁用态主按钮：去饱和灰化 + not-allowed 光标，明确“不可用”而非次级主按钮。 */
@@ -2379,6 +2389,13 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
 }
 
+.wb-update-notice .wb-update-notice-action:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
 .wb-update-notice-close {
   display: grid;
   place-items: center;
@@ -2493,6 +2510,12 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-update-primary:hover:not(:disabled),
 .wb-update-primary:focus-visible {
   background: var(--wb-accent-control-hover);
+}
+
+.wb-update-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
 }
 
 .wb-database-sync-dialog {
@@ -3728,9 +3751,11 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
 }
 
-.wb-backup-audit-mode button:disabled {
+.wb-backup-audit-mode button:disabled,
+.wb-backup-audit-mode button.active:disabled {
+  background: transparent;
+  color: var(--wb-disabled);
   cursor: not-allowed;
-  opacity: 0.5;
 }
 
 /* Lists shared by the tabs */
@@ -3794,7 +3819,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-backup-empty-icon {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   opacity: 0.6;
 }
 
@@ -3831,7 +3856,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-backup-audit-row.aborted {
-  opacity: 0.62;
+  color: var(--wb-quiet-text);
 }
 
 .wb-backup-audit-main {
@@ -3891,7 +3916,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-backup-op[data-op="DELETE"] {
   background: color-mix(in srgb, var(--wb-danger) 14%, transparent);
-  color: var(--wb-danger);
+  color: var(--wb-danger-text);
 }
 
 .wb-backup-op[data-op="INSERT"] {
@@ -4296,8 +4321,12 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-backup-enable-row.disabled {
-  opacity: 0.55;
+  color: var(--wb-disabled);
   cursor: default;
+}
+
+.wb-backup-enable-row.disabled .wb-backup-enable-name {
+  color: var(--wb-disabled);
 }
 
 .wb-backup-enable-row.disabled:hover {
@@ -4649,15 +4678,15 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: pointer;
 }
 
-.wb-backup-number-step:hover,
-.wb-backup-number-step:active {
+.wb-backup-number-step:hover:not(:disabled),
+.wb-backup-number-step:active:not(:disabled) {
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
 }
 
 .wb-backup-number-step:disabled {
   cursor: default;
-  opacity: 0.5;
+  color: var(--wb-disabled);
 }
 
 .wb-backup-number-step span {
@@ -5109,6 +5138,12 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-control-text);
 }
 
+.wb-import-start-btn:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+}
+
 .wb-import-cancel-btn {
   padding: 5px 16px;
   border: 1px solid var(--wb-danger-border);
@@ -5130,7 +5165,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-dialog-close:disabled {
-  opacity: 0.4;
+  color: var(--wb-disabled);
   cursor: not-allowed;
 }
 
@@ -5442,6 +5477,16 @@ label:has(input[type="checkbox"]:disabled) {
   border-color: var(--wb-accent);
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
+}
+
+.wb-batch-mode-switch button:disabled {
+  color: var(--wb-disabled);
+}
+
+.wb-batch-mode-switch button.is-active:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
 }
 
 .wb-batch-export-settings {
@@ -5848,7 +5893,8 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-stage-counts .is-deleted strong,
 .wb-table-stage-counts .is-errors strong { color: var(--wb-danger); }
 .wb-table-stage-counts .is-unchanged strong { color: var(--wb-text); }
-.wb-table-stage-counts .is-zero { opacity: 0.45; }
+.wb-table-stage-counts .is-zero { color: var(--wb-quiet-text); }
+.wb-table-stage-counts .is-zero strong { color: var(--wb-quiet-text); }
 
 .wb-table-stage-switch {
   display: inline-flex;
@@ -5885,7 +5931,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-table-stage-switch button:disabled {
   cursor: default;
-  opacity: 0.35;
+  color: var(--wb-disabled);
 }
 
 .wb-batch-comparison.is-table-stage .wb-batch-comparison-toolbar {
@@ -6319,7 +6365,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-batch-comparison-load-state button:disabled {
   cursor: wait;
-  opacity: 0.65;
+  color: var(--wb-disabled);
 }
 
 .wb-batch-diff-section {
@@ -7255,7 +7301,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-activity-rail-btn:disabled {
   cursor: wait;
-  opacity: 0.62;
+  color: var(--wb-disabled);
 }
 
 .wb-more-review-count {
@@ -7807,7 +7853,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-split-menu button:disabled {
   background: transparent;
-  opacity: 0.4;
+  color: var(--wb-disabled);
 }
 
 .wb-split-menu-enter-active {
@@ -7881,7 +7927,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-pane-toggle:hover,
 .wb-pane-toggle:focus-visible {
   background: var(--wb-surface);
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-pane-toggle:focus-visible {
@@ -8001,13 +8047,13 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-search-nav-icon:disabled {
   cursor: default;
-  opacity: 0.4;
+  color: var(--wb-disabled);
 }
 
 .wb-search-nav-icon:disabled:hover,
 .wb-search-nav-icon:disabled:focus-visible {
   background: transparent;
-  color: var(--wb-secondary-text);
+  color: var(--wb-disabled);
 }
 
 .wb-inspector-search-count {
@@ -9213,7 +9259,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-shortcut-row-actions button:disabled {
-  opacity: 0.5;
+  color: var(--wb-disabled);
   cursor: default;
 }
 
@@ -9296,6 +9342,12 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-shortcut-dialog-primary:hover:not(:disabled),
 .wb-shortcut-dialog-primary:focus-visible {
   background: var(--wb-accent-control-hover) !important;
+}
+
+.wb-shortcut-dialog-primary:disabled {
+  border-color: var(--wb-border) !important;
+  background: var(--wb-control) !important;
+  color: var(--wb-disabled) !important;
 }
 
 .wb-sidebar-settings-label {
@@ -10109,7 +10161,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-database-item.active .wb-alias-realname,
 .wb-connection-node.active .wb-alias-realname {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-table-branch {
@@ -10638,7 +10690,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-item.active .wb-table-comment {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-tree-spacer {
@@ -11199,8 +11251,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab-overflow-item:disabled {
-  color: var(--wb-text);
-  opacity: 0.5;
+  color: var(--wb-disabled);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -11737,8 +11788,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-open:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.58;
 }
 
 .wb-home-favorite-db-icon {
@@ -11929,6 +11980,12 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: var(--wb-fs-body);
   font-weight: 650;
   cursor: pointer;
+}
+
+.wb-home-favorites-add:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
 }
 
 .wb-home-favorites-add:hover:not(:disabled),
@@ -12204,8 +12261,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-database-list > button:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.68;
 }
 
 .wb-home-favorite-database-list > button > span {
@@ -12321,9 +12378,15 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-home-favorite-picker-footer button.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+}
+
 .wb-home-favorite-picker-footer button:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.5;
 }
 
 @media (max-width: 680px) {
@@ -13014,8 +13077,8 @@ label:has(input[type="checkbox"]:disabled) {
   height: 15px;
   padding: 0 4px;
   border-radius: 8px;
-  background: var(--wb-danger);
-  color: var(--wb-accent-contrast, #fff);
+  background: var(--wb-danger-control);
+  color: var(--wb-danger-control-text);
   font-size: var(--wb-fs-micro);
   font-weight: 700;
   line-height: 15px;
@@ -13198,9 +13261,8 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-toolbar-split-button-main:disabled,
 .wb-toolbar-split-button-caret:disabled {
   background: transparent;
-  color: var(--wb-quiet-text);
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.48;
 }
 
 .wb-toolbar-split-button-caret svg {
@@ -13320,7 +13382,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-toolbar-action-group > .wb-toolbar-action-button:disabled {
   color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.58;
 }
 
 .wb-toolbar-action-group > .wb-toolbar-split-button.is-active {
@@ -13529,9 +13590,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-toolbar-action-menu-item:disabled {
   background: transparent;
-  color: var(--wb-quiet-text);
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.5;
 }
 
 .wb-toolbar-action-menu-icon {
@@ -13753,9 +13813,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-grid-boundary-pill:disabled {
-  color: var(--wb-quiet-text);
+  color: var(--wb-disabled);
   cursor: not-allowed;
-  opacity: 0.62;
 }
 
 .wb-grid-boundary-pill .is-spinning {
@@ -14210,23 +14269,30 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-grid-error-retry {
   margin-top: 10px;
   padding: 5px 18px;
-  border: 1px solid var(--wb-accent);
+  border: 1px solid var(--wb-accent-control);
   border-radius: 6px;
-  background: var(--wb-accent);
-  color: #fff;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
   font-size: var(--wb-fs-body);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.wb-grid-error-retry:hover {
-  background: var(--wb-accent-strong);
-  border-color: var(--wb-accent-strong);
-}
-
-.wb-grid-error-retry:active {
+.wb-grid-error-retry:hover:not(:disabled) {
   background: var(--wb-accent-control-hover);
   border-color: var(--wb-accent-control-hover);
+}
+
+.wb-grid-error-retry:active:not(:disabled) {
+  background: var(--wb-accent-control-busy);
+  border-color: var(--wb-accent-control-busy);
+}
+
+.wb-grid-error-retry:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
 }
 
 /* ── 0 行空状态 & 加载更多进度行 ─────────────────────────────────────── */
@@ -14255,7 +14321,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-grid-empty-action:focus-visible {
   border-color: var(--wb-accent);
   background: var(--wb-control-hover);
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-grid-empty-action:active {
@@ -14765,7 +14831,7 @@ label:has(input[type="checkbox"]:disabled) {
 /* 非编辑态的"提交中"提示：乐观写入后、后端确认前，单元格文字轻微变淡并带
    一个右上角小圆点，让用户知道这个值还在保存中、尚未落库。 */
 .wb-grid td.pending .wb-cell-text {
-  opacity: 0.55;
+  opacity: 0.7;
   position: relative;
 }
 
@@ -15005,8 +15071,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-insert-row-actions button:disabled {
+  color: var(--wb-disabled);
   cursor: wait;
-  opacity: 0.6;
 }
 
 .wb-insert-row-actions .is-spinning {
@@ -15018,7 +15084,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-insert-row.is-saving .wb-cell-text {
-  opacity: 0.6;
+  opacity: 0.7;
 }
 
 /* ── Freeze panes (Excel-style frozen rows/columns) ──────────────────────
@@ -15440,7 +15506,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dbhome-actions > button:disabled {
   color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.58;
 }
 
 .wb-dbhome-action-button {
@@ -15921,6 +15986,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sql-library-header-actions button.is-primary:hover {
   background: var(--wb-accent-control-hover);
+}
+
+.wb-sql-library-header-actions button.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
 }
 
 .wb-sql-library-header-actions button:focus-visible,
@@ -16586,6 +16657,12 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-design-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+}
+
 .wb-design-body {
   display: flex;
   flex: 1;
@@ -16905,7 +16982,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-design-add-column:focus-visible {
   border-color: var(--wb-accent);
   background: var(--wb-accent-soft);
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 /* Column resize handle */
@@ -16955,7 +17032,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-drag-handle:hover {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 /* Comment expand button */
@@ -17003,14 +17080,19 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-strong);
 }
 
-.wb-design-comment-expand:hover,
+.wb-design-comment-expand:hover:not(:disabled),
 .wb-design-comment-expand:focus-visible {
   border-color: transparent;
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
 }
 
-.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover,
+.wb-design-comment-expand:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
+.mysql-workbench[data-theme="light"] .wb-design-comment-expand:hover:not(:disabled),
 .mysql-workbench[data-theme="light"] .wb-design-comment-expand:focus-visible {
   border-color: color-mix(in srgb, var(--wb-accent) 58%, transparent);
   background: color-mix(in srgb, var(--wb-accent) 14%, var(--wb-cell-editor));
@@ -17266,15 +17348,15 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-design-danger {
   border-color: transparent;
-  background: color-mix(in srgb, var(--wb-danger) 72%, #000);
-  color: #fff;
+  background: var(--wb-danger-control);
+  color: var(--wb-danger-control-text);
 }
 
 .wb-design-danger:hover:not(:disabled),
 .wb-design-danger:focus-visible {
   border-color: transparent;
-  background: color-mix(in srgb, var(--wb-danger) 62%, #000);
-  color: #fff;
+  background: var(--wb-danger-control-hover);
+  color: var(--wb-danger-control-text);
 }
 
 .wb-design-danger:disabled {
@@ -17375,7 +17457,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-design-sql-details summary:hover {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-design-sql-details[open] summary {
@@ -17418,7 +17500,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-empty-icon {
   width: 48px;
   height: 48px;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   opacity: 0.6;
   margin-bottom: 4px;
 }
@@ -17455,6 +17537,11 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-empty-action:focus-visible {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
+}
+
+.wb-empty-action:disabled {
+  background: var(--wb-control);
+  color: var(--wb-disabled);
 }
 
 .wb-schema-list {
@@ -18105,9 +18192,8 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-context-menu button:disabled,
 .wb-context-menu button:disabled:hover {
   background: transparent;
-  color: var(--wb-quiet-text);
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.55;
 }
 
 .wb-context-separator {
@@ -18175,7 +18261,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-context-menu .wb-context-count-step:hover:not(:disabled),
 .wb-context-menu .wb-context-count-step:focus-visible {
   background: var(--wb-accent-soft);
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-context-count-control input {
@@ -18312,7 +18398,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-grid td.pending .wb-null-badge {
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 /* 数值列右对齐 + 等宽数字（Excel/TablePlus 惯例），让数据一眼可读、可比 */
@@ -18496,7 +18582,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding: 5px 8px;
   border: 0;
   background: transparent;
-  color: var(--wb-primary-text);
+  color: var(--wb-text);
   text-align: left;
   cursor: pointer;
 }
@@ -19206,8 +19292,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-copy-selection-clear:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.4;
 }
 
 .wb-table-copy-selection-list {
@@ -19285,8 +19371,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-copy-selection-row button:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.4;
 }
 
 .wb-table-copy-selection-empty {
@@ -22348,7 +22434,8 @@ label:has(input[type="checkbox"]:disabled) {
   }
 }
 
-.wb-dbhome-object-cell {
+/* Remarks keep their own text color; only metadata uses the quiet treatment. */
+.wb-dbhome-object-cell:not(.wb-dbhome-object-comment) {
   color: var(--wb-quiet-text);
   font-size: var(--wb-fs-body);
   font-variant-numeric: tabular-nums;
@@ -22992,7 +23079,6 @@ button.wb-table-mention:active {
   background: var(--wb-control);
   color: var(--wb-disabled);
   cursor: not-allowed;
-  opacity: 0.82;
 }
 
 .wb-quick-open-value-submit.is-loading:disabled {
@@ -23609,8 +23695,15 @@ button.wb-table-mention:active {
   font-weight: 600;
 }
 
-.wb-design-debug-footer .wb-design-debug-primary:hover {
+.wb-design-debug-footer .wb-design-debug-primary:hover:not(:disabled) {
   background: var(--wb-accent-control-hover);
+}
+
+.wb-design-debug-footer .wb-design-debug-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
 }
 
 .wb-design-debug-hint {
@@ -23701,7 +23794,7 @@ button.wb-table-mention:active {
 }
 
 .wb-design-debug-ambient-actions button:disabled {
-  opacity: 0.5;
+  color: var(--wb-disabled);
   cursor: default;
 }
 
@@ -23761,8 +23854,8 @@ button.wb-table-mention:active {
 .wb-audit-count b { font-variant-numeric: tabular-nums; font-weight: 700; }
 .wb-audit-count[data-kind="insert"]:not([data-zero="true"]) { background: var(--wb-success-surface); color: var(--wb-success-text); }
 .wb-audit-count[data-kind="update"]:not([data-zero="true"]) { background: var(--wb-accent-soft); color: var(--wb-accent-strong); }
-.wb-audit-count[data-kind="delete"]:not([data-zero="true"]) { background: color-mix(in srgb, var(--wb-danger) 12%, transparent); color: var(--wb-danger); }
-.wb-audit-count[data-zero="true"] { opacity: 0.7; }
+.wb-audit-count[data-kind="delete"]:not([data-zero="true"]) { background: color-mix(in srgb, var(--wb-danger) 12%, transparent); color: var(--wb-danger-text); }
+.wb-audit-count[data-zero="true"] { color: var(--wb-quiet-text); }
 .wb-audit-blocked { display: inline-flex; align-items: center; gap: 4px; color: var(--wb-warning-text); font-size: var(--wb-fs-caption); font-weight: 600; }
 .wb-audit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .wb-audit-actions > button { display: inline-flex; align-items: center; gap: 6px; }
@@ -24022,7 +24115,7 @@ button.wb-table-mention:active {
 }
 
 .wb-context-menu button.danger .wb-context-shortcut {
-  color: color-mix(in srgb, var(--wb-danger) 72%, transparent);
+  color: var(--wb-danger);
 }
 
 .wb-table-item.is-selected {
@@ -24042,7 +24135,7 @@ button.wb-table-mention:active {
 .wb-activity-more { display: flex; }
 .wb-activity-more-menu { min-width: 188px; }
 .wb-activity-more .wb-activity-rail-btn[aria-expanded="true"] {
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   background: var(--wb-accent-soft);
 }
 .wb-activity-more .wb-activity-rail-btn[aria-expanded="true"] .wb-activity-rail-tip { display: none; }
@@ -24104,8 +24197,7 @@ button.wb-table-mention:active {
 }
 :root[data-wb-platform="macos"] .wb-context-menu button:disabled,
 :root[data-wb-platform="macos"] .wb-context-menu button:disabled:hover {
-  opacity: 0.35;
-  color: inherit;
+  color: var(--wb-disabled);
 }
 :root[data-wb-platform="macos"] .wb-context-shortcut {
   margin-left: auto;
@@ -24464,9 +24556,15 @@ button.wb-table-mention:active {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-folder-actions button.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+}
+
 .wb-folder-actions button:disabled {
+  color: var(--wb-disabled);
   cursor: default;
-  opacity: 0.5;
 }
 
 .wb-folder-rows {

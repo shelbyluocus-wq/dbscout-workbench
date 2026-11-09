@@ -299,7 +299,11 @@ function remove(name) {
 }
 
 .wb-rf-changes li.is-excluded > :not(input) {
-  opacity: 0.45;
+  color: var(--wb-quiet-text);
+}
+
+.wb-rf-changes li.is-excluded .wb-rf-change-mark {
+  color: var(--wb-quiet-text);
 }
 
 .wb-rf-changes li.is-excluded strong {
@@ -333,7 +337,7 @@ function remove(name) {
 
 .wb-rf-sql summary {
   width: fit-content;
-  color: var(--wb-accent);
+  color: var(--wb-accent-strong);
   font-size: var(--wb-fs-body);
   cursor: pointer;
 }

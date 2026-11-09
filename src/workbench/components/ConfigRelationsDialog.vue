@@ -725,6 +725,13 @@ onMounted(async () => {
   background: var(--wb-accent-control-hover);
 }
 
+.wb-relations-quiet-btn.is-primary:disabled {
+  border-color: var(--wb-border);
+  background: var(--wb-control);
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
 .wb-relations-review-group {
   display: flex;
   flex-direction: column;

@@ -36,6 +36,22 @@ export function relativeLuminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+export function contrastRatio(a, b) {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// Walks hex toward `toward` in 2% steps until it reaches `min` contrast
+// against `bg`; falls back to `toward` when even that is not enough.
+export function ensureContrast(hex, bg, min, toward) {
+  for (let i = 0; i <= 50; i++) {
+    const candidate = mixHex(hex, toward, i / 50);
+    if (contrastRatio(candidate, bg) >= min) return candidate;
+  }
+  return toward;
+}
+
 export function accentControlText(hex) {
   return relativeLuminance(hex) > 0.45 ? "#1a1c20" : "#ffffff";
 }
@@ -48,16 +64,25 @@ export function accentControlText(hex) {
 export function systemAccentTokens(mode, accent) {
   const dark = mode === "dark";
   const accentMain = dark ? mixHex(accent, "#FFFFFF", 0.2) : accent;
-  const accentStrong = dark ? mixHex(accent, "#FFFFFF", 0.35) : mixHex(accent, "#000000", 0.2);
-  const accentBusy = dark ? mixHex(accent, "#FFFFFF", 0.5) : mixHex(accent, "#000000", 0.32);
+  const text = accentControlText(accent);
+  const control = text === "#ffffff"
+    ? ensureContrast(accent, "#FFFFFF", 4.5, "#000000")
+    : ensureContrast(accent, "#1A1C20", 4.5, "#FFFFFF");
+  const away = text === "#ffffff" ? "#000000" : "#FFFFFF";
+  const lightStrongBg = relativeLuminance(mixHex(accent, "#F9F9F7", 0.8)) < relativeLuminance("#E3E7EB")
+    ? mixHex(accent, "#F9F9F7", 0.8)
+    : "#E3E7EB";
+  const accentStrong = dark
+    ? ensureContrast(mixHex(accent, "#FFFFFF", 0.35), mixHex(accent, "#0F0F11", 0.72), 4.5, "#FFFFFF")
+    : ensureContrast(mixHex(accent, "#000000", 0.2), lightStrongBg, 4.5, "#000000");
   return {
     "--wb-accent": accentMain,
     "--wb-accent-strong": accentStrong,
     "--wb-accent-soft": rgba(accentMain, dark ? 0.12 : 0.08),
-    "--wb-accent-control": accent,
-    "--wb-accent-control-hover": accentStrong,
-    "--wb-accent-control-busy": accentBusy,
-    "--wb-accent-control-text": accentControlText(accent),
+    "--wb-accent-control": control,
+    "--wb-accent-control-hover": mixHex(control, away, 0.12),
+    "--wb-accent-control-busy": mixHex(control, away, 0.22),
+    "--wb-accent-control-text": text,
     "--wb-cell-highlight": `var(--wb-cell-highlight-custom, ${accentMain})`,
   };
 }
