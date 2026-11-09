@@ -1921,8 +1921,10 @@ test("workbench exposes a persisted theme toggle synchronized with the native wi
   const sidebar = read("./components/WorkbenchSidebar.vue");
   const theme = read("./composables/useTheme.js");
 
-  assert.match(orchestrator, /import\s+\{\s*useTheme\s*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
-  assert.match(orchestrator, /useTheme\(\)/);
+  assert.match(orchestrator, /import\s+\{[^}]*\buseTheme\b[^}]*\}\s+from\s+["']\.\/composables\/useTheme\.js["']/);
+  // The native theme apply is wrapped so macOS traffic lights are re-aligned
+  // after AppKit resets them on appearance changes.
+  assert.match(orchestrator, /useTheme\(\{\s*applyNativeTheme:\s*applyNativeThemeKeepingTrafficLights/);
   assert.match(orchestrator, /<main[\s\S]*?:data-theme="effectiveTheme"/);
   assert.match(orchestrator, /:is-dark="isDark"/);
   // The settings control is a 3-option segment (light / dark / system) that

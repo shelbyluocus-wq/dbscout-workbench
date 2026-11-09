@@ -204,7 +204,7 @@ import {
   usePaneResize,
 } from "./composables/usePaneResize.js";
 import { inspectorSurfaceFor } from "./inspectorVisibility.js";
-import { useTheme } from "./composables/useTheme.js";
+import { applyNativeWindowTheme, useTheme } from "./composables/useTheme.js";
 import { createColorThemeController } from "./colorThemeController.js";
 import { useFontPreference } from "./composables/useFontPreference.js";
 import { useUpdater } from "./composables/useUpdater.js";
@@ -1326,7 +1326,9 @@ const {
   expandInspector,
 } = usePaneResize({ viewportWidth: windowWidth });
 
-const { effectiveTheme, isDark, toggleTheme, preference: themePreference, setThemePreference, refresh: refreshTheme } = useTheme();
+const { effectiveTheme, isDark, toggleTheme, preference: themePreference, setThemePreference, refresh: refreshTheme } = useTheme({
+  applyNativeTheme: applyNativeThemeKeepingTrafficLights,
+});
 const macosVibrancy = useMacosVibrancy({ themeRefresh: refreshTheme });
 macosVibrancy.start();
 const {
@@ -4773,6 +4775,15 @@ const syncMacosTrafficLights = useMacosTrafficLights({
   getScale: () => pageZoom.scale,
   invoke: invokeWorkbench,
 });
+
+// macOS re-centres the traffic lights on the default titlebar frame whenever
+// the window appearance flips (setTheme / vibrancy effects), undoing our
+// alignment — re-align right away and again once AppKit settles.
+async function applyNativeThemeKeepingTrafficLights(theme) {
+  await applyNativeWindowTheme(theme);
+  syncMacosTrafficLights();
+  setTimeout(syncMacosTrafficLights, 150);
+}
 if (isTauriRuntime()) void pageZoom.restore();
 
 const handlePageZoomWheel = createPageZoomWheelHandler({
