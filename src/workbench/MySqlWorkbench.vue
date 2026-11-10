@@ -405,8 +405,17 @@ const {
     statusText: conn.statusText,
     setStatus: conn.setStatus,
     ensureTableSchema: conn.ensureTableSchema,
+    onTableActivated: focusOpenedTableSearch,
   },
 );
+
+function focusOpenedTableSearch(tab) {
+  void nextTick(() => {
+    if (workspace.activeTabId !== tab.id || focusedPaneState.activeDataTab?.id !== tab.id) return;
+    if (dialogLayerManager.hasActiveModalLayer()) return;
+    focusedPaneState.focusTableSearch?.();
+  });
+}
 
 const focusedPaneState = reactive({
   paneId: "",

@@ -1607,7 +1607,10 @@ test("overlapping opens retain progress and only the latest activation wins", as
     if (command === "close_table_session") return { closed: true };
     throw new Error(`unexpected command ${command}`);
   };
-  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const activated = [];
+  const session = useTableSession(workspace, invoke, {
+    busy: ref(false), statusText: ref(""), onTableActivated: (tab) => activated.push(tab.id),
+  });
 
   const alpha = session.openTable({ tableName: "alpha" });
   const beta = session.openTable({ tableName: "beta" });
@@ -1617,12 +1620,19 @@ test("overlapping opens retain progress and only the latest activation wins", as
   const alphaTab = await alpha;
   assert.equal(session.pendingTableOpenCount.value, 1);
   assert.equal(workspace.activeTabId, current.id);
+  assert.deepEqual(activated, []);
 
   pages.get("beta").resolve(payload("beta"));
   const betaTab = await beta;
   assert.equal(session.pendingTableOpenCount.value, 0);
   assert.notEqual(alphaTab.id, betaTab.id);
   assert.equal(workspace.activeTabId, betaTab.id);
+  assert.deepEqual(activated, [betaTab.id]);
+  await session.openTable({ tableName: "beta" });
+  assert.deepEqual(activated, [betaTab.id, betaTab.id]);
+  await session.openTable({ tableName: "alpha" }, { activate: false });
+  assert.deepEqual(activated, [betaTab.id, betaTab.id]);
+  await session.dispose();
 });
 
 test("explicit tab selection cancels a pending table activation", async () => {

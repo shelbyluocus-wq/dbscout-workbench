@@ -47,7 +47,7 @@ function tableStatusLabel(tab, totalRows = tab?.totalRows, totalRowsExact = tab?
 export function useTableSession(
   workspace,
   invokeWorkbench,
-  { statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null },
+  { statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null, onTableActivated = null },
 ) {
   const currentRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
@@ -406,6 +406,7 @@ export function useTableSession(
     if (!tab || !intent || activationIntentByPane.get(paneId)?.token !== intent.token) return false;
     activateTableTab(workspace, tab.id);
     activationIntentByPane.delete(paneId);
+    onTableActivated?.(tab);
     return true;
   }
 
