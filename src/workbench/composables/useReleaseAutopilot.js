@@ -8,7 +8,7 @@ import { appendAutopilotLog, idleAutopilot, nextAutopilotStep } from "../release
  * where a rule says a person decides. It drives the update through the same
  * actions a person uses, so the steps keep their confirmations' effects,
  * logs, history and resets. Waiting is cheap: nothing runs between steps but
- * a watch on the update, and the GM clock starts the shutdown as before.
+ * a watch on the update.
  */
 export function createAutopilot({ flow, rules, sleep, speed = () => 1, now = () => new Date() }) {
   const state = flow.state;
@@ -31,8 +31,6 @@ export function createAutopilot({ flow, rules, sleep, speed = () => 1, now = () 
       tasks: state.tasks,
       rules: rules(),
       auto: auto(),
-      phase: flow.serverPhase.value,
-      scheduleProblem: flow.scheduleProblem.value,
       planNotes: flow.planNotesLeft.value,
       canStart: flow.canStart.value,
     };
@@ -136,13 +134,6 @@ export function createAutopilot({ flow, rules, sleep, speed = () => 1, now = () 
       else pause("failed", action.taskId);
       return;
     }
-    if (action.kind === "schedule") {
-      follow("gm.maintenance");
-      if (action.postpone && flow.suggestSchedule()) log("postponed", { taskId: "gm.maintenance", detail: state.schedule.maintenanceStart });
-      if (!(await flow.scheduleMaintenance()) && active.value && state.tasks["gm.maintenance"].status === TASK_STATUS.IDLE) {
-        pause("schedule", "gm.maintenance");
-      }
-    }
   }
 
   async function tick() {
@@ -173,9 +164,8 @@ export function createAutopilot({ flow, rules, sleep, speed = () => 1, now = () 
     if (!disposed) void Promise.resolve().then(tick);
   }
 
-  // A step finishing (also the GM's own shutdown) or the server moving on wakes the run.
   const stopWatch = watch(
-    [status, () => flow.runningTask.value, () => flow.serverPhase.value, () => state.outcome],
+    [status, () => flow.runningTask.value, () => state.outcome],
     () => queueTick(),
   );
   // An update reopened while in one-click mode goes on where it was.

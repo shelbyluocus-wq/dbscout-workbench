@@ -7,18 +7,17 @@ import { pageTitle } from "../utils/releaseFlowFormat.js";
 
 const props = defineProps({
   pageId: { type: String, required: true },
-  mode: { type: String, default: "" },
   description: { type: String, default: "" },
 });
 
 const descriptionText = computed(() => props.description
-  || t(props.pageId === "gmServer" ? `releaseFlow.page.gmServer.description.${props.mode || "maintenance"}` : `releaseFlow.page.${props.pageId}.description`));
+  || t(`releaseFlow.page.${props.pageId}.description`));
 </script>
 
 <template>
   <header class="wb-rf-page-head">
     <div class="wb-rf-page-title">
-      <h3 tabindex="-1">{{ pageTitle(pageId, mode) }}</h3>
+      <h3 tabindex="-1">{{ pageTitle(pageId) }}</h3>
       <slot name="tag" />
     </div>
     <p>{{ descriptionText }}</p>

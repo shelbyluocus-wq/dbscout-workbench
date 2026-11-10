@@ -23,17 +23,14 @@ export const AUTOPILOT_RULES = Object.freeze([
   Object.freeze({ id: "transferFails", group: "client", choices: Object.freeze(["stop", "skip"]) }),
   Object.freeze({ id: "diffReview", group: "client", choices: Object.freeze(["auto", "stop"]) }),
   Object.freeze({ id: "planNotes", group: "database", choices: Object.freeze(["continue", "stop"]) }),
-  Object.freeze({ id: "configApply", group: "gm", choices: Object.freeze(["auto", "stop"]) }),
-  Object.freeze({ id: "lateStart", group: "gm", choices: Object.freeze(["stop", "postpone"]) }),
-  Object.freeze({ id: "openServers", group: "gm", choices: Object.freeze(["auto", "stop"]) }),
 ]);
 export const AUTOPILOT_RULE_BY_ID = new Map(AUTOPILOT_RULES.map((rule) => [rule.id, rule]));
-export const AUTOPILOT_GROUPS = Object.freeze(["client", "database", "gm"]);
+export const AUTOPILOT_GROUPS = Object.freeze(["client", "database"]);
 export const AUTOPILOT_RETRIES = Object.freeze([0, 1, 2, 3]);
 export const AUTOPILOT_RETRY_DELAYS = Object.freeze([10, 30, 60, 120]);
 export const AUTOPILOT_STATUSES = Object.freeze(["off", "running", "paused", "done"]);
 export const AUTOPILOT_LOG_KINDS = Object.freeze([
-  "started", "resumed", "paused", "stopped", "retry", "resolved", "skipped", "postponed", "done",
+  "started", "resumed", "paused", "stopped", "retry", "resolved", "skipped", "done",
 ]);
 const MAX_LOG = 40;
 
@@ -61,6 +58,7 @@ export function idleAutopilot() {
 export function restoreAutopilot(saved) {
   const auto = idleAutopilot();
   if (!plainObject(saved)) return auto;
+  if (saved.taskId && !RELEASE_TASK_BY_ID.has(saved.taskId)) return auto;
   if (AUTOPILOT_STATUSES.includes(saved.status)) auto.status = saved.status;
   auto.reason = typeof saved.reason === "string" ? saved.reason : "";
   auto.taskId = RELEASE_TASK_BY_ID.has(saved.taskId) ? saved.taskId : "";
@@ -70,7 +68,8 @@ export function restoreAutopilot(saved) {
   }
   auto.startedAt = Number(saved.startedAt) || 0;
   auto.log = Array.isArray(saved.log)
-    ? saved.log.filter((entry) => Number(entry?.at) && AUTOPILOT_LOG_KINDS.includes(entry.kind)).slice(-MAX_LOG)
+    ? saved.log.filter((entry) => Number(entry?.at) && AUTOPILOT_LOG_KINDS.includes(entry.kind)
+      && (!entry.taskId || RELEASE_TASK_BY_ID.has(entry.taskId))).slice(-MAX_LOG)
       .map((entry) => ({ at: Number(entry.at), kind: entry.kind, taskId: RELEASE_TASK_BY_ID.has(entry.taskId) ? entry.taskId : "", detail: String(entry.detail || "") }))
     : [];
   // A wait for a retry does not survive closing the workspace; the retry runs on reopening.
@@ -91,24 +90,22 @@ function gate(rules, auto, ruleId, stopChoice, taskId) {
 /**
  * What one-click mode does next for an update, from a snapshot of it:
  *
- *   { brief, tasks, rules, auto, phase, scheduleProblem, planNotes, canStart }
+ *   { brief, tasks, rules, auto, planNotes, canStart }
  *
- * `phase` is the server phase (releaseServer.js), `planNotes` how many memo
- * notes the plan step leaves to a person. Returns one of
+ * `planNotes` counts memo notes the plan step leaves to a person. Returns one of
  *
  *   { kind: "start" }                    start the update
  *   { kind: "run", taskId }              run a step
  *   { kind: "retry", taskId, attempt }   run a failed step again (after the delay)
  *   { kind: "resolve", choice }          settle the SVN conflicts with one choice
  *   { kind: "skip", taskId }             skip a step that may be skipped
- *   { kind: "schedule", postpone }       hand the schedule to the GM (moved first)
- *   { kind: "wait", reason }             nothing to do until the GM or a step moves
+ *   { kind: "wait", reason }             nothing to do until a step moves
  *   { kind: "pause", reason, taskId }    stop and wait for the person
  *   { kind: "done" }                     every step is settled
  *
  * Steps are taken in guide order; the first one not settled decides.
  */
-export function nextAutopilotStep({ brief, tasks, rules, auto, phase = "running", scheduleProblem = "", planNotes = 0, canStart = false }) {
+export function nextAutopilotStep({ brief, tasks, rules, auto, planNotes = 0, canStart = false }) {
   if (!brief.started) return canStart ? { kind: "start" } : { kind: "pause", reason: "notReady", taskId: "" };
   for (const definition of applicableTasks(brief)) {
     const id = definition.id;
@@ -137,21 +134,8 @@ export function nextAutopilotStep({ brief, tasks, rules, auto, phase = "running"
     }
     // Idle. Guide order follows the dependencies, so only a missing input blocks here.
     if (missingDependencies(id, tasks, brief).length) return { kind: "pause", reason: "blocked", taskId: id };
-    if (id === "gm.maintenance" || (id === "gm.clientOpen" && brief.mode === "maintenance")) {
-      if (scheduleProblem === "endBeforeStart") return { kind: "pause", reason: "schedule", taskId: "gm.maintenance" };
-      if (scheduleProblem === "startPassed") {
-        return rules.lateStart === "postpone"
-          ? { kind: "schedule", postpone: true }
-          : { kind: "pause", reason: "lateStart", taskId: "gm.maintenance" };
-      }
-      return { kind: "schedule", postpone: false };
-    }
-    // The monitors close the servers at the scheduled time; the flow watches for it.
-    if (id === "gm.shutdown") return phase === "scheduled" ? { kind: "wait", reason: "maintenance" } : { kind: "run", taskId: id };
     if (id === "db.plans" && planNotes > 0 && gate(rules, auto, "planNotes", "stop", id)) return { kind: "pause", reason: "planNotes", taskId: id };
     if (id === "client.diff" && gate(rules, auto, "diffReview", "stop", id)) return { kind: "pause", reason: "review", taskId: id };
-    if (id === "gm.configApply" && gate(rules, auto, "configApply", "stop", id)) return { kind: "pause", reason: "configApply", taskId: id };
-    if (id === "gm.open" && gate(rules, auto, "openServers", "stop", id)) return { kind: "pause", reason: "open", taskId: id };
     return { kind: "run", taskId: id };
   }
   return { kind: "done" };

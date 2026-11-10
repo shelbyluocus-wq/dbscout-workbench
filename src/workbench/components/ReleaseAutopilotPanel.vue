@@ -1,6 +1,6 @@
 <script setup>
-// The one-click panel of the brief: the times the update keeps to and the
-// rules for the problems a run can meet (shared by every platform). With the
+// The one-click panel of the brief: the rules for the problems a run can
+// meet (shared by every platform). With the
 // rules set, "One-click run" in the footer takes the update to the end by
 // itself and only stops where a rule says so.
 import { computed, ref } from "vue";
@@ -8,7 +8,6 @@ import { ChevronDown, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { AUTOPILOT_GROUPS, AUTOPILOT_RETRIES, AUTOPILOT_RETRY_DELAYS, AUTOPILOT_RULES } from "../releaseAutopilotState.js";
 import { autopilotRuleSummary } from "../utils/releaseFlowFormat.js";
-import ReleaseScheduleFields from "./ReleaseScheduleFields.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
@@ -23,9 +22,6 @@ const groups = computed(() => AUTOPILOT_GROUPS.map((group) => ({
   rules: AUTOPILOT_RULES.filter((rule) => rule.group === group),
 })));
 const summary = computed(() => autopilotRuleSummary(rules.value));
-// The times can change until they are handed to the GM.
-const scheduleLocked = computed(() => props.flow.busy.value || props.flow.finished.value || props.flow.serverPhase.value !== "running");
-const timed = computed(() => state.brief.mode === "maintenance" || props.flow.applies("gm.clientOpen"));
 
 function set(ruleId, value) {
   props.workspace.setAutopilotRule(ruleId, value);
@@ -53,22 +49,6 @@ function set(ruleId, value) {
     </ul>
 
     <div v-else id="wb-rf-auto-body" class="wb-rf-auto-body">
-      <div v-if="timed" class="wb-rf-card">
-        <div class="wb-rf-group-head">
-          <h5>{{ t('releaseFlow.autopilot.times') }}</h5>
-          <div class="wb-rf-group-tools">
-            <button
-              v-if="state.brief.mode === 'maintenance'"
-              type="button"
-              class="wb-rf-btn is-quiet is-small"
-              :disabled="scheduleLocked"
-              @click="flow.suggestSchedule()"
-            >{{ t('releaseFlow.server.suggest') }}</button>
-          </div>
-        </div>
-        <ReleaseScheduleFields :flow="flow" :disabled="scheduleLocked" />
-      </div>
-
       <div v-for="group in groups" :key="group.id" class="wb-rf-auto-group">
         <h5>{{ t(`releaseFlow.autopilot.group.${group.id}`) }}</h5>
         <div v-for="rule in group.rules" :key="rule.id" class="wb-rf-auto-rule" :data-release-rule="rule.id">

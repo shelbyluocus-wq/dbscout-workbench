@@ -1,12 +1,11 @@
 <script setup>
 // One-click mode of the update on screen: what it is doing now (a step, a
-// retry countdown, the wait for maintenance), why it paused and how to go
+// retry countdown), why it paused and how to go
 // on, and a short log of what it decided by itself.
 import { computed, ref } from "vue";
-import { CircleCheck, FastForward, LoaderCircle, Pause, Play, TriangleAlert, Zap } from "lucide-vue-next";
+import { CircleCheck, LoaderCircle, Pause, Play, TriangleAlert, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { formatCountdown } from "../utils/releaseServer.js";
-import { autopilotReasonText, formatClockTime, formatReleaseTime, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
+import { autopilotReasonText, formatClockTime, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
 
 const props = defineProps({
   flow: { type: Object, required: true },
@@ -34,14 +33,8 @@ const detail = computed(() => {
     const seconds = Math.max(0, Math.ceil((auto.value.retryAt - now.value) / 1000));
     return t("releaseFlow.autopilot.detail.retry", { step: taskTitle(next.taskId || ""), seconds, attempt: auto.value.retries[next.taskId] || 1 });
   }
-  if (next.kind === "wait" && next.reason === "maintenance") {
-    return t("releaseFlow.autopilot.detail.waiting", { time: formatCountdown(flow.maintenanceStartAt.value - flow.serverNow.value) });
-  }
   return t("releaseFlow.autopilot.detail.next");
 });
-
-const waitingForMaintenance = computed(() => status.value === "running" && !props.flow.runningTask.value
-  && autopilot.next.value.kind === "wait" && autopilot.next.value.reason === "maintenance");
 
 function logText(entry) {
   const step = entry.taskId ? taskTitle(entry.taskId) : "";
@@ -50,7 +43,6 @@ function logText(entry) {
     const [choice, count] = entry.detail.split(":");
     return t("releaseFlow.autopilot.log.resolved", { count: Number(count) || 0, choice: t(`releaseFlow.svn.choice.${choice}`) });
   }
-  if (entry.kind === "postponed") return t("releaseFlow.autopilot.log.postponed", { time: formatReleaseTime(entry.detail) });
   return t(`releaseFlow.autopilot.log.${entry.kind}`, { step, attempt: entry.detail });
 }
 
@@ -71,9 +63,6 @@ const entries = computed(() => [...auto.value.log].reverse());
       <span v-if="status === 'paused'" class="wb-rf-muted">{{ t('releaseFlow.autopilot.pausedHint') }}</span>
     </div>
     <div class="wb-rf-auto-tools">
-      <button v-if="waitingForMaintenance && flow.state.demo" type="button" class="wb-rf-btn is-small" :title="t('releaseFlow.server.fastForwardHint')" @click="flow.fastForward()">
-        <FastForward :size="13" aria-hidden="true" />{{ t('releaseFlow.server.fastForward') }}
-      </button>
       <template v-if="status === 'paused'">
         <button type="button" class="wb-rf-btn is-small is-quiet" @click="autopilot.stop()">{{ t('releaseFlow.autopilot.manual') }}</button>
         <button type="button" class="wb-rf-btn is-small is-primary" data-release-auto-resume :disabled="flow.busy.value" @click="autopilot.resume()">

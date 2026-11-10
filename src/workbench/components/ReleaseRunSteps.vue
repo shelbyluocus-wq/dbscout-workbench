@@ -1,5 +1,5 @@
 <script setup>
-// The steps of one update, under its platform card: the brief, the four
+// The steps of one update, under its platform card: the brief, the three
 // phases with their pages and the result. Each step shows its state.
 import { computed } from "vue";
 import { ClipboardList, Flag } from "lucide-vue-next";
@@ -17,7 +17,6 @@ const emit = defineEmits(["navigate"]);
 
 const pages = computed(() => props.flow.pages.value);
 const page = computed(() => props.flow.state.page);
-const mode = computed(() => props.flow.state.brief.mode);
 const byId = (id) => pages.value.find((entry) => entry.id === id);
 
 const phases = computed(() => RELEASE_PHASES.map((phase, index) => {
@@ -34,7 +33,7 @@ function iconStatus(entry) {
 }
 
 function label(entry) {
-  return `${pageTitle(entry.id, mode.value)} · ${t(`releaseFlow.rail.state.${iconStatus(entry)}`)}`;
+  return `${pageTitle(entry.id)} · ${t(`releaseFlow.rail.state.${iconStatus(entry)}`)}`;
 }
 
 function ariaCurrent(id) {
@@ -75,7 +74,7 @@ function ariaCurrent(id) {
               @click="emit('navigate', entry.id)"
             >
               <ReleaseStatusIcon :status="iconStatus(entry)" :size="14" />
-              <span class="wb-rf-rail-label">{{ pageTitle(entry.id, mode) }}</span>
+              <span class="wb-rf-rail-label">{{ pageTitle(entry.id) }}</span>
             </button>
           </li>
         </ul>

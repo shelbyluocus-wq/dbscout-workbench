@@ -62,7 +62,7 @@ let planSequence = 0;
 
 /**
  * The release workspace: every platform's update side by side (each with its
- * own progress, schedule and server clock watch), the history, the open-plan
+ * own progress), the history, the open-plan
  * memo and the shared settings. Progress persists on this device, so an
  * update left half-way continues the next time the workspace opens.
  */
@@ -79,7 +79,6 @@ export function useReleaseWorkspace({
   const today = localDateIso(now());
   const stored = readStoredWorkspace(storage);
   const legacy = stored ? null : readLegacyFlow(storage);
-  const fresh = !stored && !legacy;
   const workspace = reactive(createWorkspaceData({ stored, legacy, today, translate, seedRuns: seed ? createDemoRuns : null }));
   const storedHistory = readStoredHistory(storage);
   const history = ref(storedHistory ?? (seed ? compactHistory(createDemoHistory({ today, platforms: workspace.platforms })) : []));
@@ -95,17 +94,14 @@ export function useReleaseWorkspace({
   function writeHistory() {
     writeStoredHistory(storage, history.value);
   }
-  if (!storedHistory) writeHistory();
-  if (fresh || legacy) persistence.schedule();
+  writeHistory();
+  persistence.schedule();
 
   /* ── Clock ── */
-  // Real time for every update; each update's GM clock adds its own demo offset.
   const clock = ref(now().getTime());
   const stopClock = ticker(() => (clock.value = now().getTime()));
 
   /* ── Updates ── */
-  // Every update keeps a live flow, so a maintenance on one platform closes
-  // its servers on time while another platform is on screen.
   const flows = new Map();
   const flowsVersion = ref(0);
 
@@ -144,7 +140,6 @@ export function useReleaseWorkspace({
         templates: templateList,
         sleep,
         now,
-        clock,
         flush: () => persistence.flush(),
         onSettled: settle,
       }));
@@ -378,7 +373,7 @@ export function useReleaseWorkspace({
       if (Object.hasOwn(RELEASE_SPEEDS, value)) workspace.demo.speed = value;
       return;
     }
-    if (["conflicts", "buildFailure", "missingFiles", "gmNetwork", "shutdownSlow"].includes(key)) workspace.demo[key] = Boolean(value);
+    if (["conflicts", "buildFailure", "missingFiles"].includes(key)) workspace.demo[key] = Boolean(value);
   }
 
   /* ── One-click mode ── */

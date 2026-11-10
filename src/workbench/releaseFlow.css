@@ -532,11 +532,6 @@
   align-items: center;
 }
 
-/* Three stops: development → relay database → the platform, through the GM. */
-.wb-rf-route.is-three {
-  grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) 36px minmax(0, 1fr);
-}
-
 .wb-rf-route-node {
   display: grid;
   gap: 6px;
@@ -550,11 +545,6 @@
 .wb-rf-route-node.is-target {
   border-color: color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
   box-shadow: 0 0 0 3px var(--wb-accent-soft);
-}
-
-.wb-rf-route-node.is-later {
-  border-style: dashed;
-  background: transparent;
 }
 
 .wb-rf-route-node > span {

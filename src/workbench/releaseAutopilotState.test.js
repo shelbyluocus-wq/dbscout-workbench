@@ -54,14 +54,14 @@ test("SVN conflicts are settled by the rule, or wait for the person", () => {
 });
 
 test("a failed step is retried as often as the rules say, then waits for the person", () => {
-  const statuses = { ...ALL_DONE_BEFORE("gm.clientUpload"), "gm.clientUpload": "failed" };
-  const patches = { "gm.clientUpload": { error: "gmNetwork" } };
-  assert.deepEqual(decide({ statuses, patches }), { kind: "retry", taskId: "gm.clientUpload", attempt: 1 });
-  assert.deepEqual(decide({ statuses, patches, auto: { retries: { "gm.clientUpload": 1 } } }), { kind: "retry", taskId: "gm.clientUpload", attempt: 2 });
-  assert.deepEqual(decide({ statuses, patches, auto: { retries: { "gm.clientUpload": 2 } } }), { kind: "pause", reason: "failed", taskId: "gm.clientUpload" });
-  assert.deepEqual(decide({ statuses, patches, rules: { retries: 0 } }), { kind: "pause", reason: "failed", taskId: "gm.clientUpload" });
+  const statuses = { ...ALL_DONE_BEFORE("client.sync"), "client.sync": "failed" };
+  const patches = { "client.sync": { error: "failed" } };
+  assert.deepEqual(decide({ statuses, patches }), { kind: "retry", taskId: "client.sync", attempt: 1 });
+  assert.deepEqual(decide({ statuses, patches, auto: { retries: { "client.sync": 1 } } }), { kind: "retry", taskId: "client.sync", attempt: 2 });
+  assert.deepEqual(decide({ statuses, patches, auto: { retries: { "client.sync": 2 } } }), { kind: "pause", reason: "failed", taskId: "client.sync" });
+  assert.deepEqual(decide({ statuses, patches, rules: { retries: 0 } }), { kind: "pause", reason: "failed", taskId: "client.sync" });
   // A step cut off by closing the workspace just runs again; one a retry cannot fix stops at once.
-  assert.deepEqual(decide({ statuses, patches: { "gm.clientUpload": { error: "interrupted" } } }), { kind: "run", taskId: "gm.clientUpload" });
+  assert.deepEqual(decide({ statuses, patches: { "client.sync": { error: "interrupted" } } }), { kind: "run", taskId: "client.sync" });
   const build = { ...ALL_DONE_BEFORE("build.cocos"), "build.cocos": "failed" };
   assert.deepEqual(decide({ statuses: build, patches: { "build.cocos": { error: "buildPrecheck" } } }), { kind: "pause", reason: "failed", taskId: "build.cocos" });
 });
@@ -89,41 +89,28 @@ test("rules that stop pause before their step until the person lets it pass", ()
   assert.deepEqual(decide({ statuses: sync, patches: missing }), { kind: "run", taskId: "client.transfer" });
   assert.deepEqual(decide({ statuses: sync, patches: missing, rules: { missingFiles: "stop" } }), { kind: "pause", reason: "missingFiles", taskId: "client.sync" });
 
-  const apply = { ...ALL_DONE_BEFORE("gm.configApply"), "gm.configReload": "done" };
-  assert.deepEqual(decide({ statuses: apply, rules: { configApply: "stop" } }), { kind: "pause", reason: "configApply", taskId: "gm.configApply" });
-  const open = ALL_DONE_BEFORE("gm.open");
-  assert.deepEqual(decide({ statuses: open }), { kind: "run", taskId: "gm.open" });
-  assert.deepEqual(decide({ statuses: open, rules: { openServers: "stop" } }), { kind: "pause", reason: "open", taskId: "gm.open" });
 });
 
-test("the maintenance is handed to the GM, a passed start moves or stops, and the shutdown is waited for", () => {
-  const ready = ALL_DONE_BEFORE("gm.maintenance");
-  assert.deepEqual(decide({ statuses: ready }), { kind: "schedule", postpone: false });
-  assert.deepEqual(decide({ statuses: ready, scheduleProblem: "startPassed" }), { kind: "pause", reason: "lateStart", taskId: "gm.maintenance" });
-  assert.deepEqual(decide({ statuses: ready, scheduleProblem: "startPassed", rules: { lateStart: "postpone" } }), { kind: "schedule", postpone: true });
-  assert.deepEqual(decide({ statuses: ready, scheduleProblem: "endBeforeStart", rules: { lateStart: "postpone" } }), { kind: "pause", reason: "schedule", taskId: "gm.maintenance" });
-  const scheduled = { ...ready, "gm.maintenance": "done", "gm.clientOpen": "done" };
-  assert.deepEqual(decide({ statuses: scheduled, phase: "scheduled" }), { kind: "wait", reason: "maintenance" });
-  // A shutdown the monitors did not finish is checked again like any failed step.
-  const slow = { ...scheduled, "gm.shutdown": "failed" };
-  assert.deepEqual(decide({ statuses: slow, patches: { "gm.shutdown": { error: "shutdownIncomplete" } }, phase: "scheduled" }), { kind: "retry", taskId: "gm.shutdown", attempt: 1 });
+test("a saved one-click run waiting on removed work returns to manual control", () => {
+  assert.deepEqual(restoreAutopilot({ status: "running", taskId: "gm.shutdown", reason: "lateStart" }), idleAutopilot());
+  assert.deepEqual(restoreAutopilot({ status: "paused", taskId: "gm.open", reason: "open" }), idleAutopilot());
 });
 
 test("rules and one-click state restore to known values only", () => {
   assert.deepEqual(restoreAutopilotRules(null), defaultAutopilotRules());
   for (const rule of AUTOPILOT_RULES) assert.equal(defaultAutopilotRules()[rule.id], rule.choices[0]);
   const rules = restoreAutopilotRules({ svnConflicts: "theirs", openServers: "nope", retries: 3, retryDelay: 7 });
-  assert.deepEqual([rules.svnConflicts, rules.openServers, rules.retries, rules.retryDelay], ["theirs", "auto", 3, 30]);
+  assert.deepEqual([rules.svnConflicts, rules.openServers, rules.retries, rules.retryDelay], ["theirs", undefined, 3, 30]);
   const auto = restoreAutopilot({
     status: "running",
     reason: "x",
-    taskId: "gm.nothing",
+    taskId: "client.sync",
     acknowledged: ["client.diff", "gm.nothing"],
-    retries: { "gm.clientUpload": 2, "gm.nothing": 1, "db.sync": -1 },
+    retries: { "client.sync": 2, "gm.nothing": 1, "db.sync": -1 },
     retryAt: 123,
-    log: [{ at: 5, kind: "retry", taskId: "gm.clientUpload", detail: 1 }, { at: 6, kind: "boom" }],
+    log: [{ at: 5, kind: "retry", taskId: "client.sync", detail: 1 }, { at: 6, kind: "boom" }, { at: 7, kind: "retry", taskId: "gm.open" }],
   });
-  assert.deepEqual([auto.status, auto.taskId, auto.acknowledged, auto.retries, auto.retryAt], ["running", "", ["client.diff"], { "gm.clientUpload": 2 }, 0]);
-  assert.deepEqual(auto.log, [{ at: 5, kind: "retry", taskId: "gm.clientUpload", detail: "1" }]);
+  assert.deepEqual([auto.status, auto.taskId, auto.acknowledged, auto.retries, auto.retryAt], ["running", "client.sync", ["client.diff"], { "client.sync": 2 }, 0]);
+  assert.deepEqual(auto.log, [{ at: 5, kind: "retry", taskId: "client.sync", detail: "1" }]);
   assert.equal(restoreAutopilot({ status: "flying" }).status, "off");
 });

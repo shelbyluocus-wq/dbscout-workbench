@@ -19,8 +19,7 @@ import {
   missingDependencies,
   nextTaskOnPage,
 } from "../releaseFlowState.js";
-import { formatCountdown } from "../utils/releaseServer.js";
-import { autopilotRuleSummary, formatReleaseCount, formatReleaseDate, formatReleaseRange, formatReleaseTime, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
+import { autopilotRuleSummary, formatReleaseDate, pageTitle, releaseErrorText, taskTitle } from "../utils/releaseFlowFormat.js";
 import ReleaseAutopilotBar from "./ReleaseAutopilotBar.vue";
 import ReleaseFlowOverview from "./ReleaseFlowOverview.vue";
 import ReleaseDatabasePage from "./ReleaseDatabasePage.vue";
@@ -29,8 +28,6 @@ import ReleaseFileSyncPage from "./ReleaseFileSyncPage.vue";
 import ReleaseTransferPage from "./ReleaseTransferPage.vue";
 import ReleaseDiffPage from "./ReleaseDiffPage.vue";
 import ReleaseCocosPage from "./ReleaseCocosPage.vue";
-import ReleaseGmTasksPage from "./ReleaseGmTasksPage.vue";
-import ReleaseServerPage from "./ReleaseServerPage.vue";
 import ReleaseFlowSummary from "./ReleaseFlowSummary.vue";
 
 const props = defineProps({
@@ -52,15 +49,13 @@ const PAGE_COMPONENTS = {
   clientTransfer: ReleaseTransferPage,
   clientDiff: ReleaseDiffPage,
   build: ReleaseCocosPage,
-  gmUpload: ReleaseGmTasksPage,
-  gmServer: ReleaseServerPage,
   summary: ReleaseFlowSummary,
 };
 // Pages built around wide tables or two columns get more room.
 const WIDE_PAGES = new Set(["clientSync", "clientDiff", "build"]);
 // Real operations, so their confirmations carry no demo note.
 const REAL_TASKS = new Set(["build.cocos"]);
-const CONFIRMED_TASKS = new Set(["db.sync", "db.restore", "gm.configApply", "gm.restart", "gm.open"]);
+const CONFIRMED_TASKS = new Set(["db.sync", "db.restore"]);
 
 const pageComponent = computed(() => PAGE_COMPONENTS[state.page] || ReleaseFlowOverview);
 const pageProps = computed(() => {
@@ -70,9 +65,8 @@ const pageProps = computed(() => {
   return base;
 });
 const busy = computed(() => props.flow.busy.value);
-const mode = computed(() => state.brief.mode);
 const platform = computed(() => props.flow.platform.value);
-const eyebrow = computed(() => [platform.value.name, formatReleaseDate(state.brief.date), t(`releaseFlow.mode.${mode.value}`)].join(" · "));
+const eyebrow = computed(() => [platform.value.name, formatReleaseDate(state.brief.date)].join(" · "));
 
 /* ── Footer: the one next action of the current page ── */
 function blockerText(taskId, blocker) {
@@ -98,7 +92,7 @@ function nextStep(pageId) {
   return {
     status: nextPage === "summary"
       ? t("releaseFlow.footer.doneLast")
-      : t("releaseFlow.footer.doneNext", { step: pageTitle(nextPage, mode.value) }),
+      : t("releaseFlow.footer.doneNext", { step: pageTitle(nextPage) }),
     primary: { label: t(nextPage === "summary" ? "releaseFlow.footer.toSummary" : "releaseFlow.footer.next"), action: "next" },
   };
 }
@@ -109,51 +103,6 @@ function runningFooter() {
     running: true,
     primary: { label: t("releaseFlow.footer.runningButton"), disabled: true },
   };
-}
-
-// The maintenance page follows the server rather than a task list: schedule,
-// wait for the time, restart during maintenance, then open.
-function serverFooter() {
-  const flow = props.flow;
-  const phase = flow.serverPhase.value;
-  if (phase === "running") {
-    // The maintenance window and the hot update's opening are handed over together.
-    const blockedTask = flow.scheduleBlocker.value;
-    const blocker = blockedTask ? flow.blockerOf(blockedTask) : "";
-    const problem = flow.scheduleProblem.value;
-    const blocking = problem === "endBeforeStart" || problem === "startPassed";
-    return {
-      status: blockerText(blockedTask, blocker) || (problem ? t(`releaseFlow.schedule.problem.${problem}`) : t("releaseFlow.server.footer.schedule")),
-      tone: blocking ? "warning" : "",
-      primary: { label: t("releaseFlow.server.action.schedule"), action: "schedule", disabled: Boolean(blocker) || blocking },
-    };
-  }
-  if (phase === "scheduled" && flow.shutdownRefused.value) {
-    return {
-      status: releaseErrorText(state.tasks["gm.shutdown"].error),
-      tone: "danger",
-      primary: { label: t("releaseFlow.footer.retry"), action: "run", taskId: "gm.shutdown", disabled: Boolean(flow.blockerOf("gm.shutdown")) },
-    };
-  }
-  if (phase === "scheduled") {
-    const left = formatCountdown(flow.maintenanceStartAt.value - flow.serverNow.value);
-    return {
-      status: t("releaseFlow.server.footer.waiting", { time: left }),
-      primary: { label: t("releaseFlow.server.action.waiting"), disabled: true },
-    };
-  }
-  if (phase === "maintenance" || phase === "readyToOpen") {
-    // Apply what the GM has ready, start the zones, then open them.
-    const taskId = nextTaskOnPage("gmServer", state.tasks, state.brief) || "gm.open";
-    const blocker = flow.blockerOf(taskId);
-    const failed = state.tasks[taskId].status === TASK_STATUS.FAILED;
-    return {
-      status: blockerText(taskId, blocker) || (failed ? releaseErrorText(state.tasks[taskId].error) : t(`releaseFlow.server.footer.${phase}`)),
-      tone: failed ? "danger" : "",
-      primary: { label: taskTitle(taskId), action: "run", taskId, disabled: Boolean(blocker) },
-    };
-  }
-  return nextStep("gmServer");
 }
 
 const autopilot = props.flow.autopilot;
@@ -196,7 +145,6 @@ const footer = computed(() => {
     };
   }
   if (flow.runningTask.value) return runningFooter();
-  if (pageId === "gmServer" && mode.value === "maintenance") return serverFooter();
   if (pageId === "clientSvn" && flow.conflictsPending.value) {
     const pending = flow.svnConflicts.value.filter((conflict) => !conflict.choice).length;
     return {
@@ -215,16 +163,13 @@ const footer = computed(() => {
   const blocker = flow.blockerOf(nextTask);
   const failed = state.tasks[nextTask].status === TASK_STATUS.FAILED;
   const definition = RELEASE_TASK_BY_ID.get(nextTask);
-  // GM pages list operations as cards; the button names the one it runs.
-  const named = page.phase === "gm" && tasks.length > 1;
   let status = blockerText(nextTask, blocker);
   if (!status && failed) status = releaseErrorText(state.tasks[nextTask].error);
   if (!status && tasks.length > 1) {
     const settled = tasks.filter((id) => [TASK_STATUS.DONE, TASK_STATUS.SKIPPED].includes(state.tasks[id].status)).length;
     status = t("releaseFlow.footer.pageProgress", { done: settled, total: tasks.length });
   }
-  let label = failed ? t("releaseFlow.footer.retry") : runLabel(nextTask);
-  if (named && !failed) label = taskTitle(nextTask);
+  const label = failed ? t("releaseFlow.footer.retry") : runLabel(nextTask);
   return {
     status,
     tone: failed ? "danger" : "",
@@ -262,28 +207,7 @@ function confirmOptions(taskId) {
       danger: true,
     };
   }
-  if (taskId === "gm.configApply") {
-    const pack = state.tasks["gm.configPack"].result || {};
-    return {
-      title: t("releaseFlow.confirm.configApply.title", { platform: target.name, version: pack.version || "" }),
-      message: t("releaseFlow.confirm.configApply.message", { platform: target.name, version: pack.version || "", tables: formatReleaseCount(pack.tables) }),
-      confirmText: t("releaseFlow.confirm.configApply.action"),
-      danger: true,
-    };
-  }
-  if (taskId === "gm.restart") {
-    return {
-      title: t("releaseFlow.confirm.restart.title"),
-      message: t("releaseFlow.confirm.restart.message", { platform: target.name }),
-      confirmText: t("releaseFlow.confirm.restart.action"),
-      danger: true,
-    };
-  }
-  return {
-    title: t("releaseFlow.confirm.open.title"),
-    message: t("releaseFlow.confirm.open.message", { platform: target.name }),
-    confirmText: t("releaseFlow.confirm.open.action"),
-  };
+  return {};
 }
 
 // A real build is confirmed with what it will use and where it writes.
@@ -332,17 +256,6 @@ function navigate(target) {
 }
 
 /* ── One-click mode ── */
-function autopilotItems() {
-  const items = [];
-  if (state.brief.mode === "maintenance") {
-    items.push(t("releaseFlow.autopilot.confirm.window", { window: formatReleaseRange(state.schedule.maintenanceStart, state.schedule.maintenanceEnd) }));
-  }
-  if (props.flow.applies("gm.clientOpen")) {
-    items.push(t("releaseFlow.autopilot.confirm.clientOpen", { time: formatReleaseTime(state.schedule.clientOpenAt) }));
-  }
-  return [...items, ...autopilotRuleSummary(props.workspace.state.autopilot)];
-}
-
 async function startAutopilot() {
   if (!autoOffered.value) return;
   if (!(await withConfirm("", {
@@ -350,7 +263,7 @@ async function startAutopilot() {
     message: t(state.brief.started ? "releaseFlow.autopilot.confirm.messageRest" : "releaseFlow.autopilot.confirm.message", {
       count: progressLeft.value,
     }),
-    items: autopilotItems(),
+    items: autopilotRuleSummary(props.workspace.state.autopilot),
     confirmText: t("releaseFlow.autopilot.confirm.action"),
   }))) return;
   autopilot.start();
@@ -368,7 +281,6 @@ function primaryAction() {
   else if (action.action === "next") props.flow.step(1);
   else if (action.action === "run") void runTask(action.taskId);
   else if (action.action === "resolve") void props.flow.resolveConflicts();
-  else if (action.action === "schedule") void props.flow.scheduleMaintenance();
   else if (action.action === "summary") props.flow.go("summary");
   else if (action.action === "newUpdate") openNewUpdate(platform.value.id);
 }

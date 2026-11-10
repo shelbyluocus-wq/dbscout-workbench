@@ -3,13 +3,12 @@
 // for later this week. Every seeded entry is marked as demo, like the
 // simulated updates themselves; the demo options can clear them.
 
-import { TASK_STATUS, applicableTasks, createReleaseBrief, defaultSchedule } from "../releaseFlowState.js";
+import { TASK_STATUS, applicableTasks, createReleaseBrief } from "../releaseFlowState.js";
 import { createRun } from "../releaseWorkspaceState.js";
 import { addDays } from "./releasePlanNotes.js";
-import { localInputTime } from "./releaseServer.js";
 import { DEMO_BUILD_OUTPUT, DEMO_COCOS_VERSION, DEMO_REVISION } from "./releaseFlowDemo.js";
 
-const ALL_SCOPES = Object.freeze({ database: true, client: true, server: true, activity: true });
+const ALL_SCOPES = Object.freeze({ database: true, client: true });
 
 // Files a sync of the TAP client could not find in the development client.
 const DEMO_MISSING_FILES = Object.freeze([
@@ -18,24 +17,23 @@ const DEMO_MISSING_FILES = Object.freeze([
 ]);
 
 const HISTORY_SEEDS = Object.freeze([
-  { platformId: "tw", daysAgo: 13, mode: "maintenance", scope: ALL_SCOPES, start: "10:00", minutes: 150 },
+  { platformId: "tw", daysAgo: 13, scope: ALL_SCOPES, start: "10:00", minutes: 150 },
   {
     platformId: "tap",
     daysAgo: 6,
-    mode: "hot",
-    scope: { database: true, client: true, server: false, activity: true },
+    scope: ALL_SCOPES,
     start: "14:00",
     minutes: 95,
     warnings: DEMO_MISSING_FILES,
   },
-  { platformId: "douyin", daysAgo: 2, mode: "maintenance", scope: ALL_SCOPES, start: "10:00", minutes: 140 },
+  { platformId: "douyin", daysAgo: 2, scope: ALL_SCOPES, start: "10:00", minutes: 140 },
 ]);
 
 function seededRelease(seed, { today, platforms }) {
   const date = addDays(today, -seed.daysAgo);
-  const startedAt = localInputTime(`${date}T${seed.start}`);
+  const startedAt = new Date(`${date}T${seed.start}`).getTime();
   const finishedAt = startedAt + seed.minutes * 60000;
-  const brief = { ...createReleaseBrief(date), mode: seed.mode, scope: { ...seed.scope }, prepared: true, started: true };
+  const brief = { ...createReleaseBrief(date), scope: { ...seed.scope }, prepared: true, started: true };
   const definitions = applicableTasks(brief);
   const span = (finishedAt - startedAt) / definitions.length;
   const platform = platforms.find((entry) => entry.id === seed.platformId);
@@ -61,8 +59,7 @@ function seededRelease(seed, { today, platforms }) {
     createdAt: startedAt - 30 * 60000,
     startedAt,
     finishedAt,
-    brief: { date, mode: seed.mode, scope: { ...seed.scope } },
-    schedule: defaultSchedule(date),
+    brief: { date, scope: { ...seed.scope } },
     steps,
     events: [],
     logs: [],
@@ -73,7 +70,7 @@ function seededRelease(seed, { today, platforms }) {
 function seededBuild({ today, platforms }) {
   const platform = platforms.find((entry) => entry.id === "douyin");
   const date = addDays(today, -1);
-  const startedAt = localInputTime(`${date}T16:20`);
+  const startedAt = new Date(`${date}T16:20`).getTime();
   const finishedAt = startedAt + 9 * 60000;
   return {
     id: `history-demo-build-douyin-${date}`,
@@ -107,10 +104,8 @@ export function createDemoHistory({ today, platforms }) {
   return [...HISTORY_SEEDS.map((seed) => seededRelease(seed, { today, platforms })), seededBuild({ today, platforms })];
 }
 
-/** 玩心 is scheduled for a maintenance two days from now, not started yet. */
 export function createDemoRuns({ today }) {
   const date = addDays(today, 2);
-  const run = createRun({ id: "run-demo-wanxin", platformId: "wanxin", today: date, createdAt: localInputTime(`${today}T09:00`) });
-  run.schedule = { ...defaultSchedule(date), maintenanceStart: `${date}T09:30`, maintenanceEnd: `${date}T11:30`, clientOpenAt: `${date}T11:30` };
+  const run = createRun({ id: "run-demo-wanxin", platformId: "wanxin", today: date, createdAt: new Date(`${today}T09:00`).getTime() });
   return [run];
 }

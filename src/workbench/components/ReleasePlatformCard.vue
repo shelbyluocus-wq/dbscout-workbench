@@ -5,7 +5,7 @@
 import { computed } from "vue";
 import { CircleAlert, TriangleAlert, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { formatDateTime, issueText } from "../utils/releaseFlowFormat.js";
+import { formatDateTime, formatDayOf, issueText } from "../utils/releaseFlowFormat.js";
 
 const props = defineProps({
   card: { type: Object, required: true },
@@ -48,7 +48,7 @@ const label = computed(() => [
         <span class="wb-rf-note-count">{{ card.progress.done }}/{{ card.progress.total }}</span>
       </span>
       <span class="wb-rf-note-meta">
-        <span v-if="card.plannedAt">{{ t('releaseFlow.card.planned', { time: formatDateTime(card.plannedAt) }) }}</span>
+        <span v-if="card.plannedAt">{{ t('releaseFlow.card.planned', { time: formatDayOf(card.plannedAt) }) }}</span>
         <span v-if="card.lastUpdate">{{ t('releaseFlow.card.last', { time: formatDateTime(card.lastUpdate) }) }}</span>
         <span v-if="!card.plannedAt && !card.lastUpdate">{{ t('releaseFlow.card.never') }}</span>
       </span>

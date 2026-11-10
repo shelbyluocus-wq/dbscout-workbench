@@ -1,5 +1,5 @@
 <script setup>
-// One glyph per task or page state, shared by the step rail, GM cards and the
+// One glyph per task or page state, shared by the step rail and the
 // summary. Color is never the only signal: each state has its own shape.
 import { CircleCheck, CircleX, LoaderCircle, Minus, SkipForward, TriangleAlert } from "lucide-vue-next";
 

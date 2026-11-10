@@ -22,13 +22,6 @@ export function releaseErrorText(code, translate = t) {
   return text === key ? value : text;
 }
 
-export function formatReleaseBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`;
-  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
-  return `${value} B`;
-}
-
 export function formatReleaseCount(value, locale = language.locale.value) {
   return new Intl.NumberFormat(locale).format(Number(value) || 0);
 }
@@ -53,69 +46,9 @@ export function formatReleaseWeekday(iso, locale = language.locale.value) {
   return formatIsoDate(iso, { weekday: "short" }, locale);
 }
 
-/**
- * A datetime-local value ("2026-10-24T10:00") as "10/24 10:00", or just
- * "10:00" when it falls on `dayIso`.
- */
-export function formatReleaseTime(value, { dayIso = "", locale = language.locale.value } = {}) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value));
-  if (!match) return "";
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
-  const timeOnly = String(value).slice(0, 10) === dayIso;
-  const options = timeOnly
-    ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }
-    : { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
-  return new Intl.DateTimeFormat(locale, options).format(date);
-}
-
-/** "10/24 10:00 – 12:00": the end drops the date when both share a day. */
-export function formatReleaseRange(start, end, { dayIso = "", locale = language.locale.value } = {}) {
-  const startDay = String(start).slice(0, 10);
-  const endText = formatReleaseTime(end, { dayIso: String(end).slice(0, 10) === startDay ? startDay : dayIso, locale });
-  return `${formatReleaseTime(start, { dayIso, locale })} – ${endText}`;
-}
-
 export function formatClockTime(timestamp, locale = language.locale.value) {
   return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
     .format(new Date(timestamp));
-}
-
-/** What a finished GM operation reported, as one sentence. */
-export function gmResultText(taskId, result = {}, translate = t) {
-  const key = `releaseFlow.task.${taskId}.done`;
-  const value = result || {};
-  switch (taskId) {
-    case "gm.configPack":
-      return translate(key, { version: value.version, tables: formatReleaseCount(value.tables), size: formatReleaseBytes(value.sizeBytes) });
-    case "gm.configApply":
-      return translate(key, { version: value.version, backup: value.backup });
-    case "gm.configReload":
-    case "gm.serverApply":
-      return translate(key, { count: value.servers ?? value.hosts, version: value.version });
-    case "gm.activityUpload":
-    case "gm.serverBuild":
-      return translate(key, { file: value.file, version: value.version, revision: value.revision });
-    case "gm.activityCurrent":
-      return translate(key, { version: value.version, date: value.date ? formatReleaseDate(value.date) : "" });
-    case "gm.serverPush":
-    case "gm.clientPull":
-    case "gm.clientPush":
-      return translate(key, { version: value.version });
-    case "gm.activityReload":
-      return translate(key, { count: value.activities });
-    case "gm.clientUpload":
-      return translate(key, { file: value.file, size: formatReleaseBytes(value.sizeBytes), version: value.version });
-    case "gm.maintenance":
-      return translate(key, { window: formatReleaseRange(value.start, value.end) });
-    case "gm.shutdown":
-      return translate(key, { count: formatReleaseCount(value.players), time: value.at ? formatClockTime(Date.parse(value.at)) : "" });
-    case "gm.clientOpen":
-      return translate(key, { version: value.version, at: formatReleaseTime(value.at) });
-    case "gm.restart":
-      return translate(key, { count: value.servers, version: value.version });
-    default:
-      return translate(key);
-  }
 }
 
 /** What a finished step did, in one line (summary page and history). */
@@ -140,7 +73,7 @@ export function stepResultText(taskId, { status, result = {} } = {}, { cocosVers
     case "build.cocos":
       return translate("releaseFlow.summary.build", { version: value.engineVersion || cocosVersion, platform: value.platform || "android" });
     default:
-      return gmResultText(taskId, value, translate);
+      return "";
   }
 }
 
@@ -206,9 +139,7 @@ export function taskTitle(taskId, translate = t) {
   return translate(`releaseFlow.task.${taskId}.title`);
 }
 
-/** A page's title; the last GM page is named by the update mode. */
-export function pageTitle(pageId, mode = "", translate = t) {
-  if (pageId === "gmServer") return translate(`releaseFlow.page.gmServer.title.${mode || "maintenance"}`);
+export function pageTitle(pageId, translate = t) {
   return translate(`releaseFlow.page.${pageId}.title`);
 }
 

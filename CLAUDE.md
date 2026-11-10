@@ -21,6 +21,11 @@ separate exact-key tab without clearing the original filters. Batch actions defa
 to compact results and fast execution; optional demo mode labels/pauses steps.
 See `docs/local-control-connections.md` for limits and verification commands.
 
+Release scope (2026-11-10): database and client preparation only. GM connections,
+commands, simulated steps, activity/server publishing and maintenance controls
+are removed. Existing workspace/history data drops those fields and tasks while
+preserving retained work. There is no local GM test environment to start.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > A near-identical `AGENTS.md` exists for Codex. When you change project
@@ -184,15 +189,14 @@ capabilities:
   `chengxu/tool`, `trunk/client/nzg` + `trunk/tools`, plus the common
   `client/jswz` / `Versions/nzg` checkouts) and fills empty or missing ones.
   Path rows have a Browse button that reveals the script/project in Explorer.
-- **Release workspace** — the activity-rail Release entry (below one-click
-  table transfer) opens a lazily loaded workspace for every platform's
+- **Release workspace** — the Release entry in More opens a lazily loaded workspace for every platform's
   updates. A board on the left shows each platform as a note (state: not
   scheduled / scheduled / updating / needs attention / done, progress, last
   and planned update, the first issue such as a failed step, SVN conflicts,
   files a sync missed, steps to run again or a missed start); clicking one
   opens its update, whose steps unfold under its note. Each platform has at
-  most one update on its card, with its own progress, schedule and demo GM
-  clock, so several platforms run side by side; New update asks for the
+  most one update on its card, with its own progress and planned date,
+  so several platforms run side by side; New update asks for the
   platform and, when it still has an open update, whether to continue it or
   abandon it (kept in the history). A finished update is written to the
   history once and stays read-only on its card until the next update.
@@ -202,17 +206,12 @@ capabilities:
   the history (every update with its steps, results, errors, warnings and
   last log lines, every client build and SVN operation; filtered by platform
   and kind, simulated entries marked Demo), open plans, client build, SVN and
-  platform settings. An update's brief (date, maintenance or no-downtime,
-  and which of database / client / server / activities it contains) decides
-  which steps apply. The GM steps follow the jswz GM's own flows (source in
-  a separate GM repository; every platform's live servers have their own
-  GM). Then: one database page (overwrite sync into the platform's intranet
+  platform settings. An update's brief (date and database / client scope)
+  decides which steps apply. Then: one database page (overwrite sync into the platform's intranet
   relay database, never the live one, with kept
   tables chosen from a styled suggestion list; the overwrite backs the
   relay database up first and its backup offers a confirmed restore that
-  resets the overwrite and what was built on it, while a change already
-  applied on the platform is rolled back there with the previous config
-  version; then the open plan written
+  resets the overwrite and what was built on it; then the open plan written
   as one UPDATE per table and direction, composite keys as row-value IN,
   rows the person leaves out skipped); SVN update with a choice per
   conflicting file; file sync with gitignore-like exclusion rules
@@ -223,31 +222,13 @@ capabilities:
   with a one-click transfer template whose settings show and can change
   there, new templates made there too (the same store as the transfer
   dialog), log kept open; the diff review on the shared SVN view (below)
-  over a simulated working copy; the Cocos build; GM preparation while the
-  servers run (a config version the company GM packs from the relay
-  database and sends to the platform's GM; the activity table uploaded and
-  scheduled as the next version; the hot update uploaded to the company GM,
-  confirmed and synced, named `ver_<platform>_<version>.zip`; the server
-  version the company GM builds from SVN and syncs; activities are reloaded
-  only without downtime), all of which the pre-maintenance waits for, as
-  the GM's maintenance checklist does; and the last page. With maintenance
-  that page is a live server console: schedule the pre-maintenance together
-  with the hot update's opening (both or neither), wait on a countdown while
-  the monitors close the servers by themselves at the start time (an `auto`
-  task that only watches the zones: one not finished waits for a retry, one
-  cut off by closing the workspace runs again), apply the server version
-  and the config version (confirmed), start the zones still closed to
-  players and check them, then open; a hot update that follows maintenance
-  opens with an early reopening. Without downtime the page applies the
-  config version, has the servers read it again and sets the hot update's
-  opening. One-click mode runs a whole update by itself: the brief's panel
-  holds the times and the rules for what it meets (SVN conflicts, files the
-  sync missed, a conversion that still fails, the diff review, unreadable
-  plan notes, the config apply, a passed maintenance start, opening the
-  servers; retries and their delay), shared by every platform; the run
-  pauses where a rule says stop or a step fails past its retries (build
-  checks, the release guard and failed zone checks always stop; the
-  servers are never opened then), a bar above the page shows what it does,
+  over a simulated working copy; the Cocos build; and the summary. Completion
+  means preparation is done, not that anything was published to live servers.
+  With both scopes selected there are seven steps; database restore is a side
+  action, not a step. One-click mode runs the preparation by shared rules for
+  SVN conflicts, missing files, failed conversion, diff review, unreadable plan
+  notes and retries. It pauses where a rule says stop or a step exhausts its
+  retries; build checks and the release guard always stop. A bar above the page shows what it does,
   why it paused and its log, cards tag it, and it goes on where it was
   when the workspace opens again. Open plans are a memo the team keeps (no
   table is read): entries (hero, mount, spirit, battle pet, feature or other;
@@ -275,20 +256,22 @@ capabilities:
   real svn on the SVN page and a simulated working copy on the diff step.
   Every other step runs through a driver (`run(taskId, context, io)`): the
   build step through `createReleaseBuildDriver`, the rest through
-  `releaseFlowDemoDriver.js`, which touches no database, file, working copy
-  or GM; the header badge, page chips, confirmations and history entries
+  `releaseFlowDemoDriver.js`, which touches no database, file or working copy;
+  the header badge, page chips, confirmations and history entries
   say which is simulated (in the browser preview the mock backend simulates
   the build and SVN too and says so). Real integrations replace the demo task
   by task. Demo content uses the jswz client's real table, item, file and
   folder names (`newsg_4cfg`, `heroprop`, `buildopenplatprop`, platforms
   抖音 / TAP / 玩心 / TW); platform databases and folders, backups, the
-  changes themselves, versions, GM replies and the seeded history are
+  changes themselves, versions and the seeded history are
   simulated, and the client's server settings (`Config.ts` endpoints and
   keys) are never copied into source. The workspace (platforms, memo,
   rules, updates, view) persists in `dbscout_release_flow_v3` and the history
   separately in `dbscout_release_history_v1`; a started v2 draft becomes an
   update; rerunning or editing the input of a finished task resets the tasks
-  built on it.
+  built on it. Restoration removes legacy GM endpoints, schedules, tasks,
+  history entries, events and automation rules. GM-only drafts return to an
+  unstarted brief with no scope selected; old GM waits cannot execute.
 - **Config relations** — for game-config databases the workbench works out
   which config tables reference each other from three evidence sources:
   database column comments, a static scan of the bound game client's source
@@ -587,9 +570,9 @@ from UI):
 - `sidebarTreeState.js`, `sidebarSearchState.js`, `sidebarScroll.js`,
   `sidebarDragPreview.js` — Sidebar tree/search/scroll/drag state
 - `sqlExecutionState.js` — SQL console job/result event state and lifecycle
-- `releaseFlowState.js` — One update's pages, tasks (including the
-  automatic shutdown and the database restore action), dependencies,
-  scope/mode applicability, invalidation and restore of saved tasks
+- `releaseFlowState.js` — One update's pages, database/client tasks and
+  database restore action, dependencies, scope applicability, invalidation
+  and restore of saved tasks
 - `releaseAutopilotState.js` — One-click mode: its rules (choices,
   defaults, restore), an update's one-click state and log, and the decision
   of what a run does next
@@ -642,8 +625,7 @@ from UI):
   platform and build-target settings and the demo options;
   `useReleaseFlow.js` (`createRunFlow`) — one update's brief, per-task input,
   logs, results and events, run/cancel/skip through the driver, resets
-  after input changes, backup/restore, and its GM clock (injectable `ticker`,
-  per-update demo fast-forward) that starts the shutdown;
+  after input changes and backup/restore;
   `useReleaseAutopilot.js` (`createAutopilot`) — the one-click runner that
   drives a flow through its own actions, retries, pauses and resumes;
   `useCocosBuild.js`
@@ -652,8 +634,7 @@ from UI):
   SVN view's state over a backend or demo source. Helpers in `utils/`:
   `releasePlanNotes.js` (note parsing, date judgement, plan diff and
   per-table statements), `releaseFileRules.js` (exclusion rules, rule kinds,
-  picked paths), `releaseServer.js` (server phases, maintenance stages,
-  countdowns and schedule times), `cocosBuildCommand.js` (Cocos options,
+  picked paths), `cocosBuildCommand.js` (Cocos options,
   command line, platforms, output folders, checks and exit codes),
   `unifiedDiff.js` (svn diff parsing, side-by-side rows and in-line
   highlights), `releaseFlowDemo.js` / `releaseFlowDemoTables.js` /

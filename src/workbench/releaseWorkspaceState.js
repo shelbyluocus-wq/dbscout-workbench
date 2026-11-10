@@ -14,7 +14,6 @@ import {
   TASK_STATUS,
   applicableTasks,
   createReleaseBrief,
-  defaultSchedule,
   flowComplete,
   flowProgress,
   localDateIso,
@@ -25,7 +24,6 @@ import {
 import { idleAutopilot, restoreAutopilot, restoreAutopilotRules } from "./releaseAutopilotState.js";
 import { cleanExclusionRules } from "./utils/releaseFileRules.js";
 import { isIsoDate } from "./utils/releasePlanNotes.js";
-import { localInputTime } from "./utils/releaseServer.js";
 import {
   DEMO_DEFAULT_PLATFORM,
   DEMO_FILE_EXCLUSIONS,
@@ -72,12 +70,6 @@ function cleanTableNames(values) {
 }
 
 export { cleanTableNames };
-
-function shiftDate(value, fromIso, toIso) {
-  return typeof value === "string" && value.startsWith(fromIso) ? `${toIso}${value.slice(fromIso.length)}` : value;
-}
-
-export { shiftDate };
 
 /* ── Platforms ─────────────────────────────────────────────────────────── */
 
@@ -183,8 +175,6 @@ function restoreDemo(saved) {
     conflicts: demo.conflicts !== false,
     buildFailure: demo.buildFailure === true,
     missingFiles: demo.missingFiles === true,
-    gmNetwork: demo.gmNetwork === true,
-    shutdownSlow: demo.shutdownSlow === true,
     speed: Object.hasOwn(RELEASE_SPEEDS, demo.speed) ? demo.speed : "normal",
   };
 }
@@ -210,7 +200,6 @@ export function createRun({ id = createRunId(), platformId, today = localDateIso
     // leave the workspace for the history.
     outcome: "",
     brief,
-    schedule: defaultSchedule(today),
     tasks: restoreTasks(null, brief),
     events: [],
     page: "brief",
@@ -219,24 +208,10 @@ export function createRun({ id = createRunId(), platformId, today = localDateIso
     planSkips: {},
     // What the simulated working copy of the diff step already committed or reverted.
     svnDemo: { committed: [], reverted: [], revision: 0, commits: [] },
-    // Demo fast-forward of this update's GM clock, added to the real time.
-    clockOffset: 0,
     // One-click mode of this update (releaseAutopilotState.js).
     autopilot: idleAutopilot(),
     demo: true,
   };
-}
-
-function restoreSchedule(saved, fallback) {
-  const schedule = { ...fallback };
-  const timePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-  for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) {
-    if (timePattern.test(saved?.[key] || "")) schedule[key] = saved[key];
-  }
-  if (typeof saved?.clientOpenFollowsMaintenance === "boolean") {
-    schedule.clientOpenFollowsMaintenance = saved.clientOpenFollowsMaintenance;
-  }
-  return schedule;
 }
 
 const TASK_IDS = new Set(RELEASE_TASKS.map((definition) => definition.id));
@@ -245,7 +220,8 @@ function restoreEvents(saved) {
   if (!Array.isArray(saved)) return [];
   return saved
     .filter((entry) => Number(entry?.at) && (TASK_IDS.has(entry.taskId) || (!entry.taskId && entry.event === "started")))
-    .slice(-MAX_EVENTS);
+    .slice(-MAX_EVENTS)
+    .map((entry) => ({ at: Number(entry.at), taskId: entry.taskId || "", event: String(entry.event || "") }));
 }
 
 export function restoreRun(saved, { platforms, today }) {
@@ -253,10 +229,12 @@ export function restoreRun(saved, { platforms, today }) {
   if (!platforms.some((platform) => platform.id === saved.platformId)) return null;
   const fallback = createRun({ id: saved.id, platformId: saved.platformId, today, createdAt: Number(saved.createdAt) || Date.now() });
   const brief = restoreBrief(saved.brief, fallback.brief);
-  const schedule = restoreSchedule(saved.schedule, defaultSchedule(brief.date));
+  if (!applicableTasks(brief).length) {
+    brief.started = false;
+    brief.prepared = false;
+  }
   // An unstarted draft follows the calendar; a started update keeps its day.
   if (!brief.started && brief.date < today) {
-    for (const key of ["maintenanceStart", "maintenanceEnd", "clientOpenAt"]) schedule[key] = shiftDate(schedule[key], brief.date, today);
     brief.date = today;
   }
   const choices = {};
@@ -268,15 +246,15 @@ export function restoreRun(saved, { platforms, today }) {
   const tasks = restoreTasks(saved.tasks, brief);
   const done = saved.outcome === "done" && flowComplete(tasks, brief);
   const autopilot = restoreAutopilot(saved.autopilot);
+  if (!applicableTasks(brief).length) Object.assign(autopilot, idleAutopilot());
   // A finished update has nothing left for one-click mode to do.
   if (done && autopilot.status !== "off") Object.assign(autopilot, { status: "done", reason: "", taskId: "" });
   return {
     ...fallback,
-    startedAt: Number(saved.startedAt) || 0,
+    startedAt: brief.started ? Number(saved.startedAt) || 0 : 0,
     finishedAt: done ? Number(saved.finishedAt) || 0 : 0,
     outcome: done ? "done" : "",
     brief,
-    schedule,
     tasks,
     events: restoreEvents(saved.events),
     page: RELEASE_PAGES.some((entry) => entry.id === saved.page) ? saved.page : "brief",
@@ -290,9 +268,8 @@ export function restoreRun(saved, { platforms, today }) {
         ? saved.svnDemo.commits.filter((commit) => Number(commit?.revision) && Array.isArray(commit.paths)).slice(0, 20)
         : [],
     },
-    clockOffset: Number.isFinite(saved.clockOffset) ? saved.clockOffset : 0,
     autopilot,
-    demo: saved.demo !== false,
+    demo: true,
   };
 }
 
@@ -382,12 +359,10 @@ export function migrateLegacyFlow(legacy, { today, translate }) {
       createdAt: Number(events[0]?.at) || Date.now(),
       startedAt,
       brief: legacy.brief,
-      schedule: legacy.schedule,
       tasks,
       events,
       page: legacy.page === "overview" ? "brief" : legacy.page,
       conflictChoices: legacy.conflictChoices,
-      clockOffset: legacy.demo?.clockOffset,
       demo: true,
     });
   }
@@ -430,16 +405,20 @@ function writeJson(storage, key, value) {
 }
 
 export function writeStoredWorkspace(storage, snapshot) {
-  return writeJson(storage, RELEASE_WORKSPACE_STORAGE_KEY, { ...snapshot, schema: RELEASE_WORKSPACE_SCHEMA });
+  const written = writeJson(storage, RELEASE_WORKSPACE_STORAGE_KEY, { ...snapshot, schema: RELEASE_WORKSPACE_SCHEMA });
+  if (written) {
+    try {
+      storage?.removeItem?.(RELEASE_FLOW_STORAGE_KEY);
+    } catch {}
+  }
+  return written;
 }
 
 /* ── Status of an update, as its platform card shows it ────────────────── */
 
-/** When the update is planned: the maintenance start, else the hot update's opening. */
 export function plannedTime(run) {
-  if (!run) return 0;
-  const key = run.brief.mode === "maintenance" ? "maintenanceStart" : "clientOpenAt";
-  const time = localInputTime(run.schedule?.[key]);
+  if (!run || !isIsoDate(run.brief?.date)) return 0;
+  const time = new Date(`${run.brief.date}T00:00:00`).getTime();
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -473,8 +452,7 @@ export function runIssues(run, { now = Date.now() } = {}) {
   const stale = applicableTasks(run.brief).filter((definition) => run.tasks[definition.id]?.stale
     && run.tasks[definition.id].status === TASK_STATUS.IDLE);
   if (run.brief.started && stale.length) issues.push({ kind: "stale", tone: "warning", taskId: stale[0].id, count: stale.length });
-  const planned = plannedTime(run);
-  if (!run.brief.started && planned && planned < now) issues.push({ kind: "overdue", tone: "warning", taskId: "" });
+  if (!run.brief.started && run.brief.date < localDateIso(new Date(now))) issues.push({ kind: "overdue", tone: "warning", taskId: "" });
   return issues;
 }
 
@@ -507,7 +485,6 @@ export function platformCard(platform, { run = null, history = [], now = Date.no
     progress: run ? flowProgress(run.tasks, run.brief) : { done: 0, total: 0 },
     lastUpdate: run?.outcome === "done" ? run.finishedAt : last?.finishedAt || 0,
     plannedAt: run && run.outcome !== "done" ? plannedTime(run) : 0,
-    mode: run?.brief.mode || "",
     // Running by itself in one-click mode (a paused run is an issue instead).
     autopilot: run?.autopilot?.status === "running",
     issues: runIssues(run, { now }),
@@ -556,8 +533,7 @@ export function historyEntryFromRun(run, { platform, outcome, at = Date.now() })
     createdAt: run.createdAt,
     startedAt: run.startedAt || run.createdAt,
     finishedAt: at,
-    brief: { date: run.brief.date, mode: run.brief.mode, scope: { ...run.brief.scope } },
-    schedule: plain(run.schedule),
+    brief: { date: run.brief.date, scope: { ...run.brief.scope } },
     steps,
     events: plain(run.events.slice(-MAX_EVENTS)),
     stats: {
@@ -603,18 +579,36 @@ function cleanLogs(lines) {
 function restoreHistoryEntry(entry) {
   if (!plainObject(entry) || typeof entry.id !== "string" || !HISTORY_KINDS.includes(entry.kind)) return null;
   if (!HISTORY_OUTCOMES.includes(entry.outcome) || !Number(entry.finishedAt)) return null;
+  const steps = Array.isArray(entry.steps)
+    ? entry.steps.filter((step) => TASK_IDS.has(step?.taskId)).map((step) => ({ ...step, logs: cleanLogs(step.logs) }))
+    : [];
+  const brief = restoreBrief(entry.brief, createReleaseBrief());
+  if (entry.kind === "release" && !steps.length && !applicableTasks(brief).length) return null;
+  const applicable = new Set(applicableTasks(brief).map((task) => task.id));
+  const stats = entry.kind === "release" ? {
+    done: steps.filter((step) => applicable.has(step.taskId)
+      && [TASK_STATUS.DONE, TASK_STATUS.SKIPPED].includes(step.status)).length,
+    total: applicable.size,
+    failed: steps.filter((step) => step.status === TASK_STATUS.FAILED).length,
+    warnings: steps.reduce((sum, step) => sum + (Array.isArray(step.result?.warnings) ? step.result.warnings.length : 0), 0),
+  } : plainObject(entry.stats) || { done: 0, total: 0, failed: 0, warnings: 0 };
   return {
-    ...entry,
+    id: entry.id,
+    kind: entry.kind,
+    runId: String(entry.runId || ""),
+    platformId: String(entry.platformId || ""),
+    platformName: String(entry.platformName || ""),
+    outcome: entry.outcome,
+    title: String(entry.title || ""),
+    ...(entry.kind === "release" ? { brief: { date: brief.date, scope: brief.scope } } : { details: plainObject(entry.details) || {} }),
     demo: entry.demo !== false,
     createdAt: Number(entry.createdAt) || Number(entry.finishedAt),
     startedAt: Number(entry.startedAt) || Number(entry.finishedAt),
     finishedAt: Number(entry.finishedAt),
-    steps: Array.isArray(entry.steps)
-      ? entry.steps.filter((step) => TASK_IDS.has(step?.taskId)).map((step) => ({ ...step, logs: cleanLogs(step.logs) }))
-      : [],
-    events: Array.isArray(entry.events) ? entry.events.filter((event) => Number(event?.at)) : [],
+    steps,
+    events: restoreEvents(entry.events),
     logs: cleanLogs(entry.logs),
-    stats: plainObject(entry.stats) || { done: 0, total: 0, failed: 0, warnings: 0 },
+    stats,
   };
 }
 

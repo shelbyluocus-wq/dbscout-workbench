@@ -5,12 +5,11 @@ import en from "./i18n/en.js";
 import zhCN from "./i18n/zhCN.js";
 import zhTW from "./i18n/zhTW.js";
 import { releaseFlowEn } from "./i18n/releaseFlowMessages.js";
-import { RELEASE_MODES, RELEASE_PAGES, RELEASE_PHASES, RELEASE_SCOPES, RELEASE_TASKS } from "./releaseFlowState.js";
+import { RELEASE_PAGES, RELEASE_PHASES, RELEASE_SCOPES, RELEASE_TASKS } from "./releaseFlowState.js";
 import { CONFLICT_CHOICES, RELEASE_SPEEDS } from "./composables/useReleaseFlow.js";
 import { HISTORY_KINDS, HISTORY_OUTCOMES } from "./releaseWorkspaceState.js";
 import { AUTOPILOT_GROUPS, AUTOPILOT_LOG_KINDS, AUTOPILOT_RULES } from "./releaseAutopilotState.js";
 import { PLAN_MEMO_CATEGORIES } from "./utils/releaseFlowDemo.js";
-import { MAINTENANCE_STAGES, SERVER_PHASES } from "./utils/releaseServer.js";
 
 const root = new URL("./", import.meta.url);
 const SOURCES = [
@@ -32,21 +31,13 @@ function dynamicKeys() {
   const add = (prefix, values, suffixes = [""]) => {
     for (const value of values) for (const suffix of suffixes) keys.push(`releaseFlow.${prefix}${value}${suffix}`);
   };
-  const pages = RELEASE_PAGES.map((entry) => entry.id).filter((id) => id !== "gmServer");
-  // Tasks the server page drives itself rather than through a task card.
-  const scheduled = new Set(["gm.maintenance", "gm.clientOpen", "gm.shutdown"]);
-  const gmTasks = RELEASE_TASKS.map((entry) => entry.id).filter((id) => id.startsWith("gm."));
+  const pages = RELEASE_PAGES.map((entry) => entry.id);
   add("page.", pages, [".title"]);
   add("page.", pages.filter((id) => id !== "summary"), [".description"]);
-  add("page.gmServer.", ["title.", "description."], RELEASE_MODES);
   add("task.", RELEASE_TASKS.map((entry) => entry.id), [".title"]);
   add("task.", RELEASE_TASKS.filter((entry) => entry.id !== "db.plans" && !entry.action).map((entry) => entry.id), [".run"]);
   add("task.", RELEASE_TASKS.filter((entry) => entry.skippable).map((entry) => entry.id), [".skipHint"]);
-  add("task.", gmTasks, [".done"]);
-  add("task.", gmTasks.filter((id) => !scheduled.has(id)), [".hint"]);
   add("phase.", RELEASE_PHASES);
-  add("mode.", RELEASE_MODES);
-  add("overview.modeHint.", RELEASE_MODES);
   add("scope.", RELEASE_SCOPES);
   add("rail.state.", ["done", "skipped", "running", "failed", "attention", "pending", "notApplicable"]);
   add("demo.speed.", Object.keys(RELEASE_SPEEDS));
@@ -56,21 +47,15 @@ function dynamicKeys() {
   add("files.status.", ["A", "M", "D"]);
   add("transfer.stage.", ["script", "locate", "copy"]);
   add("cocos.exit.", ["success", "invalidOptions", "buildError", "unknown"]);
-  add("gm.group.", ["config", "activity", "client", "server"]);
-  add("schedule.problem.", ["endBeforeStart", "clientBeforeEnd", "startPassed"]);
-  add("server.phase.", SERVER_PHASES);
-  add("server.headline.", SERVER_PHASES);
-  add("server.stage.", MAINTENANCE_STAGES.map((stage) => stage.id));
-  add("server.footer.", ["maintenance", "readyToOpen"]);
   add("platformEditor.", ["sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "cocosVersion", "buildPlatform", "cocosPath"]);
   add("platformEditor.group.", ["database", "client", "build"]);
-  add("error.", ["interrupted", "buildFailed", "failed", "unknownTask", "qaFindings", "noBackup", "gmNetwork", "shutdownIncomplete"]);
+  add("error.", ["interrupted", "buildFailed", "failed", "unknownTask", "qaFindings", "noBackup"]);
   // One-click mode: its rules and choices, why it pauses, its log.
   add("autopilot.rule.", AUTOPILOT_RULES.map((rule) => rule.id));
   for (const rule of AUTOPILOT_RULES) add(`autopilot.choice.${rule.id}.`, rule.choices);
   add("autopilot.group.", [...AUTOPILOT_GROUPS, "failures"]);
   add("autopilot.status.", ["running", "paused", "done"]);
-  add("autopilot.reason.", ["notReady", "conflicts", "missingFiles", "failed", "blocked", "review", "planNotes", "configApply", "lateStart", "schedule", "open", "stopped"]);
+  add("autopilot.reason.", ["notReady", "conflicts", "missingFiles", "failed", "blocked", "review", "planNotes", "stopped"]);
   add("autopilot.log.", AUTOPILOT_LOG_KINDS);
   // The workspace around the updates: navigation, cards, history and tools.
   add("nav.", ["home", "history", "plans", "build", "svn", "platforms"]);

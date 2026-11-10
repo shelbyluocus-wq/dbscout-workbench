@@ -1,5 +1,5 @@
 // Guided release flow of one platform's update: pages, tasks and their
-// dependencies, kept apart from the UI. The brief (update date, update mode
+// dependencies, kept apart from the UI. The brief (update date
 // and scope) decides which tasks apply; a task can run once every applicable
 // dependency is done or skipped. Rerunning or changing the input of a
 // finished task resets the tasks that depend on it. Several updates (one per
@@ -9,9 +9,8 @@
 // The v2 single-flow draft; the v3 workspace migrates it into one update.
 export const RELEASE_FLOW_STORAGE_KEY = "dbscout_release_flow_v2";
 export const RELEASE_FLOW_SCHEMA = 2;
-export const RELEASE_PHASES = Object.freeze(["database", "client", "build", "gm"]);
-export const RELEASE_SCOPES = Object.freeze(["database", "client", "server", "activity"]);
-export const RELEASE_MODES = Object.freeze(["maintenance", "hot"]);
+export const RELEASE_PHASES = Object.freeze(["database", "client", "build"]);
+export const RELEASE_SCOPES = Object.freeze(["database", "client"]);
 export const TASK_STATUS = Object.freeze({
   IDLE: "idle",
   RUNNING: "running",
@@ -24,25 +23,10 @@ export const TASK_STATUS = Object.freeze({
 export const MAX_LOG_LINES = 160;
 const MAX_HISTORY = 120;
 
-function task(id, page, { scope = "", mode = "", deps = [], skippable = false, auto = false, action = false } = {}) {
-  return Object.freeze({ id, page, scope, mode, deps: Object.freeze(deps), skippable, auto, action });
+function task(id, page, { scope = "", deps = [], skippable = false, action = false } = {}) {
+  return Object.freeze({ id, page, scope, deps: Object.freeze(deps), skippable, action });
 }
 
-// Order is the order the guide offers them in. `scope` limits a task to
-// releases that include that content; `mode` to maintenance or hot updates.
-// An `auto` task is not started by a person: the shutdown runs when the
-// scheduled maintenance time arrives. An `action` is offered beside the steps
-// (restoring the database from the backup its overwrite made): it never
-// counts toward progress and nothing depends on it.
-//
-// The GM steps follow the GM's own flows. The database is the platform's
-// intranet relay database; the GM packs a config version from it, which the
-// platform's own GM applies. The company GM builds the server version from
-// SVN and syncs it to the platform's GM; a hot update reaches the company GM,
-// is confirmed there and synced. Everything that can be prepared while the
-// servers run is done before the maintenance is scheduled (the GM only
-// accepts a pre-maintenance once its maintenance checklist is complete), so
-// the downtime only applies what is ready, starts and opens.
 export const RELEASE_TASKS = Object.freeze([
   task("db.sync", "database", { scope: "database" }),
   task("db.restore", "database", { scope: "database", action: true }),
@@ -52,29 +36,6 @@ export const RELEASE_TASKS = Object.freeze([
   task("client.transfer", "clientTransfer", { scope: "client", deps: ["client.sync"], skippable: true }),
   task("client.diff", "clientDiff", { scope: "client", deps: ["client.transfer"] }),
   task("build.cocos", "build", { scope: "client", deps: ["client.diff"] }),
-  task("gm.configPack", "gmUpload", { scope: "database", deps: ["db.plans"] }),
-  task("gm.activityUpload", "gmUpload", { scope: "activity" }),
-  task("gm.activityCurrent", "gmUpload", { scope: "activity", deps: ["gm.activityUpload"] }),
-  task("gm.activityReload", "gmUpload", { scope: "activity", mode: "hot", deps: ["gm.activityCurrent"] }),
-  task("gm.clientUpload", "gmUpload", { scope: "client", deps: ["build.cocos"] }),
-  task("gm.clientPull", "gmUpload", { scope: "client", deps: ["gm.clientUpload"] }),
-  task("gm.clientPush", "gmUpload", { scope: "client", deps: ["gm.clientPull"] }),
-  task("gm.serverBuild", "gmUpload", { scope: "server", mode: "maintenance" }),
-  task("gm.serverPush", "gmUpload", { scope: "server", mode: "maintenance", deps: ["gm.serverBuild"] }),
-  task("gm.maintenance", "gmServer", {
-    mode: "maintenance",
-    deps: ["gm.configPack", "gm.activityCurrent", "gm.clientPush", "gm.serverPush"],
-  }),
-  task("gm.clientOpen", "gmServer", { scope: "client", deps: ["gm.clientPush"] }),
-  task("gm.shutdown", "gmServer", { mode: "maintenance", deps: ["gm.maintenance"], auto: true }),
-  task("gm.serverApply", "gmServer", { scope: "server", mode: "maintenance", deps: ["gm.serverPush", "gm.shutdown"] }),
-  task("gm.configApply", "gmServer", { scope: "database", deps: ["gm.configPack", "gm.shutdown"] }),
-  task("gm.configReload", "gmServer", { scope: "database", mode: "hot", deps: ["gm.configApply"] }),
-  task("gm.restart", "gmServer", {
-    mode: "maintenance",
-    deps: ["gm.shutdown", "gm.serverApply", "gm.configApply", "gm.activityCurrent"],
-  }),
-  task("gm.open", "gmServer", { mode: "maintenance", deps: ["gm.restart", "gm.clientOpen"] }),
 ]);
 
 export const RELEASE_TASK_BY_ID = new Map(RELEASE_TASKS.map((entry) => [entry.id, entry]));
@@ -92,8 +53,6 @@ export const RELEASE_PAGES = Object.freeze([
   page("clientTransfer", "client"),
   page("clientDiff", "client"),
   page("build", "build"),
-  page("gmUpload", "gm"),
-  page("gmServer", "gm"),
   page("summary", ""),
 ]);
 
@@ -107,20 +66,10 @@ export function localDateIso(now = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-export function defaultSchedule(dateIso) {
-  return {
-    maintenanceStart: `${dateIso}T10:00`,
-    maintenanceEnd: `${dateIso}T12:00`,
-    clientOpenAt: `${dateIso}T12:00`,
-    clientOpenFollowsMaintenance: true,
-  };
-}
-
 export function createReleaseBrief(dateIso = localDateIso()) {
   return {
     date: dateIso,
-    mode: "maintenance",
-    scope: { database: true, client: true, server: true, activity: true },
+    scope: { database: true, client: true },
     prepared: false,
     started: false,
   };
@@ -132,7 +81,6 @@ export function idleTaskState() {
 
 export function taskApplies(definition, brief) {
   if (!definition || !brief) return false;
-  if (definition.mode && definition.mode !== brief.mode) return false;
   if (definition.scope && !brief.scope?.[definition.scope]) return false;
   return true;
 }
@@ -322,7 +270,6 @@ export function restoreBrief(saved, fallback) {
   const brief = { ...fallback, scope: { ...fallback.scope } };
   if (!plainObject(saved)) return brief;
   if (/^\d{4}-\d{2}-\d{2}$/.test(saved.date || "")) brief.date = saved.date;
-  if (RELEASE_MODES.includes(saved.mode)) brief.mode = saved.mode;
   for (const scope of RELEASE_SCOPES) {
     if (typeof saved.scope?.[scope] === "boolean") brief.scope[scope] = saved.scope[scope];
   }

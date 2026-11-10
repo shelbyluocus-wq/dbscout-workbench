@@ -4,8 +4,8 @@
 // flags, platform names (buildopenplatprop), the working-copy layout under
 // chengxu, the conversion script name, the build output, the QA release
 // guard and the hot-update version format. Simulated: each platform's own
-// database and folder, revisions, diffs, versions, GM replies and server
-// numbers. Dates are relative to the update day so the demo stays current.
+// database and folder, revisions, diffs and versions.
+// Dates are relative to the update day so the demo stays current.
 
 import { addDays, evaluatePlanRule, formatPlanDate, parsePlanNote, stateFlag } from "./releasePlanNotes.js";
 import { DEMO_CONFIG_TABLES } from "./releaseFlowDemoTables.js";
@@ -23,19 +23,7 @@ export const DEMO_BUNDLE_COUNT = 56;
 export const DEMO_PROPS_COUNT = 487;
 export const DEMO_REVISION = 52817;
 export const DEMO_HOT_UPDATE = Object.freeze({ previous: "1.023", next: "1.024" });
-// Size of the simulated hot-update package the GM step uploads.
 export const DEMO_HOT_UPDATE_BYTES = 187_365_376;
-export const DEMO_SERVERS = Object.freeze({ count: 4, online: 1284 });
-// Version numbers and sizes the simulated GM hands out.
-export const DEMO_GM = Object.freeze({
-  configVersion: 42,
-  configBytes: 12_996_608,
-  activityVersion: 318,
-  serverVersion: 207,
-  serverRevision: 52_418,
-  serverBytes: 50_541_363,
-  checklist: 8,
-});
 
 // heroprop holds heroes, pets, spirits and mounts by ID range; OpenFlag 0 keeps
 // one closed. Features open per platform in buildopenplatprop.IsOpen.

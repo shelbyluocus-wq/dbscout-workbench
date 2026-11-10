@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { RELEASE_SCOPES } from "../releaseFlowState.js";
 
-/** "Maintenance · database, client" / "Client build · android" / "SVN commit r52818". */
+/** "Database, client" / "Client build · android" / "SVN commit r52818". */
 export function historyTitle(entry, translate = t) {
   if (entry.kind === "build") {
     return translate("releaseFlow.history.title.build", { platform: entry.details?.platform || "" });
@@ -18,9 +18,7 @@ export function historyTitle(entry, translate = t) {
     return translate(details.action === "revert" || details.action === "resolve" ? `releaseFlow.history.title.${details.action}` : "releaseFlow.history.title.svn", { count });
   }
   const scopes = RELEASE_SCOPES.filter((scope) => entry.brief?.scope?.[scope]).map((scope) => translate(`releaseFlow.scope.${scope}`));
-  return [translate(`releaseFlow.mode.${entry.brief?.mode || "maintenance"}`), scopes.join(translate("releaseFlow.list.separator"))]
-    .filter(Boolean)
-    .join(" · ");
+  return scopes.join(translate("releaseFlow.list.separator")) || translate("releaseFlow.history.kind.release");
 }
 
 /** Group entries (newest first) by local day for headings. */

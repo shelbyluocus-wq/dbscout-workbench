@@ -1,6 +1,6 @@
 // Browser regression for the release workspace (demo driver, mock backend):
-// the platform board and overview, a maintenance update from the brief to the
-// reopened servers (backup and restore, the open-plan memo, picked exclusion
+// the platform board and overview, an update from the brief to the client
+// build (backup and restore, the open-plan memo, picked exclusion
 // rules, a template made on the transfer step, the side-by-side diff with a
 // commit, the build confirmation), the history, continuing and abandoning
 // updates, the standalone build and SVN pages, reopening, English copy,
@@ -36,7 +36,8 @@ async function openWorkbench({ theme = 'light', language = 'zh-TW', viewport = {
 }
 
 async function openWorkspace(page) {
-  await page.locator('[data-wb-rail-id="releaseFlow"]').click();
+  await page.locator('[data-wb-rail-id="more"]').click();
+  await page.locator('#wb-activity-more-menu').getByRole('menuitem', { name: /版本更新|Release/ }).click();
   await page.locator('.wb-rf-dialog').waitFor();
 }
 
@@ -46,7 +47,7 @@ function helpers(page) {
   const label = async () => (await primary.textContent()).trim();
   const card = (platformId) => page.locator(`[data-release-platform="${platformId}"]`);
   async function settle() {
-    await page.waitForFunction(() => !document.querySelector('.wb-rf-task-running, .wb-rf-gm-task.is-running, .wb-rf-footer .wb-rf-spin'), null, { timeout: 40_000 });
+    await page.waitForFunction(() => !document.querySelector('.wb-rf-task-running, .wb-rf-footer .wb-rf-spin'), null, { timeout: 40_000 });
   }
   async function confirm({ expect = null } = {}) {
     const dialog = page.locator('.wb-confirm-dialog');
@@ -88,7 +89,7 @@ function helpers(page) {
 }
 
 try {
-  // The board, a maintenance update end to end, the history.
+  // The board, a preparation update end to end, the history.
   {
     const { context, page } = await openWorkbench();
     const h = helpers(page);
@@ -113,6 +114,9 @@ try {
     await newUpdate('tw');
     await page.locator('[data-release-create]').click();
     assert.equal(await current(), 'brief');
+    assert.deepEqual(await page.locator('.wb-rf-scope').allTextContents().then((texts) => texts.map((text) => text.trim())), ['資料庫', '客戶端']);
+    assert.equal(await page.locator('[data-release-page^="gm"]').count(), 0);
+    assert.doesNotMatch(await page.locator('.wb-rf-dialog').textContent(), /GM|停服|開服|維護排程/);
     assert.equal(await primary.isDisabled(), true, 'the update starts once its files are ready');
     await page.locator('.wb-rf-ready input').check();
     await primary.click();
@@ -213,33 +217,6 @@ try {
     await settle();
     assert.match(await page.locator('.wb-rf-task-panel').last().textContent(), /模擬結果/, 'a simulated build says so');
     await assertFits('build');
-    await primary.click();
-
-    // Everything the GM can prepare is ready before the maintenance is scheduled.
-    assert.equal(await current(), 'gmUpload');
-    assert.equal(await page.locator('[data-release-task]').count(), 8, 'config, activity, hot update and server');
-    await finishPage();
-    await primary.click();
-    assert.equal(await current(), 'gmServer');
-    await primary.click();
-    await page.locator('button', { hasText: '快轉到維護時間' }).click();
-    await settle();
-    // During the downtime: apply the server and config versions, start the zones, open.
-    assert.deepEqual(
-      await page.locator('[data-release-task]').evaluateAll((cards) => cards.map((card) => card.dataset.releaseTask)),
-      ['gm.serverApply', 'gm.configApply', 'gm.restart', 'gm.open'],
-    );
-    await primary.click();
-    await settle();
-    await primary.click();
-    await confirm({ expect: /配置版本 #42/ });
-    await settle();
-    await primary.click();
-    await confirm({ expect: /玩家仍無法進入/ });
-    await settle();
-    await primary.click();
-    await confirm();
-    await settle();
     assert.equal(await label(), '查看結果', 'a finished update shows its result first');
     await primary.click();
     assert.equal(await current(), 'summary');
@@ -250,7 +227,7 @@ try {
     await page.locator('.wb-rf-nav [data-release-section="history"]').click();
     const newest = page.locator('.wb-rf-history-days .wb-rf-history-row').first();
     assert.match(await newest.textContent(), /TW/);
-    assert.match(await page.locator('.wb-rf-history-detail').textContent(), /完成 22\/22 步/);
+    assert.match(await page.locator('.wb-rf-history-detail').textContent(), /完成 7\/7 步/);
     assert.match(await page.locator('.wb-rf-history-detail').textContent(), /缺少：/, 'warnings are kept with the step');
     await assertFits('history');
     await shot('history');
@@ -308,7 +285,6 @@ try {
     await openWorkspace(page);
     await page.locator('button[aria-controls="wb-rf-demo-menu"]').click();
     await page.locator('#wb-rf-demo-menu [role="radio"]').nth(1).click();
-    await page.locator('#wb-rf-demo-menu label', { hasText: '第一次上傳熱更新中斷' }).locator('input').check();
     await page.keyboard.press('Escape');
 
     // 玩心 already has an update scheduled; open it from its card.
@@ -328,16 +304,13 @@ try {
     await bar.waitFor();
     assert.match(await card('wanxin').textContent(), /一鍵/);
     assert.equal(await primary.isDisabled(), true, 'nothing to click while it runs');
-    await page.waitForFunction(() => /等待維護開始/.test(document.querySelector('[data-release-autopilot-detail]')?.textContent || ''), null, { timeout: 120_000 });
-    assert.equal(await page.locator('[data-release-current]').getAttribute('data-release-current'), 'gmServer', 'the run shows the step it is on');
-    await shot('autopilot-waiting');
-    await bar.locator('button', { hasText: '快轉到維護時間' }).click();
     await page.waitForFunction(() => document.querySelector('[data-release-autopilot]')?.dataset.status === 'done', null, { timeout: 60_000 });
+    assert.equal(await page.locator('[data-release-current]').getAttribute('data-release-current'), 'build');
     assert.match(await card('wanxin').textContent(), /已完成/);
     await bar.locator('button', { hasText: '紀錄' }).click();
     const log = await bar.locator('.wb-rf-auto-log').textContent();
     assert.match(log, /自動處理 2 個 SVN 衝突/);
-    assert.match(log, /上傳熱更新包：第 1 次重試/);
+    assert.doesNotMatch(log, /GM|停服|開服/);
     await shot('autopilot-done');
     await context.close();
   }
@@ -360,7 +333,55 @@ try {
       await page.waitForTimeout(200);
       await assertFits(`english ${section}`);
     }
+    assert.equal(await page.locator('input[type="password"]').count(), 0);
+    assert.doesNotMatch(await page.locator('.wb-rf-dialog').textContent(), /GM|maintenance/i);
     await shot('dark-en-platforms');
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWorkbench();
+    await page.evaluate(() => {
+      const today = new Date();
+      const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      localStorage.setItem('dbscout_release_flow_v3', JSON.stringify({
+        schema: 3,
+        companyGm: { url: 'https://company.invalid' },
+        platforms: [{ id: 'tw', gm: { url: 'https://platform.invalid' } }],
+        runs: [
+          {
+            id: 'retained', platformId: 'tw', page: 'gmServer', createdAt: 1,
+            brief: { date, started: true, prepared: true, mode: 'maintenance', scope: { database: true, client: false, server: true, activity: true } },
+            tasks: { 'db.sync': { status: 'done' }, 'db.plans': { status: 'done' }, 'gm.shutdown': { status: 'running' } },
+            autopilot: { status: 'paused', reason: 'open', taskId: 'gm.open' },
+            schedule: { maintenanceStart: `${date}T10:00` },
+          },
+          {
+            id: 'removed-only', platformId: 'tap', page: 'gmUpload', createdAt: 2,
+            brief: { date, started: true, prepared: true, scope: { database: false, client: false, server: true, activity: true } },
+            tasks: { 'gm.activityUpload': { status: 'running' } },
+          },
+        ],
+        view: { section: 'run', runId: 'retained' },
+      }));
+      localStorage.setItem('dbscout_release_history_v1', JSON.stringify({ schema: 1, entries: [{
+        id: 'old-local', kind: 'gm', outcome: 'done', finishedAt: 1, details: { requestId: 'old-request' },
+      }] }));
+    });
+    await openWorkspace(page);
+    const { primary, current, card, shot } = helpers(page);
+    assert.match(await card('tw').textContent(), /2\/2/);
+    await primary.click();
+    assert.equal(await current(), 'summary');
+    assert.match(await page.locator('.wb-rf-summary-hero').textContent(), /更新準備完成/);
+    await card('tap').locator('.wb-rf-note-head').click();
+    assert.equal(await current(), 'brief');
+    assert.equal(await primary.isDisabled(), true);
+    assert.equal(await page.locator('.wb-rf-scope[aria-pressed="true"]').count(), 0);
+    assert.equal(await page.locator('.wb-rf-ready input').isChecked(), false);
+    await page.waitForFunction(() => !/companyGm|gm\.|gmServer|gmUpload|maintenance|schedule|platform.invalid/.test(localStorage.getItem('dbscout_release_flow_v3')));
+    assert.doesNotMatch(await page.evaluate(() => localStorage.getItem('dbscout_release_history_v1')), /old-local|old-request|gm\./);
+    await shot('legacy-migrated');
     await context.close();
   }
 

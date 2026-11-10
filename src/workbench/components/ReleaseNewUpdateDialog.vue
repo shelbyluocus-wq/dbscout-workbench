@@ -8,7 +8,7 @@ import { Check } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
-import { formatDateTime } from "../utils/releaseFlowFormat.js";
+import { formatDateTime, formatDayOf } from "../utils/releaseFlowFormat.js";
 
 const props = defineProps({
   workspace: { type: Object, required: true },
@@ -32,7 +32,7 @@ function stateText(entry) {
   if (current && !current.outcome) {
     return current.brief.started
       ? t("releaseFlow.newUpdate.open", entry.progress)
-      : t("releaseFlow.newUpdate.scheduled", { time: formatDateTime(entry.plannedAt) || current.brief.date });
+      : t("releaseFlow.newUpdate.scheduled", { time: formatDayOf(entry.plannedAt) || current.brief.date });
   }
   return entry.lastUpdate ? t("releaseFlow.card.last", { time: formatDateTime(entry.lastUpdate) }) : t("releaseFlow.card.never");
 }

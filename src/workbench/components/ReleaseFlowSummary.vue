@@ -51,7 +51,6 @@ const totalTime = computed(() => {
 const briefLine = computed(() => [
   platform.value.name,
   formatReleaseDate(state.brief.date),
-  t(`releaseFlow.mode.${state.brief.mode}`),
 ].join(" · "));
 
 function reportText() {
@@ -136,7 +135,7 @@ async function copyReport() {
 
 .wb-rf-summary-hero h3 {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--wb-fs-display);
   font-weight: 650;
   outline: none;
 }

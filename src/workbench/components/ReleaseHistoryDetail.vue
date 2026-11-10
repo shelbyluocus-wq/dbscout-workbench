@@ -67,7 +67,6 @@ function reveal() {
     <template v-if="entry.kind === 'release'">
       <div class="wb-rf-history-brief">
         <span class="wb-rf-chip">{{ formatReleaseDate(entry.brief?.date) }}</span>
-        <span class="wb-rf-chip">{{ t(`releaseFlow.mode.${entry.brief?.mode || 'maintenance'}`) }}</span>
         <span v-for="scope in scopes" :key="scope" class="wb-rf-chip">{{ t(`releaseFlow.scope.${scope}`) }}</span>
       </div>
       <p class="wb-rf-history-stats">

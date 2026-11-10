@@ -7,7 +7,7 @@ import { ArrowRight, CalendarCheck2, FolderGit2, Package, Plus } from "lucide-vu
 import { t } from "../i18n/index.js";
 import { RELEASE_TASK_BY_ID, localDateIso } from "../releaseFlowState.js";
 import { addDays, formatPlanDate, parsePlanNote } from "../utils/releasePlanNotes.js";
-import { formatDateTime, issueText } from "../utils/releaseFlowFormat.js";
+import { formatDateTime, formatDayOf, issueText } from "../utils/releaseFlowFormat.js";
 import ReleaseHistoryList from "./ReleaseHistoryList.vue";
 import ReleaseSectionHead from "./ReleaseSectionHead.vue";
 
@@ -124,7 +124,7 @@ function runAction(id) {
           <span>
             {{ t(`releaseFlow.card.status.${card.status}`) }}
             <template v-if="card.status !== 'pending'"> · {{ t('releaseFlow.card.progress', card.progress) }}</template>
-            <template v-if="card.plannedAt"> · {{ t('releaseFlow.card.planned', { time: formatDateTime(card.plannedAt) }) }}</template>
+            <template v-if="card.plannedAt"> · {{ t('releaseFlow.card.planned', { time: formatDayOf(card.plannedAt) }) }}</template>
           </span>
           <button type="button" class="wb-rf-link" @click="workspace.openRun(card.runId)">{{ t('releaseFlow.home.continue') }}<ArrowRight :size="13" aria-hidden="true" /></button>
         </li>

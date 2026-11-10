@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RELEASE_TASKS, TASK_STATUS, idleTaskState } from "./releaseFlowState.js";
+import { RELEASE_FLOW_STORAGE_KEY, RELEASE_TASKS, TASK_STATUS, idleTaskState } from "./releaseFlowState.js";
 import {
   MAX_HISTORY_ENTRIES,
+  RELEASE_HISTORY_STORAGE_KEY,
   cleanPlanEntry,
   compactHistory,
   createRun,
@@ -10,11 +11,13 @@ import {
   historyEntryFromRun,
   migrateLegacyFlow,
   platformCard,
+  readStoredHistory,
   restorePlans,
   restoreRun,
   runIssues,
   runStatus,
   toolHistoryEntry,
+  writeStoredWorkspace,
 } from "./releaseWorkspaceState.js";
 import { createDemoPlatforms, planEntryKey } from "./utils/releaseFlowDemo.js";
 
@@ -83,7 +86,7 @@ test("a saved update is restored for a known platform with a consistent outcome"
   assert.equal(run.outcome, "", "an update is only done when its steps are");
   assert.deepEqual(run.planSkips, { "hero-1061": true });
   assert.deepEqual(run.svnDemo.committed, ["a.ts"]);
-  assert.deepEqual([run.clockOffset, run.page, run.brief.date], [60000, "brief", "2026-10-20"]);
+  assert.deepEqual([run.clockOffset, run.page, run.brief.date], [undefined, "brief", "2026-10-20"]);
 });
 
 test("one update per platform, and the view falls back to the overview", () => {
@@ -124,7 +127,8 @@ test("issues are listed worst first and decide the card's state", () => {
 
   const draft = createRun({ id: "d", platformId: "tap", today: TODAY });
   assert.equal(runStatus(draft, { now: new Date(2026, 9, 24, 9, 0).getTime() }), "pending");
-  assert.deepEqual(runIssues(draft, { now: new Date(2026, 9, 24, 10, 1).getTime() }).map((issue) => issue.kind), ["overdue"]);
+  assert.deepEqual(runIssues(draft, { now: new Date(2026, 9, 24, 23, 59).getTime() }), []);
+  assert.deepEqual(runIssues(draft, { now: new Date(2026, 9, 25, 0, 1).getTime() }).map((issue) => issue.kind), ["overdue"]);
 
   const history = [
     { kind: "release", platformId: "tw", outcome: "done", finishedAt: 10 },
@@ -148,13 +152,13 @@ test("a history entry keeps every step with its result, error, warnings and last
     result: { warnings: [{ code: "missing", path: "a" }, { code: "missing", path: "b" }] },
     logs: Array.from({ length: 60 }, (_, index) => ({ text: `line ${index}`, tone: "" })),
   });
-  setTask(run, "gm.open", TASK_STATUS.RUNNING);
+  setTask(run, "build.cocos", TASK_STATUS.RUNNING);
   const entry = historyEntryFromRun(run, { platform: { name: "TW" }, outcome: "abandoned", at: 99 });
   assert.equal(entry.steps.some((step) => step.taskId === "db.restore"), false, "an action that never ran is not listed");
-  assert.equal(entry.steps.find((step) => step.taskId === "gm.open").status, "failed", "a step cut off is not shown as running");
+  assert.equal(entry.steps.find((step) => step.taskId === "build.cocos").status, "failed", "a step cut off is not shown as running");
   const sync = entry.steps.find((step) => step.taskId === "client.sync");
   assert.deepEqual([sync.logs.length, sync.logs[0].text], [40, "line 20"]);
-  assert.deepEqual(entry.stats, { done: 21, total: 22, failed: 1, warnings: 2 });
+  assert.deepEqual(entry.stats, { done: 6, total: 7, failed: 1, warnings: 2 });
   assert.deepEqual([entry.kind, entry.outcome, entry.platformName, entry.finishedAt], ["release", "abandoned", "TW", 99]);
 });
 
@@ -179,4 +183,34 @@ test("a v2 draft that never started migrates without an update", () => {
   assert.deepEqual(migrated.runs, []);
   assert.deepEqual(migrated.view, { section: "home" });
   assert.equal(migrated.plans.items.length, 35);
+});
+
+test("saved histories drop GM entries and steps while keeping non-GM evidence", () => {
+  const record = historyEntryFromRun(startedRun(), { platform: { name: "TW" }, outcome: "abandoned", at: 99 });
+  record.steps[0] = { taskId: "db.sync", status: "done", result: { backup: { id: "kept" } }, logs: [{ text: "backup done" }] };
+  record.steps.push({ taskId: "gm.open", status: "failed", logs: [{ text: "old service log" }] });
+  record.events = [{ at: 10, taskId: "db.sync", event: "done" }, { at: 20, taskId: "gm.open", event: "failed", serverAt: 21 }];
+  record.brief.mode = "maintenance";
+  record.brief.scope.server = true;
+  record.schedule = { maintenanceStart: "2026-10-24T10:00" };
+  record.stats = { done: 20, total: 22, failed: 1, warnings: 0 };
+  const raw = JSON.stringify({ entries: [record, { ...record, id: "local", kind: "gm" }] });
+  const history = readStoredHistory({ getItem: (key) => key === RELEASE_HISTORY_STORAGE_KEY ? raw : null });
+  assert.equal(history.length, 1);
+  assert.deepEqual(history[0].stats, { done: 1, total: 7, failed: 0, warnings: 0 });
+  assert.equal(history[0].steps[0].result.backup.id, "kept");
+  assert.deepEqual(history[0].steps[0].logs, [{ text: "backup done", tone: "" }]);
+  assert.doesNotMatch(JSON.stringify(history), /gm\.|maintenance|schedule|serverAt|old service log/);
+  record.brief.scope.client = false;
+  record.steps.push({ taskId: "client.sync", status: "done" });
+  const databaseOnly = readStoredHistory({ getItem: () => JSON.stringify({ entries: [record] }) });
+  assert.deepEqual(databaseOnly[0].stats, { done: 1, total: 2, failed: 0, warnings: 0 });
+});
+
+test("legacy storage is removed only after the retained workspace is saved", () => {
+  const removed = [];
+  assert.equal(writeStoredWorkspace({ setItem() { throw new Error("full"); }, removeItem: (key) => removed.push(key) }, {}), false);
+  assert.deepEqual(removed, []);
+  assert.equal(writeStoredWorkspace({ setItem() {}, removeItem: (key) => removed.push(key) }, {}), true);
+  assert.deepEqual(removed, [RELEASE_FLOW_STORAGE_KEY]);
 });

@@ -1,13 +1,11 @@
 <script setup>
 // Phase 1: overwrite the platform's intranet relay database with the
 // development one (after backing it up, which a restore returns to), then
-// write the open plan for this day. The GM later packs a config version from
-// the relay database and the platform's GM applies it; that is where the
-// change goes live, and where it is rolled back. The plan itself is the memo
+// write the open plan for this day. The plan itself is the memo
 // on the open plans page; this page writes the entries that name a table row
 // and lists the others.
 import { computed, ref } from "vue";
-import { ArrowDown, ArrowRight, ArrowUp, Database, DatabaseBackup, Globe, Plus, RotateCcw } from "lucide-vue-next";
+import { ArrowDown, ArrowRight, ArrowUp, Database, DatabaseBackup, Plus, RotateCcw } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatPlanDate } from "../utils/releasePlanNotes.js";
 import { formatDateTime, formatReleaseCount } from "../utils/releaseFlowFormat.js";
@@ -67,7 +65,7 @@ function remove(name) {
 <template>
   <ReleasePageHead page-id="database" />
 
-  <div class="wb-rf-route is-three">
+  <div class="wb-rf-route">
     <div class="wb-rf-route-node">
       <span><Database :size="13" aria-hidden="true" />{{ t('releaseFlow.database.source') }}</span>
       <strong class="wb-rf-code">{{ platform.sourceDatabase }}</strong>
@@ -76,11 +74,6 @@ function remove(name) {
     <div class="wb-rf-route-node is-target">
       <span><Database :size="13" aria-hidden="true" />{{ t('releaseFlow.database.target', { platform: platform.name }) }}</span>
       <strong class="wb-rf-code">{{ platform.targetDatabase }}</strong>
-    </div>
-    <span class="wb-rf-route-arrow" aria-hidden="true"><ArrowRight :size="18" /></span>
-    <div class="wb-rf-route-node is-later">
-      <span><Globe :size="13" aria-hidden="true" />{{ t('releaseFlow.database.outer', { platform: platform.name }) }}</span>
-      <strong>{{ t('releaseFlow.database.outerHow') }}</strong>
     </div>
   </div>
 

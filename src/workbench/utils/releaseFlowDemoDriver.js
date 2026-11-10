@@ -7,20 +7,18 @@
 // `io.progress(fraction)` reports progress and `io.wait(ms)` pauses, rejecting
 // once the run is cancelled. A failure rejects with an Error whose `code`
 // names it. This demo driver only simulates: it touches no database, file,
-// SVN working copy, Cocos editor or GM server. A real driver can replace it
+// SVN working copy or Cocos editor. A real driver can replace it
 // task by task with the same contract.
 
 import {
   DEMO_BUILD_OUTPUT,
   DEMO_COCOS_FAILURE_LOG,
   DEMO_COCOS_LOG,
-  DEMO_GM,
   DEMO_HOT_UPDATE,
   DEMO_HOT_UPDATE_BYTES,
   DEMO_PROPS_COUNT,
   DEMO_QA_MARKERS,
   DEMO_REVISION,
-  DEMO_SERVERS,
   DEMO_SVN_UPDATES,
   DEMO_TRANSFER_SCRIPT,
   DEMO_TRANSFER_SHEETS,
@@ -252,120 +250,6 @@ async function buildCocos(context, io) {
   };
 }
 
-async function gmCall(io, lines, result, totalMs = 900) {
-  io.log(lines[0]);
-  await steps(io, lines.slice(1), totalMs);
-  return result;
-}
-
-function gmTasks(context) {
-  const { schedule, results, gmFiles, platform, syncPlan, demo, attempt } = context;
-  const build = results["build.cocos"] || {};
-  const pack = results["gm.configPack"] || {};
-  const servers = DEMO_SERVERS.count;
-  const at = () => new Date(context.serverNow()).toISOString();
-  const gm = `${platform.name} GM`;
-  return {
-    // The company GM packs the relay database its own platform settings name;
-    // the step says when that is not the database this update wrote.
-    "gm.configPack": (io) => gmCall(io, [
-      `company GM: pack source for ${platform.name} = ${platform.targetDatabase} (matches the platform database)`,
-      `export ${syncPlan.catalog.length} tables → gzip snapshot ${(DEMO_GM.configBytes / 1048576).toFixed(1)} MB, sha256 9f3c…e21a`,
-      `sftp to ${gm} … 100%`,
-      `${gm}: size and sha256 match · config version #${DEMO_GM.configVersion} registered`,
-    ], { version: DEMO_GM.configVersion, tables: syncPlan.catalog.length, sizeBytes: DEMO_GM.configBytes, source: platform.targetDatabase }, 1400),
-    "gm.activityUpload": (io) => gmCall(io, [
-      `upload ${gmFiles.activity} (182 KB)`,
-      `Activebaseprop row 1 names platform ${platform.name}`,
-      `activity version #${DEMO_GM.activityVersion} created`,
-    ], { file: gmFiles.activity, version: DEMO_GM.activityVersion }),
-    "gm.activityCurrent": (io) => gmCall(io, [
-      `next activity version #${DEMO_GM.activityVersion} from ${context.brief.date}`,
-      "ok",
-    ], { version: DEMO_GM.activityVersion, date: context.brief.date }),
-    "gm.activityReload": (io) => gmCall(io, [
-      `reload CActivityPropMgr on ${servers} game servers`,
-      `${servers} / ${servers} reloaded · 12 activities`,
-    ], { activities: 12, servers }, 1200),
-    "gm.clientUpload": async (io) => {
-      // A real build reports no package size; the simulated upload uses its own.
-      const sizeBytes = build.sizeBytes || DEMO_HOT_UPDATE_BYTES;
-      io.log(`upload ${gmFiles.client} (${(sizeBytes / 1048576).toFixed(1)} MB) → company GM test folder`);
-      for (let percent = 10; percent <= 100; percent += 10) {
-        await io.wait(320);
-        io.progress(percent / 100);
-        // The demo can drop the connection once, half-way through.
-        if (demo.gmNetwork && attempt === 1 && percent === 50) {
-          io.log("connection to the company GM lost at 50%", "error");
-          throw new ReleaseTaskError("gmNetwork");
-        }
-      }
-      io.log(`company GM saved it · hot update ${gmFiles.clientVersion} waiting to be confirmed`, "success");
-      return { file: gmFiles.client, sizeBytes, version: gmFiles.clientVersion };
-    },
-    "gm.clientPull": (io) => gmCall(io, [
-      `company GM: /clihotupdate4test/${platform.id}/${gmFiles.client}`,
-      `${((build.sizeBytes || DEMO_HOT_UPDATE_BYTES) / 1048576).toFixed(1)} MB, size matches · confirmed`,
-    ], { file: gmFiles.client, version: gmFiles.clientVersion }),
-    "gm.clientPush": (io) => gmCall(io, [
-      `${gm}: fetch hot update ${gmFiles.clientVersion} from the company GM`,
-      `written to gmhot/${platform.id}/ · synced`,
-    ], { version: gmFiles.clientVersion }, 1200),
-    "gm.serverBuild": (io) => gmCall(io, [
-      `company GM: svn update the ${platform.name} server branch → r${DEMO_GM.serverRevision}`,
-      "npm run dist … ok",
-      "node encservl.js … ok",
-      `zip ${gmFiles.server} (${(DEMO_GM.serverBytes / 1048576).toFixed(1)} MB) · server version #${DEMO_GM.serverVersion}`,
-    ], { file: gmFiles.server, version: DEMO_GM.serverVersion, revision: DEMO_GM.serverRevision }, 2400),
-    "gm.serverPush": (io) => gmCall(io, [
-      `sftp ${gmFiles.server} to ${gm}`,
-      "uploading … 100%",
-      `${gm}: size, sha256, platform and version match · server #${DEMO_GM.serverVersion} registered`,
-    ], { version: DEMO_GM.serverVersion }, 1600),
-    "gm.maintenance": (io) => gmCall(io, [
-      `maintenance checklist: ${DEMO_GM.checklist} / ${DEMO_GM.checklist} done`,
-      `pre-maintenance ${schedule.maintenanceStart} → ${schedule.maintenanceEnd}, players warned 5 minutes before`,
-      `monitors on ${servers} hosts notified`,
-    ], { start: schedule.maintenanceStart, end: schedule.maintenanceEnd, checklist: DEMO_GM.checklist }),
-    "gm.clientOpen": (io) => gmCall(io, [`set hot update ${gmFiles.clientVersion} open at ${schedule.clientOpenAt}`, "ok"], { at: schedule.clientOpenAt, version: gmFiles.clientVersion }),
-    // The monitors close the servers at the pre-maintenance time; this step
-    // only watches the zones until every one has stopped.
-    "gm.shutdown": async (io) => {
-      const stopped = demo.shutdownSlow && attempt === 1 ? servers - 1 : servers;
-      await gmCall(io, [
-        "pre-maintenance time reached; the monitors close the servers",
-        "players warned and disconnected",
-        `zone status: ${stopped} / ${servers} stopped`,
-      ], null, 2600);
-      if (stopped < servers) {
-        io.log(`${servers - stopped} server still running after the wait`, "warning");
-        throw new ReleaseTaskError("shutdownIncomplete");
-      }
-      io.log("every zone in maintenance", "success");
-      return { players: DEMO_SERVERS.online, at: at() };
-    },
-    "gm.serverApply": (io) => gmCall(io, [
-      `apply server #${DEMO_GM.serverVersion} to ${servers} hosts (copy only, no restart)`,
-      `${servers} / ${servers} copied`,
-    ], { version: DEMO_GM.serverVersion, hosts: servers }, 1400),
-    "gm.configApply": (io) => gmCall(io, [
-      `preview: config version #${pack.version || DEMO_GM.configVersion} replaces ${pack.tables || syncPlan.catalog.length} tables of the zones' config database`,
-      "import into an isolated database … ok",
-      "table list matches the version",
-      `switched with one RENAME · previous tables kept in gm_cfg_backup_${context.runId.slice(-4)}`,
-    ], { version: pack.version || DEMO_GM.configVersion, tables: pack.tables || syncPlan.catalog.length, backup: `gm_cfg_backup_${context.runId.slice(-4)}` }, 1800),
-    "gm.configReload": (io) => gmCall(io, [
-      `reload the config managers on ${servers} game servers`,
-      `${servers} / ${servers} reloaded`,
-    ], { servers }, 1200),
-    "gm.restart": (io) => gmCall(io, [
-      `start the zones in maintenance (closed to players)`,
-      `heartbeat check: ${servers} / ${servers} healthy`,
-    ], { servers, version: DEMO_GM.serverVersion }, 2600),
-    "gm.open": (io) => gmCall(io, ["end maintenance, open the zones", `${servers} / ${servers} servers accept logins`], { at: at() }, 1100),
-  };
-}
-
 const TASK_RUNNERS = Object.freeze({
   "db.sync": syncDatabase,
   "db.restore": restoreDatabase,
@@ -384,8 +268,6 @@ export function createReleaseDemoDriver() {
     async run(taskId, context, io) {
       const runner = TASK_RUNNERS[taskId];
       if (runner) return runner(context, io);
-      const gm = gmTasks(context)[taskId];
-      if (gm) return gm(io);
       throw new ReleaseTaskError("unknownTask", `Unknown task ${taskId}`);
     },
   };
