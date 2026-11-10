@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createTableMentionIndex, splitTableMentions } from "./tableMentions.js";
 
@@ -44,4 +45,12 @@ test("text without a current table stays plain", () => {
   assert.equal(splitTableMentions("", index), null);
   assert.equal(splitTableMentions("炎龙骑士", index), null);
   assert.equal(splitTableMentions("hero", createTableMentionIndex([])), null);
+});
+
+test("table-name links keep a continuous underline across letter descenders", () => {
+  const styles = readFileSync(new URL("../workbench.css", import.meta.url), "utf8");
+  const linkStyles = styles.match(/button\.wb-table-mention\s*\{([^}]+)\}/)?.[1];
+  assert.ok(linkStyles, "table-name link styles exist");
+  assert.match(linkStyles, /text-decoration:\s*underline\s*;/);
+  assert.match(linkStyles, /text-decoration-skip-ink:\s*none\s*;/);
 });
