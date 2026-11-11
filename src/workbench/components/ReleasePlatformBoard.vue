@@ -31,6 +31,11 @@ function navigate(runId, pageId) {
   flow.go(pageId);
   props.workspace.openRun(runId);
 }
+
+function openAddPlatform() {
+  props.workspace.ui.addingPlatform = true;
+  props.workspace.openSection("platforms");
+}
 </script>
 
 <template>
@@ -41,7 +46,22 @@ function navigate(runId, pageId) {
       </button>
     </div>
     <div class="wb-rf-board-scroll">
-      <p class="wb-rf-board-caption">{{ t('releaseFlow.board.platforms') }}</p>
+      <div class="wb-rf-board-head">
+        <p class="wb-rf-board-caption">
+          <span>{{ t('releaseFlow.board.platforms') }}</span>
+          <span class="wb-rf-board-count">{{ cards.length }}</span>
+        </p>
+        <button
+          type="button"
+          class="wb-rf-board-add"
+          data-board-add-platform
+          :title="t('releaseFlow.platformEditor.add')"
+          :aria-label="t('releaseFlow.platformEditor.add')"
+          @click="openAddPlatform"
+        >
+          <Plus :size="13" aria-hidden="true" />{{ t('releaseFlow.platformEditor.addShort') }}
+        </button>
+      </div>
       <ReleasePlatformCard
         v-for="card in cards"
         :key="card.platformId"

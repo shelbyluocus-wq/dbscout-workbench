@@ -96,9 +96,15 @@ function extraEntry(entry) {
   return { path: entry.path, item: entry.item, props: "none", kind: "file", treeConflict: false, locked: false };
 }
 
+function pickMockFolder(command, request) {
+  const hook = globalThis.__dbscoutMockFolderPick;
+  if (typeof hook === "function") return hook(command, request);
+  return typeof hook === "string" && hook ? hook : null;
+}
+
 async function svn(command, request) {
   const root = request?.root;
-  if (command === "svn_wc_pick_folder") return null;
+  if (command === "svn_wc_pick_folder") return pickMockFolder(command, request);
   if (!normalize(root)) throw new Error("notWorkingCopy: ");
   const copy = workingCopy(root);
   const paths = request.paths || [];
@@ -233,6 +239,7 @@ export function createMockReleaseTools() {
         if (job) job.cancelled = true;
         return Boolean(job);
       }
+      if (command.startsWith("cocos_pick_")) return pickMockFolder(command, request);
       // The preview has no native file dialogs; a pick is a cancel.
       return null;
     },

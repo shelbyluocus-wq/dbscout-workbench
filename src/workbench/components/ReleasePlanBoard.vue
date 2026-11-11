@@ -209,7 +209,7 @@ async function removeSelected() {
   </div>
 
   <div v-if="rows.length" class="wb-rf-plan-matrix" role="tabpanel">
-    <table class="wb-rf-table">
+    <table class="wb-rf-table" :style="{ minWidth: `${Math.max(780, 310 + platforms.length * 168)}px` }">
       <thead>
         <tr>
           <th scope="col" class="wb-rf-plan-select-col">

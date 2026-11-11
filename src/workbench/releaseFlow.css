@@ -518,20 +518,57 @@
 }
 
 /* Source → target, the shape of every copy in a release. */
+.wb-rf-db-route-wrap {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wb-rf-inline-conn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wb-rf-inline-conn-field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-rf-inline-conn-field select {
+  width: min(360px, 100%);
+  min-width: 180px;
+}
+
 .wb-rf-route {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
-  align-items: center;
+  align-items: stretch;
+  min-width: 0;
 }
 
 .wb-rf-route-node {
   display: grid;
+  align-content: center;
   gap: 6px;
   min-width: 0;
   padding: 16px 18px;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-rf-radius);
   background: var(--wb-table-surface);
+}
+
+.wb-rf-route-node.is-editable {
+  overflow: visible;
+  padding: 12px 14px;
 }
 
 .wb-rf-route-node.is-target {
@@ -551,6 +588,15 @@
   overflow: hidden;
   font-size: var(--wb-fs-title);
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rf-route-hint {
+  overflow: hidden;
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -653,7 +699,9 @@
 
 .wb-rf-segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 2px;
+  max-width: 100%;
   padding: 3px;
   border-radius: 10px;
   background: var(--wb-rf-sunken);

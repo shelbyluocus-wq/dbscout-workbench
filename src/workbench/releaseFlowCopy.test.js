@@ -25,6 +25,7 @@ const SOURCES = [
   "utils/releaseHistoryFormat.js",
   "utils/releaseFlowDemo.js",
   "utils/releasePlanCandidates.js",
+  "utils/releasePlatformFields.js",
 ];
 
 // Keys the workspace builds at run time from its own vocabularies.

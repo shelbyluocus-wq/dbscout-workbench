@@ -40,7 +40,7 @@ function choiceOf(option) {
       value,
       label: String(option.label ?? value),
       detail: String(option.detail ?? ""),
-      raw: option,
+      raw: "raw" in option ? option.raw : option,
     };
   }
   const text = String(option ?? "");

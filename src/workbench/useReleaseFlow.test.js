@@ -780,3 +780,72 @@ test("real mode executes database and client steps through backend commands and 
   const saved = JSON.parse(storage.data.get(RELEASE_WORKSPACE_STORAGE_KEY));
   assert.equal(saved.runs[0].demo, false);
 });
+
+test("custom platforms can be added, persisted, used in updates and open plans, and removed safely", async (t) => {
+  const storage = memoryStorage();
+  const workspace = createWorkspace(t, { storage });
+  workspace.state.rules.fileExclusions.tw = ["/ServerOnly/"];
+  const created = workspace.addPlatform({
+    name: "  东南亚服  ",
+    copyFromId: "tw",
+    targetDatabase: "newsg_sea_cfg",
+    targetClient: "D:\\client\\jswz-sea",
+  });
+  assert.ok(created);
+  assert.match(created.id, /^plat-/);
+  assert.equal(created.name, "东南亚服");
+  assert.equal(created.sourceDatabase, "newsg_4cfg");
+  assert.equal(created.targetDatabase, "newsg_sea_cfg");
+  assert.equal(created.targetClient, "D:\\client\\jswz-sea");
+  assert.deepEqual(workspace.state.rules.fileExclusions[created.id], ["/ServerOnly/"]);
+  assert.equal(workspace.state.platformsCustomized, true);
+  assert.equal(workspace.state.plans.items[0].notes[created.id], "");
+
+  workspace.setPlanNote("hero-1062", created.id, "10/24 開放");
+  const flow = newUpdate(workspace, created.id);
+  startWith(flow, { database: true, client: true });
+  await runAll(flow, ["db.sync", "db.plans"]);
+  assert.equal(flow.state.tasks["db.plans"].status, "done");
+
+  workspace.openPlatform(created.id);
+  workspace.state.build.targetId = created.id;
+  assert.equal(workspace.removePlatform(created.id), true);
+  assert.equal(workspace.state.platforms.some((entry) => entry.id === created.id), false);
+  assert.equal(workspace.state.plans.items[0].notes[created.id], undefined);
+  assert.equal(workspace.view.section, "platform");
+  assert.equal(workspace.state.build.targetId, "douyin");
+  assert.equal(workspace.history.value[0].platformId, created.id);
+  assert.equal(workspace.history.value[0].outcome, "abandoned");
+
+  const sea2 = workspace.addPlatform({ name: "韩服", copyFromId: "" });
+  assert.equal(sea2.sourceDatabase, "newsg_4cfg");
+  assert.equal(sea2.targetDatabase, "");
+  for (const id of ["douyin", "tap", "wanxin", "tw"]) {
+    assert.equal(workspace.removePlatform(id), true);
+  }
+  assert.equal(workspace.state.platforms.length, 1);
+  assert.equal(workspace.removePlatform(sea2.id), false, "at least one platform must remain");
+
+  workspace.dispose();
+  const reloaded = createWorkspace(t, { storage });
+  assert.deepEqual(reloaded.state.platforms.map((entry) => entry.name), ["韩服"]);
+});
+
+test("batch deleting open-plan entries removes them together and resets only affected updates", async (t) => {
+  const workspace = createWorkspace(t);
+  const tw = newUpdate(workspace, "tw");
+  const tap = newUpdate(workspace, "tap");
+  workspace.setPlanNote("hero-1061", "tw", "已開放");
+  workspace.setPlanNote("hero-1062", "tw", "已開放");
+  workspace.setPlanNote("hero-1061", "tap", "");
+  workspace.setPlanNote("hero-1062", "tap", "");
+  for (const flow of [tw, tap]) {
+    startWith(flow, { database: true, client: true });
+    await runAll(flow, ["db.sync", "db.plans"]);
+  }
+  const beforeCount = workspace.state.plans.items.length;
+  assert.equal(workspace.removePlanEntries(["hero-1061", "hero-1062", "missing-id"]), 2);
+  assert.equal(workspace.state.plans.items.length, beforeCount - 2);
+  assert.equal(tw.state.tasks["db.plans"].stale, true);
+  assert.equal(tap.state.tasks["db.plans"].status, "done");
+});

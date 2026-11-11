@@ -5,12 +5,13 @@
 // on the open plans page; this page writes the entries that name a table row
 // and lists the others.
 import { computed, inject, ref } from "vue";
-import { ArrowDown, ArrowRight, ArrowUp, Database, DatabaseBackup, Plus, RotateCcw } from "lucide-vue-next";
+import { ArrowDown, ArrowRight, ArrowUp, DatabaseBackup, Plus, RotateCcw } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatPlanDate } from "../utils/releasePlanNotes.js";
 import { formatDateTime, formatReleaseCount } from "../utils/releaseFlowFormat.js";
 import ReleaseChipList from "./ReleaseChipList.vue";
 import ReleaseCombobox from "./ReleaseCombobox.vue";
+import ReleaseDatabaseRoute from "./ReleaseDatabaseRoute.vue";
 import ReleasePageHead from "./ReleasePageHead.vue";
 import ReleaseStatusIcon from "./ReleaseStatusIcon.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
@@ -98,17 +99,7 @@ function openBackupTool() {
   </p>
   <p v-else-if="isReal && plan.error" class="wb-rf-notice is-danger" role="alert">{{ plan.error }}</p>
 
-  <div class="wb-rf-route">
-    <div class="wb-rf-route-node">
-      <span><Database :size="13" aria-hidden="true" />{{ t('releaseFlow.database.source') }}</span>
-      <strong class="wb-rf-code">{{ platform.sourceDatabase }}</strong>
-    </div>
-    <span class="wb-rf-route-arrow" aria-hidden="true"><ArrowRight :size="18" /></span>
-    <div class="wb-rf-route-node is-target">
-      <span><Database :size="13" aria-hidden="true" />{{ t('releaseFlow.database.target', { platform: platform.name }) }}</span>
-      <strong class="wb-rf-code">{{ platform.targetDatabase }}</strong>
-    </div>
-  </div>
+  <ReleaseDatabaseRoute :flow="flow" :workspace="workspace" :disabled="locked" />
 
   <section class="wb-rf-card" aria-labelledby="wb-rf-db-sync">
     <div class="wb-rf-group-head">

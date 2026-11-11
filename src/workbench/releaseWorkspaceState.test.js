@@ -13,6 +13,7 @@ import {
   platformCard,
   readStoredHistory,
   restorePlans,
+  restorePlatforms,
   restoreRun,
   runIssues,
   runStatus,
@@ -213,4 +214,37 @@ test("legacy storage is removed only after the retained workspace is saved", () 
   assert.deepEqual(removed, []);
   assert.equal(writeStoredWorkspace({ setItem() {}, removeItem: (key) => removed.push(key) }, {}), true);
   assert.deepEqual(removed, [RELEASE_FLOW_STORAGE_KEY]);
+});
+
+test("custom platforms restore cleanly alongside legacy partial overrides and customized lists", () => {
+  const legacy = restorePlatforms(
+    [
+      { id: "tw", targetDatabase: "newsg_tw_custom" },
+      { id: "plat-sea", name: "SEA", targetDatabase: "newsg_sea_cfg" },
+      { id: "custom", name: "Reserved" },
+      { id: "nameless" },
+    ],
+    PLATFORMS,
+    { customized: false },
+  );
+  assert.deepEqual(legacy.map((entry) => entry.id), ["douyin", "tap", "wanxin", "tw", "plat-sea"]);
+  assert.equal(legacy.find((entry) => entry.id === "tw").targetDatabase, "newsg_tw_custom");
+  assert.equal(legacy.find((entry) => entry.id === "tw").name, "TW");
+  assert.equal(legacy.find((entry) => entry.id === "plat-sea").targetDatabase, "newsg_sea_cfg");
+
+  const customized = createWorkspaceData({
+    stored: {
+      platformsCustomized: true,
+      platforms: [
+        { id: "plat-kr", name: "KR", targetDatabase: "newsg_kr_cfg" },
+        { id: "plat-jp", name: "JP", targetDatabase: "newsg_jp_cfg" },
+      ],
+    },
+    today: TODAY,
+    translate,
+  });
+  assert.equal(customized.platformsCustomized, true);
+  assert.deepEqual(customized.platforms.map((entry) => entry.id), ["plat-kr", "plat-jp"]);
+  assert.equal(customized.build.targetId, "plat-kr");
+  assert.deepEqual(Object.keys(customized.plans.items[0].notes), ["plat-kr", "plat-jp"]);
 });

@@ -73,16 +73,90 @@ export { cleanTableNames };
 
 /* ── Platforms ─────────────────────────────────────────────────────────── */
 
-export function restorePlatforms(saved, fallback = createDemoPlatforms()) {
+export function createPlatformProfile(draft = {}, base = {}) {
+  const sample = createDemoPlatforms()[0] || {};
+  const next = {
+    id: "",
+    name: "",
+    connectionId: "",
+    sourceDatabase: sample.sourceDatabase || "",
+    targetDatabase: "",
+    sourceClient: sample.sourceClient || "",
+    targetClient: "",
+    transferTemplateId: sample.transferTemplateId || "juesheng-2",
+    cocosVersion: sample.cocosVersion || "",
+    cocosPath: sample.cocosPath || "",
+    buildPlatform: sample.buildPlatform || "android",
+    buildConfig: "",
+    buildOutputName: "",
+    buildDebug: false,
+    buildMd5Cache: true,
+    buildQaGuard: true,
+    ...base,
+  };
+  if (typeof draft?.id === "string") {
+    const id = text(draft.id, 60);
+    if (id && id !== "custom") next.id = id;
+  }
+  for (const field of PLATFORM_TEXT_FIELDS) {
+    if (typeof draft?.[field] !== "string") continue;
+    next[field] = field === "name" ? text(draft[field], 40) : draft[field].trim();
+  }
+  for (const field of PLATFORM_FLAG_FIELDS) {
+    if (typeof draft?.[field] === "boolean") next[field] = draft[field];
+  }
+  return next;
+}
+
+function mergeSavedPlatform(stored, base) {
+  const next = { ...base };
+  for (const field of PLATFORM_TEXT_FIELDS) {
+    if (typeof stored[field] !== "string") continue;
+    if (field === "name") {
+      const trimmed = text(stored[field], 40);
+      if (trimmed) next.name = trimmed;
+    } else {
+      next[field] = stored[field];
+    }
+  }
+  for (const field of PLATFORM_FLAG_FIELDS) {
+    if (typeof stored[field] === "boolean") next[field] = stored[field];
+  }
+  return next;
+}
+
+export function restorePlatforms(saved, fallback = createDemoPlatforms(), { customized = false } = {}) {
   if (!Array.isArray(saved)) return fallback;
-  return fallback.map((platform) => {
+  if (customized) {
+    const fallbackById = new Map(fallback.map((platform) => [platform.id, platform]));
+    const seen = new Set();
+    const list = [];
+    for (const entry of saved) {
+      if (!plainObject(entry)) continue;
+      const id = text(entry.id, 60);
+      if (!id || id === "custom" || seen.has(id)) continue;
+      const base = fallbackById.get(id) || createPlatformProfile({}, { id });
+      const merged = mergeSavedPlatform(entry, base);
+      if (!text(merged.name, 40)) continue;
+      seen.add(id);
+      list.push(merged);
+    }
+    return list.length ? list : fallback;
+  }
+  const list = fallback.map((platform) => {
     const stored = saved.find((entry) => entry?.id === platform.id);
-    if (!stored) return platform;
-    const next = { ...platform };
-    for (const field of PLATFORM_TEXT_FIELDS) if (typeof stored[field] === "string") next[field] = stored[field];
-    for (const field of PLATFORM_FLAG_FIELDS) if (typeof stored[field] === "boolean") next[field] = stored[field];
-    return next;
+    return plainObject(stored) ? mergeSavedPlatform(stored, platform) : platform;
   });
+  const seen = new Set(list.map((platform) => platform.id));
+  for (const entry of saved) {
+    if (!plainObject(entry)) continue;
+    const id = text(entry.id, 60);
+    const name = text(entry.name, 40);
+    if (!id || id === "custom" || !name || seen.has(id)) continue;
+    seen.add(id);
+    list.push(createPlatformProfile(entry, { id }));
+  }
+  return list;
 }
 
 /** Build settings for a client folder that is no platform's, same fields as a platform. */
@@ -138,7 +212,10 @@ export function restorePlans(saved, { platforms, today, translate }) {
       .filter((entry) => entry && !seen.has(entry.id) && seen.add(entry.id));
     return { items, seededOn: isIsoDate(saved.seededOn) ? saved.seededOn : today };
   }
-  return { items: createDemoPlanItems(today, translate), seededOn: today };
+  const seeded = createDemoPlanItems(today, translate)
+    .map((entry) => cleanPlanEntry(entry, platforms))
+    .filter(Boolean);
+  return { items: seeded, seededOn: today };
 }
 
 /* ── Rules and demo database ───────────────────────────────────────────── */
@@ -308,12 +385,14 @@ function restoreView(saved, runs, platforms) {
  */
 export function createWorkspaceData({ stored = null, legacy = null, today = localDateIso(), translate, seedRuns = null, realMode = false } = {}) {
   const base = stored || (legacy ? migrateLegacyFlow(legacy, { today, translate }) : null);
-  const platforms = restorePlatforms(base?.platforms);
+  const platformsCustomized = Boolean(base?.platformsCustomized);
+  const platforms = restorePlatforms(base?.platforms, undefined, { customized: platformsCustomized });
   const plans = restorePlans(base?.plans, { platforms, today, translate });
   const savedRuns = Array.isArray(base?.runs) ? base.runs : (base ? [] : seedRuns?.({ today, platforms }) || []);
   const runs = onePerPlatform(savedRuns.map((run) => restoreRun(run, { platforms, today, realMode })).filter(Boolean));
   return {
     platforms,
+    platformsCustomized,
     plans,
     rules: restoreRules(base?.rules, platforms),
     demoFlags: restoreDemoFlags(base?.demoFlags, platforms, plans.items),
@@ -343,6 +422,7 @@ export function migrateLegacyFlow(legacy, { today, translate }) {
     for (const platform of platforms) {
       const note = legacy.notes?.[item.id]?.[platform.id];
       if (typeof note === "string") notes[platform.id] = note;
+      else if (typeof notes[platform.id] !== "string") notes[platform.id] = "";
     }
     return { ...item, notes };
   });
@@ -350,7 +430,9 @@ export function migrateLegacyFlow(legacy, { today, translate }) {
   const worked = Object.values(tasks).some((task) => task?.status && task.status !== TASK_STATUS.IDLE);
   const runs = [];
   if (legacy.brief?.started === true || worked) {
-    const platformId = platforms.some((platform) => platform.id === legacy.brief?.platformId) ? legacy.brief.platformId : DEMO_DEFAULT_PLATFORM;
+    const platformId = platforms.some((platform) => platform.id === legacy.brief?.platformId)
+      ? legacy.brief.platformId
+      : (platforms[0]?.id || DEMO_DEFAULT_PLATFORM);
     const events = Array.isArray(legacy.history) ? legacy.history : [];
     const startedAt = events.find((entry) => entry?.event === "started")?.at || 0;
     runs.push({

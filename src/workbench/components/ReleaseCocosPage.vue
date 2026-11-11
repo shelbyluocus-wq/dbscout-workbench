@@ -52,7 +52,7 @@ function failureText(result, error) {
 
   <section class="wb-rf-card" aria-labelledby="wb-rf-cocos-settings">
     <div class="wb-rf-group-head"><h4 id="wb-rf-cocos-settings">{{ t('releaseFlow.build.settings') }}</h4></div>
-    <ReleaseBuildPanel :tool="tool" :disabled="locked" project-locked />
+    <ReleaseBuildPanel :tool="tool" :disabled="locked" />
   </section>
 
   <ReleaseTaskPanel :flow="flow" task-id="build.cocos" log-expanded>

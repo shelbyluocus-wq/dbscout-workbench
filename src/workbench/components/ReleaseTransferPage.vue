@@ -9,6 +9,7 @@ import { ArrowRight, Check, FileSpreadsheet, FileText, FolderOpen, FolderSearch,
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseRoutePathNode from "./ReleaseRoutePathNode.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
@@ -86,6 +87,18 @@ function setStrategy(value) {
 <template>
   <ReleasePageHead page-id="clientTransfer" />
 
+  <ReleaseRoutePathNode
+    :workspace="workspace"
+    :platform="platform"
+    field-key="targetClient"
+    :label="t('releaseFlow.files.target', { platform: platform.name })"
+    target
+    :disabled="busy"
+    :hint="`${t('releaseFlow.transfer.target')} · ${assetsFolder}`"
+  >
+    <template #icon><FolderOpen :size="13" aria-hidden="true" /></template>
+  </ReleaseRoutePathNode>
+
   <section class="wb-rf-group" aria-labelledby="wb-rf-transfer-templates">
     <div class="wb-rf-group-head">
       <h4 id="wb-rf-transfer-templates">{{ t('releaseFlow.transfer.templates') }}</h4>
@@ -147,7 +160,17 @@ function setStrategy(value) {
       <div class="wb-rf-fact">
         <dt>{{ t('releaseFlow.transfer.script') }}</dt>
         <dd>
-          <span class="wb-rf-code">{{ selected.scriptPath || t('releaseFlow.transfer.noScript') }}</span>
+          <input
+            v-if="transfer"
+            :value="selected.scriptPath || ''"
+            class="wb-rf-input wb-rf-code wb-rf-fact-input"
+            :placeholder="t('releaseFlow.transfer.noScript')"
+            :aria-label="t('releaseFlow.transfer.script')"
+            :disabled="busy || transferBusy"
+            spellcheck="false"
+            @change="transfer.updateTemplate(selected.id, { scriptPath: $event.target.value })"
+          />
+          <span v-else class="wb-rf-code">{{ selected.scriptPath || t('releaseFlow.transfer.noScript') }}</span>
           <span v-if="transfer" class="wb-rf-fact-actions">
             <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickScript(selected.id)">
               <FileText :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickScript') }}
@@ -185,7 +208,17 @@ function setStrategy(value) {
         <div class="wb-rf-fact">
           <dt>{{ t('releaseFlow.transfer.projectRoot') }}</dt>
           <dd>
-            <span class="wb-rf-code">{{ selected.projectRoot || '—' }}</span>
+            <input
+              v-if="transfer"
+              :value="selected.projectRoot || ''"
+              class="wb-rf-input wb-rf-code wb-rf-fact-input"
+              placeholder="—"
+              :aria-label="t('releaseFlow.transfer.projectRoot')"
+              :disabled="busy || transferBusy"
+              spellcheck="false"
+              @change="transfer.updateTemplate(selected.id, { projectRoot: $event.target.value })"
+            />
+            <span v-else class="wb-rf-code">{{ selected.projectRoot || '—' }}</span>
             <span v-if="transfer" class="wb-rf-fact-actions">
               <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickProjectDir(selected.id)">
                 <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickProject') }}
@@ -348,6 +381,11 @@ function setStrategy(value) {
   gap: 6px 10px;
   min-width: 0;
   margin: 0;
+}
+
+.wb-rf-fact-input {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .wb-rf-fact-actions {

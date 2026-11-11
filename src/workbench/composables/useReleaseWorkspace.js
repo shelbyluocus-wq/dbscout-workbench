@@ -10,6 +10,7 @@ import {
   RELEASE_WORKSPACE_STORAGE_KEY,
   cleanPlanEntry,
   compactHistory,
+  createPlatformProfile,
   createRun,
   createWorkspaceData,
   historyEntryFromRun,
@@ -28,7 +29,12 @@ import {
   defaultAutopilotRules,
 } from "../releaseAutopilotState.js";
 import { createDemoHistory, createDemoRuns } from "../utils/releaseWorkspaceDemo.js";
-import { RELEASE_PLAN_CATEGORIES, RELEASE_PLAN_ITEMS } from "../utils/releaseFlowDemo.js";
+import {
+  DEMO_FILE_EXCLUSIONS,
+  DEMO_SYNC_EXCLUSIONS,
+  RELEASE_PLAN_CATEGORIES,
+  RELEASE_PLAN_ITEMS,
+} from "../utils/releaseFlowDemo.js";
 import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
 import { mergePlanCandidates } from "../utils/releasePlanCandidates.js";
 import { createCoalescedTask } from "../utils/coalescedTask.js";
@@ -64,6 +70,7 @@ const PLATFORM_FIELD_TASKS = Object.freeze({
 });
 
 let planSequence = 0;
+let platformSequence = 0;
 
 /**
  * The release workspace: every platform's update side by side (each with its
@@ -93,7 +100,7 @@ export function useReleaseWorkspace({
   const history = ref(storedHistory ?? (seed ? compactHistory(createDemoHistory({ today, platforms: workspace.platforms })) : []));
   const view = workspace.view;
   // What a page should show when it opens (not kept between sessions).
-  const ui = reactive({ historyEntryId: "" });
+  const ui = reactive({ historyEntryId: "", addingPlatform: false });
 
   const templateList = computed(() => (typeof templates === "function" ? templates() : templates?.value || templates || []));
   const connectionList = computed(() => (typeof connections === "function" ? connections() : connections?.value || connections || []));
@@ -319,6 +326,92 @@ export function useReleaseWorkspace({
       roots.push(PLATFORM_FIELD_TASKS[field]);
     }
     if (roots.length) flow?.invalidate(roots);
+    return true;
+  }
+
+  function addPlatform(draft = {}) {
+    const name = String(draft?.name ?? "").trim().slice(0, 40);
+    if (!name) return null;
+    const source = draft?.copyFromId === ""
+      ? null
+      : (typeof draft?.copyFromId === "string" ? platformById(draft.copyFromId) : workspace.platforms[0] || null);
+    let id = "";
+    do {
+      platformSequence = (platformSequence + 1) % 1296;
+      id = `plat-${now().getTime().toString(36)}-${platformSequence.toString(36).padStart(2, "0")}`;
+    } while (id === "custom" || platformById(id));
+    const inherited = source
+      ? {
+          id,
+          connectionId: source.connectionId,
+          sourceDatabase: source.sourceDatabase,
+          targetDatabase: "",
+          sourceClient: source.sourceClient,
+          targetClient: "",
+          transferTemplateId: source.transferTemplateId,
+          cocosVersion: source.cocosVersion,
+          cocosPath: source.cocosPath,
+          buildPlatform: source.buildPlatform,
+          buildConfig: "",
+          buildOutputName: "",
+          buildDebug: source.buildDebug,
+          buildMd5Cache: source.buildMd5Cache,
+          buildQaGuard: source.buildQaGuard,
+        }
+      : { id };
+    const { copyFromId: _ignored, id: _ignoredId, ...overrides } = draft || {};
+    const platform = createPlatformProfile({ ...overrides, name }, inherited);
+    platform.id = id;
+    workspace.platforms.push(platform);
+    workspace.platformsCustomized = true;
+    workspace.rules.syncExclusions[id] = source && Array.isArray(workspace.rules.syncExclusions[source.id])
+      ? [...workspace.rules.syncExclusions[source.id]]
+      : [...DEMO_SYNC_EXCLUSIONS];
+    workspace.rules.fileExclusions[id] = source && Array.isArray(workspace.rules.fileExclusions[source.id])
+      ? [...workspace.rules.fileExclusions[source.id]]
+      : [...DEMO_FILE_EXCLUSIONS];
+    workspace.demoFlags[id] = {};
+    for (const entry of workspace.plans.items) {
+      if (typeof entry.notes[id] !== "string") entry.notes[id] = "";
+    }
+    planCandidateTableCache.clear();
+    return platform;
+  }
+
+  function removePlatform(platformId) {
+    const index = workspace.platforms.findIndex((platform) => platform.id === platformId);
+    if (index < 0 || workspace.platforms.length <= 1) return false;
+    const flow = flowOfPlatform(platformId);
+    if (flow?.busy.value) return false;
+    const target = workspace.platforms[index];
+    const existing = runOf(platformId);
+    if (existing) {
+      if (!existing.outcome && existing.brief.started) {
+        addHistory(historyEntryFromRun(existing, { platform: target, outcome: "abandoned", at: now().getTime() }));
+      }
+      removeRun(existing.id);
+    }
+    workspace.platforms.splice(index, 1);
+    workspace.platformsCustomized = true;
+    delete workspace.rules.syncExclusions[platformId];
+    delete workspace.rules.fileExclusions[platformId];
+    delete workspace.demoFlags[platformId];
+    for (const entry of workspace.plans.items) {
+      delete entry.notes[platformId];
+    }
+    planCandidateTableCache.clear();
+    const fallbackId = workspace.platforms[Math.min(index, workspace.platforms.length - 1)]?.id || "";
+    if (workspace.build.targetId === platformId) {
+      workspace.build.targetId = workspace.platforms[0]?.id || "custom";
+    }
+    if ((view.section === "platform" && view.platformId === platformId)
+      || (view.section === "run" && existing && view.runId === existing.id)) {
+      if (fallbackId) openPlatform(fallbackId);
+      else openHome();
+    }
+    if (view.returnTo?.platformId === platformId || (existing && view.returnTo?.runId === existing.id)) {
+      view.returnTo = null;
+    }
     return true;
   }
 
@@ -572,6 +665,8 @@ export function useReleaseWorkspace({
     createUpdate,
     abandonUpdate,
     updatePlatform,
+    addPlatform,
+    removePlatform,
     addPlanEntry,
     updatePlanEntry,
     setPlanNote,

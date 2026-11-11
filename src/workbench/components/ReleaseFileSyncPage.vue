@@ -11,6 +11,7 @@ import { DEMO_PROJECT_IGNORES } from "../utils/releaseFlowDemo.js";
 import { ALWAYS_EXCLUDED_RULES, cleanExclusionRules, ruleForPick } from "../utils/releaseFileRules.js";
 import { invokeWorkbench } from "../utils/tauriBridge.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseRoutePathNode from "./ReleaseRoutePathNode.vue";
 import ReleaseRuleList from "./ReleaseRuleList.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
@@ -133,15 +134,26 @@ function onMenuFocusOut(event) {
   <ReleasePageHead page-id="clientSync" />
 
   <div class="wb-rf-route">
-    <div class="wb-rf-route-node">
-      <span><FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.files.source') }}</span>
-      <strong class="wb-rf-code">{{ platform.sourceClient }}</strong>
-    </div>
+    <ReleaseRoutePathNode
+      :workspace="workspace"
+      :platform="platform"
+      field-key="sourceClient"
+      :label="t('releaseFlow.files.source')"
+      :disabled="locked"
+    >
+      <template #icon><FolderOpen :size="13" aria-hidden="true" /></template>
+    </ReleaseRoutePathNode>
     <span class="wb-rf-route-arrow" aria-hidden="true"><ArrowRight :size="18" /></span>
-    <div class="wb-rf-route-node is-target">
-      <span><FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.files.target', { platform: platform.name }) }}</span>
-      <strong class="wb-rf-code">{{ platform.targetClient }}</strong>
-    </div>
+    <ReleaseRoutePathNode
+      :workspace="workspace"
+      :platform="platform"
+      field-key="targetClient"
+      :label="t('releaseFlow.files.target', { platform: platform.name })"
+      target
+      :disabled="locked"
+    >
+      <template #icon><FolderOpen :size="13" aria-hidden="true" /></template>
+    </ReleaseRoutePathNode>
   </div>
 
   <div class="wb-rf-files-grid">

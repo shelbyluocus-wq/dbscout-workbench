@@ -124,7 +124,7 @@ try {
     assert.match(await card('tw').textContent(), /更新中/);
 
     // Kept tables: the suggestion list filters, arrows move, Enter keeps one.
-    const combo = page.locator('.wb-rf-combobox input');
+    const combo = page.locator('.wb-rf-exclusions .wb-rf-combobox input');
     await combo.fill('heropro');
     await page.locator('.wb-rf-combobox-list').waitFor();
     await combo.press('Enter');
@@ -382,6 +382,105 @@ try {
     await page.waitForFunction(() => !/companyGm|gm\.|gmServer|gmUpload|maintenance|schedule|platform.invalid/.test(localStorage.getItem('dbscout_release_flow_v3')));
     assert.doesNotMatch(await page.evaluate(() => localStorage.getItem('dbscout_release_history_v1')), /old-local|old-request|gm\./);
     await shot('legacy-migrated');
+    await context.close();
+  }
+
+  // Minimize to activity rail, custom platforms, open-plan dropdown + batch delete, and inline step parameters.
+  {
+    const { context, page } = await openWorkbench();
+    const { primary, current, card, confirm, finishPage, assertFits, newUpdate, shot } = helpers(page);
+    await openWorkspace(page);
+    await page.locator('button[aria-controls="wb-rf-demo-menu"]').click();
+    await page.locator('#wb-rf-demo-menu [role="radio"]').nth(1).click();
+    await page.locator('#wb-rf-demo-menu label', { hasText: 'SVN 更新時出現衝突' }).locator('input').uncheck();
+    await page.keyboard.press('Escape');
+
+    // 1. Add a 5th custom platform from the board header and verify layout + propagation.
+    await page.locator('[data-board-add-platform]').click();
+    assert.equal(await page.locator('main.wb-rf-main').getAttribute('data-release-section'), 'platforms');
+    await page.locator('[data-platform-new-name]').fill('東南亞服');
+    await page.locator('[data-platform-new-db]').fill('newsg_sea_cfg');
+    await page.locator('[data-platform-new-client]').fill('D:\\client\\jswz-sea');
+    await page.locator('[data-platform-create-submit]').click();
+    assert.equal(await page.locator('.wb-rf-note').count(), 5, 'custom 5th platform appears on board');
+    await assertFits('custom 5th platform settings');
+
+    // 2. Open plans: 5 platform columns, candidate dropdown cross-fill, preset-all, and batch multi-delete.
+    await page.locator('.wb-rf-nav [data-release-section="plans"]').click();
+    assert.equal(await page.locator('.wb-rf-table thead th').count(), 8, 'checkbox + item + 5 platforms + actions');
+    await page.locator('[data-plan-add]').click();
+    await page.locator('[data-plan-name]').press('ArrowDown');
+    await page.locator('.wb-rf-modal .wb-rf-combobox-list [role="option"]').first().click();
+    assert.notEqual((await page.locator('[data-plan-ref]').inputValue()).trim(), '', 'picking a candidate cross-fills its ID');
+    await page.locator('[data-plan-preset-all]').selectOption({ index: 1 });
+    await page.locator('[data-plan-save]').click();
+
+    const planCountBefore = await page.locator('[data-plan-item]').count();
+    await page.locator('[data-plan-select]').nth(0).check();
+    await page.locator('[data-plan-select]').nth(1).check();
+    await page.locator('[data-plan-batch-delete]').click();
+    await confirm();
+    assert.equal(await page.locator('[data-plan-item]').count(), planCountBefore - 2, 'batch delete removes selected rows together');
+
+    // 3. Start an update on the custom platform, minimize to the activity rail, and restore.
+    const seaCard = page.locator('.wb-rf-note', { hasText: '東南亞服' });
+    const seaId = await seaCard.getAttribute('data-release-platform');
+    await newUpdate(seaId);
+    await page.locator('[data-release-create]').click();
+    await page.locator('.wb-rf-ready input').check();
+    await primary.click();
+    assert.equal(await current(), 'database');
+
+    await page.locator('[data-release-minimize]').click();
+    assert.equal(await page.locator('.wb-rf-dialog').isVisible(), false, 'minimizing hides the dialog without unmounting');
+    const railBtn = page.locator('[data-wb-rail-id="releaseFlow"]');
+    await railBtn.waitFor();
+    const orderOk = await page.evaluate(() => {
+      const rf = document.querySelector('[data-wb-rail-id="releaseFlow"]');
+      const upd = document.querySelector('[data-wb-rail-id="update"]');
+      return Boolean(rf && upd && (rf.compareDocumentPosition(upd) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    assert.equal(orderOk, true, 'release-flow status entry sits above the update button in the bottom rail');
+    assert.notEqual((await railBtn.locator('.wb-activity-rail-status').textContent()).trim(), '', 'shows live update status text');
+    await shot('minimized-rail');
+
+    await railBtn.click();
+    assert.equal(await page.locator('.wb-rf-dialog').isVisible(), true, 'clicking the rail status entry restores the workspace');
+    assert.equal(await current(), 'database');
+
+    // 4. Inline parameter editing inside workflow steps (database, client path, and client project on build step).
+    const targetDbInput = page.locator('[data-release-field="targetDatabase"]');
+    await targetDbInput.fill('newsg_sea_v2_cfg');
+    await targetDbInput.press('Enter');
+    await finishPage();
+    await primary.click(); // -> clientSvn
+    assert.equal(await current(), 'clientSvn');
+    const targetClientInput = page.locator('[data-release-field="targetClient"]');
+    await targetClientInput.fill('D:\\client\\jswz-sea-v2');
+    await targetClientInput.dispatchEvent('change');
+    await finishPage();
+    await primary.click(); // -> clientSync
+    assert.equal(await current(), 'clientSync');
+    await finishPage();
+    await primary.click(); // -> clientTransfer
+    await finishPage();
+    await primary.click(); // -> clientDiff
+    await finishPage();
+    await primary.click(); // -> build
+    assert.equal(await current(), 'build');
+    const buildProjectInput = page.locator('[data-build-project]');
+    assert.equal(await buildProjectInput.isDisabled(), false, 'client project path is editable directly on the build step');
+    assert.equal(await buildProjectInput.inputValue(), 'D:\\client\\jswz-sea-v2', 'inline path edit carried over to the build step');
+    await buildProjectInput.fill('D:\\client\\jswz-sea-build');
+    await buildProjectInput.dispatchEvent('change');
+    await shot('inline-build-project');
+
+    // 5. Delete custom platform cleanly from platform settings.
+    await page.locator('.wb-rf-nav [data-release-section="platforms"]').click();
+    await page.locator(`[data-platform-tab="${seaId}"]`).click();
+    await page.locator('[data-platform-delete]').click();
+    await confirm();
+    assert.equal(await page.locator('.wb-rf-note').count(), 4, 'deleting custom platform removes its card cleanly');
     await context.close();
   }
 

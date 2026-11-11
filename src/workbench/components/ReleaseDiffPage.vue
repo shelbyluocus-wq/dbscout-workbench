@@ -4,12 +4,13 @@
 // here. Uses the real SVN working copy in desktop mode and the simulated
 // working copy in demo / browser preview mode.
 import { computed, onMounted, watch } from "vue";
-import { ArrowRight } from "lucide-vue-next";
+import { ArrowRight, FolderGit2 } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { createSvnBackendSource, useSvnWorkspace } from "../composables/useSvnWorkspace.js";
 import { RELEASE_SPEEDS } from "../releaseWorkspaceState.js";
 import { createDemoSvnSource } from "../utils/releaseSvnDemo.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseRoutePathNode from "./ReleaseRoutePathNode.vue";
 import ReleaseSvnWorkspace from "./ReleaseSvnWorkspace.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
@@ -21,6 +22,7 @@ const emit = defineEmits(["run", "rerun", "navigate"]);
 
 const isReal = computed(() => Boolean(props.flow.isReal?.value));
 const platform = computed(() => props.flow.platform.value);
+const locked = computed(() => props.flow.busy.value || props.flow.finished.value);
 const speed = () => RELEASE_SPEEDS[props.flow.workspace.demo.speed] ?? 1;
 const backendSource = createSvnBackendSource();
 const demoSource = createDemoSvnSource({
@@ -85,6 +87,17 @@ function openRealWorkingCopy() {
       </button>
     </template>
   </ReleasePageHead>
+
+  <ReleaseRoutePathNode
+    :workspace="workspace"
+    :platform="platform"
+    field-key="targetClient"
+    :label="t('releaseFlow.svn.target', { platform: platform.name })"
+    target
+    :disabled="locked"
+  >
+    <template #icon><FolderGit2 :size="13" aria-hidden="true" /></template>
+  </ReleaseRoutePathNode>
 
   <ReleaseSvnWorkspace :svn="svn" :simulated="!isReal" />
 

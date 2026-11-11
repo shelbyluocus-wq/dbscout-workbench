@@ -7,6 +7,7 @@ import { Cloud, FolderGit2, HardDrive, User } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { CONFLICT_CHOICES } from "../composables/useReleaseFlow.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseRoutePathNode from "./ReleaseRoutePathNode.vue";
 import ReleaseTaskPanel from "./ReleaseTaskPanel.vue";
 
 const props = defineProps({
@@ -20,16 +21,23 @@ const task = computed(() => props.flow.state.tasks["client.svn"]);
 const conflicts = computed(() => props.flow.svnConflicts.value);
 const pending = computed(() => props.flow.conflictsPending.value);
 const busy = computed(() => props.flow.busy.value);
+const locked = computed(() => busy.value || props.flow.finished.value);
 const CHOICE_ICONS = { theirs: Cloud, mine: HardDrive, manual: User };
 </script>
 
 <template>
   <ReleasePageHead page-id="clientSvn" />
 
-  <div class="wb-rf-route-node is-target">
-    <span><FolderGit2 :size="13" aria-hidden="true" />{{ t('releaseFlow.svn.target', { platform: platform.name }) }}</span>
-    <strong class="wb-rf-code">{{ platform.targetClient }}</strong>
-  </div>
+  <ReleaseRoutePathNode
+    :workspace="workspace"
+    :platform="platform"
+    field-key="targetClient"
+    :label="t('releaseFlow.svn.target', { platform: platform.name })"
+    target
+    :disabled="locked"
+  >
+    <template #icon><FolderGit2 :size="13" aria-hidden="true" /></template>
+  </ReleaseRoutePathNode>
 
   <section
     v-if="pending || (task.status === 'done' && task.result?.resolved)"

@@ -4,7 +4,7 @@
 // it or to abandon it (kept in the history) and start over; a new update
 // never mixes with an old one.
 import { computed, nextTick, onMounted, ref } from "vue";
-import { Check } from "lucide-vue-next";
+import { Check, Plus } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -17,8 +17,11 @@ const props = defineProps({
 
 const emit = defineEmits(["close"]);
 const dialogRef = ref(null);
+const newPlatformInputRef = ref(null);
+const addingPlatform = ref(false);
+const newPlatformName = ref("");
 const { confirm } = useConfirm();
-useEscClose(() => true, () => emit("close"), null, { dialogRef });
+useEscClose(() => !addingPlatform.value, () => emit("close"), null, { dialogRef });
 
 const cards = computed(() => props.workspace.cards.value);
 const choice = ref(props.platformId || cards.value.find((card) => !card.runId || card.status === "done")?.platformId || cards.value[0]?.platformId || "");
@@ -26,6 +29,27 @@ const card = computed(() => cards.value.find((entry) => entry.platformId === cho
 const run = computed(() => (card.value?.runId ? props.workspace.runOf(card.value.platformId) : null));
 const openRun = computed(() => (run.value && !run.value.outcome ? run.value : null));
 const runBusy = computed(() => Boolean(openRun.value && props.workspace.flowFor(openRun.value.id)?.busy.value));
+
+function toggleAddPlatform() {
+  addingPlatform.value = !addingPlatform.value;
+  newPlatformName.value = "";
+  if (addingPlatform.value) {
+    void nextTick(() => newPlatformInputRef.value?.focus());
+  }
+}
+
+function submitInlinePlatform() {
+  const trimmed = newPlatformName.value.trim();
+  if (!trimmed) return;
+  const created = props.workspace.addPlatform({
+    name: trimmed,
+    copyFromId: choice.value || cards.value[0]?.platformId || "",
+  });
+  if (!created) return;
+  choice.value = created.id;
+  addingPlatform.value = false;
+  newPlatformName.value = "";
+}
 
 function stateText(entry) {
   const current = entry.runId ? props.workspace.runOf(entry.platformId) : null;
@@ -93,6 +117,36 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector('[aria-checke
       <p v-if="openRun" class="wb-rf-notice is-warning" role="status">
         {{ t(openRun.brief.started ? 'releaseFlow.newUpdate.hasOpen' : 'releaseFlow.newUpdate.hasDraft', { platform: card.name }) }}
       </p>
+      <div class="wb-rf-new-platform-row">
+        <button
+          v-if="!addingPlatform"
+          type="button"
+          class="wb-rf-btn is-quiet"
+          data-new-update-add-platform
+          @click="toggleAddPlatform"
+        >
+          <Plus :size="14" aria-hidden="true" />{{ t('releaseFlow.platformEditor.add') }}
+        </button>
+        <form
+          v-else
+          class="wb-rf-new-platform-form"
+          @submit.prevent="submitInlinePlatform"
+          @keydown.esc.stop="addingPlatform = false"
+        >
+          <input
+            ref="newPlatformInputRef"
+            v-model="newPlatformName"
+            data-new-update-platform-name
+            maxlength="40"
+            :aria-label="t('releaseFlow.platformEditor.name')"
+            :placeholder="t('releaseFlow.platformEditor.namePlaceholder')"
+          />
+          <button type="submit" class="wb-rf-btn is-primary" data-new-update-platform-submit :disabled="!newPlatformName.trim()">
+            {{ t('releaseFlow.platformEditor.createAction') }}
+          </button>
+          <button type="button" class="wb-rf-btn is-quiet" @click="addingPlatform = false">{{ t('releaseFlow.cancel') }}</button>
+        </form>
+      </div>
       <footer class="wb-rf-modal-foot">
         <button type="button" class="wb-rf-btn is-quiet" @click="emit('close')">{{ t('releaseFlow.cancel') }}</button>
         <template v-if="openRun">
@@ -104,3 +158,35 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector('[aria-checke
     </section>
   </div>
 </template>
+
+<style scoped>
+.wb-rf-new-platform-row {
+  display: flex;
+  align-items: center;
+}
+
+.wb-rf-new-platform-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.wb-rf-new-platform-form input {
+  flex: 1 1 180px;
+  height: var(--wb-rf-control-h);
+  min-width: 0;
+  padding: 0 11px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-rf-radius-control);
+  background: var(--wb-cell-editor);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-rf-new-platform-form input:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
+}
+</style>

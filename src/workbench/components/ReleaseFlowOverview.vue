@@ -3,13 +3,15 @@
 // and what this release contains. The steps under the platform's card adapt
 // to these answers right away.
 import { computed } from "vue";
-import { Check, Database, MonitorSmartphone } from "lucide-vue-next";
+import { ArrowRight, Check, Database, FolderOpen, MonitorSmartphone } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { RELEASE_SCOPES, localDateIso } from "../releaseFlowState.js";
 import { addDays } from "../utils/releasePlanNotes.js";
 import { formatReleaseWeekday } from "../utils/releaseFlowFormat.js";
 import ReleaseAutopilotPanel from "./ReleaseAutopilotPanel.vue";
+import ReleaseDatabaseRoute from "./ReleaseDatabaseRoute.vue";
 import ReleasePageHead from "./ReleasePageHead.vue";
+import ReleaseRoutePathNode from "./ReleaseRoutePathNode.vue";
 
 const props = defineProps({
   flow: { type: Object, required: true },
@@ -42,8 +44,38 @@ const relativeDay = computed(() => {
     </div>
     <div class="wb-rf-platform-fixed">
       <strong>{{ flow.platform.value.name }}</strong>
-      <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetDatabase }}</span>
-      <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetClient }}</span>
+      <template v-if="!workspace || (!state.brief.scope.database && !state.brief.scope.client)">
+        <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetDatabase }}</span>
+        <span class="wb-rf-code wb-rf-muted">{{ flow.platform.value.targetClient }}</span>
+      </template>
+    </div>
+    <ReleaseDatabaseRoute
+      v-if="workspace && state.brief.scope.database"
+      :flow="flow"
+      :workspace="workspace"
+      :disabled="busy"
+    />
+    <div v-if="workspace && state.brief.scope.client" class="wb-rf-route">
+      <ReleaseRoutePathNode
+        :workspace="workspace"
+        :platform="flow.platform.value"
+        field-key="sourceClient"
+        :label="t('releaseFlow.files.source')"
+        :disabled="busy"
+      >
+        <template #icon><FolderOpen :size="13" aria-hidden="true" /></template>
+      </ReleaseRoutePathNode>
+      <span class="wb-rf-route-arrow" aria-hidden="true"><ArrowRight :size="18" /></span>
+      <ReleaseRoutePathNode
+        :workspace="workspace"
+        :platform="flow.platform.value"
+        field-key="targetClient"
+        :label="t('releaseFlow.files.target', { platform: flow.platform.value.name })"
+        target
+        :disabled="busy"
+      >
+        <template #icon><FolderOpen :size="13" aria-hidden="true" /></template>
+      </ReleaseRoutePathNode>
     </div>
   </section>
 
