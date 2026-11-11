@@ -317,6 +317,7 @@ pub fn run() {
             release_flow::release_client_sync_cancel,
             release_flow::release_read_plan_flags,
             release_flow::release_execute_plan_writes,
+            release_flow::release_list_plan_candidates,
             svn_workspace::svn_wc_info,
             svn_workspace::svn_wc_status,
             svn_workspace::svn_wc_file_diff,

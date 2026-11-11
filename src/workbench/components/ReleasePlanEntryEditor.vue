@@ -1,14 +1,21 @@
 <script setup>
 // Add or edit one open-plan entry: its name, kind and (optional) ID, and each
-// platform's note. A date picker per platform writes the usual "10/28 開放" /
-// "10/28 關閉"; the note itself stays free text.
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+// platform's note. Name and ID offer database-backed / preset dropdowns while
+// remaining free text; per-platform notes support date pickers, quick status
+// dropdowns, and one-shot fill across all platforms.
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { t } from "../i18n/index.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { PLAN_LIMITS } from "../releaseWorkspaceState.js";
 import { PLAN_MEMO_CATEGORIES, RELEASE_PLAN_CATEGORIES, planEntryKey } from "../utils/releaseFlowDemo.js";
+import {
+  buildPlanNameOptions,
+  buildPlanNotePresets,
+  buildPlanRefOptions,
+} from "../utils/releasePlanCandidates.js";
 import { formatPlanDate, parsePlanNote } from "../utils/releasePlanNotes.js";
 import { localDateIso } from "../releaseFlowState.js";
+import ReleaseCombobox from "./ReleaseCombobox.vue";
 
 const props = defineProps({
   workspace: { type: Object, required: true },
@@ -29,10 +36,49 @@ const draft = reactive({
   notes: Object.fromEntries(platforms.value.map((platform) => [platform.id, props.item.notes?.[platform.id] || ""])),
 });
 const touched = ref(false);
+const candidates = ref([]);
+const lastPickedName = ref(props.item.name || "");
+let candidateRequestSeq = 0;
+
 const nameMissing = computed(() => !draft.name.trim());
 const tableCategory = computed(() => RELEASE_PLAN_CATEGORIES.find((entry) => entry.id === draft.category) || null);
 // Whether an update can write this entry, or only lists it to do by hand.
 const writable = computed(() => planEntryKey({ category: draft.category, ref: draft.ref }) !== null);
+const nameOptions = computed(() => buildPlanNameOptions(candidates.value, t));
+const refOptions = computed(() => buildPlanRefOptions(candidates.value, t));
+const notePresets = computed(() => buildPlanNotePresets(today, today, t));
+
+async function refreshCandidates(categoryId) {
+  const seq = ++candidateRequestSeq;
+  if (typeof props.workspace.loadPlanCandidates !== "function") {
+    candidates.value = [];
+    return;
+  }
+  const list = await props.workspace.loadPlanCandidates(categoryId);
+  if (seq === candidateRequestSeq) candidates.value = Array.isArray(list) ? list : [];
+}
+
+watch(() => draft.category, (nextCategory) => {
+  void refreshCandidates(nextCategory);
+}, { immediate: true });
+
+function onPickName(_value, raw) {
+  const cand = raw?.candidate;
+  if (!cand) return;
+  draft.name = cand.name;
+  if (cand.ref) draft.ref = cand.ref;
+  lastPickedName.value = cand.name;
+}
+
+function onPickRef(_value, raw) {
+  const cand = raw?.candidate;
+  if (!cand) return;
+  draft.ref = cand.ref;
+  if (cand.name && (!draft.name.trim() || draft.name === lastPickedName.value)) {
+    draft.name = cand.name;
+    lastPickedName.value = cand.name;
+  }
+}
 
 function dateOf(note) {
   const rule = parsePlanNote(note, today);
@@ -42,6 +88,23 @@ function dateOf(note) {
 function setDate(platformId, action, value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
   draft.notes[platformId] = t(action === "close" ? "releaseFlow.note.close" : "releaseFlow.note.open", { date: formatPlanDate(value, today) });
+}
+
+function applyPreset(platformId, event) {
+  const value = event.target.value;
+  event.target.value = "";
+  if (!value) return;
+  draft.notes[platformId] = value === "__clear__" ? "" : value;
+}
+
+function applyPresetAll(event) {
+  const value = event.target.value;
+  event.target.value = "";
+  if (!value) return;
+  const nextValue = value === "__clear__" ? "" : value;
+  for (const platform of platforms.value) {
+    draft.notes[platform.id] = nextValue;
+  }
 }
 
 function save() {
@@ -63,21 +126,46 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector("input")?.foc
         <p>{{ t('releaseFlow.plan.editor.description') }}</p>
       </header>
       <div class="wb-rf-plan-editor-fields">
-        <label class="wb-rf-field">
-          {{ t('releaseFlow.plan.editor.name') }}
-          <input v-model="draft.name" :maxlength="PLAN_LIMITS.name" :aria-invalid="touched && nameMissing" data-plan-name />
+        <div class="wb-rf-field">
+          <span>{{ t('releaseFlow.plan.editor.name') }}</span>
+          <ReleaseCombobox
+            v-model="draft.name"
+            :options="nameOptions"
+            :code="false"
+            :open-on-focus="false"
+            :submit-when-closed="true"
+            :maxlength="PLAN_LIMITS.name"
+            :invalid="touched && nameMissing"
+            :label="t('releaseFlow.plan.editor.name')"
+            :placeholder="t('releaseFlow.plan.editor.namePlaceholder')"
+            :input-props="{ 'data-plan-name': '' }"
+            :limit="160"
+            @pick="onPickName"
+          />
           <span v-if="touched && nameMissing" class="wb-rf-field-error">{{ t('releaseFlow.plan.editor.nameRequired') }}</span>
-        </label>
+        </div>
         <label class="wb-rf-field">
           {{ t('releaseFlow.plan.editor.category') }}
           <select v-model="draft.category" data-plan-category-select>
             <option v-for="entry in PLAN_MEMO_CATEGORIES" :key="entry" :value="entry">{{ t(`releaseFlow.plan.category.${entry}`) }}</option>
           </select>
         </label>
-        <label class="wb-rf-field">
-          {{ t('releaseFlow.plan.editor.ref') }}
-          <input v-model="draft.ref" class="wb-rf-code" :maxlength="PLAN_LIMITS.ref" :placeholder="tableCategory?.keyColumns.join(' · ') || ''" spellcheck="false" data-plan-ref />
-        </label>
+        <div class="wb-rf-field">
+          <span>{{ t('releaseFlow.plan.editor.ref') }}</span>
+          <ReleaseCombobox
+            v-model="draft.ref"
+            :options="refOptions"
+            :open-on-focus="false"
+            :submit-when-closed="true"
+            align="end"
+            :maxlength="PLAN_LIMITS.ref"
+            :label="t('releaseFlow.plan.editor.ref')"
+            :placeholder="tableCategory?.keyColumns.join(' · ') || ''"
+            :input-props="{ 'data-plan-ref': '' }"
+            :limit="160"
+            @pick="onPickRef"
+          />
+        </div>
       </div>
       <p class="wb-rf-hint" :class="{ 'is-warning': !writable }">
         {{ writable
@@ -90,7 +178,22 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector("input")?.foc
           <tr>
             <th scope="col">{{ t('releaseFlow.plan.editor.platform') }}</th>
             <th scope="col">{{ t('releaseFlow.plan.editor.date') }}</th>
-            <th scope="col">{{ t('releaseFlow.plan.editor.note') }}</th>
+            <th scope="col">
+              <div class="wb-rf-plan-editor-note-head">
+                <span>{{ t('releaseFlow.plan.editor.note') }}</span>
+                <select
+                  class="wb-rf-plan-preset-select"
+                  :value="''"
+                  :aria-label="t('releaseFlow.plan.editor.presetAll')"
+                  data-plan-preset-all
+                  @change="applyPresetAll"
+                >
+                  <option value="">{{ t('releaseFlow.plan.editor.presetAll') }}</option>
+                  <option v-for="preset in notePresets" :key="preset.id" :value="preset.value">{{ preset.label }}</option>
+                  <option value="__clear__">{{ t('releaseFlow.plan.editor.clearNote') }}</option>
+                </select>
+              </div>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -114,13 +217,25 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector("input")?.foc
               </div>
             </td>
             <td>
-              <input
-                v-model="draft.notes[platform.id]"
-                class="wb-rf-input"
-                :maxlength="PLAN_LIMITS.note"
-                :placeholder="t('releaseFlow.plan.notePlaceholder')"
-                :aria-label="t('releaseFlow.plan.noteLabel', { item: draft.name || t('releaseFlow.plan.editor.name'), platform: platform.name })"
-              />
+              <div class="wb-rf-plan-editor-note-cell">
+                <select
+                  class="wb-rf-plan-preset-select is-compact"
+                  :value="''"
+                  :aria-label="t('releaseFlow.plan.editor.presetPlaceholder')"
+                  @change="applyPreset(platform.id, $event)"
+                >
+                  <option value="">{{ t('releaseFlow.plan.editor.presetPlaceholder') }}</option>
+                  <option v-for="preset in notePresets" :key="preset.id" :value="preset.value">{{ preset.label }}</option>
+                  <option value="__clear__">{{ t('releaseFlow.plan.editor.clearNote') }}</option>
+                </select>
+                <input
+                  v-model="draft.notes[platform.id]"
+                  class="wb-rf-input"
+                  :maxlength="PLAN_LIMITS.note"
+                  :placeholder="t('releaseFlow.plan.notePlaceholder')"
+                  :aria-label="t('releaseFlow.plan.noteLabel', { item: draft.name || t('releaseFlow.plan.editor.name'), platform: platform.name })"
+                />
+              </div>
             </td>
           </tr>
         </tbody>
@@ -153,7 +268,14 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector("input")?.foc
 }
 
 .wb-rf-plan-editor-table th:nth-child(2) {
-  width: 250px;
+  width: 240px;
+}
+
+.wb-rf-plan-editor-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .wb-rf-plan-editor-date {
@@ -163,10 +285,35 @@ onMounted(() => void nextTick(() => dialogRef.value?.querySelector("input")?.foc
 }
 
 .wb-rf-plan-editor-date input {
-  width: 150px;
+  width: 146px;
 }
 
-.wb-rf-plan-editor-table td .wb-rf-input {
-  width: 100%;
+.wb-rf-plan-editor-note-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-rf-plan-preset-select {
+  flex: none;
+  height: 30px;
+  max-width: 148px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 7px;
+  background: var(--wb-control-surface);
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 500;
+}
+
+.wb-rf-plan-preset-select.is-compact {
+  width: 98px;
+}
+
+.wb-rf-plan-editor-note-cell .wb-rf-input {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
 }
 </style>

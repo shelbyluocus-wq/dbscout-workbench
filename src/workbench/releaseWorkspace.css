@@ -922,6 +922,11 @@
   transform-origin: top center;
 }
 
+.wb-rf-combobox.is-end .wb-rf-combobox-list {
+  left: auto;
+  right: 0;
+}
+
 .wb-rf-combobox-option {
   display: flex;
   align-items: center;
@@ -942,6 +947,25 @@
 .wb-rf-combobox-option svg {
   flex: none;
   color: var(--wb-accent-strong);
+}
+
+.wb-rf-combobox-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-rf-combobox-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-rf-combobox-detail {
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-mono);
+  font-size: var(--wb-fs-caption);
 }
 
 .wb-rf-combobox-empty {

@@ -28,9 +28,13 @@ import {
   defaultAutopilotRules,
 } from "../releaseAutopilotState.js";
 import { createDemoHistory, createDemoRuns } from "../utils/releaseWorkspaceDemo.js";
+import { RELEASE_PLAN_CATEGORIES, RELEASE_PLAN_ITEMS } from "../utils/releaseFlowDemo.js";
 import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
+import { mergePlanCandidates } from "../utils/releasePlanCandidates.js";
 import { createCoalescedTask } from "../utils/coalescedTask.js";
+import { invokeWorkbench } from "../utils/tauriBridge.js";
 import { abortableSleep, createRunFlow } from "./useReleaseFlow.js";
+import { resolvePlatformConnection } from "./useReleaseRealDriver.js";
 
 function everySecond(callback) {
   const timer = setInterval(callback, 1000);
@@ -290,6 +294,9 @@ export function useReleaseWorkspace({
     return true;
   }
 
+  const planCandidateTableCache = new Map();
+  const callBackend = invoke || invokeWorkbench;
+
   /* ── Platforms ── */
   function updatePlatform(platformId, patch = {}) {
     const target = platformById(platformId);
@@ -301,6 +308,9 @@ export function useReleaseWorkspace({
       const value = field === "name" ? patch[field].slice(0, 40) : patch[field].trim();
       if (value === target[field] || (field === "name" && !value.trim())) continue;
       target[field] = value;
+      if (field === "connectionId" || field === "sourceDatabase" || field === "targetDatabase") {
+        planCandidateTableCache.clear();
+      }
       if (PLATFORM_FIELD_TASKS[field]) roots.push(PLATFORM_FIELD_TASKS[field]);
     }
     for (const field of PLATFORM_FLAG_FIELDS) {
@@ -362,14 +372,76 @@ export function useReleaseWorkspace({
     return updatePlanEntry(id, { notes: { [platformId]: String(note ?? "") } });
   }
 
+  function removePlanEntries(ids) {
+    if (planBusy()) return 0;
+    const targetIds = new Set(Array.isArray(ids) ? ids : [ids]);
+    if (!targetIds.size) return 0;
+    const removed = [];
+    const kept = [];
+    for (const entry of workspace.plans.items) {
+      if (targetIds.has(entry.id)) removed.push(entry);
+      else kept.push(entry);
+    }
+    if (!removed.length) return 0;
+    workspace.plans.items.splice(0, workspace.plans.items.length, ...kept);
+    const invalidated = new Set();
+    for (const entry of removed) {
+      for (const flags of Object.values(workspace.demoFlags)) delete flags[entry.id];
+      for (const run of workspace.runs) delete run.planSkips[entry.id];
+      for (const platformId of touchedPlatforms(entry, null)) invalidated.add(platformId);
+    }
+    invalidatePlans([...invalidated]);
+    return removed.length;
+  }
+
   function removePlanEntry(id) {
-    const index = workspace.plans.items.findIndex((entry) => entry.id === id);
-    if (index < 0 || planBusy()) return false;
-    const [removed] = workspace.plans.items.splice(index, 1);
-    for (const flags of Object.values(workspace.demoFlags)) delete flags[id];
-    for (const run of workspace.runs) delete run.planSkips[id];
-    invalidatePlans(touchedPlatforms(removed, null));
-    return true;
+    return removePlanEntries([id]) > 0;
+  }
+
+  function resolveCandidateSource() {
+    const preferredId = view.platformId || currentFlow.value?.state?.platformId || "";
+    const ordered = preferredId
+      ? [platformById(preferredId), ...workspace.platforms.filter((p) => p.id !== preferredId)].filter(Boolean)
+      : workspace.platforms;
+    for (const platform of ordered) {
+      const database = String(platform.sourceDatabase || platform.targetDatabase || "").trim();
+      if (!database) continue;
+      const connection = resolvePlatformConnection(platform, connectionList.value, databaseMap.value);
+      if (connection?.id) return { connectionId: connection.id, database };
+    }
+    return null;
+  }
+
+  async function loadPlanCandidates(category = "hero") {
+    const catMeta = RELEASE_PLAN_CATEGORIES.find((entry) => entry.id === category) || null;
+    let dbRows = [];
+    if (realMode && catMeta) {
+      const source = resolveCandidateSource();
+      if (source) {
+        const cacheKey = `${source.connectionId}:${source.database}:${catMeta.table}`;
+        let pending = planCandidateTableCache.get(cacheKey);
+        if (!pending) {
+          pending = Promise.resolve(callBackend("release_list_plan_candidates", {
+            connectionId: source.connectionId,
+            database: source.database,
+            table: catMeta.table,
+            keyColumns: catMeta.keyColumns,
+            flagColumn: catMeta.flagColumn,
+          })).then((res) => (Array.isArray(res?.rows) ? res.rows : [])).catch(() => {
+            planCandidateTableCache.delete(cacheKey);
+            return [];
+          });
+          planCandidateTableCache.set(cacheKey, pending);
+        }
+        dbRows = await pending;
+      }
+    }
+    return mergePlanCandidates({
+      category,
+      dbRows,
+      memoItems: workspace.plans.items,
+      builtinItems: RELEASE_PLAN_ITEMS,
+    });
   }
 
   /* ── History ── */
@@ -420,6 +492,7 @@ export function useReleaseWorkspace({
   /** Back to the demo as first opened: seeded updates, history and memo. */
   function resetDemo() {
     if (anyBusy.value) return false;
+    planCandidateTableCache.clear();
     for (const flow of flows.values()) flow.dispose();
     flows.clear();
     try {
@@ -503,6 +576,8 @@ export function useReleaseWorkspace({
     updatePlanEntry,
     setPlanNote,
     removePlanEntry,
+    removePlanEntries,
+    loadPlanCandidates,
     addHistory,
     recordTool,
     historyFor,

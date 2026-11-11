@@ -7299,6 +7299,59 @@ label:has(input[type="checkbox"]:disabled) {
   animation: wb-update-pulse 1s ease-in-out infinite;
 }
 
+.wb-activity-rail-btn.has-status-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 34px;
+  height: auto;
+  min-height: 38px;
+  padding: 4px 2px 3px;
+}
+
+.wb-activity-rail-status {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--wb-fs-micro);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-activity-rail-btn.is-release-idle,
+.wb-activity-rail-btn.is-release-active,
+.wb-activity-rail-btn.is-release-running {
+  color: var(--wb-accent-strong);
+  background: var(--wb-accent-soft);
+  border-color: color-mix(in srgb, var(--wb-accent) 28%, transparent);
+}
+
+.wb-activity-rail-btn.is-release-running > svg {
+  animation: wb-update-pulse 1.2s ease-in-out infinite;
+}
+
+.wb-activity-rail-btn.is-release-attention {
+  color: var(--wb-warning-text);
+  background: var(--wb-warning-surface);
+  border-color: var(--wb-warning-border);
+}
+
+.wb-activity-rail-btn.is-release-danger {
+  color: var(--wb-danger-text);
+  background: var(--wb-danger-surface);
+  border-color: var(--wb-danger-border);
+}
+
+.wb-activity-rail-btn.is-release-done {
+  color: var(--wb-success-text);
+  background: var(--wb-success-surface);
+  border-color: var(--wb-success-border);
+}
+
 .wb-activity-rail-btn:disabled {
   cursor: wait;
   color: var(--wb-disabled);
@@ -7311,7 +7364,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wb-activity-rail-btn.is-checking > svg {
+  .wb-activity-rail-btn.is-checking > svg,
+  .wb-activity-rail-btn.is-release-running > svg {
     animation: none;
   }
 }

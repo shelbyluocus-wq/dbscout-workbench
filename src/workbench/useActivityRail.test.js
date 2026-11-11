@@ -286,6 +286,38 @@ test("rail pin and update states react without rebuilding the rail", () => {
   assert.equal(rail.bottomItems.value[0].busy, true);
 });
 
+test("minimized release workspace docks directly above the updater button with live status", () => {
+  const minimized = ref(false);
+  const statusText = ref("2/7");
+  const hint = ref("抖音 · Updating (2/7) — click to restore");
+  let restored = 0;
+  const rail = useActivityRail({
+    states: {
+      releaseFlow: () => (minimized.value
+        ? { visible: true, busy: true, statusText: statusText.value, hint: hint.value, stateClass: { "is-release-running": true } }
+        : { visible: false }),
+    },
+    actions: {
+      releaseFlow: () => { restored += 1; minimized.value = false; },
+    },
+  });
+
+  assert.deepEqual(rail.bottomItems.value.map((item) => item.id), ["update", "settings"]);
+
+  minimized.value = true;
+  assert.deepEqual(rail.bottomItems.value.map((item) => item.id), ["releaseFlow", "update", "settings"]);
+  assert.equal(rail.bottomItems.value[0].statusText, "2/7");
+  assert.equal(rail.bottomItems.value[0].busy, true);
+  assert.equal(rail.bottomItems.value[0].hint, "抖音 · Updating (2/7) — click to restore");
+
+  statusText.value = "Done";
+  assert.equal(rail.bottomItems.value[0].statusText, "Done");
+
+  rail.select("releaseFlow");
+  assert.equal(restored, 1);
+  assert.deepEqual(rail.bottomItems.value.map((item) => item.id), ["update", "settings"]);
+});
+
 test("release and relation review move to More while built-in chat is excluded from the product", () => {
   const workbench = read("MySqlWorkbench.vue");
   assert.match(workbench, /id: "releaseFlow", icon: Rocket/);

@@ -5,8 +5,9 @@
 // keep their own progress on this device, so the workspace can be closed and
 // resumed, and several platforms can be updated side by side.
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
-import { CalendarCheck2, FolderGit2, History, LayoutDashboard, Package, Rocket, Server, X } from "lucide-vue-next";
+import { CalendarCheck2, FolderGit2, History, LayoutDashboard, Minus, Package, Rocket, Server, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
+import { RELEASE_TASKS, TASK_STATUS } from "../releaseFlowState.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useReleaseWorkspace } from "../composables/useReleaseWorkspace.js";
@@ -29,6 +30,7 @@ import "../releaseFlow.css";
 import "../releaseWorkspace.css";
 
 const props = defineProps({
+  minimized: { type: Boolean, default: false },
   connections: { type: Array, default: () => [] },
   databasesByConnection: { type: Object, default: () => ({}) },
   databaseSync: { type: Object, default: null },
@@ -39,6 +41,8 @@ const props = defineProps({
 
 const emit = defineEmits([
   "close",
+  "minimize",
+  "status-change",
   "open-database-sync",
   "open-backup-center",
   "open-table-transfer",
@@ -97,7 +101,7 @@ async function requestClose() {
   emit("close");
 }
 
-useEscClose(() => true, () => void requestClose(), () => busy.value, { dialogRef });
+useEscClose(() => !props.minimized, () => void requestClose(), () => busy.value, { dialogRef });
 
 const NAV = Object.freeze([
   { id: "home", icon: LayoutDashboard },
@@ -126,9 +130,102 @@ const SECTION_COMPONENTS = {
 const currentFlow = computed(() => workspace.currentFlow.value);
 const sectionKey = computed(() => (view.section === "run" ? `run:${view.runId}` : `${view.section}:${view.platformId}`));
 
+const minimizedStatus = computed(() => {
+  const cards = workspace.cards.value;
+  const focusedRunId = currentFlow.value?.state.id || "";
+  const pickCard = (status) => (
+    (focusedRunId && cards.find((card) => card.runId === focusedRunId && card.status === status))
+    || cards.find((card) => card.status === status)
+    || null
+  );
+
+  const runningFlow = workspace.flows.value.find((flow) => flow.busy.value || flow.autopilot.active.value);
+  if (runningFlow) {
+    const card = cards.find((entry) => entry.runId === runningFlow.state.id);
+    const done = card?.progress.done || 0;
+    const total = card?.progress.total || 0;
+    const platform = card?.name || runningFlow.state.platformId;
+    const runningTask = RELEASE_TASKS.find((def) => runningFlow.state.tasks[def.id]?.status === TASK_STATUS.RUNNING);
+    return {
+      tone: "running",
+      busy: true,
+      shortText: total ? `${done}/${total}` : t("releaseFlow.minimized.short.running"),
+      detail: runningTask
+        ? t("releaseFlow.minimized.detail.step", { platform, step: t(`releaseFlow.task.${runningTask.id}.title`), done, total })
+        : t("releaseFlow.minimized.detail.running", { platform, done, total }),
+    };
+  }
+
+  const attentionCard = pickCard("attention");
+  if (attentionCard) {
+    const failed = attentionCard.issues.some((issue) => issue.tone === "danger");
+    const done = attentionCard.progress.done || 0;
+    const total = attentionCard.progress.total || 0;
+    return {
+      tone: failed ? "danger" : "attention",
+      busy: false,
+      shortText: failed ? t("releaseFlow.minimized.short.failed") : t("releaseFlow.minimized.short.attention"),
+      detail: failed
+        ? t("releaseFlow.minimized.detail.failed", { platform: attentionCard.name, done, total })
+        : t("releaseFlow.minimized.detail.attention", { platform: attentionCard.name, done, total }),
+    };
+  }
+
+  const activeCard = pickCard("active");
+  if (activeCard) {
+    const done = activeCard.progress.done || 0;
+    const total = activeCard.progress.total || 0;
+    return {
+      tone: "active",
+      busy: false,
+      shortText: total ? `${done}/${total}` : t("releaseFlow.minimized.short.active"),
+      detail: t("releaseFlow.minimized.detail.active", { platform: activeCard.name, done, total }),
+    };
+  }
+
+  const doneCard = (focusedRunId && cards.find((card) => card.runId === focusedRunId && card.status === "done"))
+    || cards.find((card) => card.runId && card.status === "done")
+    || null;
+  if (doneCard) {
+    return {
+      tone: "done",
+      busy: false,
+      shortText: t("releaseFlow.minimized.short.done"),
+      detail: t("releaseFlow.minimized.detail.done", { platform: doneCard.name }),
+    };
+  }
+
+  const pendingCard = pickCard("pending");
+  if (pendingCard) {
+    return {
+      tone: "idle",
+      busy: false,
+      shortText: t("releaseFlow.minimized.short.pending"),
+      detail: t("releaseFlow.minimized.detail.pending", { platform: pendingCard.name }),
+    };
+  }
+
+  return {
+    tone: "idle",
+    busy: false,
+    shortText: t("releaseFlow.minimized.short.idle"),
+    detail: t("releaseFlow.minimized.restoreHint"),
+  };
+});
+
+watch(minimizedStatus, (status) => emit("status-change", status), { immediate: true });
+
 function focusHeading() {
+  if (props.minimized) return;
   mainRef.value?.querySelector("h3")?.focus({ preventScroll: true });
 }
+
+watch(
+  () => props.minimized,
+  (isMinimized, wasMinimized) => {
+    if (!isMinimized && wasMinimized) void nextTick(focusHeading);
+  },
+);
 
 watch(
   () => [sectionKey.value, currentFlow.value?.state.page],
@@ -157,12 +254,12 @@ onMounted(() => void nextTick(focusHeading));
 </script>
 
 <template>
-  <div class="wb-dialog-overlay">
+  <div v-show="!minimized" class="wb-dialog-overlay" :aria-hidden="minimized ? 'true' : undefined">
     <section
       ref="dialogRef"
       class="wb-dialog wb-rf-dialog"
       role="dialog"
-      aria-modal="true"
+      :aria-modal="minimized ? undefined : 'true'"
       aria-labelledby="wb-rf-title"
       tabindex="-1"
     >
@@ -186,6 +283,16 @@ onMounted(() => void nextTick(focusHeading));
         </nav>
         <div class="wb-rf-header-actions">
           <ReleaseDemoMenu v-if="!realMode || currentFlow?.state?.demo" :workspace="workspace" />
+          <button
+            type="button"
+            class="wb-rf-btn is-quiet wb-rf-minimize"
+            data-release-minimize
+            :title="t('releaseFlow.minimize')"
+            :aria-label="t('releaseFlow.minimize')"
+            @click="emit('minimize')"
+          >
+            <Minus :size="17" aria-hidden="true" />
+          </button>
           <button
             type="button"
             class="wb-rf-btn is-quiet wb-rf-close"
@@ -233,6 +340,7 @@ onMounted(() => void nextTick(focusHeading));
 </template>
 
 <style scoped>
+.wb-rf-minimize,
 .wb-rf-close {
   width: 34px;
   padding: 0;

@@ -1,19 +1,22 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::FutureExt;
 use sqlx::{MySqlConnection, MySqlPool, Row};
 use tauri::AppHandle;
+use tokio::task::JoinSet;
 
 use crate::backup;
-use crate::db::escape_ident;
+use crate::db::{connect_database_with_max_connections, escape_ident};
 use crate::mysql_text;
 use crate::sync_guard::{run_with_heartbeat, GuardError};
 use crate::sync_verification::{
-    capture_table_fingerprint, compare_fingerprints, list_base_tables as list_verification_tables,
-    MismatchKind, TableFingerprint, TableMismatch,
+    capture_table_fingerprint_with_columns, compare_fingerprints,
+    list_all_fingerprint_columns, list_base_tables as list_verification_tables,
+    list_table_fingerprint_columns, FingerprintColumn, MismatchKind, TableFingerprint,
+    TableMismatch,
 };
 use crate::types::{
     BackupConfig, DatabaseSyncProgress, DatabaseSyncTablePlan, PreviewDatabaseSyncResponse,
@@ -32,6 +35,11 @@ const SYNC_VERIFY_TIMEOUT_SECONDS: u64 = 15 * 60;
 const SYNC_BACKUP_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
 const SYNC_RESTORE_TIMEOUT_SECONDS: u64 = 2 * 60 * 60;
 const SYNC_LOCK_RETRY_ATTEMPTS: usize = 3;
+const SYNC_WORKER_CONCURRENCY: usize = 8;
+const SYNC_DROP_BATCH_SIZE: usize = 50;
+const COUNT_ROWS_UNION_BATCH_SIZE: usize = 40;
+const COUNT_ROWS_CONCURRENCY: usize = 6;
+const SYNC_PROGRESS_THROTTLE: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnInfo {
@@ -682,11 +690,15 @@ pub async fn preview_database_sync(
     excluded_tables: Vec<String>,
 ) -> Result<PreviewDatabaseSyncResponse, String> {
     validate_database_pair(source_database, target_database)?;
-    ensure_database_exists(pool, source_database).await?;
-    ensure_database_exists(pool, target_database).await?;
+    tokio::try_join!(
+        ensure_database_exists(pool, source_database),
+        ensure_database_exists(pool, target_database)
+    )?;
     let exclusions = normalize_exclusions(excluded_tables);
-    let source_tables = list_base_tables(pool, source_database).await?;
-    let target_tables = list_base_tables(pool, target_database).await?;
+    let (source_tables, target_tables) = tokio::try_join!(
+        list_base_tables(pool, source_database),
+        list_base_tables(pool, target_database)
+    )?;
     let included_for_counts = source_tables
         .iter()
         .filter(|table| {
@@ -1036,7 +1048,31 @@ where
         Some(snapshot.path.clone()),
         "running",
     ));
-    let mut connection = guard_operation(
+    let sync_pool = guard_operation(
+        connect_database_with_max_connections(
+            mysql_url,
+            None,
+            SYNC_WORKER_CONCURRENCY as u32,
+        ),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "preflight".into(),
+            label: "初始化并行同步连接池".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: preview.included_tables.len() as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await
+    .map_err(SyncError::without_restore)?;
+
+    let mut connection = match guard_operation(
         async {
             pool.acquire()
                 .await
@@ -1058,9 +1094,16 @@ where
         },
     )
     .await
-    .map_err(SyncError::without_restore)?;
+    {
+        Ok(conn) => conn,
+        Err(error) => {
+            sync_pool.close().await;
+            return Err(SyncError::without_restore(error));
+        }
+    };
     let mutation_result = overwrite_target_database(
         &mut connection,
+        &sync_pool,
         request,
         &preview,
         cancellation,
@@ -1071,6 +1114,7 @@ where
         backup_snapshot_path.clone(),
     )
     .await;
+    sync_pool.close().await;
     if let Err(error) = mutation_result.as_ref() {
         if is_connection_fatal_error(error) {
             connection.close_on_drop();
@@ -1119,8 +1163,112 @@ where
     Ok(())
 }
 
+fn is_urgent_progress(event: &DatabaseSyncProgress) -> bool {
+    event.message.contains("已等待") || event.message.contains("重试")
+}
+
+async fn acquire_sync_worker_connection(
+    pool: &MySqlPool,
+    disable_fk_checks: bool,
+) -> Result<sqlx::pool::PoolConnection<sqlx::MySql>, String> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("获取同步工作连接失败: {error}"))?;
+    if let Err(error) = set_session_lock_wait_limits(&mut conn).await {
+        conn.close_on_drop();
+        return Err(error);
+    }
+    if disable_fk_checks {
+        if let Err(error) = set_foreign_key_checks(&mut conn, false).await {
+            conn.close_on_drop();
+            return Err(error);
+        }
+    }
+    Ok(conn)
+}
+
+async fn release_sync_worker_connection<T>(
+    mut conn: sqlx::pool::PoolConnection<sqlx::MySql>,
+    work_result: Result<T, String>,
+    reenable_fk_checks: bool,
+) -> Result<T, String> {
+    if work_result
+        .as_ref()
+        .is_err_and(|error| is_connection_fatal_error(error))
+    {
+        conn.close_on_drop();
+        return work_result;
+    }
+    if reenable_fk_checks {
+        let reenable = set_foreign_key_checks(&mut conn, true).await;
+        if reenable.is_err() {
+            conn.close_on_drop();
+        }
+        return foreign_key_guard_result(work_result, reenable);
+    }
+    work_result
+}
+
+async fn run_concurrent_workers<I, W, Fut, T, Emit, OnItem>(
+    items: I,
+    concurrency: usize,
+    mut make_worker: W,
+    mut progress_rx: tokio::sync::mpsc::UnboundedReceiver<DatabaseSyncProgress>,
+    emit: &mut Emit,
+    mut on_item: OnItem,
+) -> Result<(), String>
+where
+    I: IntoIterator,
+    W: FnMut(I::Item) -> Fut,
+    Fut: Future<Output = Result<T, String>> + Send + 'static,
+    T: Send + 'static,
+    Emit: FnMut(DatabaseSyncProgress),
+    OnItem: FnMut(T, &mut Emit, &mut Instant),
+{
+    let mut iter = items.into_iter();
+    let mut join_set: JoinSet<Result<T, String>> = JoinSet::new();
+    for _ in 0..concurrency.max(1) {
+        let Some(item) = iter.next() else {
+            break;
+        };
+        join_set.spawn(make_worker(item));
+    }
+
+    let mut last_emit = Instant::now() - SYNC_PROGRESS_THROTTLE;
+    let mut progress_open = true;
+    while !join_set.is_empty() {
+        tokio::select! {
+            biased;
+            maybe_progress = progress_rx.recv(), if progress_open => {
+                match maybe_progress {
+                    Some(event) => {
+                        if is_urgent_progress(&event) || last_emit.elapsed() >= SYNC_PROGRESS_THROTTLE {
+                            emit(event);
+                            last_emit = Instant::now();
+                        }
+                    }
+                    None => progress_open = false,
+                }
+            }
+            join_res = join_set.join_next() => {
+                let Some(join_res) = join_res else {
+                    break;
+                };
+                let item = join_res.map_err(|error| format!("同步并发任务异常退出: {error}"))??;
+                if let Some(next_item) = iter.next() {
+                    join_set.spawn(make_worker(next_item));
+                }
+                on_item(item, emit, &mut last_emit);
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn overwrite_target_database<F>(
     connection: &mut MySqlConnection,
+    sync_pool: &MySqlPool,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
     cancellation: &WorkCancellation,
@@ -1188,40 +1336,54 @@ where
         .collect::<Vec<_>>();
     target_tables_to_drop.sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase()));
 
+    let total_drop = target_tables_to_drop.len();
     emit(progress(
         &request.job_id,
         "dropTarget",
         "正在删除目标库旧表",
         None,
         0,
-        target_tables_to_drop.len() as u64,
+        total_drop as u64,
         None,
         None,
         backup_snapshot_path.clone(),
         "running",
     ));
-    for (index, table) in target_tables_to_drop.iter().enumerate() {
+    let mut dropped_count = 0usize;
+    for batch in target_tables_to_drop.chunks(SYNC_DROP_BATCH_SIZE) {
+        let Some(table) = batch.first() else {
+            continue;
+        };
+        let batch_end = dropped_count + batch.len();
         emit(progress(
             &request.job_id,
             "dropTarget",
             &format!(
-                "正在删除目标表 {table}（第 {} / {} 张）",
-                index + 1,
-                target_tables_to_drop.len()
+                "正在删除目标表 {table}（第 {} - {} / {} 张）",
+                dropped_count + 1,
+                batch_end,
+                total_drop
             ),
             Some(table.clone()),
-            index as u64,
-            target_tables_to_drop.len() as u64,
+            dropped_count as u64,
+            total_drop as u64,
             None,
             None,
             backup_snapshot_path.clone(),
             "running",
         ));
-        let drop_sql = format!(
-            "DROP TABLE IF EXISTS `{}`.`{}`",
-            escape_ident(&request.target_database),
-            escape_ident(table)
-        );
+        let qualified_tables = batch
+            .iter()
+            .map(|name| {
+                format!(
+                    "`{}`.`{}`",
+                    escape_ident(&request.target_database),
+                    escape_ident(name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let drop_sql = format!("DROP TABLE IF EXISTS {qualified_tables}");
         execute_sql_with_watchdog(
             connection,
             &drop_sql,
@@ -1233,22 +1395,23 @@ where
                 stage: "dropTarget".into(),
                 label: format!("删除目标表 {table}"),
                 current_table: Some(table.clone()),
-                completed_tables: index as u64,
-                total_tables: target_tables_to_drop.len() as u64,
+                completed_tables: dropped_count as u64,
+                total_tables: total_drop as u64,
                 completed_rows: None,
                 total_rows: None,
                 backup_snapshot_path: backup_snapshot_path.clone(),
             },
         )
         .await?;
-        dropped_tables.push(table.clone());
+        dropped_tables.extend(batch.iter().cloned());
+        dropped_count = batch_end;
         emit(progress(
             &request.job_id,
             "dropTarget",
-            &format!("已删除目标表 {table}"),
-            Some(table.clone()),
-            (index + 1) as u64,
-            target_tables_to_drop.len() as u64,
+            &format!("已删除目标表 {table} 等（{dropped_count} / {total_drop}）"),
+            batch.last().cloned(),
+            dropped_count as u64,
+            total_drop as u64,
             None,
             None,
             backup_snapshot_path.clone(),
@@ -1256,91 +1419,28 @@ where
         ));
     }
 
+    let total_included = preview.included_tables.len();
     emit(progress(
         &request.job_id,
         "createTarget",
         "正在创建目标库表结构",
         None,
         0,
-        preview.included_tables.len() as u64,
+        total_included as u64,
         None,
         None,
         backup_snapshot_path.clone(),
         "running",
     ));
-    for (index, table) in preview.included_tables.iter().enumerate() {
-        emit(progress(
-            &request.job_id,
-            "createTarget",
-            &format!(
-                "正在创建目标表 {table}（第 {} / {} 张）",
-                index + 1,
-                preview.included_tables.len()
-            ),
-            Some(table.clone()),
-            index as u64,
-            preview.included_tables.len() as u64,
-            None,
-            None,
-            backup_snapshot_path.clone(),
-            "running",
-        ));
-        let ddl = guard_operation(
-            show_create_table(connection, &request.source_database, table),
-            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
-            cancellation,
-            emit,
-            OperationProgress {
-                job_id: request.job_id.clone(),
-                stage: "createTarget".into(),
-                label: format!("读取源表 {table} 的结构"),
-                current_table: Some(table.clone()),
-                completed_tables: index as u64,
-                total_tables: preview.included_tables.len() as u64,
-                completed_rows: None,
-                total_rows: None,
-                backup_snapshot_path: backup_snapshot_path.clone(),
-            },
-        )
-        .await?;
-        let rewritten = rewrite_create_table_for_database(
-            &ddl,
-            &request.source_database,
-            &request.target_database,
-            table,
-        )?;
-        execute_sql_with_watchdog(
-            connection,
-            &rewritten,
-            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
-            cancellation,
-            emit,
-            OperationProgress {
-                job_id: request.job_id.clone(),
-                stage: "createTarget".into(),
-                label: format!("创建目标表 {table}"),
-                current_table: Some(table.clone()),
-                completed_tables: index as u64,
-                total_tables: preview.included_tables.len() as u64,
-                completed_rows: None,
-                total_rows: None,
-                backup_snapshot_path: backup_snapshot_path.clone(),
-            },
-        )
-        .await?;
-        emit(progress(
-            &request.job_id,
-            "createTarget",
-            &format!("已创建目标表 {table}"),
-            Some(table.clone()),
-            (index + 1) as u64,
-            preview.included_tables.len() as u64,
-            None,
-            None,
-            backup_snapshot_path.clone(),
-            "running",
-        ));
-    }
+    create_target_tables_concurrently(
+        sync_pool,
+        request,
+        &preview.included_tables,
+        cancellation,
+        emit,
+        backup_snapshot_path.clone(),
+    )
+    .await?;
 
     let total_rows = preview.estimated_rows;
     emit(progress(
@@ -1349,12 +1449,31 @@ where
         "正在复制源库数据",
         None,
         0,
-        preview.included_tables.len() as u64,
+        total_included as u64,
         Some(0),
         Some(total_rows),
         backup_snapshot_path.clone(),
         "running",
     ));
+    let mut source_columns_by_table = guard_operation(
+        list_all_columns(sync_pool, &request.source_database),
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "copyData".into(),
+            label: "批量读取源库字段元数据".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: total_included as u64,
+            completed_rows: Some(0),
+            total_rows: Some(total_rows),
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+    let mut copy_plans: Vec<(usize, String, String)> = Vec::with_capacity(total_included);
     for (index, table) in preview.included_tables.iter().enumerate() {
         if target_set.contains(&table.to_lowercase())
             || preview
@@ -1362,40 +1481,29 @@ where
                 .iter()
                 .any(|source| source.eq_ignore_ascii_case(table))
         {
-            emit(progress(
-                &request.job_id,
-                "copyData",
-                &format!(
-                    "正在复制表 {table}（第 {} / {} 张）",
-                    index + 1,
-                    preview.included_tables.len()
-                ),
-                Some(table.clone()),
-                index as u64,
-                preview.included_tables.len() as u64,
-                Some(*copied_rows),
-                Some(total_rows),
-                backup_snapshot_path.clone(),
-                "running",
-            ));
-            let columns = guard_operation(
-                list_columns(connection, &request.source_database, table),
-                Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
-                cancellation,
-                emit,
-                OperationProgress {
-                    job_id: request.job_id.clone(),
-                    stage: "copyData".into(),
-                    label: format!("读取源表 {table} 的字段"),
-                    current_table: Some(table.clone()),
-                    completed_tables: index as u64,
-                    total_tables: preview.included_tables.len() as u64,
-                    completed_rows: Some(*copied_rows),
-                    total_rows: Some(total_rows),
-                    backup_snapshot_path: backup_snapshot_path.clone(),
-                },
-            )
-            .await?;
+            let columns = match source_columns_by_table.remove(&table.to_lowercase()) {
+                Some(cols) if !cols.is_empty() => cols,
+                _ => {
+                    guard_operation(
+                        list_columns(connection, &request.source_database, table),
+                        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+                        cancellation,
+                        emit,
+                        OperationProgress {
+                            job_id: request.job_id.clone(),
+                            stage: "copyData".into(),
+                            label: format!("读取源表 {table} 的字段"),
+                            current_table: Some(table.clone()),
+                            completed_tables: 0,
+                            total_tables: total_included as u64,
+                            completed_rows: Some(*copied_rows),
+                            total_rows: Some(total_rows),
+                            backup_snapshot_path: backup_snapshot_path.clone(),
+                        },
+                    )
+                    .await?
+                }
+            };
             let insertable = insertable_columns(&columns);
             let sql = build_copy_table_sql(
                 &request.source_database,
@@ -1403,43 +1511,26 @@ where
                 table,
                 &insertable,
             )?;
-            let rows = execute_sql_with_watchdog(
-                connection,
-                &sql,
-                Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
-                cancellation,
-                emit,
-                OperationProgress {
-                    job_id: request.job_id.clone(),
-                    stage: "copyData".into(),
-                    label: format!("复制表 {table} 的数据"),
-                    current_table: Some(table.clone()),
-                    completed_tables: index as u64,
-                    total_tables: preview.included_tables.len() as u64,
-                    completed_rows: Some(*copied_rows),
-                    total_rows: Some(total_rows),
-                    backup_snapshot_path: backup_snapshot_path.clone(),
-                },
-            )
-            .await?;
-            copied_tables.push(table.clone());
-            *copied_rows = copied_rows.saturating_add(rows);
-            emit(progress(
-                &request.job_id,
-                "copyData",
-                &format!("已复制表 {table}"),
-                Some(table.clone()),
-                (index + 1) as u64,
-                preview.included_tables.len() as u64,
-                Some(*copied_rows),
-                Some(total_rows),
-                backup_snapshot_path.clone(),
-                "running",
-            ));
+            copy_plans.push((index, table.clone(), sql));
         }
     }
+    copy_target_tables_concurrently(
+        sync_pool,
+        request,
+        copy_plans,
+        total_included,
+        total_rows,
+        cancellation,
+        emit,
+        copied_tables,
+        copied_rows,
+        backup_snapshot_path.clone(),
+    )
+    .await?;
+
     *copied_rows = verify_and_repair_target(
         connection,
+        sync_pool,
         request,
         preview,
         cancellation,
@@ -1450,8 +1541,309 @@ where
     Ok(())
 }
 
+async fn create_target_tables_concurrently<Emit>(
+    sync_pool: &MySqlPool,
+    request: &SyncDatabaseOverwriteRequest,
+    included_tables: &[String],
+    cancellation: &WorkCancellation,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<(), String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    if included_tables.is_empty() {
+        return Ok(());
+    }
+    let total = included_tables.len();
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let snapshot_for_workers = backup_snapshot_path.clone();
+    let pool_for_workers = sync_pool.clone();
+    let request_for_workers = std::sync::Arc::new(request.clone());
+    let cancel_for_workers = cancellation.clone();
+    let mut completed = 0usize;
+    run_concurrent_workers(
+        included_tables.iter().cloned().enumerate(),
+        SYNC_WORKER_CONCURRENCY,
+        move |(index, table)| {
+            let tx = progress_tx.clone();
+            let snapshot_path = snapshot_for_workers.clone();
+            let worker_pool = pool_for_workers.clone();
+            let worker_request = request_for_workers.clone();
+            let worker_cancel = cancel_for_workers.clone();
+            async move {
+                let mut worker_emit = |event: DatabaseSyncProgress| {
+                    let _ = tx.send(event);
+                };
+                create_target_table_worker(
+                    &worker_pool,
+                    &worker_request,
+                    index,
+                    total,
+                    table,
+                    &worker_cancel,
+                    &mut worker_emit,
+                    snapshot_path,
+                )
+                .await
+            }
+        },
+        progress_rx,
+        emit,
+        |table, emit, last_emit| {
+            completed += 1;
+            if completed == 1 || completed == total || last_emit.elapsed() >= SYNC_PROGRESS_THROTTLE
+            {
+                emit(progress(
+                    &request.job_id,
+                    "createTarget",
+                    &format!("已创建目标表 {table}（{completed} / {total}）"),
+                    Some(table),
+                    completed as u64,
+                    total as u64,
+                    None,
+                    None,
+                    backup_snapshot_path.clone(),
+                    "running",
+                ));
+                *last_emit = Instant::now();
+            }
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_target_table_worker<Emit>(
+    sync_pool: &MySqlPool,
+    request: &SyncDatabaseOverwriteRequest,
+    index: usize,
+    total: usize,
+    table: String,
+    cancellation: &WorkCancellation,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<String, String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let mut conn = acquire_sync_worker_connection(sync_pool, true).await?;
+    let work_result = async {
+        emit(progress(
+            &request.job_id,
+            "createTarget",
+            &format!(
+                "正在创建目标表 {table}（第 {} / {} 张）",
+                index + 1,
+                total
+            ),
+            Some(table.clone()),
+            index as u64,
+            total as u64,
+            None,
+            None,
+            backup_snapshot_path.clone(),
+            "running",
+        ));
+        let ddl = guard_operation(
+            show_create_table(&mut conn, &request.source_database, &table),
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "createTarget".into(),
+                label: format!("读取源表 {table} 的结构"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path: backup_snapshot_path.clone(),
+            },
+        )
+        .await?;
+        let rewritten = rewrite_create_table_for_database(
+            &ddl,
+            &request.source_database,
+            &request.target_database,
+            &table,
+        )?;
+        execute_sql_with_watchdog(
+            &mut conn,
+            &rewritten,
+            Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+            cancellation,
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "createTarget".into(),
+                label: format!("创建目标表 {table}"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total as u64,
+                completed_rows: None,
+                total_rows: None,
+                backup_snapshot_path,
+            },
+        )
+        .await?;
+        Ok(table)
+    }
+    .await;
+    release_sync_worker_connection(conn, work_result, true).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn copy_target_tables_concurrently<Emit>(
+    sync_pool: &MySqlPool,
+    request: &SyncDatabaseOverwriteRequest,
+    copy_plans: Vec<(usize, String, String)>,
+    total_included: usize,
+    total_rows: u64,
+    cancellation: &WorkCancellation,
+    emit: &mut Emit,
+    copied_tables: &mut Vec<String>,
+    copied_rows: &mut u64,
+    backup_snapshot_path: Option<String>,
+) -> Result<(), String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    if copy_plans.is_empty() {
+        return Ok(());
+    }
+    let plan_len = copy_plans.len();
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let snapshot_for_workers = backup_snapshot_path.clone();
+    let pool_for_workers = sync_pool.clone();
+    let request_for_workers = std::sync::Arc::new(request.clone());
+    let cancel_for_workers = cancellation.clone();
+    let mut ordered_tables: Vec<(usize, String)> = Vec::with_capacity(plan_len);
+    let mut completed = 0usize;
+    run_concurrent_workers(
+        copy_plans,
+        SYNC_WORKER_CONCURRENCY,
+        move |(index, table, sql)| {
+            let tx = progress_tx.clone();
+            let snapshot_path = snapshot_for_workers.clone();
+            let worker_pool = pool_for_workers.clone();
+            let worker_request = request_for_workers.clone();
+            let worker_cancel = cancel_for_workers.clone();
+            async move {
+                let mut worker_emit = |event: DatabaseSyncProgress| {
+                    let _ = tx.send(event);
+                };
+                copy_target_table_worker(
+                    &worker_pool,
+                    &worker_request,
+                    index,
+                    total_included,
+                    total_rows,
+                    table,
+                    sql,
+                    &worker_cancel,
+                    &mut worker_emit,
+                    snapshot_path,
+                )
+                .await
+            }
+        },
+        progress_rx,
+        emit,
+        |(index, table, rows), emit, last_emit| {
+            completed += 1;
+            *copied_rows = copied_rows.saturating_add(rows);
+            ordered_tables.push((index, table.clone()));
+            if completed == 1
+                || completed == plan_len
+                || last_emit.elapsed() >= SYNC_PROGRESS_THROTTLE
+            {
+                emit(progress(
+                    &request.job_id,
+                    "copyData",
+                    &format!("已复制表 {table}（{completed} / {total_included}）"),
+                    Some(table),
+                    completed as u64,
+                    total_included as u64,
+                    Some(*copied_rows),
+                    Some(total_rows),
+                    backup_snapshot_path.clone(),
+                    "running",
+                ));
+                *last_emit = Instant::now();
+            }
+        },
+    )
+    .await?;
+
+    ordered_tables.sort_by_key(|(index, _)| *index);
+    copied_tables.extend(ordered_tables.into_iter().map(|(_, table)| table));
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn copy_target_table_worker<Emit>(
+    sync_pool: &MySqlPool,
+    request: &SyncDatabaseOverwriteRequest,
+    index: usize,
+    total_included: usize,
+    total_rows: u64,
+    table: String,
+    sql: String,
+    cancellation: &WorkCancellation,
+    emit: &mut Emit,
+    backup_snapshot_path: Option<String>,
+) -> Result<(usize, String, u64), String>
+where
+    Emit: FnMut(DatabaseSyncProgress),
+{
+    let mut conn = acquire_sync_worker_connection(sync_pool, true).await?;
+    let work_result = async {
+        emit(progress(
+            &request.job_id,
+            "copyData",
+            &format!(
+                "正在复制表 {table}（第 {} / {} 张）",
+                index + 1,
+                total_included
+            ),
+            Some(table.clone()),
+            index as u64,
+            total_included as u64,
+            None,
+            Some(total_rows),
+            backup_snapshot_path.clone(),
+            "running",
+        ));
+        let rows = execute_sql_with_watchdog(
+            &mut conn,
+            &sql,
+            Duration::from_secs(SYNC_COPY_TIMEOUT_SECONDS),
+            cancellation,
+            emit,
+            OperationProgress {
+                job_id: request.job_id.clone(),
+                stage: "copyData".into(),
+                label: format!("复制表 {table} 的数据"),
+                current_table: Some(table.clone()),
+                completed_tables: index as u64,
+                total_tables: total_included as u64,
+                completed_rows: None,
+                total_rows: Some(total_rows),
+                backup_snapshot_path,
+            },
+        )
+        .await?;
+        Ok((index, table, rows))
+    }
+    .await;
+    release_sync_worker_connection(conn, work_result, true).await
+}
+
 async fn verify_and_repair_target<Emit>(
     connection: &mut MySqlConnection,
+    sync_pool: &MySqlPool,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
     cancellation: &WorkCancellation,
@@ -1463,6 +1855,7 @@ where
 {
     let (source, _target, mismatches) = capture_verification_pass(
         connection,
+        sync_pool,
         request,
         preview,
         cancellation,
@@ -1519,6 +1912,7 @@ where
 
     let (source, _target, remaining) = capture_verification_pass(
         connection,
+        sync_pool,
         request,
         preview,
         cancellation,
@@ -1551,6 +1945,7 @@ where
 
 async fn capture_verification_pass<Emit>(
     connection: &mut MySqlConnection,
+    sync_pool: &MySqlPool,
     request: &SyncDatabaseOverwriteRequest,
     preview: &PreviewDatabaseSyncResponse,
     cancellation: &WorkCancellation,
@@ -1628,71 +2023,151 @@ where
     source_tables.retain(|name| !excluded.contains(&name.to_lowercase()));
     target_tables.retain(|name| !preserved.contains(&name.to_lowercase()));
 
-    let total = source_tables.len() + target_tables.len();
-    let mut completed = 0_usize;
-    let mut source = Vec::with_capacity(source_tables.len());
-    let mut target = Vec::with_capacity(target_tables.len());
-    for (database, tables, side, output) in [
-        (
-            request.source_database.as_str(),
-            source_tables.as_slice(),
-            "源库",
-            &mut source,
-        ),
-        (
-            request.target_database.as_str(),
-            target_tables.as_slice(),
-            "目标库",
-            &mut target,
-        ),
-    ] {
-        for table in tables {
-            emit(progress(
-                &request.job_id,
-                "verify",
-                &format!("正在校验{side}表 {table} 的结构、行数和数据"),
-                Some(table.clone()),
-                completed as u64,
-                total as u64,
-                None,
-                None,
-                backup_snapshot_path.clone(),
-                "running",
-            ));
-            let fingerprint = guard_operation(
-                capture_table_fingerprint(connection, database, table),
-                Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
-                cancellation,
-                emit,
-                OperationProgress {
-                    job_id: request.job_id.clone(),
-                    stage: "verify".into(),
-                    label: format!("校验{side}表 {table}"),
-                    current_table: Some(table.clone()),
-                    completed_tables: completed as u64,
-                    total_tables: total as u64,
-                    completed_rows: None,
-                    total_rows: None,
-                    backup_snapshot_path: backup_snapshot_path.clone(),
-                },
+    let (mut source_fp_cols, mut target_fp_cols) = guard_operation(
+        async {
+            tokio::try_join!(
+                list_all_fingerprint_columns(sync_pool, &request.source_database),
+                list_all_fingerprint_columns(sync_pool, &request.target_database)
             )
-            .await?;
-            output.push(fingerprint);
-            completed += 1;
-            emit(progress(
-                &request.job_id,
-                "verify",
-                &format!("已校验{side}表 {table}"),
-                Some(table.clone()),
-                completed as u64,
-                total as u64,
-                None,
-                None,
-                backup_snapshot_path.clone(),
-                "running",
-            ));
-        }
+        },
+        Duration::from_secs(SYNC_DDL_TIMEOUT_SECONDS),
+        cancellation,
+        emit,
+        OperationProgress {
+            job_id: request.job_id.clone(),
+            stage: "verify".into(),
+            label: "批量读取源库与目标库校验字段".into(),
+            current_table: None,
+            completed_tables: 0,
+            total_tables: (source_tables.len() + target_tables.len()) as u64,
+            completed_rows: None,
+            total_rows: None,
+            backup_snapshot_path: backup_snapshot_path.clone(),
+        },
+    )
+    .await?;
+
+    let total = source_tables.len() + target_tables.len();
+    let mut tasks: Vec<(bool, usize, &'static str, String, String, Option<Vec<FingerprintColumn>>)> =
+        Vec::with_capacity(total);
+    for (index, table) in source_tables.iter().enumerate() {
+        let cols = source_fp_cols.remove(&table.to_lowercase());
+        tasks.push((
+            false,
+            index,
+            "源库",
+            request.source_database.clone(),
+            table.clone(),
+            cols,
+        ));
     }
+    for (index, table) in target_tables.iter().enumerate() {
+        let cols = target_fp_cols.remove(&table.to_lowercase());
+        tasks.push((
+            true,
+            index,
+            "目标库",
+            request.target_database.clone(),
+            table.clone(),
+            cols,
+        ));
+    }
+
+    let (progress_tx, progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let snapshot_for_workers = backup_snapshot_path.clone();
+    let pool_for_workers = sync_pool.clone();
+    let job_id_for_workers = request.job_id.clone();
+    let cancel_for_workers = cancellation.clone();
+    let mut source_indexed: Vec<(usize, TableFingerprint)> =
+        Vec::with_capacity(source_tables.len());
+    let mut target_indexed: Vec<(usize, TableFingerprint)> =
+        Vec::with_capacity(target_tables.len());
+    let mut completed = 0usize;
+    run_concurrent_workers(
+        tasks,
+        SYNC_WORKER_CONCURRENCY,
+        move |(is_target, index, side, database, table, preloaded_cols)| {
+            let tx = progress_tx.clone();
+            let snapshot_path = snapshot_for_workers.clone();
+            let worker_pool = pool_for_workers.clone();
+            let worker_job_id = job_id_for_workers.clone();
+            let worker_cancel = cancel_for_workers.clone();
+            async move {
+                let mut worker_emit = |event: DatabaseSyncProgress| {
+                    let _ = tx.send(event);
+                };
+                let mut conn = acquire_sync_worker_connection(&worker_pool, false).await?;
+                let work_result = async {
+                    let fp = guard_operation(
+                        async {
+                            let cols = match preloaded_cols {
+                                Some(cols) => cols,
+                                None => {
+                                    list_table_fingerprint_columns(&mut conn, &database, &table)
+                                        .await?
+                                }
+                            };
+                            capture_table_fingerprint_with_columns(
+                                &mut conn, &database, &table, &cols,
+                            )
+                            .await
+                        },
+                        Duration::from_secs(SYNC_VERIFY_TIMEOUT_SECONDS),
+                        &worker_cancel,
+                        &mut worker_emit,
+                        OperationProgress {
+                            job_id: worker_job_id,
+                            stage: "verify".into(),
+                            label: format!("校验{side}表 {table}"),
+                            current_table: Some(table.clone()),
+                            completed_tables: index as u64,
+                            total_tables: total as u64,
+                            completed_rows: None,
+                            total_rows: None,
+                            backup_snapshot_path: snapshot_path,
+                        },
+                    )
+                    .await?;
+                    Ok((is_target, index, side, fp))
+                }
+                .await;
+                release_sync_worker_connection(conn, work_result, false).await
+            }
+        },
+        progress_rx,
+        emit,
+        |(is_target, index, side, fingerprint), emit, last_emit| {
+            completed += 1;
+            let table_name = fingerprint.name.clone();
+            if is_target {
+                target_indexed.push((index, fingerprint));
+            } else {
+                source_indexed.push((index, fingerprint));
+            }
+            if completed == 1 || completed == total || last_emit.elapsed() >= SYNC_PROGRESS_THROTTLE
+            {
+                emit(progress(
+                    &request.job_id,
+                    "verify",
+                    &format!("已校验{side}表 {table_name}（{completed} / {total}）"),
+                    Some(table_name),
+                    completed as u64,
+                    total as u64,
+                    None,
+                    None,
+                    backup_snapshot_path.clone(),
+                    "running",
+                ));
+                *last_emit = Instant::now();
+            }
+        },
+    )
+    .await?;
+
+    source_indexed.sort_by_key(|(index, _)| *index);
+    target_indexed.sort_by_key(|(index, _)| *index);
+    let source: Vec<TableFingerprint> = source_indexed.into_iter().map(|(_, fp)| fp).collect();
+    let target: Vec<TableFingerprint> = target_indexed.into_iter().map(|(_, fp)| fp).collect();
     let mismatches = compare_fingerprints(&source, &target);
     Ok((source, target, mismatches))
 }
@@ -1969,23 +2444,87 @@ pub async fn count_rows(
     database: &str,
     tables: &[String],
 ) -> Result<HashMap<String, u64>, String> {
-    let mut counts = HashMap::new();
-    for table in tables {
+    if tables.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut chunk_iter = tables
+        .chunks(COUNT_ROWS_UNION_BATCH_SIZE)
+        .map(|chunk| chunk.to_vec());
+    let mut join_set: JoinSet<Result<Vec<(String, u64)>, String>> = JoinSet::new();
+    for _ in 0..COUNT_ROWS_CONCURRENCY {
+        let Some(chunk) = chunk_iter.next() else {
+            break;
+        };
+        join_set.spawn(count_rows_chunk(pool.clone(), database.to_string(), chunk));
+    }
+
+    let mut counts = HashMap::with_capacity(tables.len());
+    while let Some(join_res) = join_set.join_next().await {
+        let chunk_counts = join_res.map_err(|error| format!("统计行数任务异常: {error}"))??;
+        if let Some(next_chunk) = chunk_iter.next() {
+            join_set.spawn(count_rows_chunk(
+                pool.clone(),
+                database.to_string(),
+                next_chunk,
+            ));
+        }
+        counts.extend(chunk_counts);
+    }
+    Ok(counts)
+}
+
+async fn count_rows_chunk(
+    pool: MySqlPool,
+    database: String,
+    chunk: Vec<String>,
+) -> Result<Vec<(String, u64)>, String> {
+    let escaped_db = escape_ident(&database);
+    let union_sql = chunk
+        .iter()
+        .enumerate()
+        .map(|(idx, table)| {
+            format!(
+                "SELECT CAST({idx} AS SIGNED) AS tbl_idx, CAST(COUNT(*) AS SIGNED) AS cnt FROM `{escaped_db}`.`{}`",
+                escape_ident(table)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
+    match sqlx::query(&union_sql).fetch_all(&pool).await {
+        Ok(rows) if rows.len() == chunk.len() => {
+            let mut out = Vec::with_capacity(chunk.len());
+            for row in rows {
+                let idx = row.try_get::<i64, _>("tbl_idx").unwrap_or(-1);
+                let cnt = row.try_get::<i64, _>("cnt").unwrap_or(0).max(0) as u64;
+                if let Ok(index) = usize::try_from(idx) {
+                    if let Some(table) = chunk.get(index) {
+                        out.push((table.clone(), cnt));
+                    }
+                }
+            }
+            if out.len() == chunk.len() {
+                return Ok(out);
+            }
+        }
+        _ => {}
+    }
+
+    let mut fallback = Vec::with_capacity(chunk.len());
+    for table in chunk {
         let sql = format!(
-            "SELECT COUNT(*) AS cnt FROM `{}`.`{}`",
-            escape_ident(database),
-            escape_ident(table)
+            "SELECT COUNT(*) AS cnt FROM `{escaped_db}`.`{}`",
+            escape_ident(&table)
         );
         let count = sqlx::query(&sql)
-            .fetch_one(pool)
+            .fetch_one(&pool)
             .await
             .map_err(|error| format!("统计表 {table} 行数失败: {error}"))?
             .try_get::<i64, _>("cnt")
             .unwrap_or(0)
             .max(0) as u64;
-        counts.insert(table.clone(), count);
+        fallback.push((table, count));
     }
-    Ok(counts)
+    Ok(fallback)
 }
 
 pub(crate) async fn show_create_table(
@@ -2005,6 +2544,36 @@ pub(crate) async fn show_create_table(
     mysql_text::string(&row, "Create Table")
         .or_else(|_| mysql_text::string(&row, 1))
         .map_err(|error| format!("读取表 {table} DDL 失败: {error}"))
+}
+
+pub(crate) async fn list_all_columns(
+    pool: &MySqlPool,
+    database: &str,
+) -> Result<HashMap<String, Vec<ColumnInfo>>, String> {
+    let rows = sqlx::query(
+        "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COALESCE(EXTRA, '') AS EXTRA, COALESCE(GENERATION_EXPRESSION, '') AS GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取数据库 {database} 字段元数据失败: {error}"))?;
+    let mut map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
+    for row in rows {
+        let Ok(table_name) = mysql_text::string(&row, "TABLE_NAME") else {
+            continue;
+        };
+        map.entry(table_name.to_lowercase())
+            .or_default()
+            .push(ColumnInfo {
+                name: mysql_text::string(&row, "COLUMN_NAME").unwrap_or_default(),
+                data_type: mysql_text::string(&row, "DATA_TYPE").unwrap_or_default(),
+                extra: mysql_text::string(&row, "EXTRA").unwrap_or_default(),
+                generation_expression: mysql_text::string(&row, "GENERATION_EXPRESSION")
+                    .unwrap_or_default(),
+            });
+    }
+    Ok(map)
 }
 
 pub(crate) async fn list_columns(
@@ -2592,5 +3161,80 @@ mod tests {
             result,
             Err("重新启用 FOREIGN_KEY_CHECKS 失败: reenable failed".into())
         );
+    }
+
+    #[tokio::test]
+    async fn run_concurrent_workers_bounds_parallelism_and_propagates_errors() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut collected = Vec::new();
+        let mut emitted = Vec::new();
+        let mut emit = |ev: DatabaseSyncProgress| emitted.push(ev);
+
+        let active_clone = active.clone();
+        let max_clone = max_seen.clone();
+        run_concurrent_workers(
+            0..20usize,
+            4,
+            move |idx| {
+                let active_c = active_clone.clone();
+                let max_c = max_clone.clone();
+                let tx_c = tx.clone();
+                async move {
+                    let now = active_c.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_c.fetch_max(now, Ordering::SeqCst);
+                    let _ = tx_c.send(progress(
+                        "job-1",
+                        "copyData",
+                        "stalled",
+                        None,
+                        idx as u64,
+                        20,
+                        None,
+                        None,
+                        None,
+                        "stalled",
+                    ));
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    active_c.fetch_sub(1, Ordering::SeqCst);
+                    Ok(idx)
+                }
+            },
+            rx,
+            &mut emit,
+            |idx, _emit, _last| collected.push(idx),
+        )
+        .await
+        .expect("all 20 worker tasks should finish cleanly");
+
+        collected.sort_unstable();
+        assert_eq!(collected, (0..20).collect::<Vec<_>>());
+        assert!(max_seen.load(Ordering::SeqCst) <= 4);
+        assert!(max_seen.load(Ordering::SeqCst) >= 2);
+        assert!(!emitted.is_empty());
+
+        let (_tx2, rx2) = tokio::sync::mpsc::unbounded_channel();
+        let mut noop_emit = |_ev: DatabaseSyncProgress| {};
+        let err = run_concurrent_workers(
+            0..10usize,
+            4,
+            |idx| async move {
+                if idx == 3 {
+                    Err("boom on table 3".to_string())
+                } else {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    Ok(idx)
+                }
+            },
+            rx2,
+            &mut noop_emit,
+            |_idx, _emit, _last| {},
+        )
+        .await;
+        assert_eq!(err, Err("boom on table 3".to_string()));
     }
 }

@@ -4,7 +4,7 @@
  * hide the rest. Typing filters.
  */
 function optionSearchText(option) {
-  if (option && typeof option === "object") return `${option.label ?? ""} ${option.value ?? ""}`;
+  if (option && typeof option === "object") return `${option.label ?? ""} ${option.value ?? ""} ${option.detail ?? ""}`;
   return String(option);
 }
 

@@ -16,6 +16,13 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   emptyText: { type: String, default: "" },
   limit: { type: Number, default: 80 },
+  code: { type: Boolean, default: true },
+  maxlength: { type: [Number, String], default: undefined },
+  invalid: { type: Boolean, default: false },
+  submitWhenClosed: { type: Boolean, default: false },
+  openOnFocus: { type: Boolean, default: true },
+  align: { type: String, default: "start" },
+  inputProps: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(["update:modelValue", "pick"]);
@@ -27,10 +34,17 @@ const listRef = ref(null);
 
 function choiceOf(option) {
   if (option && typeof option === "object") {
-    return { value: String(option.value ?? ""), label: String(option.label ?? option.value ?? "") };
+    const value = String(option.value ?? "");
+    return {
+      key: String(option.key ?? value),
+      value,
+      label: String(option.label ?? value),
+      detail: String(option.detail ?? ""),
+      raw: option,
+    };
   }
   const text = String(option ?? "");
-  return { value: text, label: text };
+  return { key: text, value: text, label: text, detail: "", raw: text };
 }
 
 const matches = computed(() => suggestionMatches(props.options, props.modelValue, { browsing: browsing.value, limit: props.limit }).map(choiceOf));
@@ -73,7 +87,7 @@ function scrollActive() {
 function pick(option) {
   const choice = choiceOf(option);
   emit("update:modelValue", choice.value);
-  emit("pick", choice.value);
+  emit("pick", choice.value, choice.raw);
   open.value = false;
   browsing.value = false;
   active.value = -1;
@@ -97,6 +111,7 @@ function onKeydown(event) {
     if (count) active.value = (active.value + step + count) % count;
     scrollActive();
   } else if (event.key === "Enter") {
+    if (!open.value && props.submitWhenClosed) return;
     event.preventDefault();
     const choice = open.value && active.value >= 0 ? matches.value[active.value] : props.modelValue.trim();
     if (choice) pick(choice);
@@ -116,10 +131,11 @@ function onBlur(event) {
 </script>
 
 <template>
-  <div class="wb-rf-combobox" :class="{ 'is-open': open && (matches.length || emptyText) }">
+  <div class="wb-rf-combobox" :class="{ 'is-open': open && (matches.length || emptyText), 'is-end': align === 'end' }">
     <input
+      v-bind="inputProps"
       :id="`${id}-input`"
-      class="wb-rf-input wb-rf-code"
+      :class="['wb-rf-input', { 'wb-rf-code': code }]"
       role="combobox"
       autocomplete="off"
       spellcheck="false"
@@ -129,10 +145,12 @@ function onBlur(event) {
       :aria-activedescendant="activeId"
       :aria-label="label || placeholder"
       :placeholder="placeholder"
+      :maxlength="maxlength"
+      :aria-invalid="invalid || undefined"
       :value="shown"
       :disabled="disabled"
       @input="onInput"
-      @focus="show({ browse: true })"
+      @focus="openOnFocus && show({ browse: true })"
       @click="show({ browse: true })"
       @keydown="onKeydown"
       @blur="onBlur"
@@ -152,7 +170,7 @@ function onBlur(event) {
         <li
           v-for="(option, index) in matches"
           :id="`${id}-option-${index}`"
-          :key="option.value"
+          :key="option.key"
           role="option"
           class="wb-rf-combobox-option"
           :data-current="option.value === modelValue ? 'true' : undefined"
@@ -161,8 +179,11 @@ function onBlur(event) {
           @mouseenter="active = index"
           @click="pick(option)"
         >
-          <span>{{ option.label }}</span>
-          <Check v-if="index === active" :size="13" aria-hidden="true" />
+          <span class="wb-rf-combobox-label">{{ option.label }}</span>
+          <span v-if="option.detail || index === active" class="wb-rf-combobox-meta">
+            <span v-if="option.detail" class="wb-rf-combobox-detail">{{ option.detail }}</span>
+            <Check v-if="index === active" :size="13" aria-hidden="true" />
+          </span>
         </li>
         <li v-if="!matches.length" class="wb-rf-combobox-empty" role="presentation">{{ emptyText }}</li>
       </ul>

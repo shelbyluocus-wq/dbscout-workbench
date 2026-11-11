@@ -12,6 +12,7 @@ import { cocosOutputDir } from "../utils/cocosBuildCommand.js";
 
 const COMMANDS = new Set([
   "release_pick_exclusion",
+  "release_list_plan_candidates",
   "svn_wc_info",
   "svn_wc_status",
   "svn_wc_update",
@@ -221,6 +222,7 @@ export function createMockReleaseTools() {
     async invoke(command, payload = {}) {
       const request = payload.request || payload;
       if (command === "release_pick_exclusion") return pickExclusion(request);
+      if (command === "release_list_plan_candidates") return { rows: [], tableFound: false };
       if (command.startsWith("svn_wc_")) return svn(command, request);
       if (command === "cocos_inspect_project") return inspectProject(request);
       if (command === "cocos_find_editors") return findEditors(payload.projectPath);

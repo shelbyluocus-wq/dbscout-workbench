@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, FolderOpen, Pin, Plug, Plus, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, FolderOpen, Pin, Plug, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -78,6 +78,17 @@ const LEAD_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "lea
 const TOP_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => !entry.zone);
 const BOTTOM_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "bottom");
 
+// Shown directly above the updater dot in the bottom zone only while the
+// Release workspace is minimized, keeping the default rail untouched.
+const RELEASE_FLOW_BOTTOM_ENTRY = Object.freeze({
+  id: "releaseFlow",
+  icon: Rocket,
+  labelKey: "releaseFlow.title",
+  hintKey: "releaseFlow.minimized.restoreHint",
+  popup: "dialog",
+  zone: "bottom",
+});
+
 function readStoredOrder(storage) {
   try {
     const parsed = JSON.parse(storage?.getItem?.(ORDER_STORAGE_KEY) || "null");
@@ -152,7 +163,7 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
   const orderedIds = computed(() => resolveActivityRailOrder(customOrder.value));
   const entryById = new Map(ACTIVITY_RAIL_ENTRIES.map((entry) => [entry.id, entry]));
 
-  function toItem(entry) {
+  function toItem(entry, stateOverride = states[entry.id]?.()) {
     const shortcut = entry.shortcutAction ? shortcuts?.get(entry.shortcutAction) || "" : "";
     const shortcutLabel = formatShortcutForPlatform(shortcut);
     const expandedValue = expanded[entry.id];
@@ -173,13 +184,19 @@ export function useActivityRail({ actions = {}, shortcuts = null, translate = t,
       badge,
       badgeText: badge > 99 ? "99+" : badge > 0 ? String(badge) : "",
       badgeLabel: badge > 0 ? translate("shell.railBadge", { count: badge }) : "",
-      ...(states[entry.id]?.() || {}),
+      ...(stateOverride || {}),
     };
   }
 
-  const leadItems = computed(() => LEAD_ENTRIES.map(toItem));
+  const leadItems = computed(() => LEAD_ENTRIES.map((entry) => toItem(entry)));
   const items = computed(() => orderedIds.value.map((id) => toItem(entryById.get(id))));
-  const bottomItems = computed(() => BOTTOM_ENTRIES.map(toItem));
+  const bottomItems = computed(() => {
+    const base = BOTTOM_ENTRIES.map((entry) => toItem(entry));
+    const releaseState = states.releaseFlow?.();
+    if (!releaseState?.visible) return base;
+    const { visible: _visible, ...rest } = releaseState;
+    return [toItem(RELEASE_FLOW_BOTTOM_ENTRY, rest), ...base];
+  });
 
   function reorder(sourceId, targetId, { position = "before" } = {}) {
     const next = previewDragOrder(orderedIds.value, sourceId, targetId, { position });

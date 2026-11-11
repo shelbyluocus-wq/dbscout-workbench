@@ -972,13 +972,27 @@ function openTableTransfer() {
 
 // Release guide: the workspace keeps its own progress, so reopening it resumes.
 const releaseFlowOpen = ref(false);
+const releaseFlowMinimized = ref(false);
+const releaseFlowStatus = ref(null);
 
 function openReleaseFlow() {
   releaseFlowOpen.value = true;
+  releaseFlowMinimized.value = false;
   // The conversion step shows each template's script; find the built-in
   // ones in the background, as the table transfer dialog does.
   void tableTransfer.discoverAndFill();
   void fetchAllConnectionsDatabases();
+}
+
+function minimizeReleaseFlow() {
+  if (!releaseFlowOpen.value) return;
+  releaseFlowMinimized.value = true;
+}
+
+function closeReleaseFlow() {
+  releaseFlowOpen.value = false;
+  releaseFlowMinimized.value = false;
+  releaseFlowStatus.value = null;
 }
 
 // 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，
@@ -1213,6 +1227,21 @@ const {
         "is-error": updater.status.value === "error" || updater.status.value === "unavailable",
       },
     }),
+    releaseFlow: () => {
+      const visible = releaseFlowOpen.value && releaseFlowMinimized.value;
+      if (!visible) return { visible: false };
+      const status = releaseFlowStatus.value;
+      const tone = status?.tone || "idle";
+      return {
+        visible: true,
+        busy: Boolean(status?.busy),
+        statusText: status?.shortText || "",
+        hint: status?.detail || t("releaseFlow.minimized.restoreHint"),
+        stateClass: {
+          [`is-release-${tone}`]: true,
+        },
+      };
+    },
   },
   actions: {
     addConnection: openConnDialog,
@@ -1223,6 +1252,7 @@ const {
     blackcatMcp: openBlackcatMcp,
     tableFolders: openTableFolderPage,
     pinWindow: toggleWindowPin,
+    releaseFlow: openReleaseFlow,
     update: openUpdateDialog,
     settings: openSidebarSettings,
   },
@@ -5920,6 +5950,7 @@ onBeforeUnmount(() => {
 
     <ReleaseFlowDialog
       v-if="releaseFlowOpen"
+      :minimized="releaseFlowMinimized"
       :connections="connections"
       :databases-by-connection="databasesByConnection"
       :database-sync="databaseSync"
@@ -5929,7 +5960,9 @@ onBeforeUnmount(() => {
       @open-database-sync="openDatabaseSync"
       @open-backup-center="openBackupCenterFromRelease"
       @open-table-transfer="openTableTransfer"
-      @close="releaseFlowOpen = false"
+      @minimize="minimizeReleaseFlow"
+      @status-change="releaseFlowStatus = $event"
+      @close="closeReleaseFlow"
     />
 
     <DatabaseSyncDialog

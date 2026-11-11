@@ -2,14 +2,15 @@
 // Open plans, a workspace page: a memo the team keeps for itself, one row per
 // hero, mount, spirit, battle pet, feature or anything else, with every
 // platform's note ("10/28 開放", "11/30 關閉", "已開放" …) judged for a chosen
-// day. The memo reads no table; an update's database step writes the rows
-// whose entries name a table row and lists the others to do by hand.
-import { computed, ref } from "vue";
+// day. Supports multi-selection (with Shift-range) and one-click batch deletion,
+// plus quick status presets right inside each cell.
+import { computed, ref, watch } from "vue";
 import { Pencil, Plus, Search, Trash2 } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { localDateIso } from "../releaseFlowState.js";
 import { PLAN_MEMO_CATEGORIES, planEntryKey } from "../utils/releaseFlowDemo.js";
+import { buildPlanNotePresets } from "../utils/releasePlanCandidates.js";
 import { evaluatePlanRule, parsePlanNote } from "../utils/releasePlanNotes.js";
 import { formatReleaseWeekday } from "../utils/releaseFlowFormat.js";
 import ReleasePlanEntryEditor from "./ReleasePlanEntryEditor.vue";
@@ -34,6 +35,8 @@ const viewDate = ref(releaseDate.value);
 const category = ref("all");
 const query = ref("");
 const editing = ref(null);
+const selectedIds = ref([]);
+const lastSelectedId = ref("");
 
 const categoryCounts = computed(() => Object.fromEntries(PLAN_MEMO_CATEGORIES.map((entry) => [
   entry,
@@ -44,6 +47,60 @@ const rows = computed(() => {
   return items.value.filter((item) => (category.value === "all" || item.category === category.value)
     && (!needle || item.name.toLowerCase().includes(needle) || item.ref.toLowerCase().includes(needle)));
 });
+const selectedSet = computed(() => new Set(selectedIds.value));
+const visibleSelectedCount = computed(() => rows.value.filter((item) => selectedSet.value.has(item.id)).length);
+const allVisibleSelected = computed(() => rows.value.length > 0 && visibleSelectedCount.value === rows.value.length);
+const someVisibleSelected = computed(() => visibleSelectedCount.value > 0 && !allVisibleSelected.value);
+const notePresets = computed(() => buildPlanNotePresets(viewDate.value, viewDate.value, t));
+
+watch(items, (list) => {
+  if (!selectedIds.value.length) return;
+  const alive = new Set(list.map((entry) => entry.id));
+  const pruned = selectedIds.value.filter((id) => alive.has(id));
+  if (pruned.length !== selectedIds.value.length) selectedIds.value = pruned;
+}, { deep: true });
+
+function toggleSelectAllVisible() {
+  const visibleIds = rows.value.map((item) => item.id);
+  if (!visibleIds.length) return;
+  if (allVisibleSelected.value) {
+    const drop = new Set(visibleIds);
+    selectedIds.value = selectedIds.value.filter((id) => !drop.has(id));
+    return;
+  }
+  const next = new Set(selectedIds.value);
+  for (const id of visibleIds) next.add(id);
+  selectedIds.value = [...next];
+}
+
+function toggleSelectRow(itemId, event) {
+  const checked = event.target.checked;
+  const next = new Set(selectedIds.value);
+  if (event.shiftKey && lastSelectedId.value) {
+    const ids = rows.value.map((entry) => entry.id);
+    const from = ids.indexOf(lastSelectedId.value);
+    const to = ids.indexOf(itemId);
+    if (from >= 0 && to >= 0) {
+      const [start, end] = from < to ? [from, to] : [to, from];
+      for (let i = start; i <= end; i += 1) {
+        if (checked) next.add(ids[i]);
+        else next.delete(ids[i]);
+      }
+      selectedIds.value = [...next];
+      lastSelectedId.value = itemId;
+      return;
+    }
+  }
+  if (checked) next.add(itemId);
+  else next.delete(itemId);
+  selectedIds.value = [...next];
+  lastSelectedId.value = itemId;
+}
+
+function clearSelection() {
+  selectedIds.value = [];
+  lastSelectedId.value = "";
+}
 
 function verdict(item, platformId) {
   const result = evaluatePlanRule(parsePlanNote(item.notes?.[platformId], viewDate.value), viewDate.value);
@@ -57,6 +114,13 @@ function verdict(item, platformId) {
 
 function onDateChange(event) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) viewDate.value = event.target.value;
+}
+
+function applyQuickPreset(itemId, platformId, event) {
+  const value = event.target.value;
+  event.target.value = "";
+  if (!value) return;
+  props.workspace.setPlanNote(itemId, platformId, value === "__clear__" ? "" : value);
 }
 
 function openEditor(item = null) {
@@ -73,11 +137,37 @@ async function remove(item) {
   }))) return;
   props.workspace.removePlanEntry(item.id);
 }
+
+async function removeSelected() {
+  const targets = [...selectedIds.value];
+  if (!targets.length) return;
+  if (!(await confirm({
+    title: t("releaseFlow.plan.batchDelete.title", { count: targets.length }),
+    message: t("releaseFlow.plan.batchDelete.message"),
+    confirmText: t("releaseFlow.plan.delete.action"),
+    cancelText: t("releaseFlow.cancel"),
+    danger: true,
+  }))) return;
+  if (typeof props.workspace.removePlanEntries === "function") {
+    props.workspace.removePlanEntries(targets);
+  } else {
+    for (const id of targets) props.workspace.removePlanEntry(id);
+  }
+  clearSelection();
+}
 </script>
 
 <template>
   <ReleaseSectionHead :workspace="workspace" :title="t('releaseFlow.page.plans.title')" :description="t('releaseFlow.page.plans.description')">
     <template #actions>
+      <template v-if="selectedIds.length">
+        <button type="button" class="wb-rf-btn is-quiet" data-plan-clear-select :disabled="busy" @click="clearSelection">
+          {{ t('releaseFlow.plan.clearSelection', { count: selectedIds.length }) }}
+        </button>
+        <button type="button" class="wb-rf-btn is-danger" data-plan-batch-delete :disabled="busy" @click="removeSelected">
+          <Trash2 :size="14" aria-hidden="true" />{{ t('releaseFlow.plan.batchDelete', { count: selectedIds.length }) }}
+        </button>
+      </template>
       <button type="button" class="wb-rf-btn is-primary" data-plan-add :disabled="busy" @click="openEditor()">
         <Plus :size="14" aria-hidden="true" />{{ t('releaseFlow.plan.add') }}
       </button>
@@ -122,6 +212,18 @@ async function remove(item) {
     <table class="wb-rf-table">
       <thead>
         <tr>
+          <th scope="col" class="wb-rf-plan-select-col">
+            <input
+              type="checkbox"
+              class="wb-rf-plan-checkbox"
+              :checked="allVisibleSelected"
+              :indeterminate.prop="someVisibleSelected"
+              :disabled="busy"
+              :aria-label="t('releaseFlow.plan.selectAll')"
+              data-plan-select-all
+              @change="toggleSelectAllVisible"
+            />
+          </th>
           <th scope="col" class="wb-rf-plan-item-col">{{ t('releaseFlow.plan.column.item') }}</th>
           <th v-for="platform in platforms" :key="platform.id" scope="col" :class="{ 'is-release': platform.id === releasePlatform }">
             {{ platform.name }}
@@ -131,7 +233,18 @@ async function remove(item) {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="item in rows" :key="item.id" :data-plan-item="item.id">
+        <tr v-for="item in rows" :key="item.id" :class="{ 'is-selected': selectedSet.has(item.id) }" :data-plan-item="item.id">
+          <td class="wb-rf-plan-select-cell">
+            <input
+              type="checkbox"
+              class="wb-rf-plan-checkbox"
+              :checked="selectedSet.has(item.id)"
+              :disabled="busy"
+              :aria-label="t('releaseFlow.plan.selectRow', { name: item.name })"
+              :data-plan-select="item.id"
+              @click="toggleSelectRow(item.id, $event)"
+            />
+          </td>
           <th scope="row">
             <strong>{{ item.name }}</strong>
             <span class="wb-rf-plan-item-meta">
@@ -150,6 +263,18 @@ async function remove(item) {
                 :aria-label="t('releaseFlow.plan.noteLabel', { item: item.name, platform: platform.name })"
                 @change="workspace.setPlanNote(item.id, platform.id, $event.target.value)"
               />
+              <select
+                class="wb-rf-plan-quick-select"
+                :value="''"
+                :disabled="busy"
+                :aria-label="t('releaseFlow.plan.editor.presetPlaceholder')"
+                :title="t('releaseFlow.plan.editor.presetPlaceholder')"
+                @change="applyQuickPreset(item.id, platform.id, $event)"
+              >
+                <option value="">▾</option>
+                <option v-for="preset in notePresets" :key="preset.id" :value="preset.value">{{ preset.label }}</option>
+                <option value="__clear__">{{ t('releaseFlow.plan.editor.clearNote') }}</option>
+              </select>
               <span class="wb-rf-plan-verdict" :class="verdict(item, platform.id).tone">{{ verdict(item, platform.id).text }}</span>
             </div>
           </td>
@@ -222,17 +347,33 @@ async function remove(item) {
 /* Fixed columns share the width evenly, so the release platform's column
    stays in view; narrower windows scroll the matrix instead. */
 .wb-rf-plan-matrix table {
-  min-width: 760px;
+  min-width: 780px;
   table-layout: fixed;
 }
 
-.wb-rf-plan-matrix th:first-child,
-.wb-rf-plan-matrix td:first-child {
-  padding-left: 18px;
+.wb-rf-plan-select-col,
+.wb-rf-plan-select-cell {
+  width: 40px;
+  padding-left: 14px;
+  padding-right: 4px;
+  text-align: center;
+}
+
+.wb-rf-plan-checkbox {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--wb-accent);
+  cursor: pointer;
+}
+
+.wb-rf-plan-matrix tbody tr.is-selected {
+  background: color-mix(in srgb, var(--wb-accent) 6%, transparent);
 }
 
 .wb-rf-plan-item-col {
-  width: 200px;
+  width: 196px;
 }
 
 .wb-rf-plan-matrix tbody th {
@@ -244,13 +385,10 @@ async function remove(item) {
 .wb-rf-plan-matrix tbody th strong {
   display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wb-rf-plan-matrix tbody th strong {
   margin-right: 8px;
   font-size: var(--wb-fs-body);
   font-weight: 600;
+  text-overflow: ellipsis;
 }
 
 .wb-rf-plan-matrix .is-release {
@@ -270,7 +408,7 @@ async function remove(item) {
 .wb-rf-plan-cell {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .wb-rf-plan-note {
@@ -294,6 +432,28 @@ async function remove(item) {
 .wb-rf-plan-note:focus {
   border-color: var(--wb-accent);
   background: var(--wb-cell-editor);
+}
+
+.wb-rf-plan-quick-select {
+  flex: none;
+  width: 22px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  text-align: center;
+  appearance: none;
+  cursor: pointer;
+}
+
+.wb-rf-plan-quick-select:hover:not(:disabled) {
+  border-color: var(--wb-border);
+  background: var(--wb-control-surface);
+  color: var(--wb-text);
 }
 
 .wb-rf-plan-verdict {

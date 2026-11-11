@@ -879,6 +879,123 @@ pub struct ReleaseExecutePlanWritesResponse {
     pub executed_sql: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseListPlanCandidatesRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub table: String,
+    pub key_columns: Vec<String>,
+    #[serde(default)]
+    pub flag_column: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleasePlanCandidateRow {
+    pub keys: Vec<i64>,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flag: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseListPlanCandidatesResponse {
+    pub rows: Vec<ReleasePlanCandidateRow>,
+    pub table_found: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateColumnMeta {
+    name: String,
+    data_type: String,
+    comment: String,
+}
+
+impl CandidateColumnMeta {
+    fn is_text(&self) -> bool {
+        matches!(
+            self.data_type.to_ascii_lowercase().as_str(),
+            "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext"
+        )
+    }
+}
+
+fn is_asset_like_column(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "icon", "res", "model", "spine", "prefab", "sound", "atlas", "img", "image", "path",
+        "effect", "anim",
+    ]
+    .iter()
+    .any(|token| lower == *token || lower.ends_with(token))
+}
+
+fn pick_candidate_name_column<'a>(
+    columns: &'a [CandidateColumnMeta],
+    excluded: &[&str],
+) -> Option<&'a str> {
+    const PREFERRED: [&str; 12] = [
+        "Name", "HeroName", "BuildName", "UnitName", "FuncName", "ShowName", "CnName", "Title",
+        "Desc", "Des", "Describe", "Remark",
+    ];
+    let text_cols = || {
+        columns.iter().filter(|col| {
+            col.is_text()
+                && !excluded.iter().any(|ex| col.name.eq_ignore_ascii_case(ex))
+                && !is_asset_like_column(&col.name)
+        })
+    };
+    PREFERRED
+        .iter()
+        .find_map(|pref| text_cols().find(|col| col.name.eq_ignore_ascii_case(pref)))
+        .or_else(|| text_cols().find(|col| col.name.to_ascii_lowercase().contains("name")))
+        .or_else(|| {
+            text_cols().find(|col| {
+                col.comment.contains("名称")
+                    || col.comment.contains("名字")
+                    || col.comment.contains("功能名")
+            })
+        })
+        .or_else(|| text_cols().next())
+        .map(|col| col.name.as_str())
+}
+
+async fn load_table_candidate_columns(
+    pool: &sqlx::MySqlPool,
+    database: &str,
+    table: &str,
+) -> Result<Vec<CandidateColumnMeta>, String> {
+    let rows = sqlx::query(
+        "SELECT CAST(COLUMN_NAME AS CHAR) AS col_name, \
+                CAST(DATA_TYPE AS CHAR) AS data_type, \
+                CAST(COALESCE(COLUMN_COMMENT, '') AS CHAR) AS col_comment \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
+         ORDER BY ORDINAL_POSITION",
+    )
+    .bind(database)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取表 {table} 字段信息失败：{error}"))?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Ok(name) = row.try_get::<String, _>("col_name") else {
+            continue;
+        };
+        let data_type = row.try_get::<String, _>("data_type").unwrap_or_default();
+        let comment = row.try_get::<String, _>("col_comment").unwrap_or_default();
+        out.push(CandidateColumnMeta {
+            name,
+            data_type,
+            comment,
+        });
+    }
+    Ok(out)
+}
+
 fn validate_ident<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.contains('\0') {
@@ -1182,6 +1299,177 @@ pub async fn release_execute_plan_writes(
     })
 }
 
+#[tauri::command]
+pub async fn release_list_plan_candidates(
+    request: ReleaseListPlanCandidatesRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<ReleaseListPlanCandidatesResponse, String> {
+    let database = validate_ident(&request.database, "目标数据库")?;
+    let requested_table = validate_ident(&request.table, "数据表")?;
+    if request.key_columns.is_empty() || request.key_columns.len() > 4 {
+        return Ok(ReleaseListPlanCandidatesResponse::default());
+    }
+
+    let pool = crate::commands::real_database_pool(
+        &request.connection_id,
+        database,
+        &state,
+        &perf_context,
+    )
+    .await?;
+    let existing_tables = load_existing_table_names(&pool, database).await?;
+    let Some(actual_table) = existing_tables.get(&requested_table.to_lowercase()) else {
+        return Ok(ReleaseListPlanCandidatesResponse {
+            rows: Vec::new(),
+            table_found: false,
+        });
+    };
+
+    let columns = load_table_candidate_columns(&pool, database, actual_table).await?;
+    let mut actual_keys: Vec<String> = Vec::with_capacity(request.key_columns.len());
+    for requested_key in &request.key_columns {
+        let trimmed = validate_ident(requested_key, "主键字段")?;
+        let Some(found) = columns
+            .iter()
+            .find(|col| col.name.eq_ignore_ascii_case(trimmed))
+        else {
+            return Ok(ReleaseListPlanCandidatesResponse {
+                rows: Vec::new(),
+                table_found: true,
+            });
+        };
+        actual_keys.push(found.name.clone());
+    }
+
+    let actual_flag = request
+        .flag_column
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|flag| {
+            columns
+                .iter()
+                .find(|col| col.name.eq_ignore_ascii_case(flag))
+                .map(|col| col.name.clone())
+        });
+
+    let mut excluded_refs: Vec<&str> = actual_keys.iter().map(String::as_str).collect();
+    if let Some(ref flag_col) = actual_flag {
+        excluded_refs.push(flag_col.as_str());
+    }
+    let own_name_col = pick_candidate_name_column(&columns, &excluded_refs).map(str::to_string);
+
+    // buildopenplatprop stores per-platform open flags keyed by BuildID -> buildopenprop.BuildID.
+    // Join buildopenprop when available so feature rows get their canonical feature name.
+    let mut join_clause = String::new();
+    let mut parent_name_expr: Option<String> = None;
+    if actual_table.eq_ignore_ascii_case("buildopenplatprop") {
+        if let (Some(own_build_id), Some(parent_table)) = (
+            actual_keys
+                .iter()
+                .find(|col| col.eq_ignore_ascii_case("BuildID")),
+            existing_tables.get("buildopenprop"),
+        ) {
+            if let Ok(parent_cols) =
+                load_table_candidate_columns(&pool, database, parent_table).await
+            {
+                if let (Some(parent_build_id), Some(parent_label)) = (
+                    parent_cols
+                        .iter()
+                        .find(|col| col.name.eq_ignore_ascii_case("BuildID")),
+                    pick_candidate_name_column(&parent_cols, &["BuildID"]),
+                ) {
+                    join_clause = format!(
+                        " LEFT JOIN {} p ON t.{} = p.{}",
+                        quote_ident(parent_table),
+                        quote_ident(own_build_id),
+                        quote_ident(&parent_build_id.name)
+                    );
+                    parent_name_expr = Some(format!(
+                        "NULLIF(TRIM(CAST(p.{} AS CHAR)), '')",
+                        quote_ident(parent_label)
+                    ));
+                }
+            }
+        }
+    }
+
+    let own_name_expr = own_name_col.as_deref().map(|col| {
+        format!(
+            "NULLIF(TRIM(CAST(t.{} AS CHAR)), '')",
+            quote_ident(col)
+        )
+    });
+    let name_select = match (own_name_expr, parent_name_expr) {
+        // Prefer canonical feature name in buildopenprop when joining, falling back to own column.
+        (Some(own), Some(parent)) => format!("COALESCE({parent}, {own}, '') AS item_name"),
+        (Some(own), None) => format!("COALESCE({own}, '') AS item_name"),
+        (None, Some(parent)) => format!("COALESCE({parent}, '') AS item_name"),
+        (None, None) => "'' AS item_name".to_string(),
+    };
+
+    let arity = actual_keys.len();
+    let mut select_cols = Vec::with_capacity(arity + 2);
+    let mut order_cols = Vec::with_capacity(arity);
+    for (idx, col) in actual_keys.iter().enumerate() {
+        let ident = quote_ident(col);
+        select_cols.push(format!("CAST(t.{ident} AS SIGNED) AS k{idx}"));
+        order_cols.push(format!("t.{ident} ASC"));
+    }
+    select_cols.push(name_select);
+    if let Some(ref flag_col) = actual_flag {
+        select_cols.push(format!("CAST(t.{} AS SIGNED) AS flag_val", quote_ident(flag_col)));
+    } else {
+        select_cols.push("CAST(NULL AS SIGNED) AS flag_val".to_string());
+    }
+
+    let sql = format!(
+        "SELECT {} FROM {} t{} ORDER BY {} LIMIT 2500",
+        select_cols.join(", "),
+        quote_ident(actual_table),
+        join_clause,
+        order_cols.join(", ")
+    );
+
+    let rows = match sqlx::query(&sql).fetch_all(&pool).await {
+        Ok(rows) => rows,
+        Err(_) => {
+            return Ok(ReleaseListPlanCandidatesResponse {
+                rows: Vec::new(),
+                table_found: true,
+            });
+        }
+    };
+
+    let mut candidates = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut keys = Vec::with_capacity(arity);
+        let mut ok = true;
+        for idx in 0..arity {
+            let alias = format!("k{idx}");
+            match row.try_get::<Option<i64>, _>(alias.as_str()) {
+                Ok(Some(v)) => keys.push(v),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        let name = row.try_get::<String, _>("item_name").unwrap_or_default();
+        let flag = row.try_get::<Option<i64>, _>("flag_val").ok().flatten();
+        candidates.push(ReleasePlanCandidateRow { keys, name, flag });
+    }
+
+    Ok(ReleaseListPlanCandidatesResponse {
+        rows: candidates,
+        table_found: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1351,5 +1639,57 @@ mod tests {
         );
 
         assert!(format_plan_update_sql("heroprop", &["ID".into()], "OpenFlag", 2, &[vec![1061]]).is_err());
+    }
+
+    #[test]
+    fn candidate_name_column_skips_assets_and_prefers_human_labels() {
+        let hero_cols = vec![
+            CandidateColumnMeta {
+                name: "ID".into(),
+                data_type: "int".into(),
+                comment: "编号".into(),
+            },
+            CandidateColumnMeta {
+                name: "HeadIcon".into(),
+                data_type: "varchar".into(),
+                comment: "头像名称".into(),
+            },
+            CandidateColumnMeta {
+                name: "HeroName".into(),
+                data_type: "varchar".into(),
+                comment: "英雄名".into(),
+            },
+            CandidateColumnMeta {
+                name: "OpenFlag".into(),
+                data_type: "tinyint".into(),
+                comment: "开放".into(),
+            },
+        ];
+        assert_eq!(
+            pick_candidate_name_column(&hero_cols, &["ID", "OpenFlag"]),
+            Some("HeroName")
+        );
+
+        let build_cols = vec![
+            CandidateColumnMeta {
+                name: "BuildID".into(),
+                data_type: "int".into(),
+                comment: "".into(),
+            },
+            CandidateColumnMeta {
+                name: "ResPath".into(),
+                data_type: "varchar".into(),
+                comment: "".into(),
+            },
+            CandidateColumnMeta {
+                name: "LabelTxt".into(),
+                data_type: "varchar".into(),
+                comment: "功能名称".into(),
+            },
+        ];
+        assert_eq!(
+            pick_candidate_name_column(&build_cols, &["BuildID"]),
+            Some("LabelTxt")
+        );
     }
 }

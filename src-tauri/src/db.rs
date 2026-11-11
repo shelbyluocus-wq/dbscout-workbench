@@ -607,10 +607,19 @@ pub async fn connect_database(
     mysql_url: &str,
     database: Option<&str>,
 ) -> Result<MySqlPool, String> {
+    connect_database_with_max_connections(mysql_url, database, 5).await
+}
+
+pub(crate) async fn connect_database_with_max_connections(
+    mysql_url: &str,
+    database: Option<&str>,
+    max_connections: u32,
+) -> Result<MySqlPool, String> {
     let options = mysql_connect_options(mysql_url, database)?;
+    let max_conns = max_connections.max(1);
     MySqlPoolOptions::new()
-        .max_connections(5)
-        .min_connections(1)
+        .max_connections(max_conns)
+        .min_connections(1.min(max_conns))
         .idle_timeout(Some(Duration::from_secs(300)))
         .acquire_timeout(MYSQL_POOL_ACQUIRE_TIMEOUT)
         .connect_with(options)
@@ -633,7 +642,7 @@ pub async fn connect_table_count_database(
         .map_err(|error| format!("连接 MySQL 统计通道失败: {error}"))
 }
 
-fn mysql_connect_options(
+pub(crate) fn mysql_connect_options(
     mysql_url: &str,
     database: Option<&str>,
 ) -> Result<MySqlConnectOptions, String> {

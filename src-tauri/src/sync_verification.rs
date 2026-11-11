@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use sha2::{Digest, Sha256};
-use sqlx::MySqlConnection;
+use sqlx::{MySqlConnection, MySqlPool};
 
 use crate::db::escape_ident;
 use crate::mysql_text;
@@ -15,9 +15,9 @@ pub struct TableFingerprint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FingerprintColumn {
-    name: String,
-    data_type: String,
+pub(crate) struct FingerprintColumn {
+    pub(crate) name: String,
+    pub(crate) data_type: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,10 +116,41 @@ fn fingerprint_map(tables: &[TableFingerprint]) -> BTreeMap<String, &TableFinger
         .collect()
 }
 
-pub async fn capture_table_fingerprint(
+pub(crate) async fn list_all_fingerprint_columns(
+    pool: &MySqlPool,
+    database: &str,
+) -> Result<HashMap<String, Vec<FingerprintColumn>>, String> {
+    let rows = sqlx::query(
+        "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取数据库 {database} 校验字段失败: {error}"))?;
+    let mut by_table: HashMap<String, Vec<FingerprintColumn>> = HashMap::new();
+    for row in rows {
+        let table_name = mysql_text::string(&row, "TABLE_NAME")
+            .map_err(|error| format!("读取数据库 {database} 校验表名失败: {error}"))?;
+        let column = FingerprintColumn {
+            name: mysql_text::string(&row, "COLUMN_NAME")
+                .map_err(|error| format!("读取表 {table_name} 校验字段失败: {error}"))?,
+            data_type: mysql_text::string(&row, "DATA_TYPE")
+                .map_err(|error| format!("读取表 {table_name} 校验字段失败: {error}"))?,
+        };
+        by_table
+            .entry(table_name.to_lowercase())
+            .or_default()
+            .push(column);
+    }
+    Ok(by_table)
+}
+
+pub(crate) async fn capture_table_fingerprint_with_columns(
     connection: &mut MySqlConnection,
     database: &str,
     table: &str,
+    columns: &[FingerprintColumn],
 ) -> Result<TableFingerprint, String> {
     let qualified = format!("`{}`.`{}`", escape_ident(database), escape_ident(table));
     let ddl_row = sqlx::query(&format!("SHOW CREATE TABLE {qualified}"))
@@ -131,7 +162,8 @@ pub async fn capture_table_fingerprint(
         .map_err(|error| format!("读取表 {table} 结构失败: {error}"))?;
 
     let (row_count, checksum) =
-        capture_semantic_data_fingerprint(connection, database, table).await?;
+        capture_semantic_data_fingerprint_with_columns(connection, database, table, columns)
+            .await?;
 
     Ok(TableFingerprint {
         name: table.to_string(),
@@ -141,11 +173,11 @@ pub async fn capture_table_fingerprint(
     })
 }
 
-async fn capture_semantic_data_fingerprint(
+pub(crate) async fn list_table_fingerprint_columns(
     connection: &mut MySqlConnection,
     database: &str,
     table: &str,
-) -> Result<(u64, String), String> {
+) -> Result<Vec<FingerprintColumn>, String> {
     let column_rows = sqlx::query(
         "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
@@ -155,7 +187,7 @@ async fn capture_semantic_data_fingerprint(
     .fetch_all(&mut *connection)
     .await
     .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?;
-    let columns = column_rows
+    column_rows
         .into_iter()
         .map(|row| {
             Ok(FingerprintColumn {
@@ -165,12 +197,20 @@ async fn capture_semantic_data_fingerprint(
                     .map_err(|error| format!("读取表 {table} 校验字段失败: {error}"))?,
             })
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, String>>()
+}
+
+async fn capture_semantic_data_fingerprint_with_columns(
+    connection: &mut MySqlConnection,
+    database: &str,
+    table: &str,
+    columns: &[FingerprintColumn],
+) -> Result<(u64, String), String> {
     if columns.is_empty() {
         return Err(format!("表 {table} 没有可校验字段"));
     }
 
-    let sql = build_semantic_checksum_sql(database, table, &columns);
+    let sql = build_semantic_checksum_sql(database, table, columns);
     let rows = sqlx::query(&sql)
         .fetch_all(&mut *connection)
         .await
