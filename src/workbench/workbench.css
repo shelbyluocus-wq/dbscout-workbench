@@ -98,6 +98,7 @@
   --wb-sidebar-content-width: 292px;
   --wb-sidebar-tab-clearance: var(--wb-activity-rail-width);
   --wb-titlebar-height: 40px;
+  --wb-main-min-width: 400px;
   --wb-workspace-corner-radius: 12px;
   --wb-main-sheet-shadow: 0 1px 2px rgba(45, 55, 72, 0.04), 0 12px 32px rgba(45, 55, 72, 0.07);
   /* 外框（页签条）投向画布的"虚影"：默认无，设计调试面板可实时调强度 */
@@ -783,6 +784,11 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   flex: 1 1 0;
   align-items: stretch;
+  /* Mirror the main pane's floor (plus its two 1px divider tracks): when the
+     workspace can no longer fit it, the inspector below is pushed past the
+     window's right edge — the inspector's titlebar strip must be pushed out
+     the same way or it would paint over the pane's tab area. */
+  min-width: calc(var(--wb-main-min-width) + 2px);
   overflow: hidden;
   background: var(--wb-chrome-surface);
   box-shadow: none;
@@ -7945,7 +7951,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-main {
   position: relative;
   flex: 1 1 0;
-  min-width: 400px;
+  min-width: var(--wb-main-min-width);
   min-height: calc(100% + var(--wb-titlebar-height));
   margin-top: calc(-1 * var(--wb-titlebar-height));
   margin-bottom: 6px;
