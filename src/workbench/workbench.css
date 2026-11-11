@@ -12158,6 +12158,10 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: pointer;
 }
 
+.wb-home-favorite-open:hover:not(:disabled) {
+  background: transparent;
+}
+
 .wb-home-favorite-open:disabled {
   color: var(--wb-disabled);
   cursor: default;
@@ -24577,8 +24581,10 @@ button.wb-table-mention:active {
   backdrop-filter: blur(24px) saturate(1.8);
   font-size: var(--wb-fs-body);
 }
+/* The favorites panel is a composite panel (rows with inline icon buttons), not
+   a plain menu, so it keeps its own row and icon-button styling. */
 :root[data-wb-platform="macos"] .wb-context-menu button,
-:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button {
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed:not(.wb-home-favorites-panel) button {
   min-height: 22px;
   padding-top: 2px;
   padding-bottom: 2px;
@@ -24586,8 +24592,8 @@ button.wb-table-mention:active {
 }
 :root[data-wb-platform="macos"] .wb-context-menu button:hover,
 :root[data-wb-platform="macos"] .wb-context-menu button:focus-visible,
-:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button:hover,
-:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed button:focus-visible {
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed:not(.wb-home-favorites-panel) button:hover,
+:root[data-wb-platform="macos"] [role="menu"].wb-floating-themed:not(.wb-home-favorites-panel) button:focus-visible {
   background: var(--wb-accent-control);
   color: var(--wb-accent-control-text);
   outline: none;
