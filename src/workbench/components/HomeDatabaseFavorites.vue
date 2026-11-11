@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
-import { Check, Database, Keyboard, Plus, Search, Trash2, X } from "lucide-vue-next";
+import { Check, Database, Keyboard, Pin, Plus, Search, Trash2, X } from "lucide-vue-next";
 
 import { useAliases } from "../composables/aliasStore.js";
 import { useEscClose } from "../composables/useEscClose.js";
@@ -351,6 +351,14 @@ defineExpose({ show, hide, toggle, scheduleHide });
             <span v-if="isCurrent(entry)" class="wb-home-favorite-state">{{ t('m_cb62ebd689ee') }}</span>
             <span v-else-if="!isConnected(entry)" class="wb-home-favorite-state is-warning">{{ t('m_4c6e1211eefb') }}</span>
           </button>
+          <button
+            type="button"
+            class="wb-home-favorite-rail"
+            :aria-pressed="Boolean(entry.rail)"
+            :title="t(entry.rail ? 'railDatabase.unpin' : 'railDatabase.pin')"
+            :aria-label="t(entry.rail ? 'railDatabase.unpin' : 'railDatabase.pin')"
+            @click="context?.setRail?.({ connectionId: entry.connectionId, database: entry.database, rail: !entry.rail })"
+          ><Pin :size="15" :fill="entry.rail ? 'currentColor' : 'none'" aria-hidden="true" /></button>
           <button
             type="button"
             class="wb-home-favorite-shortcut"

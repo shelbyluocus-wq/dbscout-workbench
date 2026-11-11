@@ -146,6 +146,7 @@ capabilities:
   pane's left/top/right edges and floats "<connection name> · <database label>"
   (both alias/decoration-aware) mid-pane; the effect color is configurable per
   light/dark theme in the settings drawer.
+- **Database shortcuts on the rail** — favorite databases can be pinned to the activity rail as one-click tiles below the More button: drag a database row from the sidebar onto the rail (a dashed slot shows where it lands), use Pin to rail in the database's right-click menu, or toggle the pin on a row of the favorite-databases panel. Pinning adds the database to the favorites (`dbscout_pinned_databases`; entries gain `rail`, `railIcon`, `railText`, `railColor`) and removing a tile keeps the favorite; existing favorites stay off the rail until pinned. A tile shows a monogram derived from the alias-aware name (first digit run, else two Han characters, else initials) on an automatically assigned palette color, or the database's own decoration icon/color when it has one; its right-click menu changes the glyph (40 built-in icons, or up to 3 ASCII / 2 wide characters) and color, or removes it. Clicking a tile opens that database's home like a favorite does and never unfolds the sidebar table list; the current database's tile carries a ring. Tiles reorder by press-and-drag or Alt+Arrow and the group scrolls when it outgrows the rail. Logic: `useRailDatabases.js`, `utils/railDatabaseGlyph.js`, `utils/pinnedDatabases.js`, `utils/databaseDragPayload.js`; UI: `WorkbenchRailDatabaseGroup.vue`, `RailDatabaseTile.vue`, `RailDatabaseAppearancePopover.vue`. Checks: `node --test src/workbench/railDatabases.test.js src/workbench/pinnedDatabases.test.js src/workbench/useActivityRail.test.js` and `node scripts/test-rail-databases-browser.mjs` against a Vite dev server (`DBSCOUT_RAIL_DATABASES_TEST_URL`, default `http://127.0.0.1:1431`).
 - **One-click table transfer** — templates retain generated packages for 7 days by default (0 disables
   cleanup, configurable up to 3650 days). The main window checks 30 seconds
   after startup and hourly while running. Cleanup shares the transfer job lock,
@@ -1026,6 +1027,8 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   The settings sheet itself stays in
   `WorkbenchSidebar.vue` and teleports to `<body>` anchored at the rail's
   bottom-left.
+  Below More, favorite databases pinned to the rail render as
+  one-click tiles (`WorkbenchRailDatabaseGroup.vue`).
 - **Left pane** — Connection cards, database selector, search, virtualized table
   list with context menu
 - **Center pane** — Tab bar, toolbar (filter/sort/export/import/design), virtual-

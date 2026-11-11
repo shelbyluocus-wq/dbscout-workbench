@@ -334,3 +334,18 @@ test("release and relation review move to More while built-in chat is excluded f
   assert.equal(config.bundle.resources["resources/agent-auth*.json"], undefined);
   assert.doesNotMatch(read("../../src-tauri/src/lib.rs"), /commands::agent_/);
 });
+
+test("activity rail hosts the database shortcut group as a sidebar drop target", () => {
+  const rail = read("./components/WorkbenchActivityRail.vue");
+  const group = read("./components/WorkbenchRailDatabaseGroup.vue");
+  const orchestrator = read("./MySqlWorkbench.vue");
+
+  assert.match(rail, /import WorkbenchRailDatabaseGroup from "\.\/WorkbenchRailDatabaseGroup\.vue"/);
+  assert.match(rail, /<WorkbenchRailDatabaseGroup/);
+  assert.match(rail, /@dragover="onRailDragOver"/);
+  assert.match(rail, /@drop="onRailDrop"/);
+  assert.match(rail, /emit\("database-drop", payload\)/);
+  assert.doesNotMatch(rail, /draggable=/);
+  assert.match(group, /data-wb-rail-sort-id/);
+  assert.match(orchestrator, /:database-items="railDatabaseItems"/);
+});

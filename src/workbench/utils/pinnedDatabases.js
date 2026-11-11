@@ -4,6 +4,14 @@
 // 结构：[{ connectionId, database }]，顺序即展示顺序。
 // 真实的 connectionId / database 仍是后端调用的唯一标识，这里只存选择意向。
 
+import { previewDragOrder } from "../sidebarDragPreview.js";
+import {
+  normalizeRailColor,
+  normalizeRailIcon,
+  normalizeRailText,
+  railDatabaseId,
+} from "./railDatabaseGlyph.js";
+
 const PINNED_DATABASES_KEY = "dbscout_pinned_databases";
 
 function readJsonStorage(key, fallback) {
@@ -34,8 +42,17 @@ function normalizeEntry(entry) {
   const connectionId = String(entry?.connectionId || "").trim();
   const database = String(entry?.database || "").trim();
   if (!database) return null;
+  const normalized = { connectionId, database };
   const shortcut = String(entry?.shortcut || "").trim();
-  return shortcut ? { connectionId, database, shortcut } : { connectionId, database };
+  if (shortcut) normalized.shortcut = shortcut;
+  if (entry?.rail) normalized.rail = true;
+  const railIcon = normalizeRailIcon(entry?.railIcon);
+  const railText = normalizeRailText(entry?.railText);
+  if (railIcon) normalized.railIcon = railIcon;
+  else if (railText) normalized.railText = railText;
+  const railColor = normalizeRailColor(entry?.railColor);
+  if (railColor) normalized.railColor = railColor;
+  return normalized;
 }
 
 export function normalizePinnedDatabases(list) {
@@ -98,11 +115,73 @@ export function setPinnedDatabaseShortcut(connectionId, database, shortcut, list
   const normalizedShortcut = String(shortcut || "").trim();
   const next = entries.map((entry) => {
     if (!sameEntry(entry, { connectionId, database })) return entry;
-    const updated = { connectionId: entry.connectionId, database: entry.database };
+    const updated = { ...entry };
     if (normalizedShortcut) updated.shortcut = normalizedShortcut;
+    else delete updated.shortcut;
     return updated;
   });
   writePinnedDatabases(next);
+  return next;
+}
+
+export function setPinnedDatabaseRail(connectionId, database, rail, list = null, { color = "" } = {}) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const index = entries.findIndex((entry) => sameEntry(entry, { connectionId, database }));
+  const normalizedColor = normalizeRailColor(color);
+  if (index < 0) {
+    if (!rail) return entries;
+    const entry = normalizeEntry({ connectionId, database, rail: true, railColor: normalizedColor });
+    if (!entry) return entries;
+    entries.push(entry);
+    writePinnedDatabases(entries);
+    return entries;
+  }
+  const entry = { ...entries[index] };
+  if (rail) {
+    entry.rail = true;
+    if (!entry.railColor && normalizedColor) entry.railColor = normalizedColor;
+  } else {
+    delete entry.rail;
+  }
+  entries[index] = entry;
+  writePinnedDatabases(entries);
+  return entries;
+}
+
+export function setPinnedDatabaseRailAppearance(connectionId, database, { icon, text, color } = {}, list = null) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const index = entries.findIndex((entry) => sameEntry(entry, { connectionId, database }));
+  if (index < 0) return entries;
+  const entry = { ...entries[index] };
+  const normalizedColor = color === undefined ? undefined : normalizeRailColor(color);
+  const normalizedIcon = icon === undefined ? undefined : normalizeRailIcon(icon);
+  const normalizedText = text === undefined ? undefined : normalizeRailText(text);
+  if (normalizedColor !== undefined) {
+    if (normalizedColor) entry.railColor = normalizedColor;
+    else delete entry.railColor;
+  }
+  if (normalizedIcon) {
+    entry.railIcon = normalizedIcon;
+    delete entry.railText;
+  } else if (normalizedText) {
+    entry.railText = normalizedText;
+    delete entry.railIcon;
+  } else {
+    if (normalizedIcon === "") delete entry.railIcon;
+    if (normalizedText === "") delete entry.railText;
+  }
+  entries[index] = entry;
+  writePinnedDatabases(entries);
+  return entries;
+}
+
+export function movePinnedDatabase(sourceId, targetId, position, list = null) {
+  const entries = normalizePinnedDatabases(list || readPinnedDatabases());
+  const next = previewDragOrder(entries, sourceId, targetId, {
+    position,
+    getKey: (entry) => railDatabaseId(entry.connectionId, entry.database),
+  });
+  if (next.some((entry, index) => entry !== entries[index])) writePinnedDatabases(next);
   return next;
 }
 

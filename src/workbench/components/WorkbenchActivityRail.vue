@@ -1,9 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, toRef } from "vue";
+import { computed, onBeforeUnmount, ref, toRef, watch } from "vue";
 import { useActivityRailSort } from "../composables/useActivityRailSort.js";
 import { retainPointerActivationChrome } from "../pointerActivationChrome.js";
+import { activeDatabaseDrag, readDatabaseDrop } from "../utils/databaseDragPayload.js";
 import WorkbenchMoreMenu from "./WorkbenchMoreMenu.vue";
 import WorkbenchActivityRailButton from "./WorkbenchActivityRailButton.vue";
+import WorkbenchRailDatabaseGroup from "./WorkbenchRailDatabaseGroup.vue";
 
 const props = defineProps({
   leadItems: { type: Array, default: () => [] },
@@ -13,9 +15,22 @@ const props = defineProps({
   moreItem: { type: Object, default: null },
   theme: { type: String, default: "light" },
   moreActions: { type: Array, default: () => [] },
+  databaseItems: { type: Array, default: () => [] },
+  databaseLabel: { type: String, default: "" },
 });
 
-const emit = defineEmits(["select", "reorder", "more-open", "more-select"]);
+const emit = defineEmits([
+  "select",
+  "reorder",
+  "more-open",
+  "more-select",
+  "database-select",
+  "database-reorder",
+  "database-drop",
+  "database-unpin",
+  "database-appearance",
+  "database-appearance-reset",
+]);
 
 const sortGroupRef = ref(null);
 const sort = useActivityRailSort({
@@ -27,6 +42,40 @@ const sort = useActivityRailSort({
 onBeforeUnmount(sort.dispose);
 
 const sortPhase = computed(() => sort.phase.value);
+const databaseSortPhase = ref("idle");
+const dropHover = ref(false);
+const pendingDrop = activeDatabaseDrag;
+
+function onRailDragOver(event) {
+  if (!pendingDrop.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  dropHover.value = true;
+}
+
+function onRailDragLeave(event) {
+  if (event.relatedTarget && event.currentTarget?.contains?.(event.relatedTarget)) return;
+  const rect = event.currentTarget?.getBoundingClientRect?.();
+  if (
+    rect
+    && event.clientX >= rect.left && event.clientX <= rect.right
+    && event.clientY >= rect.top && event.clientY <= rect.bottom
+  ) return;
+  dropHover.value = false;
+}
+
+function onRailDrop(event) {
+  const payload = readDatabaseDrop(event);
+  if (!payload) return;
+  event.preventDefault();
+  dropHover.value = false;
+  emit("database-drop", payload);
+}
+
+watch(pendingDrop, (value) => {
+  if (!value) dropHover.value = false;
+});
+
 const pointerActivatedIds = ref(new Set());
 
 function pointerActivated(item) {
@@ -75,10 +124,15 @@ function sortableStyle(item, index) {
   <nav
     class="wb-activity-rail"
     :class="{
-      'is-sorting': sortPhase === 'dragging' || sortPhase === 'settling',
-      'is-sort-resetting': sortPhase === 'resetting',
+      'is-sorting':
+        sortPhase === 'dragging' || sortPhase === 'settling'
+        || databaseSortPhase === 'dragging' || databaseSortPhase === 'settling',
+      'is-sort-resetting': sortPhase === 'resetting' || databaseSortPhase === 'resetting',
     }"
     :aria-label="label"
+    @dragover="onRailDragOver"
+    @dragleave="onRailDragLeave"
+    @drop="onRailDrop"
   >
     <WorkbenchActivityRailButton
       v-for="item in leadItems"
@@ -108,6 +162,20 @@ function sortableStyle(item, index) {
 
     <WorkbenchMoreMenu v-if="moreItem" :item="moreItem" :actions="moreActions" :theme="theme"
       @open="emit('more-open')" @select="emit('more-select', $event)" />
+
+    <WorkbenchRailDatabaseGroup
+      :items="databaseItems"
+      :label="databaseLabel"
+      :theme="theme"
+      :pending-drop="pendingDrop"
+      :drop-hover="dropHover"
+      @select="(item, $event) => emit('database-select', item, $event)"
+      @reorder="(sourceId, targetId, options) => emit('database-reorder', sourceId, targetId, options)"
+      @unpin="(item) => emit('database-unpin', item)"
+      @appearance="(payload) => emit('database-appearance', payload)"
+      @appearance-reset="(item) => emit('database-appearance-reset', item)"
+      @sort-phase="(phase) => { databaseSortPhase = phase; }"
+    />
 
     <div v-if="bottomItems.length" class="wb-activity-rail-bottom">
       <WorkbenchActivityRailButton

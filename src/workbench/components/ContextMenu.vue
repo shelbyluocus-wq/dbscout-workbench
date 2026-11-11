@@ -13,6 +13,7 @@ import {
   ListRestart,
   Minus,
   Pencil,
+  Pin,
   PinOff,
   Plus,
   RefreshCw,
@@ -66,9 +67,10 @@ const props = defineProps({
   // part of it.
   tableCount: { type: Number, default: 1 },
   canDeleteTables: { type: Boolean, default: false },
+  databaseOnRail: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
+const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'toggle-database-rail', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
@@ -203,6 +205,7 @@ const contextMenuStyle = computed(() => ({
     <hr v-if="showTableActions || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>
+    <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('toggle-database-rail')"><component :is="databaseOnRail ? PinOff : Pin" :size="14" class="wb-context-icon" aria-hidden="true" />{{ t(databaseOnRail ? 'railDatabase.unpin' : 'railDatabase.pin') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
     <button v-if="surface !== 'input'" type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
     <!-- 危险操作放最后 -->

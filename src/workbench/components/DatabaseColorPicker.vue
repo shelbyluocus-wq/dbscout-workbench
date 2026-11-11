@@ -6,6 +6,7 @@ const props = defineProps({
   modelValue: { type: String, default: "" },
   label: { type: String, required: true },
   hint: { type: String, default: "" },
+  autoLabel: { type: String, default: "" },
   presets: {
     type: Array,
     default: () => DATABASE_DECORATION_COLORS.map((color) => ({ value: color, cssColor: color, label: color })),
@@ -44,9 +45,9 @@ function setColor(value) {
         type="button"
         class="wb-database-color-swatch wb-database-color-theme"
         :class="{ 'is-active': !normalizedValue }"
-        :aria-label="`${label}跟随主题`"
+        :aria-label="autoLabel || `${label}跟随主题`"
         :aria-pressed="!normalizedValue"
-        :title="`${label}跟随主题`"
+        :title="autoLabel || `${label}跟随主题`"
         @click="setColor('')"
       ></button>
       <button

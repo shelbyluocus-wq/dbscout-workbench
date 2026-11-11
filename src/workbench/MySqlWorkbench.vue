@@ -186,6 +186,7 @@ import { useBackupCenter } from "./composables/useBackupCenter.js";
 import { useTableTransfer } from "./composables/useTableTransfer.js";
 import { textInputClipboard, usesNativeTextMenu } from "./utils/textInputClipboard.js";
 import { useActivityRail } from "./composables/useActivityRail.js";
+import { useRailDatabases } from "./composables/useRailDatabases.js";
 import { useConfigRelations } from "./composables/useConfigRelations.js";
 import { CONFIG_RELATION_CONTEXT } from "./composables/configRelationContext.js";
 import { normalizeRelationFilter, normalizeRelationOrigin } from "./utils/relationFilter.js";
@@ -1247,6 +1248,39 @@ const {
   },
 });
 
+function currentRailDatabaseSource() {
+  const tab = activeTab.value;
+  if (tab?.database) {
+    return { connectionId: tab.connectionId || selectedConnectionId.value, database: tab.database };
+  }
+  return { connectionId: selectedConnectionId.value, database: selectedDatabase.value };
+}
+
+const {
+  items: railDatabaseItems,
+  isOnRail: isRailDatabase,
+  pin: pinRailDatabase,
+  unpin: unpinRailDatabase,
+  reorder: reorderRailDatabases,
+  setAppearance: setRailDatabaseAppearance,
+  resetAppearance: resetRailDatabaseAppearance,
+} = useRailDatabases({
+  pinnedDatabases,
+  connections: visibleConnections,
+  currentSource: currentRailDatabaseSource,
+  databaseLabel,
+  connectionLabel,
+  getDatabaseDecoration,
+  notify: (message) => { statusText.value = message; },
+});
+
+function toggleRailDatabaseFromContext() {
+  const { connectionId, database } = contextMenu;
+  closeContextMenu();
+  if (isRailDatabase(connectionId, database)) unpinRailDatabase({ connectionId, database });
+  else pinRailDatabase({ connectionId, database });
+}
+
 // Keep the source stable while the menu is open, including home multi-selection.
 const moreSource = ref(null);
 const moreActions = computed(() => {
@@ -1443,6 +1477,9 @@ provide(HOME_DATABASE_FAVORITES_CONTEXT, {
   addFavorite: addFavoriteDatabase,
   removeFavorite: removeFavoriteDatabase,
   setShortcut: updateFavoriteDatabaseShortcut,
+  setRail: ({ connectionId, database, rail }) => (
+    rail ? pinRailDatabase({ connectionId, database }) : unpinRailDatabase({ connectionId, database })
+  ),
 });
 const updater = useUpdater();
 const agent = useExternalMcp(invokeWorkbench);
@@ -5643,8 +5680,16 @@ onBeforeUnmount(() => {
         @more-open="openMoreActions"
         @more-select="selectMoreAction"
         :label="t('shell.activityRail')"
+        :database-items="railDatabaseItems"
+        :database-label="t('railDatabase.groupLabel')"
         @select="selectActivityRailEntry"
         @reorder="reorderActivityRailEntry"
+        @database-select="(item) => void openFavoriteDatabase({ connectionId: item.connectionId, database: item.database })"
+        @database-reorder="reorderRailDatabases"
+        @database-drop="pinRailDatabase"
+        @database-unpin="unpinRailDatabase"
+        @database-appearance="setRailDatabaseAppearance"
+        @database-appearance-reset="resetRailDatabaseAppearance"
       />
       <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="workspace.focusedPaneId" />
       <div v-if="showNarrowHint" class="wb-narrow-hint" role="status">
@@ -5885,7 +5930,9 @@ onBeforeUnmount(() => {
       :freeze-cell-label="freezeCellLabel"
       :table-count="contextMenu.tableNames.length || 1"
       :can-delete-tables="contextMenuCanDeleteTables"
+      :database-on-rail="isRailDatabase(contextMenu.connectionId, contextMenu.database)"
       @close="closeContextMenu"
+      @toggle-database-rail="toggleRailDatabaseFromContext"
       @open-tables="openTablesFromContextMenu"
       @delete-tables="deleteTablesFromContextMenu"
       @refresh="refreshFromContextMenu"

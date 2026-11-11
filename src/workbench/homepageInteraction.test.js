@@ -276,7 +276,7 @@ test("database favorites surface opens from an activity rail button instead of h
   assert.doesNotMatch(tabs, /HomeDatabaseFavorites/);
   assert.doesNotMatch(tabs, /homeFavoritesRef|scheduleHomeFavorites|showHomeFavorites|hideHomeFavorites/);
   assert.match(railGroups, /id:\s*"databaseFavorites"[\s\S]*?popup:\s*"menu"/);
-  assert.match(rail, /emit\((['"])select\1, item\.id, \$event\)/);
+  assert.match(rail, /emit\((['"])select\1, item\.id, event\)/);
   assert.match(orchestrator, /import HomeDatabaseFavorites from "\.\/components\/HomeDatabaseFavorites\.vue"/);
   assert.match(orchestrator, /<HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="workspace\.focusedPaneId" \/>/);
   assert.match(orchestrator, /function openDatabaseFavorites\(event\)[\s\S]*?homeFavoritesRef\.value\?\.toggle\?\.\(event\?\.currentTarget\)/);

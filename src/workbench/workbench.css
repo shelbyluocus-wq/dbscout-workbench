@@ -7539,6 +7539,313 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: normal;
 }
 
+.wb-rail-db-group {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.wb-rail-db-group.is-overflowing {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.wb-rail-db-group.is-overflowing::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-rail-db-tile {
+  position: relative;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--wb-rail-db-color);
+  color: var(--wb-rail-db-ink);
+  font-size: var(--wb-fs-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.wb-rail-db-tile.is-compact {
+  font-size: var(--wb-fs-micro);
+  letter-spacing: -0.02em;
+}
+
+.wb-rail-db-btn .wb-rail-db-tile {
+  transition: transform 0.15s ease-out;
+}
+
+.wb-rail-db-btn:hover:not(:disabled) .wb-rail-db-tile {
+  transform: scale(1.08);
+}
+
+.wb-rail-db-btn:active:not(:disabled) .wb-rail-db-tile {
+  transform: scale(0.94);
+}
+
+.wb-rail-db-btn:hover:not(:disabled),
+.wb-rail-db-btn:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-rail-db-btn.is-new .wb-rail-db-tile {
+  animation: wb-rail-db-tile-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes wb-rail-db-tile-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.wb-rail-db-btn.is-current .wb-rail-db-tile::after,
+.wb-rail-db-btn.is-drop-existing .wb-rail-db-tile::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1.5px solid var(--wb-accent);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.wb-rail-db-btn.is-disconnected .wb-rail-db-tile {
+  border: 1px dashed var(--wb-border-strong);
+  background: transparent;
+  color: var(--wb-quiet-text);
+}
+
+.wb-rail-db-slot {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-block: 3px;
+  place-items: center;
+  border: 1px dashed var(--wb-border-strong);
+  border-radius: 7px;
+  color: var(--wb-quiet-text);
+  animation: wb-rail-db-slot-in 0.15s ease-out;
+}
+
+.wb-rail-db-slot.is-hover {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+@keyframes wb-rail-db-slot-in {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.wb-rail-db-tip {
+  position: fixed;
+  z-index: 100;
+  opacity: 1;
+  transform: translate(0, -50%);
+  transition: none;
+  font-family: var(--wb-font-ui);
+  animation: wb-rail-db-tip-in 0.12s ease 0.3s backwards;
+}
+
+.wb-rail-db-tip.is-focus {
+  animation-delay: 0s;
+}
+
+@keyframes wb-rail-db-tip-in {
+  from { opacity: 0; transform: translate(-3px, -50%); }
+  to { opacity: 1; transform: translate(0, -50%); }
+}
+
+@keyframes wb-rail-db-tip-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.wb-rail-db-popover {
+  position: fixed;
+  z-index: 880;
+  display: grid;
+  gap: 10px;
+  width: 288px;
+  padding: 12px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: 0 6px 8px color-mix(in srgb, var(--wb-text) 14%, transparent);
+  font-family: var(--wb-font-ui);
+  font-size: var(--wb-fs-body);
+  animation: wb-home-favorites-in 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-rail-db-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.wb-rail-db-popover-name {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wb-rail-db-popover-name strong,
+.wb-rail-db-popover-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rail-db-popover-name strong {
+  font-size: var(--wb-fs-body);
+  font-weight: 650;
+}
+
+.wb-rail-db-popover-name small {
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-rail-db-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+}
+
+.wb-rail-db-mode button {
+  padding: 4px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--wb-fs-body);
+}
+
+.wb-rail-db-mode button:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-rail-db-mode button[aria-pressed="true"] {
+  border-radius: 6px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--wb-text) 16%, transparent);
+}
+
+.wb-rail-db-popover .wb-database-color-setting {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.wb-rail-db-popover .wb-database-color-label strong {
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 600;
+}
+
+.wb-rail-db-popover .wb-database-color-options {
+  gap: 2px;
+  justify-content: space-between;
+}
+
+.wb-rail-db-field {
+  display: grid;
+  gap: 6px;
+}
+
+.wb-rail-db-field-label {
+  display: grid;
+  gap: 6px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 600;
+}
+
+.wb-rail-db-field input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+}
+
+.wb-rail-db-field input:focus {
+  border-color: var(--wb-accent);
+  outline: none;
+}
+
+.wb-rail-db-field-hint {
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-rail-db-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.wb-rail-db-icon-grid button {
+  display: grid;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  cursor: pointer;
+}
+
+.wb-rail-db-icon-grid button:hover,
+.wb-rail-db-icon-grid button:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+.wb-rail-db-icon-grid button[aria-pressed="true"] {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-rail-db-popover-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wb-rail-db-reset {
+  padding: 4px 10px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--wb-fs-body);
+}
+
+.wb-rail-db-reset:hover,
+.wb-rail-db-reset:focus-visible {
+  background: var(--wb-control-hover);
+}
+
 .wb-sidebar-slot {
   flex: 0 0 auto;
   width: var(--wb-sidebar-slot-width);
@@ -11808,7 +12115,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-home-favorite-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   border-radius: 7px;
 }
@@ -11825,6 +12132,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-home-favorite-open,
 .wb-home-favorite-shortcut,
 .wb-home-favorite-remove,
+.wb-home-favorite-rail,
 .wb-home-favorites-add {
   border: 0;
   background: transparent;
@@ -11901,7 +12209,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-home-favorite-shortcut,
-.wb-home-favorite-remove {
+.wb-home-favorite-remove,
+.wb-home-favorite-rail {
   display: grid;
   width: 30px;
   height: 30px;
@@ -11914,9 +12223,20 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-home-favorite-shortcut:hover,
 .wb-home-favorite-shortcut:focus-visible,
 .wb-home-favorite-remove:hover,
-.wb-home-favorite-remove:focus-visible {
+.wb-home-favorite-remove:focus-visible,
+.wb-home-favorite-rail:hover,
+.wb-home-favorite-rail:focus-visible {
   background: var(--wb-tab-close-hover);
   color: var(--wb-text);
+}
+
+.wb-home-favorite-rail[aria-pressed="true"] {
+  color: var(--wb-accent-strong);
+}
+
+.wb-home-favorite-rail[aria-pressed="true"]:hover,
+.wb-home-favorite-rail[aria-pressed="true"]:focus-visible {
+  color: var(--wb-accent-strong);
 }
 
 .wb-home-favorite-shortcut kbd {
@@ -19589,6 +19909,22 @@ label:has(input[type="checkbox"]:disabled) {
   /* Keep the delayed fade, drop the slide-in. */
   .wb-activity-rail-tip {
     transform: translate(0, -50%);
+  }
+
+  .wb-rail-db-tip {
+    animation-name: wb-rail-db-tip-fade;
+  }
+
+  .wb-rail-db-btn .wb-rail-db-tile,
+  .wb-rail-db-btn.is-new .wb-rail-db-tile,
+  .wb-rail-db-slot {
+    transition: none;
+    animation: none;
+  }
+
+  .wb-rail-db-btn:hover:not(:disabled) .wb-rail-db-tile,
+  .wb-rail-db-btn:active:not(:disabled) .wb-rail-db-tile {
+    transform: none;
   }
 
   /* Rail reordering keeps the live gap but drops the glide and lift. */

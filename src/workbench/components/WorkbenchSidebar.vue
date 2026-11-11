@@ -26,6 +26,7 @@ import {
 import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { revealSidebarNavigationRow, revealSidebarSearchResults } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import { beginDatabaseDrag, endDatabaseDrag } from "../utils/databaseDragPayload.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { computeTableBranchMinHeight, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
@@ -625,12 +626,13 @@ function startTableDrag(connectionId, database, table, event) {
   writeTableDrag(event, { connectionId, database, tableNames: names });
 }
 
-function startSidebarDrag(kind, id, event) {
+function startSidebarDrag(kind, id, event, connectionId = "") {
   dragState.kind = kind;
   dragState.sourceId = id;
   dragState.targetId = "";
   dragState.targetPosition = "before";
   setDragPayload(event, kind, id);
+  if (kind === "database") beginDatabaseDrag(event, { connectionId, database: id });
 }
 
 function clearSidebarDrag() {
@@ -638,6 +640,7 @@ function clearSidebarDrag() {
   dragState.sourceId = "";
   dragState.targetId = "";
   dragState.targetPosition = "before";
+  endDatabaseDrag();
 }
 
 function isDragSource(kind, id) {
@@ -829,7 +832,7 @@ defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, setting
                   :aria-current="isCurrentDatabase(connection.id, database) ? 'true' : undefined"
                   :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
                   draggable="true"
-                  @dragstart.stop="startSidebarDrag('database', database, $event)"
+                  @dragstart.stop="startSidebarDrag('database', database, $event, connection.id)"
                   @dragover.prevent.stop="markDragTarget('database', database, $event)"
                   @drop.prevent.stop="dropDatabase(connection.id, database, $event)"
                   @dragend="clearSidebarDrag"
