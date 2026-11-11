@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "./i18n/index.js";
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, Link2, ListX, RefreshCw, Rocket, Send, Upload, X } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, Upload, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -1211,13 +1211,6 @@ const {
     more: () => configRelationsBadge.value,
   },
   states: {
-    pinWindow: () => ({
-      label: t(windowPin.pinned.value ? "shell.unpinWindow" : "shell.pinWindow"),
-      pressed: windowPin.pinned.value,
-      disabled: windowPin.pending.value,
-      busy: windowPin.pending.value,
-      stateClass: { "is-pinned": windowPin.pinned.value },
-    }),
     update: () => ({
       label: updater.title.value,
       busy: updater.isBusy.value,
@@ -1247,11 +1240,7 @@ const {
     addConnection: openConnDialog,
     quickOpen: openQuickOpenFromAnywhere,
     databaseFavorites: openDatabaseFavorites,
-    backupCenter: openBackupCenter,
     tableTransfer: openTableTransfer,
-    blackcatMcp: openBlackcatMcp,
-    tableFolders: openTableFolderPage,
-    pinWindow: toggleWindowPin,
     releaseFlow: openReleaseFlow,
     update: openUpdateDialog,
     settings: openSidebarSettings,
@@ -1267,6 +1256,11 @@ const moreActions = computed(() => {
   return [
     { id: "releaseFlow", icon: Rocket, label: t("releaseFlow.title"), hint: t("releaseFlow.hint") },
     { id: "relations", icon: Link2, label: t("shell.configRelations"), hint: t("shell.configRelationsHint"), badge: configRelationsBadge.value },
+    { id: "tableFolders", icon: FolderOpen, label: t("tableFolders.title"), hint: t("tableFolders.hint") },
+    { id: "backupCenter", icon: ShieldCheck, label: t("m_965320c43727"), hint: t("shell.backupCenterHint") },
+    { id: "blackcatMcp", icon: Plug, label: t("blackcatMcp.title"), hint: t("blackcatMcp.hint") },
+    { id: "pinWindow", icon: Pin, label: t(windowPin.pinned.value ? "shell.unpinWindow" : "shell.pinWindow"), pressed: windowPin.pinned.value, disabled: windowPin.pending.value },
+    { id: "moreSeparator", separator: true },
     { id: "sync", icon: DatabaseZap, label: t("m_623281e9dfdb"), disabled: !writable || !sourceHasCapability("sync", source) },
     { id: "send", icon: Send, label: t("m_8f211e16faf2"), disabled: !writable || !sourceHasCapability("tableCopy", source) },
     { id: "import", icon: Upload, label: t("m_fd7719273970"), disabled: !writable || !sourceHasCapability("import", source) },
@@ -1288,6 +1282,10 @@ function selectMoreAction(id) {
   else if (id === "export") void openBatchExport(source);
   else if (id === "relations") openConfigRelationsReview();
   else if (id === "releaseFlow") openReleaseFlow();
+  else if (id === "tableFolders") openTableFolderPage();
+  else if (id === "backupCenter") void openBackupCenter();
+  else if (id === "blackcatMcp") openBlackcatMcp();
+  else if (id === "pinWindow") void toggleWindowPin();
 }
 
 const tableCopy = useTableCopy({

@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, FolderOpen, Pin, Plug, Plus, Rocket, Search, Settings, ShieldCheck } from "lucide-vue-next";
+import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, Plus, Rocket, Search, Settings } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -7,11 +7,13 @@ import { previewDragOrder } from "../sidebarDragPreview.js";
 const ORDER_STORAGE_KEY = "dbscout_activity_rail_order";
 
 // Entries of the always-visible left rail, top to bottom. `zone: "lead"` pins an
-// entry above the rail divider and `zone: "bottom"` pins it to the rail's bottom
-// edge; neither is reorderable. Entries without a zone form the tool group,
-// which can be reordered by dragging (order persists in localStorage). Every
-// `id` dispatches to the handler of the same name passed to
-// `useActivityRail({ actions })`.
+// entry above the rail divider, `zone: "more"` keeps the overflow trigger out of
+// the reorderable group (it renders through `moreItem`), and `zone: "bottom"`
+// pins an entry to the rail's bottom edge; none of them is reorderable. Entries
+// without a zone form the tool group, which can be reordered by dragging (order
+// persists in localStorage). Table folders, the backup center, Blackcat MCP and
+// the window pin live in the More menu, not here. Every `id` dispatches to the
+// handler of the same name passed to `useActivityRail({ actions })`.
 export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
   Object.freeze({ id: "addConnection", icon: Plus, labelKey: "m_441ba9e5a9b7", popup: "dialog", zone: "lead" }),
   Object.freeze({
@@ -30,20 +32,6 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     popup: "menu",
   }),
   Object.freeze({
-    id: "tableFolders",
-    icon: FolderOpen,
-    labelKey: "tableFolders.title",
-    hintKey: "tableFolders.hint",
-    popup: "dialog",
-  }),
-  Object.freeze({
-    id: "backupCenter",
-    icon: ShieldCheck,
-    labelKey: "m_965320c43727",
-    hintKey: "shell.backupCenterHint",
-    popup: "dialog",
-  }),
-  Object.freeze({
     id: "tableTransfer",
     icon: FileSpreadsheet,
     labelKey: "m_a36603b169a6",
@@ -51,14 +39,6 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     shortcutAction: "openTableTransfer",
     popup: "dialog",
   }),
-  Object.freeze({
-    id: "blackcatMcp",
-    icon: Plug,
-    labelKey: "blackcatMcp.title",
-    hintKey: "blackcatMcp.hint",
-    popup: "dialog",
-  }),
-  Object.freeze({ id: "pinWindow", icon: Pin, labelKey: "shell.pinWindow", shortcutAction: "pinWindow" }),
   Object.freeze({ id: "more", icon: Ellipsis, labelKey: "m_38844b135cf7", popup: "menu", controls: "wb-activity-more-menu", zone: "more" }),
   Object.freeze({ id: "update", icon: Circle, labelKey: "updater.title.idle", popup: "dialog", zone: "bottom" }),
   Object.freeze({
@@ -71,8 +51,6 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
     zone: "bottom",
   }),
 ]);
-
-const INSERT_AFTER = Object.freeze({ pinWindow: "blackcatMcp", tableFolders: "databaseFavorites" });
 
 const LEAD_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => entry.zone === "lead");
 const TOP_ENTRIES = ACTIVITY_RAIL_ENTRIES.filter((entry) => !entry.zone);
@@ -114,12 +92,7 @@ export function resolveActivityRailOrder(stored) {
   const known = new Set(defaultIds);
   const ordered = (Array.isArray(stored) ? stored : []).filter((id) => known.has(String(id)));
   defaultIds.forEach((id, index) => {
-    if (!ordered.includes(id)) {
-      // Entries that ship later sit beside their neighbour in a custom order.
-      const anchor = INSERT_AFTER[id];
-      const insertion = anchor && ordered.includes(anchor) ? ordered.indexOf(anchor) + 1 : Math.min(index, ordered.length);
-      ordered.splice(insertion, 0, id);
-    }
+    if (!ordered.includes(id)) ordered.splice(Math.min(index, ordered.length), 0, id);
   });
   return ordered;
 }

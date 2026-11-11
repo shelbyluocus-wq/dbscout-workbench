@@ -16,8 +16,11 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => localStorage.setItem("dbscout_language", "zh-CN"));
   await page.goto(base, { waitUntil: "domcontentloaded" });
-  const entry = page.locator('[data-wb-rail-id="blackcatMcp"]');
-  await entry.click();
+  const openMcp = async () => {
+    await page.locator('[data-wb-rail-id="more"]').click();
+    await page.locator('#wb-activity-more-menu').getByRole('menuitem', { name: '黑猫 MCP', exact: true }).click();
+  };
+  await openMcp();
   const dialog = page.getByRole("dialog", { name: "黑猫 MCP", exact: true });
   await dialog.waitFor();
   const names = ["读取绑定项目代码", "后台关联扫描", "修改本地关联规则"];
@@ -29,7 +32,7 @@ try {
   assert.equal(await dialog.getByRole("switch", { name: names[0], exact: true }).isChecked(), false);
   assert.equal(await dialog.getByRole("switch", { name: names[2], exact: true }).isChecked(), false);
   await page.keyboard.press("Escape");
-  await entry.click();
+  await openMcp();
   assert.equal(await dialog.getByRole("switch", { name: names[1], exact: true }).isChecked(), true);
   await dialog.getByRole("switch", { name: names[1], exact: true }).uncheck();
   await dialog.screenshot({ path: join(screenshots, "permissions-desktop.png") });

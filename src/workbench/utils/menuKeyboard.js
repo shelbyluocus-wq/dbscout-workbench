@@ -1,7 +1,7 @@
 // Keyboard support shared by the workbench context menus. A menu opened from
 // the keyboard (Shift+F10 or the Menu key) takes focus; the arrow keys, Home
 // and End then move between enabled items and Escape or Tab closes it.
-const ITEM_SELECTOR = '[role="menuitem"]';
+const ITEM_SELECTOR = '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]';
 
 export function menuItems(menu) {
   return Array.from(menu?.querySelectorAll?.(ITEM_SELECTOR) || [])

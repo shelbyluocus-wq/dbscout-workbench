@@ -41,6 +41,12 @@ async function waitForNotice(text) {
   await page.getByText(text).first().waitFor();
 }
 
+// The folder page opens from the rail's More menu.
+async function openFolderPageFromMore() {
+  await page.locator('[data-wb-rail-id="more"]').click();
+  await page.locator('#wb-activity-more-menu').getByRole('menuitem', { name: '表格資料夾', exact: true }).click();
+}
+
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
   const rows = page.locator(".wb-dbhome-object-row");
@@ -52,8 +58,8 @@ try {
     await page.locator(`.wb-dbhome-object-row[data-table-name="${name}"] .wb-dbhome-favorite-button`).click();
   }
 
-  // The rail opens the folder page as a tab of this database.
-  await page.locator('[data-wb-rail-id="tableFolders"]').click();
+  // The More menu opens the folder page as a tab of this database.
+  await openFolderPageFromMore();
   await folderPage.waitFor();
   assert.equal((await page.locator(".wb-tab.active .wb-tab-name").textContent()).trim(), "表格資料夾");
   assert.match(await folderItems.first().textContent(), /收藏/);
@@ -227,7 +233,7 @@ try {
   assert.deepEqual([...tabOrderAfter].sort(), [...tabOrderBefore].sort());
   assert.deepEqual(await folderTableNames(), kept);
 
-  await page.locator('[data-wb-rail-id="tableFolders"]').click();
+  await openFolderPageFromMore();
   assert.equal(await folderPage.locator('.wb-folder-header h2').textContent(), '全部表');
   assert.equal(await folderPage.locator('.wb-folder-list [aria-current="true"]').count(), 0);
   assert.ok(await folderPage.getByRole('checkbox').count() >= names.length);

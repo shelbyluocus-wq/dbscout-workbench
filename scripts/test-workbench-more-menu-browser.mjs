@@ -28,7 +28,10 @@ try {
   const selected = await page.locator('.wb-dbhome-object-row.is-selected').evaluateAll((elements) => elements.map((row) => row.dataset.tableName));
   assert.equal(selected.length, 2);
   await more.click();
-  assert.deepEqual((await menu.getByRole('menuitem').allTextContents()).map((text) => text.trim()), ['覆盖同步…', '发送到…', '批量导入', '批量导出', '关联复核'].map((s) => s));
+  assert.deepEqual(
+    (await menu.locator('[role="menuitem"], [role="menuitemcheckbox"]').allTextContents()).map((text) => text.trim()),
+    ['版本更新', '关联复核', '表格文件夹', '备份中心', '黑猫 MCP', '钉住窗口', '覆盖同步…', '发送到…', '批量导入', '批量导出'],
+  );
   const triggerBounds = await more.boundingBox();
   const menuBounds = await menu.boundingBox();
   assert.ok(menuBounds.x >= triggerBounds.x + triggerBounds.width, 'menu opens on the right');
@@ -116,7 +119,7 @@ try {
   }
   await search.evaluate((input) => { input.type = 'search'; });
   assert.deepEqual(errors, []);
-  console.log('PASS: five More actions, right-side placement, keyboard/outside dismissal, selected tables, modal input copy, selection copy/paste, native undo, reactive search and read-only paste.');
+  console.log('PASS: ten More entries, right-side placement, keyboard/outside dismissal, selected tables, modal input copy, selection copy/paste, native undo, reactive search and read-only paste.');
 } finally {
   await browser.close();
 }

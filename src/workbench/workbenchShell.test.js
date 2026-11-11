@@ -1983,19 +1983,19 @@ test("workbench rail can pin the window with a customizable F8 shortcut", () => 
   const shortcuts = read("./composables/useShortcuts.js");
   const styles = read("./workbench.css");
 
-  assert.match(read("./composables/useActivityRail.js"), /id: "pinWindow", icon: Pin/);
+  assert.match(orchestrator, /id: "pinWindow", icon: Pin/);
   assert.match(orchestrator, /import\s+\{\s*useWindowPin\s*\}\s+from\s+["']\.\/composables\/useWindowPin\.js["']/);
   assert.match(orchestrator, /const\s+windowPin\s*=\s*useWindowPin\(\)/);
   assert.match(orchestrator, /shortcutHelper\.matchesBinding\("pinWindow", event\)/);
   assert.match(orchestrator, /pressed: windowPin\.pinned\.value/);
-  assert.match(orchestrator, /pinWindow: toggleWindowPin/);
+  assert.match(orchestrator, /id === "pinWindow"\) void toggleWindowPin\(\)/);
   assert.match(orchestrator, /"已钉住：窗口将保持在最上层"/);
   assert.match(orchestrator, /"已解除钉住：窗口恢复正常层级"/);
   assert.match(pin, /\.setAlwaysOnTop\(nextPinned\)/);
   assert.match(pin, /\.isAlwaysOnTop\(\)/);
   assert.match(shortcuts, /pinWindow:\s*"F8"/);
   assert.match(shortcuts, /pinWindow:\s*"钉住窗口"/);
-  assert.match(styles, /\.wb-activity-rail-btn\.is-pinned,[\s\S]*?color:\s*var\(--wb-accent-strong\)/);
+  assert.match(styles, /\.wb-activity-more-menu button\[aria-checked="true"\] \.wb-context-icon \{[\s\S]*?color:\s*var\(--wb-accent-strong\)/);
 });
 
 test("workbench titlebar hosts database controls and inspector collapse", () => {

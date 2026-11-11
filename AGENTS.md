@@ -2,9 +2,10 @@
 
 ## Current navigation and AI scope (2026-11-05)
 
-The window pin lives immediately below Blackcat MCP in the default activity rail;
-the app updater lives above Settings at the bottom. Release workspace and relation
-review live in More; pending relation counts appear on More and its review item.
+Table folders, the backup center, Blackcat MCP and the window pin live in the
+More menu of the activity rail; the app updater lives above Settings at the
+bottom. Release workspace and relation review live in More; pending relation
+counts appear on More and its review item.
 The built-in assistant is removed from the shipped workbench: no chat entry/panel,
 assistant initialization, runtime auto-update, exposed assistant Tauri commands,
 or packaged runner/auth files. `useExternalMcp.js` independently owns external MCP
@@ -110,7 +111,7 @@ capabilities:
   and approved local XLSX/text artifact generation in a dedicated output folder.
 - **Table folders** — one reusable page with a database switch above Favorites
   and no database subtitle on its tab (like the database home,
-  opened from the activity rail below favorite databases or the macOS Tools
+  opened from the More menu in the activity rail or the macOS Tools
   menu) groups that database's tables into named folders by reference only:
   tables are never moved or copied. Folders sit on the left with a + icon
   below them; the fixed Favorites folder comes first and is what the home
@@ -152,7 +153,7 @@ capabilities:
   child level, keeps the newest package per container, and skips project paths,
   links/reparse points, versioned trees and recently modified package contents.
   Shared work directories use the longest retention, with disabling taking priority.
-  An activity-rail entry below the backup center (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
+  An activity-rail entry (or `Ctrl+Shift+T`) opens the dialog; the user clicks Start transfer to run
   the conversion script
   (Windows: `.exe/.bat/.cmd/.lnk`; macOS: Bash `.sh/.command`, manually selected;
   `.lnk` resolved via PowerShell COM, script stdin is
@@ -340,7 +341,7 @@ capabilities:
   per direction (`--wb-relation-out*` / `--wb-relation-in*`, derived from the
   hit palette) is shared by the page, the map and the relation chip. The tab
   bar tags tables that take part in relations, and a review dialog (with an
-  activity-rail badge counting what needs attention; opened from a relation
+  More-menu badge counting what needs attention; opened from a relation
   page it reviews that table's database) summarises the totals, shows the
   bound client folder or candidate folders with their table coverage, and
   lets the user confirm or reject candidates with their evidence spelled out.
@@ -478,7 +479,7 @@ part in data compatibility checks, SQL previews and preview signatures.
 Read-only engines remain protected. `refresh_table` updates the visible table
 after changes. Only the existing XLSX import automatically creates a backup;
 other mutations do not add automatic backups or promise one-click undo.
-The activity rail's 黑猫 MCP entry opens a dialog with the master switch plus
+The More menu's 黑猫 MCP entry opens a dialog with the master switch plus
 four coarse permission groups — 打开和定位表 (open/focus UI actions), 修改数据
 (writes and whole-table import), 修改表结构 (design apply), and 复制、重命名和
 删除表 — enforced at the control endpoint and persisted in

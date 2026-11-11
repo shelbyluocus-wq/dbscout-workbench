@@ -7279,7 +7279,6 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-border);
 }
 
-.wb-activity-rail-btn.is-pinned,
 .wb-activity-rail-btn.is-available {
   color: var(--wb-accent-strong);
   background: var(--wb-accent-soft);
@@ -24193,6 +24192,10 @@ button.wb-table-mention:active {
 /* The rail overflow opens beside its trigger without resizing the workspace. */
 .wb-activity-more { display: flex; }
 .wb-activity-more-menu { min-width: 188px; }
+.wb-activity-more-menu button[aria-checked="true"] .wb-context-icon {
+  color: var(--wb-accent-strong);
+  opacity: 1;
+}
 .wb-activity-more .wb-activity-rail-btn[aria-expanded="true"] {
   color: var(--wb-accent-strong);
   background: var(--wb-accent-soft);

@@ -68,12 +68,16 @@ onBeforeUnmount(() => {
       <menu v-if="open" id="wb-activity-more-menu" ref="menu" class="wb-context-menu wb-activity-more-menu wb-floating-themed" :data-theme="theme"
         :style="position" role="menu" :aria-label="item.label" tabindex="-1"
         @keydown="keydown" @click.stop @contextmenu.prevent.stop>
-        <button v-for="action in actions" :key="action.id" type="button" role="menuitem"
-          :disabled="action.disabled" :title="action.hint || undefined" @click="select(action)">
-          <component :is="action.icon" :size="14" class="wb-context-icon" aria-hidden="true" />
-          {{ action.label }}
-          <span v-if="action.badge" class="wb-more-review-count">{{ action.badge > 99 ? '99+' : action.badge }}</span>
-        </button>
+        <template v-for="action in actions" :key="action.id">
+          <hr v-if="action.separator" class="wb-context-separator" role="separator" />
+          <button v-else type="button" :role="action.pressed === undefined ? 'menuitem' : 'menuitemcheckbox'"
+            :aria-checked="action.pressed === undefined ? undefined : action.pressed"
+            :disabled="action.disabled" :title="action.hint || undefined" @click="select(action)">
+            <component :is="action.icon" :size="14" class="wb-context-icon" :fill="action.pressed ? 'currentColor' : 'none'" aria-hidden="true" />
+            {{ action.label }}
+            <span v-if="action.badge" class="wb-more-review-count">{{ action.badge > 99 ? '99+' : action.badge }}</span>
+          </button>
+        </template>
       </menu>
     </Teleport>
   </div>
