@@ -34,7 +34,15 @@ const databaseOptions = computed(() => {
   const list = id ? props.workspace.databasesByConnection?.value?.[id] : null;
   return Array.isArray(list) ? list : [];
 });
-const dbListId = computed(() => `wb-rf-db-list-${props.platform.id}`);
+
+// A saved name the connection no longer lists stays selectable, so switching
+// to a dropdown never silently drops it.
+function databaseOptionsFor(key) {
+  const current = String(props.platform[key] || "");
+  const list = [...databaseOptions.value];
+  if (current && !list.includes(current)) list.unshift(current);
+  return list;
+}
 
 const GROUPS = Object.freeze([
   { id: "database", fields: [{ key: "sourceDatabase", dbList: true }, { key: "targetDatabase", dbList: true }] },
@@ -67,9 +75,6 @@ async function browsePath(field) {
       {{ t('releaseFlow.platformEditor.name') }}
       <input :value="platform.name" :disabled="busy" @change="update('name', $event)" />
     </label>
-    <datalist v-if="databaseOptions.length" :id="dbListId">
-      <option v-for="db in databaseOptions" :key="db" :value="db" />
-    </datalist>
     <section v-for="group in GROUPS" :key="group.id" class="wb-rf-editor-group">
       <h4>{{ t(`releaseFlow.platformEditor.group.${group.id}`) }}</h4>
       <div class="wb-rf-editor-fields">
@@ -98,10 +103,19 @@ async function browsePath(field) {
               <FolderOpen :size="14" aria-hidden="true" />{{ t('releaseFlow.platformEditor.browse') }}
             </button>
           </span>
+          <select
+            v-else-if="field.dbList && databaseOptions.length"
+            :value="platform[field.key]"
+            class="wb-rf-code"
+            :disabled="busy"
+            @change="update(field.key, $event)"
+          >
+            <option value="">{{ t('releaseFlow.platformEditor.chooseDatabase') }}</option>
+            <option v-for="db in databaseOptionsFor(field.key)" :key="db" :value="db">{{ db }}</option>
+          </select>
           <input
             v-else
             :value="platform[field.key]"
-            :list="field.dbList && databaseOptions.length ? dbListId : undefined"
             class="wb-rf-code"
             :disabled="busy"
             spellcheck="false"

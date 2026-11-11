@@ -645,6 +645,7 @@ export const RELEASE_WORKSPACE_MESSAGES = {
   "releaseFlow.platformEditor.connectionId": ["MySQL connection", "MySQL 连接", "MySQL 連線"],
   "releaseFlow.platformEditor.autoConnection": ["Auto-match by database family", "按数据库名自动匹配", "依資料庫名稱自動比對"],
   "releaseFlow.platformEditor.autoConnectionMatched": ["Auto-matched · {name}", "自动匹配 · {name}", "自動比對 · {name}"],
+  "releaseFlow.platformEditor.chooseDatabase": ["Select a database", "选择数据库", "選擇資料庫"],
   "releaseFlow.platformEditor.browse": ["Browse", "选择", "選擇"],
 
   "releaseFlow.autopilot.title": ["One-click mode", "一键模式", "一鍵模式"],
