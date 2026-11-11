@@ -7620,11 +7620,15 @@ label:has(input[type="checkbox"]:disabled) {
   pointer-events: none;
 }
 
+/* The titlebar strips live in .wb-titlebar, a sibling of .wb-workspace, so
+   they key off the root's is-dragging — under .wb-workspace the rule would
+   never match and their width transitions lag the drag, which is visible
+   in vibrancy mode as the translucent strip chasing the sidebar edge. */
 .wb-workspace.is-dragging .wb-sidebar-slot,
 .wb-workspace.is-dragging .wb-sidebar,
 .wb-workspace.is-dragging .wb-inspector,
-.wb-workspace.is-dragging .wb-titlebar-sidebar,
-.wb-workspace.is-dragging .wb-titlebar-inspector-controls,
+.mysql-workbench.is-dragging .wb-titlebar-sidebar,
+.mysql-workbench.is-dragging .wb-titlebar-inspector-controls,
 .wb-workspace.is-dragging .wb-pane-tabbar,
 .wb-workspace.is-dragging .wb-pane-tabbar .wb-object-tabs,
 .wb-workspace.is-dragging,
