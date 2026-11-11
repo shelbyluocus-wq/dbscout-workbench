@@ -66,11 +66,24 @@ const mockConnections = [
   { id: "demo-mongo", kind: "mongodb", label: "Demo MongoDB", host: "127.0.0.1", port: 27017, username: "", database: "game_db", connected: true, readOnly: false },
 ];
 
+// `?mockDatabases=<count>` appends generated databases (`bulk_db_001`…) to
+// every MySQL demo server, for exercising long database lists.
+function requestedBulkDatabases(search = globalThis.location?.search || "") {
+  let count = 0;
+  try {
+    count = Number(new URLSearchParams(String(search || "")).get("mockDatabases"));
+  } catch {
+    count = 0;
+  }
+  const total = Number.isFinite(count) ? Math.max(0, Math.min(500, Math.floor(count))) : 0;
+  return Array.from({ length: total }, (_, index) => `bulk_db_${String(index + 1).padStart(3, "0")}`);
+}
+
 const mockConnectionDatabases = {
   // `?relationLab=<tables>` adds a generated config database for the relation graph.
-  demo: ["game_db", "game_config", ...(requestedRelationLabSize() ? [RELATION_LAB_DATABASE] : [])],
-  "demo-staging": ["game_db", "analytics_db"],
-  "demo-test": ["game_db", "game_db_archive"],
+  demo: ["game_db", "game_config", ...(requestedRelationLabSize() ? [RELATION_LAB_DATABASE] : []), ...requestedBulkDatabases()],
+  "demo-staging": ["game_db", "analytics_db", ...requestedBulkDatabases()],
+  "demo-test": ["game_db", "game_db_archive", ...requestedBulkDatabases()],
   "demo-mongo": ["game_db"],
 };
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
@@ -1429,6 +1442,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   const mockPageLatencyMs = Math.max(0, Number(globalThis.__DBSCOUT_MOCK_PAGE_LATENCY_MS__) || 0);
   if (mockPageLatencyMs > 0 && (command === "fetch_table_page" || command === "fetch_table_count")) {
     await new Promise((resolve) => setTimeout(resolve, mockPageLatencyMs));
+  }
+  // Same idea for switching source: a real server answers the database list
+  // and the database selection some time after the switch began.
+  const mockSourceLatencyMs = Math.max(0, Number(globalThis.__DBSCOUT_MOCK_SOURCE_LATENCY_MS__) || 0);
+  if (mockSourceLatencyMs > 0 && (command === "list_databases" || command === "select_database")) {
+    await new Promise((resolve) => setTimeout(resolve, mockSourceLatencyMs));
   }
   if (
     command === "get_external_mcp_status"

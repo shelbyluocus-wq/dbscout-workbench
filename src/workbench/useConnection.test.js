@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { reactive, watch } from "vue";
 import { createWorkspaceState, openDatabaseHomeTab, buildSchemaSearchResults } from "./workspaceState.js";
-import { useConnection } from "./composables/useConnection.js";
+import { SOURCE_SELECTION, useConnection } from "./composables/useConnection.js";
 
 function installLocalStorage(initial = {}) {
   const store = { ...initial };
@@ -1322,14 +1322,42 @@ test("keeps the last selected connection when an earlier database list resolves 
 
   const second = conn.selectConnection("mysql-second");
   pendingDatabases.get("mysql-second").resolve(["second"]);
-  await second;
+  assert.equal(await second, SOURCE_SELECTION.selected);
   pendingDatabases.get("mysql-first").resolve(["first"]);
-  await first;
+  // The caller of the earlier switch learns it lost, so it does not go on to
+  // select a database of a server whose list was never loaded.
+  assert.equal(await first, SOURCE_SELECTION.superseded);
 
   assert.equal(conn.selectedConnectionId.value, "mysql-second");
   assert.equal(conn.selectedDatabase.value, "second");
+  assert.deepEqual(conn.databases.value, ["second"]);
   assert.equal(workspace.database, "second");
   assert.deepEqual(tableNames(workspace.schema), ["second_table"]);
+});
+
+test("a database selection overtaken by a newer one reports that it was superseded", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-main", database: "old" });
+  const pendingSelections = new Map([
+    ["first", deferred()],
+    ["second", deferred()],
+  ]);
+  const invoke = async (command, payload = {}) => {
+    if (command === "select_database") return pendingSelections.get(payload.database).promise;
+    if (command === "list_tables") return [{ table_name: `${payload.database}_table` }];
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.selectedConnectionId.value = "mysql-main";
+  conn.selectedDatabase.value = "old";
+
+  const first = conn.selectDatabase({ connectionId: "mysql-main", database: "first" });
+  const second = conn.selectDatabase({ connectionId: "mysql-main", database: "second" });
+  pendingSelections.get("first").resolve({});
+  assert.equal(await first, SOURCE_SELECTION.superseded);
+  pendingSelections.get("second").resolve({});
+  assert.equal(await second, SOURCE_SELECTION.selected);
+  assert.equal(conn.selectedDatabase.value, "second");
 });
 
 test("restores the prior visible source when selecting a database fails", async () => {
@@ -1345,7 +1373,10 @@ test("restores the prior visible source when selecting a database fails", async 
   conn.selectedConnectionId.value = "mysql-main";
   conn.selectedDatabase.value = "old";
 
-  await conn.selectDatabase({ connectionId: "mysql-main", database: "new" });
+  assert.equal(
+    await conn.selectDatabase({ connectionId: "mysql-main", database: "new" }),
+    SOURCE_SELECTION.failed,
+  );
 
   assert.equal(conn.selectedDatabase.value, "old");
   assert.equal(workspace.database, "old");

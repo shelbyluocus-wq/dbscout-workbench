@@ -50,6 +50,129 @@ export function revealSidebarNavigationRow(container, row, { behavior = "auto" }
   return true;
 }
 
+const TREE_ANIMATING_SELECTOR = [
+  ".wb-branch-enter-active",
+  ".wb-branch-leave-active",
+  ".wb-tree-reorder-enter-active",
+  ".wb-tree-reorder-leave-active",
+  ".wb-tree-reorder-move",
+].join(", ");
+const FOLLOW_SETTLE_FRAMES = 3;
+const FOLLOW_MAX_DURATION = 1500;
+const FOLLOW_USER_SCROLL_EVENTS = ["wheel", "touchmove"];
+
+function isLaidOut(container) {
+  const rect = container?.getBoundingClientRect?.();
+  return !!rect && Number(rect.bottom) - Number(rect.top) > 0;
+}
+
+// The row's position in the scrolled content, so scrolling done by the
+// follower itself never reads as the tree still moving.
+function rowContentOffset(container, row) {
+  const containerRect = container.getBoundingClientRect?.() || { top: 0 };
+  const rowRect = row.getBoundingClientRect?.() || { top: 0 };
+  return Number(rowRect.top) - Number(containerRect.top) + (Number(container.scrollTop) || 0);
+}
+
+function isTreeAnimating(container) {
+  return !!container?.querySelector?.(TREE_ANIMATING_SELECTOR);
+}
+
+function onUserScroll(container, listener) {
+  if (typeof container?.addEventListener !== "function") return () => {};
+  for (const type of FOLLOW_USER_SCROLL_EVENTS) container.addEventListener(type, listener, { passive: true });
+  return () => {
+    for (const type of FOLLOW_USER_SCROLL_EVENTS) container.removeEventListener(type, listener);
+  };
+}
+
+/**
+ * Keeps a navigation row revealed until the tree around it stops moving.
+ *
+ * Changing the source closes one branch and opens another over many frames,
+ * so one measurement taken right after the change describes a layout that is
+ * gone once those branches settle: the row a single reveal put on screen can
+ * end up far outside it. The follower repeats the nearest-edge reveal every
+ * frame until the row has held its place and no branch is animating, and
+ * lets go as soon as the user scrolls.
+ *
+ * A hidden container cannot be measured; the request is kept and `resume()`
+ * carries it out once the container is shown.
+ */
+export function createSidebarRowFollower({
+  getContainer,
+  getRow,
+  isAnimating = isTreeAnimating,
+  requestFrame = (callback) => globalThis.requestAnimationFrame(callback),
+  cancelFrame = (handle) => globalThis.cancelAnimationFrame(handle),
+  now = () => globalThis.performance.now(),
+  settleFrames = FOLLOW_SETTLE_FRAMES,
+  maxDuration = FOLLOW_MAX_DURATION,
+} = {}) {
+  let frame = null;
+  let releaseUserScroll = null;
+  let waiting = false;
+
+  function end() {
+    if (frame !== null) cancelFrame(frame);
+    frame = null;
+    releaseUserScroll?.();
+    releaseUserScroll = null;
+  }
+
+  function stop() {
+    waiting = false;
+    end();
+  }
+
+  function follow() {
+    end();
+    const container = getContainer();
+    waiting = !isLaidOut(container);
+    if (waiting) return false;
+
+    const startedAt = now();
+    let settled = 0;
+    // Where the row was when it last moved. Comparing against this rather than
+    // the previous frame keeps the slow tail of an easing curve, a fraction of
+    // a pixel per frame, from passing for a row at rest.
+    let restingOffset = null;
+    releaseUserScroll = onUserScroll(container, stop);
+
+    const step = () => {
+      frame = null;
+      if (!isLaidOut(container)) {
+        waiting = true;
+        end();
+        return;
+      }
+      const row = getRow();
+      let offset = null;
+      if (row) {
+        revealSidebarNavigationRow(container, row);
+        offset = rowContentOffset(container, row);
+      }
+      if (offset !== null && restingOffset !== null && Math.abs(offset - restingOffset) < 0.5) {
+        settled += 1;
+      } else {
+        settled = 0;
+        restingOffset = offset;
+      }
+      const atRest = settled >= settleFrames && !isAnimating(container);
+      if (atRest || now() - startedAt >= maxDuration) end();
+      else frame = requestFrame(step);
+    };
+    step();
+    return true;
+  }
+
+  function resume() {
+    return waiting ? follow() : false;
+  }
+
+  return { follow, resume, stop };
+}
+
 /**
  * 进入搜索态时，惰性地把搜索上下文带回视野。
  *

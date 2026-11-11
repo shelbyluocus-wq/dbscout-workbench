@@ -165,7 +165,7 @@ import OperationNoticeStack from "./components/OperationNoticeStack.vue";
 import { createOperationNotices } from "./operationNotices.js";
 import { describeStatusMessage } from "./utils/statusMessages.js";
 
-import { useConnection } from "./composables/useConnection.js";
+import { SOURCE_SELECTION, useConnection } from "./composables/useConnection.js";
 import { connectionHasCapability } from "./utils/connectionKinds.js";
 import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
@@ -2860,11 +2860,12 @@ async function openQuickOpenTable({ table } = {}) {
   await openTable(table, { paneId: workspace.focusedPaneId });
 }
 
-// Quick Open 浮层里切换数据库：同连接直接切库；跨连接需先切连接（刷新 databases
-// 列表）再切库。侧栏保持收起（契合"收起换留白"的整体思路）。
-// 注意：跨连接时 selectConnection 内部会自动选第一个库并调 selectDatabase，
-// 我们之后再 selectDatabase 指定用户选的库即可覆盖（selectDatabase 的竞态
-// 保护只挡 owning token 不匹配的旧调用，新调用 owning token=null 会自增 token 正常执行）。
+// Opens a database's home from outside the sidebar (rail tile, favorites,
+// Quick Open, a sidebar database click). The same server switches database
+// directly; another server switches connection first, which loads its
+// database list and lands on the requested database. Resolves true when the
+// home is open, false when the switch failed, and null when a newer switch
+// replaced this one before it finished.
 async function openDatabaseHomeTarget({ connectionId, database, paneId = workspace.focusedPaneId } = {}) {
   const targetConnectionId = String(connectionId || "");
   const targetDatabase = String(database || "");
@@ -2898,12 +2899,24 @@ async function performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabas
   }, { paneId: targetPaneId, activate: true });
   if (pendingHome) pendingHome.loading = sourceChanging;
 
+  let outcome = SOURCE_SELECTION.selected;
   if (targetConnectionId !== String(selectedConnectionId.value)) {
-    await selectConnection(targetConnectionId, { preferredDatabase: targetDatabase });
+    outcome = await selectConnection(targetConnectionId, { preferredDatabase: targetDatabase });
   }
-  if (targetDatabase !== String(selectedDatabase.value)) {
-    await selectDatabase({ connectionId: targetConnectionId, database: targetDatabase });
+  // Only a database of the server that is selected now can be chosen directly:
+  // the loaded database list belongs to that server.
+  if (
+    outcome === SOURCE_SELECTION.selected &&
+    targetConnectionId === String(selectedConnectionId.value) &&
+    targetDatabase !== String(selectedDatabase.value)
+  ) {
+    outcome = await selectDatabase({ connectionId: targetConnectionId, database: targetDatabase });
   }
+  // A newer switch took over while this one waited (quick clicks across
+  // servers, a tab activated meanwhile): the source and the tabs are its to
+  // settle, and finishing this one would leave the sidebar on a server whose
+  // database list was never loaded.
+  if (outcome === SOURCE_SELECTION.superseded) return null;
   if (
     targetConnectionId !== String(selectedConnectionId.value) ||
     targetDatabase !== String(selectedDatabase.value)
@@ -2927,6 +2940,9 @@ async function performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabas
   }
   const openedHome = openCurrentDatabaseHome({ paneId: targetPaneId, activate: true });
   if (openedHome) openedHome.loading = false;
+  // Opening the database that is already selected changes no source, so the
+  // sidebar would not bring its row back into view by itself.
+  if (!sourceChanging) sidebarRef.value?.revealSelectedDatabase?.();
   return true;
 }
 
@@ -2995,6 +3011,8 @@ function updateFavoriteDatabaseShortcut({ connectionId, database, shortcut = "" 
 async function openFavoriteDatabase(target = {}) {
   quickOpenVisible.value = false;
   const opened = await openDatabaseHomeTarget(target);
+  // null: a newer switch replaced this one, which is not a failure to report.
+  if (opened === null) return { ok: false };
   statusText.value = opened
     ? `已切换到 ${favoriteDatabaseDisplayName(target)}`
     : `无法打开收藏数据库：${favoriteDatabaseDisplayName(target)}`;

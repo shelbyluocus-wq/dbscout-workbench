@@ -777,6 +777,19 @@ src/workbench/tableFolderPage.test.js src/workbench/windowRole.test.js`,
 `cargo test --manifest-path src-tauri/Cargo.toml --lib -- table_folder_windows`
 and `node scripts/test-table-folders-browser.mjs` against a Vite dev server
 (`DBSCOUT_TABLE_FOLDERS_TEST_URL`, default `http://127.0.0.1:1431`).
+Sidebar database reveal: switching the selected source follows the selected
+database row until the tree's branch animations settle (`createSidebarRowFollower`
+in `sidebarScroll.js`), because one measurement taken at the switch is stale once
+the old branch has closed and the new one has opened; a hidden sidebar keeps the
+request until it is shown. `selectConnection` / `selectDatabase` resolve to a
+`SOURCE_SELECTION` outcome; a caller whose switch was superseded must stop
+instead of selecting a database on a server whose list was never loaded. Checks:
+`node --test src/workbench/sidebarScroll.test.js src/workbench/useConnection.test.js`
+and `node scripts/test-sidebar-database-reveal-browser.mjs` against a Vite dev
+server (`DBSCOUT_SIDEBAR_REVEAL_TEST_URL`, default `http://127.0.0.1:1431`; also
+with `DBSCOUT_BROWSER_ENGINE=webkit`). The mock takes `?mockDatabases=<count>`
+for long database lists and `globalThis.__DBSCOUT_MOCK_SOURCE_LATENCY_MS__` to
+delay source switches like a real server.
 Release workspace regressions: `node --test src/workbench/useReleaseFlow.test.js
 src/workbench/releaseFlowState.test.js src/workbench/releaseWorkspaceState.test.js
 src/workbench/releaseAutopilotState.test.js src/workbench/releaseFlowCopy.test.js src/workbench/useCocosBuild.test.js

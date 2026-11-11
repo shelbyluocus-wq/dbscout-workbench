@@ -3,7 +3,7 @@ import { t } from "../i18n/index.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
 import { Server } from "lucide-vue-next";
-import { computed, ref, reactive, watch, nextTick, onBeforeUnmount } from "vue";
+import { computed, ref, reactive, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
@@ -24,7 +24,7 @@ import {
   expandAllConnections,
 } from "../sidebarTreeState.js";
 import { createSidebarSearchState } from "../sidebarSearchState.js";
-import { revealSidebarNavigationRow, revealSidebarSearchResults } from "../sidebarScroll.js";
+import { createSidebarRowFollower, revealSidebarSearchResults } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { beginDatabaseDrag, endDatabaseDrag } from "../utils/databaseDragPayload.js";
 import { useAliases } from "../composables/aliasStore.js";
@@ -340,10 +340,8 @@ watch(
     settleDatabaseExpansion(treeState, connectionId, database);
     if (!connectionId || !database) return;
     if (connectionId === previousConnectionId && database === previousDatabase) return;
-    nextTick(() => {
-      revealSelectedDatabase();
-      revealActiveTable();
-    });
+    revealSelectedDatabase();
+    nextTick(() => revealActiveTable());
   },
 );
 
@@ -393,11 +391,30 @@ function setDatabaseRowRef(connectionId, database, element) {
 }
 
 // 外部入口切换数据库时只做 nearest reveal，绝不把数据库吸到导航区顶部。
-function revealSelectedDatabase({ behavior = "auto" } = {}) {
-  const container = treeNavRef.value;
-  const row = databaseRowRefs.get(databaseRowKey(props.selectedConnectionId, props.selectedDatabase));
-  return revealSidebarNavigationRow(container, row, { behavior });
+// The branches around the row are still opening and closing when the source
+// changes, so the row is followed until they settle rather than revealed once.
+const selectedDatabaseFollower = createSidebarRowFollower({
+  getContainer: () => treeNavRef.value,
+  getRow: () => databaseRowRefs.get(databaseRowKey(props.selectedConnectionId, props.selectedDatabase)),
+});
+
+function revealSelectedDatabase() {
+  // After the DOM update, so the branch transitions of this change have begun.
+  return nextTick(() => selectedDatabaseFollower.follow());
 }
+
+// A collapsed sidebar has no layout to measure; a database chosen meanwhile
+// is brought into view when the tree is shown again.
+let treeVisibilityObserver = null;
+onMounted(() => {
+  if (typeof ResizeObserver !== "function" || !treeNavRef.value) return;
+  treeVisibilityObserver = new ResizeObserver(() => selectedDatabaseFollower.resume());
+  treeVisibilityObserver.observe(treeNavRef.value);
+});
+onBeforeUnmount(() => {
+  treeVisibilityObserver?.disconnect();
+  selectedDatabaseFollower.stop();
+});
 
 // 把当前 tab 对应的表滚动到侧栏可视区内，并预留上下边距。
 // 表列表已虚拟化：离屏行没有 DOM，因此按表在列表中的下标计算滚动位置，
@@ -747,7 +764,7 @@ function focusSearch() {
   });
 }
 
-defineExpose({ focusSearch, toggleSettings, openSettings, openShortcuts, settingsOpen });
+defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings, openShortcuts, settingsOpen });
 </script>
 
 <template>

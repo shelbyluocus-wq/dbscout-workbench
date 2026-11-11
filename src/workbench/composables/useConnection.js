@@ -45,6 +45,15 @@ const CONNECTION_TEST_TIMEOUT_MS = 4000;
 // Status writes kept until the notice watcher drains them after each task.
 const STATUS_JOURNAL_LIMIT = 20;
 
+// How a request to change the selected source ended. `superseded` means a
+// newer request took over while this one waited: the source is no longer this
+// request's to touch, so its caller must not finish the switch by itself.
+export const SOURCE_SELECTION = Object.freeze({
+  selected: "selected",
+  superseded: "superseded",
+  failed: "failed",
+});
+
 function savedConnectionKey(connection) {
   const kind = normalizeConnectionKind(connection?.kind);
   const defaultUser = CONNECTION_KINDS[kind].defaultUser;
@@ -635,9 +644,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   async function selectConnection(connectionId, { preferredDatabase = "" } = {}) {
-    if (!connectionId) return;
+    if (!connectionId) return SOURCE_SELECTION.failed;
     const connection = connections.value.find((item) => item.id === connectionId);
-    if (!connection) return;
+    if (!connection) return SOURCE_SELECTION.failed;
     const selectionToken = ++connectionSelectionToken;
     busy.value = true;
     try {
@@ -649,11 +658,11 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           const detail = runtimeConnection?.restoreError || connection.restoreError;
           prefillConnDialog(connection, detail ? `请重新输入密码以恢复连接：${detail}` : "请重新输入密码以恢复连接");
           setStatus(connDialog.error, { error: true });
-          return;
+          return SOURCE_SELECTION.failed;
         }
         connectionId = runtimeConnection.id;
       }
-      if (selectionToken !== connectionSelectionToken) return;
+      if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       selectedConnectionId.value = connectionId;
       selectedDatabase.value = "";
       databases.value = [];
@@ -670,7 +679,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           { connectionId },
         ),
       );
-      if (selectionToken !== connectionSelectionToken) return;
+      if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       databases.value = nextDatabases;
       markPerf("database.loaded", { connectionId, count: databases.value.length });
       const requestedDatabase = databases.value.find((database) => (
@@ -680,12 +689,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         String(database) === String(runtimeConnection?.database || "")
       ));
       const database = requestedDatabase || restoredDatabase || databases.value[0] || "";
-      if (database) await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
-      else selectedDatabase.value = "";
+      if (database) return await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
+      selectedDatabase.value = "";
+      return SOURCE_SELECTION.selected;
     } catch (error) {
-      if (selectionToken !== connectionSelectionToken) return;
+      if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       prefillConnDialog(connection, "连接已失效，请重新输入密码");
       statusText.value = `切换连接失败：${String(error)}`;
+      return SOURCE_SELECTION.failed;
     } finally {
       if (selectionToken === connectionSelectionToken) busy.value = false;
     }
@@ -715,9 +726,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       typeof selection === "string"
         ? selectedConnectionId.value
         : selection?.connectionId || selectedConnectionId.value;
-    if (!database) return;
+    if (!database) return SOURCE_SELECTION.failed;
     if (owningConnectionToken === null) connectionSelectionToken += 1;
-    else if (owningConnectionToken !== connectionSelectionToken) return;
+    else if (owningConnectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
     const previousSource = {
       selectedConnectionId: selectedConnectionId.value,
       selectedDatabase: selectedDatabase.value,
@@ -738,7 +749,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         });
       }
       const selectionResult = await invokeWorkbench("select_database", { connectionId, database });
-      if (!isCurrentTableLoad(token, connectionId, database)) return;
+      if (!isCurrentTableLoad(token, connectionId, database)) return SOURCE_SELECTION.superseded;
       workspace.connectionId = connectionId || "";
       workspace.database = database;
       if (Array.isArray(selectionResult?.tables)) {
@@ -753,7 +764,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           readOnly: isReadOnlyConnection(connectionId),
         });
         statusText.value = `已连接数据库：${databaseLabel(connectionId, database)}`;
+        return SOURCE_SELECTION.selected;
       }
+      return SOURCE_SELECTION.superseded;
     } catch (error) {
       if (isCurrentTableLoad(token, connectionId, database)) {
         selectedConnectionId.value = previousSource.selectedConnectionId;
@@ -763,7 +776,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         workspace.tables = previousSource.tables;
         workspace.schema = previousSource.schema;
         statusText.value = `切换数据库失败：${String(error)}`;
+        return SOURCE_SELECTION.failed;
       }
+      return SOURCE_SELECTION.superseded;
     } finally {
       if (
         token === tableLoadToken &&
