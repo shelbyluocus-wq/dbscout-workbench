@@ -16,6 +16,7 @@ const SOURCES = [
   "MySqlWorkbench.vue",
   ...readdirSync(new URL("components/", root)).filter((name) => name.startsWith("Release")).map((name) => `components/${name}`),
   "composables/useReleaseFlow.js",
+  "composables/useReleaseRealDriver.js",
   "composables/useReleaseWorkspace.js",
   "composables/useCocosBuild.js",
   "composables/useSvnWorkspace.js",
@@ -49,7 +50,19 @@ function dynamicKeys() {
   add("cocos.exit.", ["success", "invalidOptions", "buildError", "unknown"]);
   add("platformEditor.", ["sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "cocosVersion", "buildPlatform", "cocosPath"]);
   add("platformEditor.group.", ["database", "client", "build"]);
-  add("error.", ["interrupted", "buildFailed", "failed", "unknownTask", "qaFindings", "noBackup"]);
+  add("error.", [
+    "interrupted",
+    "buildFailed",
+    "failed",
+    "unknownTask",
+    "qaFindings",
+    "noBackup",
+    "missingConnection",
+    "invalidSyncDatabases",
+    "missingClientPath",
+    "missingTemplate",
+    "svnConflictsRemain",
+  ]);
   // One-click mode: its rules and choices, why it pauses, its log.
   add("autopilot.rule.", AUTOPILOT_RULES.map((rule) => rule.id));
   for (const rule of AUTOPILOT_RULES) add(`autopilot.choice.${rule.id}.`, rule.choices);

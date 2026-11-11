@@ -7,27 +7,37 @@
 //! 3.x and 2.4 take different arguments ("Publish from the Command Line");
 //! utils/cocosBuildCommand.js shows the same ones in the page.
 
+use std::collections::VecDeque;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::sync::Notify;
 
 use crate::types::AppState;
 
 pub const PROGRESS_EVENT: &str = "cocos-build-progress";
 const QA_GUARD: &str = "qa-tests/QAReleaseGuard.mjs";
 const LOG_TAIL_LINES: usize = 200;
+const PROGRESS_FLUSH_INTERVAL: Duration = Duration::from_millis(180);
+const PROGRESS_BATCH_MAX_LINES: usize = 40;
+const PROGRESS_IMPORTANT_RESERVE: usize = 16;
+const MAX_UI_LINE_CHARS: usize = 1600;
+const MAX_DISK_LINE_BYTES: usize = 65_536;
 const SUCCESS_3X: i32 = 36;
 const INVALID_OPTIONS_3X: i32 = 32;
 const BUILD_ERROR_3X: i32 = 34;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(target_os = "windows")]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -119,15 +129,28 @@ pub struct CocosBuildResult {
     pub qa: Option<CocosQaResult>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CocosBuildProgress {
-    pub job_id: String,
+pub struct CocosProgressLine {
     /// "build" or "qa".
     pub stage: String,
     /// "out", "err" or "info".
     pub stream: String,
     pub line: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CocosBuildProgress {
+    pub job_id: String,
+    /// Legacy single-line fields retained for compatibility with single-line listeners.
+    pub stage: String,
+    pub stream: String,
+    pub line: String,
+    /// Coalesced lines emitted in a single IPC tick to keep WebView reactive work bounded.
+    pub lines: Vec<CocosProgressLine>,
+    pub total_lines: u64,
+    pub dropped_lines: u64,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -534,12 +557,220 @@ impl Drop for CocosBuildGuard<'_> {
 /* ── Running ────────────────────────────────────────────────────────────── */
 
 type Emit = Arc<dyn Fn(&str, &str, String) + Send + Sync>;
+type DiskLog = Arc<Mutex<BufWriter<std::fs::File>>>;
 
-async fn forward_lines<R: AsyncRead + Unpin>(reader: R, stream: &'static str, emit: Emit, count: Arc<AtomicU64>) {
+fn clamp_ui_line(line: &str) -> String {
+    let mut chars = line.chars();
+    let head: String = chars.by_ref().take(MAX_UI_LINE_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{head} …")
+    } else {
+        head
+    }
+}
+
+fn contains_ascii_ignore_case(haystack: &str, needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+fn looks_important_line(line: &str) -> bool {
+    contains_ascii_ignore_case(line, b"error")
+        || contains_ascii_ignore_case(line, b"failed")
+        || contains_ascii_ignore_case(line, b"exception")
+        || contains_ascii_ignore_case(line, b"fatal")
+}
+
+#[derive(Default)]
+struct ProgressBatchBuffer {
+    important: Vec<(u64, CocosProgressLine)>,
+    recent: VecDeque<(u64, CocosProgressLine)>,
+    total_lines: u64,
+    pending_count: u64,
+    closed: bool,
+}
+
+impl ProgressBatchBuffer {
+    fn push(&mut self, stage: &str, stream: &str, raw_line: String) {
+        let line = clamp_ui_line(&raw_line);
+        self.total_lines += 1;
+        self.pending_count += 1;
+        let seq = self.total_lines;
+        let important = stream == "err" || stream == "info" || stage == "qa" || looks_important_line(&line);
+        let entry = CocosProgressLine { stage: stage.into(), stream: stream.into(), line };
+        if important && self.important.len() < PROGRESS_IMPORTANT_RESERVE {
+            self.important.push((seq, entry));
+            let recent_cap = PROGRESS_BATCH_MAX_LINES.saturating_sub(self.important.len());
+            while self.recent.len() > recent_cap {
+                self.recent.pop_front();
+            }
+        } else {
+            let recent_cap = PROGRESS_BATCH_MAX_LINES.saturating_sub(self.important.len()).max(1);
+            while self.recent.len() >= recent_cap {
+                self.recent.pop_front();
+            }
+            self.recent.push_back((seq, entry));
+        }
+    }
+
+    fn drain_batch(&mut self, job_id: &str) -> Option<CocosBuildProgress> {
+        if self.pending_count == 0 {
+            return None;
+        }
+        let pending = std::mem::replace(&mut self.pending_count, 0);
+        let recent_keep = PROGRESS_BATCH_MAX_LINES.saturating_sub(self.important.len());
+        while self.recent.len() > recent_keep {
+            self.recent.pop_front();
+        }
+        let mut items: Vec<(u64, CocosProgressLine)> = Vec::with_capacity(self.important.len() + self.recent.len());
+        items.append(&mut self.important);
+        items.extend(self.recent.drain(..));
+        items.sort_by_key(|(seq, _)| *seq);
+        let dropped_lines = pending.saturating_sub(items.len() as u64);
+        let lines: Vec<CocosProgressLine> = items.into_iter().map(|(_, item)| item).collect();
+        let last = lines.last().cloned().unwrap_or(CocosProgressLine {
+            stage: "build".into(),
+            stream: "out".into(),
+            line: String::new(),
+        });
+        Some(CocosBuildProgress {
+            job_id: job_id.to_string(),
+            stage: last.stage,
+            stream: last.stream,
+            line: last.line,
+            lines,
+            total_lines: self.total_lines,
+            dropped_lines,
+        })
+    }
+}
+
+struct ProgressBatcher {
+    buffer: Arc<Mutex<ProgressBatchBuffer>>,
+    notify: Arc<Notify>,
+    flusher: tokio::task::JoinHandle<()>,
+}
+
+impl ProgressBatcher {
+    fn spawn<F>(job_id: String, interval: Duration, send: F) -> Self
+    where
+        F: Fn(CocosBuildProgress) + Send + Sync + 'static,
+    {
+        let buffer = Arc::new(Mutex::new(ProgressBatchBuffer::default()));
+        let notify = Arc::new(Notify::new());
+        let task_buffer = Arc::clone(&buffer);
+        let task_notify = Arc::clone(&notify);
+        let send = Arc::new(send);
+        let flusher = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(interval) => {}
+                    _ = task_notify.notified() => {}
+                }
+                let (batch, closed) = {
+                    let mut locked = task_buffer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    (locked.drain_batch(&job_id), locked.closed)
+                };
+                if let Some(payload) = batch {
+                    send(payload);
+                }
+                if closed {
+                    break;
+                }
+            }
+        });
+        Self { buffer, notify, flusher }
+    }
+
+    fn emitter(&self) -> Emit {
+        let buffer = Arc::clone(&self.buffer);
+        Arc::new(move |stage: &str, stream: &str, line: String| {
+            let mut locked = buffer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            locked.push(stage, stream, line);
+        })
+    }
+
+    async fn finish(self) {
+        {
+            let mut locked = self.buffer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            locked.closed = true;
+        }
+        self.notify.notify_one();
+        let _ = self.flusher.await;
+    }
+}
+
+fn open_disk_log(path: Option<&Path>) -> Option<DiskLog> {
+    let target = path?;
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let file = std::fs::File::create(target).ok()?;
+    Some(Arc::new(Mutex::new(BufWriter::with_capacity(32 * 1024, file))))
+}
+
+fn write_disk_log_line(writer: Option<&DiskLog>, stage: &str, stream: &str, line: &str) {
+    let Some(writer) = writer else { return };
+    if let Ok(mut guard) = writer.lock() {
+        let slice = if line.len() > MAX_DISK_LINE_BYTES {
+            let mut end = MAX_DISK_LINE_BYTES;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            &line[..end]
+        } else {
+            line
+        };
+        let _ = writeln!(guard, "[{stage}/{stream}] {slice}");
+    }
+}
+
+fn flush_disk_log(writer: Option<&DiskLog>) {
+    let Some(writer) = writer else { return };
+    if let Ok(mut guard) = writer.lock() {
+        let _ = guard.flush();
+    }
+}
+
+fn creator_log_path_for(log_path: Option<&Path>) -> Option<PathBuf> {
+    let path = log_path?;
+    let stem = path.file_stem()?.to_string_lossy();
+    Some(path.with_file_name(format!("{stem}.creator.log")))
+}
+
+#[cfg(unix)]
+fn lower_process_group_priority(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    let _ = std::process::Command::new("renice")
+        .args(["-n", "10", "-g", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+async fn forward_lines<R: AsyncRead + Unpin>(
+    reader: R,
+    stream: &'static str,
+    emit: Emit,
+    disk_log: Option<DiskLog>,
+    count: Arc<AtomicU64>,
+) {
     let mut reader = BufReader::new(reader);
     let mut buffer = Vec::new();
     loop {
-        buffer.clear();
+        if buffer.capacity() > MAX_DISK_LINE_BYTES {
+            buffer = Vec::new();
+        } else {
+            buffer.clear();
+        }
         match reader.read_until(b'\n', &mut buffer).await {
             Ok(0) | Err(_) => break,
             Ok(_) => {
@@ -549,6 +780,7 @@ async fn forward_lines<R: AsyncRead + Unpin>(reader: R, stream: &'static str, em
                     continue;
                 }
                 count.fetch_add(1, Ordering::Relaxed);
+                write_disk_log_line(disk_log.as_ref(), "build", stream, line);
                 emit("build", stream, line.to_string());
             }
         }
@@ -601,8 +833,15 @@ pub async fn run_qa_guard(node: Option<PathBuf>, project: &Path, output: &Path, 
     let mut command = tokio::process::Command::new(node);
     command.arg(&script).arg(output).current_dir(project).stdin(Stdio::null()).kill_on_drop(true);
     #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
-    let Ok(finished) = command.output().await else {
+    command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    #[cfg(unix)]
+    command.process_group(0);
+    let Ok(child) = command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() else {
+        return result("failed", "无法运行发布前检查".into());
+    };
+    #[cfg(unix)]
+    lower_process_group_priority(child.id().unwrap_or(0));
+    let Ok(finished) = child.wait_with_output().await else {
         return result("failed", "无法运行发布前检查".into());
     };
     let stdout = crate::table_transfer::decode_console(&finished.stdout);
@@ -659,13 +898,18 @@ pub async fn run_build(
 ) -> Result<CocosBuildResult, String> {
     let guard = jobs.register(&request.job_id)?;
     check_request(&request)?;
-    let args = build_args(&request, log_path.as_deref())?;
-    if let Some(parent) = log_path.as_deref().and_then(Path::parent) {
-        let _ = std::fs::create_dir_all(parent);
-    }
+    let creator_log = creator_log_path_for(log_path.as_deref());
+    let args = build_args(&request, creator_log.as_deref().or(log_path.as_deref()))?;
+    let disk_log = open_disk_log(log_path.as_deref());
     let project = PathBuf::from(request.project_path.trim());
     let output = output_dir(&request);
-    emit("build", "info", format!("> \"{}\" {}", request.editor_path.trim(), args.iter().map(|arg| if arg.contains([' ', ';']) { format!("\"{arg}\"") } else { arg.clone() }).collect::<Vec<_>>().join(" ")));
+    let command_line = format!(
+        "> \"{}\" {}",
+        request.editor_path.trim(),
+        args.iter().map(|arg| if arg.contains([' ', ';']) { format!("\"{arg}\"") } else { arg.clone() }).collect::<Vec<_>>().join(" ")
+    );
+    write_disk_log_line(disk_log.as_ref(), "build", "info", &command_line);
+    emit("build", "info", command_line);
     let mut command = tokio::process::Command::new(request.editor_path.trim());
     command
         .args(&args)
@@ -675,23 +919,32 @@ pub async fn run_build(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(target_os = "windows")]
-    command.creation_flags(CREATE_NO_WINDOW);
+    command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     #[cfg(unix)]
     command.process_group(0);
     let started = Instant::now();
     let mut child = command.spawn().map_err(|error| format!("无法启动 Cocos Creator：{error}"))?;
-    guard.set_pid(child.id().unwrap_or(0));
+    let pid = child.id().unwrap_or(0);
+    guard.set_pid(pid);
+    #[cfg(unix)]
+    lower_process_group_priority(pid);
     let count = Arc::new(AtomicU64::new(0));
-    let stdout = child.stdout.take().map(|reader| tokio::spawn(forward_lines(reader, "out", Arc::clone(&emit), Arc::clone(&count))));
-    let stderr = child.stderr.take().map(|reader| tokio::spawn(forward_lines(reader, "err", Arc::clone(&emit), Arc::clone(&count))));
+    let stdout = child.stdout.take().map(|reader| {
+        tokio::spawn(forward_lines(reader, "out", Arc::clone(&emit), disk_log.clone(), Arc::clone(&count)))
+    });
+    let stderr = child.stderr.take().map(|reader| {
+        tokio::spawn(forward_lines(reader, "err", Arc::clone(&emit), disk_log.clone(), Arc::clone(&count)))
+    });
     let status = child.wait().await.map_err(|error| format!("等待 Cocos Creator 结束失败：{error}"))?;
     for reader in [stdout, stderr].into_iter().flatten() {
         let _ = reader.await;
     }
-    // Some editor builds print nothing on the console; the log file then tells what happened.
+    // Some editor builds print nothing on the console; the Creator logDest file then tells what happened.
     if count.load(Ordering::Relaxed) == 0 {
-        for line in log_path.as_deref().map(log_tail).unwrap_or_default() {
+        let fallback_log = creator_log.as_deref().filter(|path| path.is_file()).or(log_path.as_deref());
+        for line in fallback_log.map(log_tail).unwrap_or_default() {
             count.fetch_add(1, Ordering::Relaxed);
+            write_disk_log_line(disk_log.as_ref(), "build", "out", &line);
             emit("build", "out", line);
         }
     }
@@ -699,10 +952,27 @@ pub async fn run_build(
     let cancelled = guard.cancelled();
     let outcome = if cancelled { "cancelled" } else { describe_exit(request.family, exit_code) };
     let qa = if outcome == "success" && request.qa_guard {
-        Some(run_qa_guard(node, &project, &output, &emit).await)
+        let qa_emit: Emit = {
+            let emit = Arc::clone(&emit);
+            let disk_log = disk_log.clone();
+            Arc::new(move |stage: &str, stream: &str, line: String| {
+                write_disk_log_line(disk_log.as_ref(), stage, stream, &line);
+                emit(stage, stream, line);
+            })
+        };
+        Some(run_qa_guard(node, &project, &output, &qa_emit).await)
     } else {
         None
     };
+    flush_disk_log(disk_log.as_ref());
+    drop(disk_log);
+    if let (Some(creator_file), Some(main_file)) = (creator_log.as_deref(), log_path.as_deref()) {
+        if creator_file.is_file() && main_file.metadata().map(|meta| meta.len() < 256).unwrap_or(true) {
+            if let (Ok(extra), Ok(mut target)) = (std::fs::read(creator_file), std::fs::OpenOptions::new().create(true).append(true).open(main_file)) {
+                let _ = target.write_all(&extra);
+            }
+        }
+    }
     Ok(CocosBuildResult {
         exit_code,
         outcome: outcome.into(),
@@ -741,10 +1011,13 @@ pub async fn cocos_build_start(app: AppHandle, state: State<'_, AppState>, reque
         .map(|directory| directory.join("cocos-build").join(format!("{}.log", request.job_id.trim().replace(['/', '\\', ':'], "_"))));
     let job_id = request.job_id.trim().to_string();
     let handle = app.clone();
-    let emit: Emit = Arc::new(move |stage: &str, stream: &str, line: String| {
-        let _ = handle.emit(PROGRESS_EVENT, CocosBuildProgress { job_id: job_id.clone(), stage: stage.into(), stream: stream.into(), line });
+    let batcher = ProgressBatcher::spawn(job_id, PROGRESS_FLUSH_INTERVAL, move |payload| {
+        let _ = handle.emit(PROGRESS_EVENT, payload);
     });
-    run_build(&state.cocos_build, request, log_path, program_on_path("node"), emit).await
+    let emit = batcher.emitter();
+    let result = run_build(&state.cocos_build, request, log_path, program_on_path("node"), emit).await;
+    batcher.finish().await;
+    result
 }
 
 #[tauri::command]
@@ -950,13 +1223,17 @@ mod tests {
         build.editor_path = editor.to_string_lossy().into_owned();
         build.project_path = project.to_string_lossy().into_owned();
         let jobs = CocosBuildJobs::default();
-        let result = run_build(&jobs, build.clone(), None, None, Arc::clone(&emit)).await.unwrap();
+        let log_file = temp.path().join("logs/build-1.log");
+        let result = run_build(&jobs, build.clone(), Some(log_file.clone()), None, Arc::clone(&emit)).await.unwrap();
         assert_eq!((result.exit_code, result.outcome.as_str(), result.output_exists), (Some(36), "success", true));
         let lines = lines.lock().unwrap().clone();
         assert!(lines[0].starts_with("build/info: > "), "{lines:?}");
         assert!(lines.contains(&format!("build/out: Start building {}", project.to_string_lossy())));
         assert!(lines.contains(&"build/err: warning: texture".to_string()));
         assert_eq!(result.lines, 3);
+        let written_log = std::fs::read_to_string(&log_file).unwrap();
+        assert!(written_log.contains("[build/out] [Build] Compile scripts done"), "{written_log}");
+        assert!(written_log.contains("[build/err] warning: texture"), "{written_log}");
 
         std::fs::write(&editor, "#!/bin/sh\necho '[Error] Build failed'\nexit 34\n").unwrap();
         let failed = run_build(&jobs, build.clone(), None, None, Arc::clone(&emit)).await.unwrap();
@@ -964,5 +1241,35 @@ mod tests {
 
         build.family = 2;
         assert!(run_build(&jobs, build, None, None, emit).await.unwrap_err().contains("3.8.8"));
+    }
+
+    #[tokio::test]
+    async fn progress_batcher_coalesces_bursts_while_keeping_errors_and_order() {
+        let batches: Arc<Mutex<Vec<CocosBuildProgress>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&batches);
+        let batcher = ProgressBatcher::spawn("job-burst".into(), Duration::from_secs(60), move |payload| {
+            sink.lock().unwrap().push(payload);
+        });
+        let emit = batcher.emitter();
+        emit("build", "info", "> CocosCreator --build".into());
+        for index in 0..200 {
+            if index == 55 {
+                emit("build", "err", "[Error] Missing sprite frame".into());
+            } else {
+                emit("build", "out", format!("[Build] asset-{index}"));
+            }
+        }
+        emit("build", "out", "x".repeat(MAX_UI_LINE_CHARS + 120));
+        batcher.finish().await;
+
+        let captured = batches.lock().unwrap();
+        assert_eq!(captured.len(), 1, "burst should flush as a single IPC batch on finish");
+        let payload = &captured[0];
+        assert_eq!(payload.total_lines, 202);
+        assert!(payload.lines.len() <= PROGRESS_BATCH_MAX_LINES);
+        assert_eq!(payload.dropped_lines, 202 - payload.lines.len() as u64);
+        assert_eq!(payload.lines[0].stream, "info");
+        assert!(payload.lines.iter().any(|entry| entry.stream == "err" && entry.line.contains("Missing sprite frame")));
+        assert!(payload.lines.last().unwrap().line.ends_with('…'));
     }
 }

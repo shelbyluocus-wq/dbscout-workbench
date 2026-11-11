@@ -141,6 +141,7 @@ export function connectionHistoryKey(connection) {
 export function useDatabaseSync({
   connections = [],
   databases = [],
+  databasesByConnection = null,
   invokeWorkbench,
   listen = null,
   storage = globalThis.localStorage,
@@ -169,7 +170,12 @@ export function useDatabaseSync({
   let tableLoadToken = 0;
 
   const connectionList = computed(() => asArrayRef(connections));
-  const databaseList = computed(() => asArrayRef(databases).map((database) => String(database ?? "")).filter(Boolean));
+  const databaseList = computed(() => {
+    const map = databasesByConnection?.value || databasesByConnection;
+    const scoped = dialog.connectionId && Array.isArray(map?.[dialog.connectionId]) ? map[dialog.connectionId] : null;
+    const source = scoped?.length ? scoped : asArrayRef(databases);
+    return source.map((database) => String(database ?? "")).filter(Boolean);
+  });
   const currentConnection = computed(() => connectionList.value.find((connection) => String(connection.id) === dialog.connectionId) || null);
   const currentConnectionReadOnly = computed(() => isReadOnlyConnection(currentConnection.value));
   const sourceDatabaseOptions = computed(() => cleanTableNames([dialog.sourceDatabase, ...databaseList.value]));
@@ -287,13 +293,20 @@ export function useDatabaseSync({
     tableLoadToken += 1;
     dialog.open = true;
     dialog.connectionId = String(target.connectionId || target.connection_id || "");
-    dialog.sourceDatabase = String(target.database || "");
+    dialog.sourceDatabase = String(target.database || target.sourceDatabase || "");
     dialog.targetDatabase = "";
     dialog.selectedExclusionTable = "";
     dialog.status = "idle";
     resetRunState();
-    setTargetDefault();
     loadExclusionHistory();
+    if (Array.isArray(target.excludedTables)) {
+      dialog.excludedTables = cleanTableNames(target.excludedTables);
+    }
+    if (target.targetDatabase) {
+      dialog.targetDatabase = coerceTargetDatabase(target.targetDatabase);
+    } else {
+      setTargetDefault();
+    }
     await loadSourceTables();
   }
 

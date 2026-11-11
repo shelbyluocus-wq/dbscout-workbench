@@ -74,6 +74,26 @@ export function buildLineTone(line) {
   return "";
 }
 
+export function progressEntriesOf(payload) {
+  if (!payload) return [];
+  const entries = [];
+  const dropped = Number(payload.droppedLines) || 0;
+  if (dropped > 0) {
+    entries.push({ text: t("releaseFlow.build.logSkipped", { count: dropped }), tone: "muted" });
+  }
+  if (Array.isArray(payload.lines) && payload.lines.length) {
+    for (const item of payload.lines) {
+      if (!item || item.line == null) continue;
+      entries.push({ text: String(item.line), tone: buildLineTone(item) });
+    }
+    return entries;
+  }
+  if (payload.line != null) {
+    entries.push({ text: String(payload.line), tone: buildLineTone(payload) });
+  }
+  return entries;
+}
+
 /**
  * The build step of an update as a real build: the same checks and backend
  * as the client build page, with the editor's output as the step's log.
@@ -94,7 +114,11 @@ export function createReleaseBuildDriver({ backend = createCocosBackend(), simul
         engineVersion: project?.engine?.version,
         simulate: simulateFailure(context) ? "failure" : "",
       });
-      const result = await backend.build(request, (line) => io.log(line.line, buildLineTone(line)), io.signal);
+      const result = await backend.build(request, (payload) => {
+        const entries = progressEntriesOf(payload);
+        if (io.logs) io.logs(entries);
+        else for (const entry of entries) io.log(entry.text, entry.tone);
+      }, io.signal);
       const outcome = { ...result, engineVersion: project?.engine?.version || "", platform: options.platform, qaChecked: result?.qa?.checked || 0 };
       if (result?.outcome === "cancelled") {
         const error = new Error("cancelled");
@@ -141,7 +165,7 @@ export function composeDrivers(...drivers) {
   const fallback = drivers.at(-1);
   return {
     run(taskId, context, io) {
-      const driver = drivers.find((candidate) => candidate.handles?.(taskId)) || fallback;
+      const driver = drivers.find((candidate) => candidate.handles?.(taskId, context)) || fallback;
       return driver.run(taskId, context, io);
     },
   };
@@ -229,6 +253,12 @@ export function useCocosBuildTool({
     if (state.lines.length > MAX_LINES) state.lines.splice(0, state.lines.length - MAX_LINES);
   }
 
+  function pushEntries(entries) {
+    if (!entries.length) return;
+    state.lines.push(...entries);
+    if (state.lines.length > MAX_LINES) state.lines.splice(0, state.lines.length - MAX_LINES);
+  }
+
   /** Run the build; `simulate` only reaches the browser preview's mock. */
   async function build({ simulate = "" } = {}) {
     if (running.value || blocked.value) return null;
@@ -236,7 +266,7 @@ export function useCocosBuildTool({
     Object.assign(state, { status: "running", lines: [], result: null, error: "", startedAt: now(), finishedAt: 0 });
     const request = buildRequest(options.value, { jobId: createBuildJobId("tool"), engineVersion: engineVersion.value, simulate });
     try {
-      const result = await backend.build(request, (line) => pushLine(line.line, buildLineTone(line)), controller.signal);
+      const result = await backend.build(request, (payload) => pushEntries(progressEntriesOf(payload)), controller.signal);
       state.result = result;
       state.status = result?.outcome === "cancelled" ? "cancelled" : result?.outcome === "success" && result.qa?.status !== "findings" ? "done" : "failed";
     } catch (error) {

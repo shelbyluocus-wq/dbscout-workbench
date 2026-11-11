@@ -42,8 +42,6 @@ function set(ruleId, value) {
         </button>
       </div>
     </div>
-    <p class="wb-rf-hint">{{ t('releaseFlow.autopilot.description') }}</p>
-
     <ul v-if="!open" class="wb-rf-list wb-rf-auto-summary">
       <li v-for="line in summary" :key="line">{{ line }}</li>
     </ul>

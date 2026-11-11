@@ -99,7 +99,6 @@ function outcomeText() {
       {{ t('releaseFlow.build.custom') }}
     </button>
   </div>
-  <p v-if="targetId !== 'custom'" class="wb-rf-hint">{{ t('releaseFlow.build.sharedSettings') }}</p>
 
   <section class="wb-rf-card" aria-labelledby="wb-rf-build-settings">
     <div class="wb-rf-group-head"><h4 id="wb-rf-build-settings">{{ t('releaseFlow.build.settings') }}</h4></div>
@@ -118,7 +117,7 @@ function outcomeText() {
         </button>
       </div>
     </div>
-    <p v-if="!running && !result && !state.error" class="wb-rf-hint">{{ t(preview ? 'releaseFlow.build.previewHint' : 'releaseFlow.build.realHint') }}</p>
+    <p v-if="preview && !running && !result && !state.error" class="wb-rf-hint">{{ t('releaseFlow.build.previewHint') }}</p>
     <div v-if="running" class="wb-rf-task-running" role="status" aria-live="polite">
       <div class="wb-rf-task-line"><strong>{{ t('releaseFlow.build.running') }}</strong></div>
       <div class="wb-rf-progress is-indeterminate"><span /></div>

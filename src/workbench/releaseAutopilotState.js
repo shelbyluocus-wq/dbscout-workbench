@@ -35,7 +35,17 @@ export const AUTOPILOT_LOG_KINDS = Object.freeze([
 const MAX_LOG = 40;
 
 // Failures that running the step again cannot fix: a person has to look.
-export const AUTOPILOT_NO_RETRY = Object.freeze(new Set(["buildPrecheck", "qaFindings", "noBackup", "unknownTask"]));
+export const AUTOPILOT_NO_RETRY = Object.freeze(new Set([
+  "buildPrecheck",
+  "qaFindings",
+  "noBackup",
+  "unknownTask",
+  "missingConnection",
+  "invalidSyncDatabases",
+  "missingClientPath",
+  "missingTemplate",
+  "svnConflictsRemain",
+]));
 
 export function defaultAutopilotRules() {
   const rules = Object.fromEntries(AUTOPILOT_RULES.map((rule) => [rule.id, rule.choices[0]]));

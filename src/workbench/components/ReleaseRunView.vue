@@ -3,7 +3,7 @@
 // one next action. Steps that are simulated say so in their confirmations;
 // the build step runs Cocos Creator for real. In one-click mode the bar above
 // the page follows the run and the footer only offers to pause it.
-import { computed, inject } from "vue";
+import { computed, inject, provide } from "vue";
 import { ArrowLeft, ArrowRight, LoaderCircle, Zap } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useConfirm } from "../composables/useConfirm.js";
@@ -66,7 +66,8 @@ const pageProps = computed(() => {
 });
 const busy = computed(() => props.flow.busy.value);
 const platform = computed(() => props.flow.platform.value);
-const eyebrow = computed(() => [platform.value.name, formatReleaseDate(state.brief.date)].join(" · "));
+const runContext = computed(() => [platform.value.name, formatReleaseDate(state.brief.date)].join(" · "));
+provide("releaseRunContext", runContext);
 
 /* ── Footer: the one next action of the current page ── */
 function blockerText(taskId, blocker) {
@@ -179,7 +180,7 @@ const footer = computed(() => {
 });
 
 function withConfirm(taskId, options) {
-  const note = REAL_TASKS.has(taskId) ? undefined : t("releaseFlow.demo.confirmNote");
+  const note = (props.flow.isReal?.value || REAL_TASKS.has(taskId)) ? undefined : t("releaseFlow.demo.confirmNote");
   return confirm({ note, cancelText: t("releaseFlow.cancel"), ...options });
 }
 
@@ -292,7 +293,6 @@ const previousPage = computed(() => adjacentPage(state.page, state.brief, -1));
   <div class="wb-rf-run">
     <div class="wb-rf-page" data-release-scroll :data-release-current="state.page">
       <div class="wb-rf-page-inner" :class="{ 'is-wide': WIDE_PAGES.has(state.page) }">
-        <p class="wb-rf-eyebrow">{{ eyebrow }}</p>
         <ReleaseAutopilotBar v-if="autopilot.status.value !== 'off'" :flow="flow" :workspace="workspace" />
         <component
           :is="pageComponent"

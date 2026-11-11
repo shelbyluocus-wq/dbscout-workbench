@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { composeDrivers } from "./composables/useCocosBuild.js";
+import { createReleaseRealDriver } from "./composables/useReleaseRealDriver.js";
 import { useReleaseWorkspace } from "./composables/useReleaseWorkspace.js";
 import { RELEASE_FLOW_SCHEMA, RELEASE_FLOW_STORAGE_KEY } from "./releaseFlowState.js";
 import { RELEASE_HISTORY_STORAGE_KEY, RELEASE_WORKSPACE_SCHEMA, RELEASE_WORKSPACE_STORAGE_KEY } from "./releaseWorkspaceState.js";
@@ -683,4 +685,98 @@ test("one-click mode goes on where it was when the workspace opens again", async
   assert.equal(again.autopilot.status.value, "running");
   await until(() => again.autopilot.status.value === "done", "finished after reopening");
   assert.equal(again.finished.value, true);
+});
+
+test("real mode executes database and client steps through backend commands and persists demo: false", async (t) => {
+  const storage = memoryStorage();
+  const invoked = [];
+  const flags = { "hero-1062": 0, "hero-1063": 1 };
+  const invoke = async (cmd, payload) => {
+    invoked.push([cmd, payload]);
+    if (cmd === "preview_database_sync") {
+      return {
+        tablesToCopy: ["heroprop", "buildopenplatprop"],
+        excludedTables: payload?.request?.excludedTables || [],
+        estimatedRows: 120,
+        warnings: [],
+      };
+    }
+    if (cmd === "list_tables") return [{ name: "heroprop" }, { name: "buildopenplatprop" }, { name: "goodsprop" }];
+    if (cmd === "release_read_plan_flags") return { flags: { ...flags }, missingTables: [] };
+    if (cmd === "release_client_sync_preview") {
+      return { copy: [{ path: "assets/Main.ts", kind: "modified" }], remove: [], kept: [], excluded: [], truncated: false };
+    }
+    if (cmd === "sync_database_overwrite") {
+      return {
+        status: "completed",
+        copiedTables: ["heroprop", "buildopenplatprop"],
+        droppedTables: [],
+        copiedRows: 120,
+        backupSnapshotPath: "/tmp/tw_snap.sql",
+      };
+    }
+    if (cmd === "list_snapshots") return [{ path: "/tmp/tw_snap.sql", ts: START.getTime(), tableCount: 3 }];
+    if (cmd === "restore_snapshot") return { ok: true };
+    if (cmd === "release_execute_plan_writes") {
+      flags["hero-1062"] = 1;
+      return { executedSql: ["UPDATE `heroprop` SET `isopen` = 1 WHERE `heroid` IN (1062)"], affectedRows: 1, statements: 1 };
+    }
+    if (cmd === "svn_wc_update") return { revision: 1208, updated: 1, lines: ["U    assets/Main.ts"], conflicts: [] };
+    if (cmd === "svn_wc_status") return [{ path: "assets/props/heroprop.json", item: "modified", props: "none", treeConflict: false }];
+    if (cmd === "release_client_sync_run") {
+      return { added: 1, modified: 1, deleted: 0, excluded: 1, warnings: [] };
+    }
+    if (cmd === "table_transfer_run") return { outputDir: "D:\\tools\\2026-10-24 09-30-00", updatedDirs: [], copiedFiles: 18 };
+    throw new Error(`unexpected command: ${cmd}`);
+  };
+  const listen = async () => () => {};
+  const connections = [
+    { id: "mysql-jswz", name: "JSWZ", kind: "mysql", connected: true, readOnly: false },
+  ];
+  const databasesByConnection = {
+    "mysql-jswz": ["newsg_4cfg", "newsg_tw_cfg"],
+  };
+  const driver = composeDrivers(
+    createReleaseRealDriver({ invoke, listen }),
+    createReleaseDemoDriver(),
+  );
+  const workspace = createWorkspace(t, {
+    storage,
+    realMode: true,
+    connections,
+    databasesByConnection,
+    invoke,
+    driver,
+  });
+  const flow = newUpdate(workspace, "tw");
+  assert.equal(flow.state.demo, false);
+  assert.equal(flow.isReal.value, true);
+  assert.equal(flow.resolvedConnection.value?.id, "mysql-jswz");
+  assert.equal(invoked.length, 0, "brief page defers live database/filesystem scans");
+
+  flow.setPrepared(true);
+  flow.start();
+  await until(() => invoked.some(([cmd]) => cmd === "release_read_plan_flags"), "live previews loaded on database page");
+
+  await flow.runTask("db.sync");
+  assert.equal(flow.state.tasks["db.sync"].result.snapshot, "/tmp/tw_snap.sql");
+  assert.equal(flow.backup.value?.simulated, false);
+
+  workspace.setPlanNote("hero-1062", "tw", "已開放");
+  await settle();
+  await flow.runTask("db.plans");
+  assert.equal(flow.state.tasks["db.plans"].status, "done");
+  assert.ok(invoked.some(([cmd]) => cmd === "release_execute_plan_writes"));
+
+  await runAll(flow, ["client.svn", "client.sync", "client.transfer", "client.diff"]);
+  const transferCall = invoked.find(([cmd]) => cmd === "table_transfer_run");
+  assert.equal(transferCall?.[1]?.request?.skipSvnUpdate, true);
+  assert.equal(flow.state.tasks["client.diff"].result.files, 1);
+
+  assert.equal(await flow.runTask("db.restore"), true);
+  assert.ok(invoked.some(([cmd, payload]) => cmd === "restore_snapshot" && payload?.request?.snapshotPath === "/tmp/tw_snap.sql"));
+
+  workspace.dispose();
+  const saved = JSON.parse(storage.data.get(RELEASE_WORKSPACE_STORAGE_KEY));
+  assert.equal(saved.runs[0].demo, false);
 });

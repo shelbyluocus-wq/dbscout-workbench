@@ -4,8 +4,8 @@
 // template made or changed here shows there, and the other way round. The
 // conversion's output is always copied into the platform client; choosing a
 // template here remembers it for the platform.
-import { computed, nextTick, ref } from "vue";
-import { Check, FileSpreadsheet, FileText, FolderOpen, FolderSearch, Plus } from "lucide-vue-next";
+import { computed, inject, nextTick, ref } from "vue";
+import { ArrowRight, Check, FileSpreadsheet, FileText, FolderOpen, FolderSearch, Plus } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import ReleasePageHead from "./ReleasePageHead.vue";
@@ -18,6 +18,7 @@ const props = defineProps({
 });
 defineEmits(["run", "rerun", "navigate"]);
 
+const tools = inject("releaseWorkbenchTools", null);
 const platform = computed(() => props.flow.platform.value);
 const templates = computed(() => props.flow.templates.value);
 const selected = computed(() => props.flow.selectedTemplate.value);
@@ -35,7 +36,11 @@ function fileName(path) {
   return String(path || "").split(/[\\/]/).pop();
 }
 
-const assetsFolder = computed(() => `${platform.value.targetClient.replace(/[\\/]+$/, "")}\\assets`);
+const assetsFolder = computed(() => {
+  const root = String(platform.value.targetClient || "").replace(/[\\/]+$/, "");
+  const sep = root.includes("\\") ? "\\" : "/";
+  return root ? `${root}${sep}assets` : "assets";
+});
 
 const STAGES = Object.freeze([
   { id: "script", until: 0.7 },
@@ -86,6 +91,9 @@ function setStrategy(value) {
       <h4 id="wb-rf-transfer-templates">{{ t('releaseFlow.transfer.templates') }}</h4>
       <span class="wb-rf-count">{{ t('releaseFlow.transfer.templatesHint') }}</span>
       <div class="wb-rf-group-tools">
+        <button v-if="tools" type="button" class="wb-rf-link" data-release-open-transfer-tool :disabled="busy" @click="tools.openTableTransfer()">
+          {{ t('releaseFlow.transfer.openTransferTool') }}<ArrowRight :size="13" aria-hidden="true" />
+        </button>
         <button v-if="transfer" type="button" class="wb-rf-btn is-small" data-release-new-template :disabled="busy || transferBusy" @click="startCreate">
           <Plus :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.new') }}
         </button>
@@ -151,17 +159,6 @@ function setStrategy(value) {
         </dd>
       </div>
       <div class="wb-rf-fact">
-        <dt>{{ t('releaseFlow.transfer.projectRoot') }}</dt>
-        <dd>
-          <span class="wb-rf-code">{{ selected.projectRoot || '—' }}</span>
-          <span v-if="transfer" class="wb-rf-fact-actions">
-            <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickProjectDir(selected.id)">
-              <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickProject') }}
-            </button>
-          </span>
-        </dd>
-      </div>
-      <div class="wb-rf-fact">
         <dt>{{ t('releaseFlow.transfer.strategy') }}</dt>
         <dd>
           <div class="wb-rf-segmented" role="radiogroup" :aria-label="t('releaseFlow.transfer.strategy')">
@@ -177,28 +174,43 @@ function setStrategy(value) {
           </div>
         </dd>
       </div>
-      <div class="wb-rf-fact">
-        <dt>{{ t('releaseFlow.transfer.target') }}</dt>
-        <dd><span class="wb-rf-code">{{ assetsFolder }}</span></dd>
-      </div>
-      <div v-if="transfer" class="wb-rf-fact">
-        <dt><label for="wb-release-transfer-retention">{{ t('tableTransfer.retention') }}</label></dt>
-        <dd>
-          <input
-            id="wb-release-transfer-retention"
-            type="number"
-            min="0"
-            max="3650"
-            step="1"
-            :value="selected.retentionDays ?? 7"
-            :disabled="busy || transferBusy"
-            @change="transfer.updateTemplate(selected.id, { retentionDays: $event.target.value }); $event.target.value = selected.retentionDays"
-          />
-          <span class="wb-rf-hint">{{ t('tableTransfer.retentionHint') }}</span>
-        </dd>
-      </div>
     </dl>
-    <p class="wb-rf-hint">{{ t('releaseFlow.transfer.shared') }}</p>
+    <details class="wb-rf-fold">
+      <summary>{{ t('releaseFlow.transfer.moreSettings') }}</summary>
+      <dl class="wb-rf-fold-body wb-rf-facts is-rows">
+        <div class="wb-rf-fact">
+          <dt>{{ t('releaseFlow.transfer.target') }}</dt>
+          <dd><span class="wb-rf-code">{{ assetsFolder }}</span></dd>
+        </div>
+        <div class="wb-rf-fact">
+          <dt>{{ t('releaseFlow.transfer.projectRoot') }}</dt>
+          <dd>
+            <span class="wb-rf-code">{{ selected.projectRoot || '—' }}</span>
+            <span v-if="transfer" class="wb-rf-fact-actions">
+              <button type="button" class="wb-rf-btn is-small is-quiet" :disabled="busy || transferBusy" @click="transfer.pickProjectDir(selected.id)">
+                <FolderOpen :size="13" aria-hidden="true" />{{ t('releaseFlow.transfer.pickProject') }}
+              </button>
+            </span>
+          </dd>
+        </div>
+        <div v-if="transfer" class="wb-rf-fact">
+          <dt><label for="wb-release-transfer-retention">{{ t('tableTransfer.retention') }}</label></dt>
+          <dd>
+            <input
+              id="wb-release-transfer-retention"
+              type="number"
+              min="0"
+              max="3650"
+              step="1"
+              :value="selected.retentionDays ?? 7"
+              :disabled="busy || transferBusy"
+              @change="transfer.updateTemplate(selected.id, { retentionDays: $event.target.value }); $event.target.value = selected.retentionDays"
+            />
+            <span class="wb-rf-hint">{{ t('tableTransfer.retentionHint') }}</span>
+          </dd>
+        </div>
+      </dl>
+    </details>
   </section>
 
   <ol class="wb-rf-list wb-rf-stages" :aria-label="t('releaseFlow.transfer.stages')">
@@ -237,8 +249,8 @@ function setStrategy(value) {
 }
 
 .wb-rf-template[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--wb-accent) 65%, transparent);
-  box-shadow: 0 0 0 3px var(--wb-accent-soft);
+  border-color: var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-accent-soft) 50%, var(--wb-table-surface));
 }
 
 .wb-rf-template-name {

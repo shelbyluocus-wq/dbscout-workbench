@@ -553,9 +553,17 @@ export function useBackupCenter(options = {}) {
 
   let stopListeners = null;
 
-  async function open() {
-    // Always land on the audit log tab when opening from the sidebar entry.
-    dialog.tab = "audit";
+  async function open({ tab = "audit", connectionId, database } = {}) {
+    // Default to the audit log tab when opening from the sidebar entry; callers
+    // such as the release database page can land directly on snapshots.
+    dialog.tab = ["audit", "snapshots", "settings"].includes(tab) ? tab : "audit";
+    if (connectionId !== undefined || database !== undefined) {
+      setFilters({
+        connectionId: connectionId ?? filters.connectionId,
+        database: database ?? filters.database,
+        tableName: "",
+      });
+    }
     dialog.open = true;
     await Promise.all([loadConfig(), loadFilterOptions(), loadAuditLogs(), loadSnapshots()]);
     if (!stopListeners) {

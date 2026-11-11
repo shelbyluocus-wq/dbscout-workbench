@@ -1028,6 +1028,7 @@ pub struct AppState {
     pub perf: crate::perf::PerformanceRecorder,
     pub table_transfer: crate::table_transfer::TableTransferJobs,
     pub cocos_build: crate::cocos_build::CocosBuildJobs,
+    pub release_client_sync: crate::release_flow::ReleaseClientSyncJobs,
     pub config_relations: crate::config_relations::engine::ConfigRelationsState,
 }
 
@@ -1593,6 +1594,7 @@ impl AppState {
             perf: crate::perf::PerformanceRecorder::default(),
             table_transfer: crate::table_transfer::TableTransferJobs::default(),
             cocos_build: crate::cocos_build::CocosBuildJobs::default(),
+            release_client_sync: crate::release_flow::ReleaseClientSyncJobs::default(),
             config_relations: crate::config_relations::engine::ConfigRelationsState::default(),
         }
     }
@@ -1615,6 +1617,8 @@ pub struct TableTransferRunRequest {
     pub script_path: String,
     pub project_root: String,
     pub conflict_strategy: Option<String>,
+    #[serde(default)]
+    pub skip_svn_update: bool,
 }
 
 /// 一键转表进度事件（table-transfer-progress）。`stage` 取值：

@@ -196,14 +196,6 @@
   min-height: 0;
 }
 
-.wb-rf-eyebrow {
-  margin: 0 0 -20px;
-  color: var(--wb-quiet-text);
-  font-size: var(--wb-fs-body);
-  font-weight: 550;
-  letter-spacing: 0.02em;
-}
-
 .wb-rf-page {
   min-height: 0;
   padding: 32px var(--wb-rf-page-x) 40px;
@@ -543,8 +535,8 @@
 }
 
 .wb-rf-route-node.is-target {
-  border-color: color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
-  box-shadow: 0 0 0 3px var(--wb-accent-soft);
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
+  background: color-mix(in srgb, var(--wb-accent-soft) 40%, var(--wb-table-surface));
 }
 
 .wb-rf-route-node > span {
@@ -896,6 +888,39 @@
 
 .wb-rf-log-toggle[aria-expanded="true"] svg {
   transform: rotate(180deg);
+}
+
+/* Progressive disclosure (<details class="wb-rf-fold">) -------------------- */
+.wb-rf-fold {
+  min-width: 0;
+}
+
+.wb-rf-fold > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+  font-weight: 550;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-rf-fold > summary:hover {
+  color: var(--wb-accent-strong);
+}
+
+.wb-rf-fold[open] > summary {
+  color: var(--wb-text);
+}
+
+.wb-rf-fold-body {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--wb-line);
 }
 
 @media (prefers-reduced-motion: reduce) {

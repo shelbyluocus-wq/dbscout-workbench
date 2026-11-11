@@ -26,6 +26,7 @@ mod natural_sort;
 mod path_reveal;
 mod perf;
 mod perf_fixture;
+mod release_flow;
 mod release_paths;
 mod replace;
 pub mod runtime_resources;
@@ -311,12 +312,18 @@ pub fn run() {
             commands::set_snapshot_enabled,
             path_reveal::reveal_local_path,
             release_paths::release_pick_exclusion,
+            release_flow::release_client_sync_preview,
+            release_flow::release_client_sync_run,
+            release_flow::release_client_sync_cancel,
+            release_flow::release_read_plan_flags,
+            release_flow::release_execute_plan_writes,
             svn_workspace::svn_wc_info,
             svn_workspace::svn_wc_status,
             svn_workspace::svn_wc_file_diff,
             svn_workspace::svn_wc_commit,
             svn_workspace::svn_wc_revert,
             svn_workspace::svn_wc_resolve,
+            svn_workspace::svn_wc_update,
             svn_workspace::svn_wc_log,
             svn_workspace::svn_wc_pick_folder,
             cocos_build::cocos_inspect_project,

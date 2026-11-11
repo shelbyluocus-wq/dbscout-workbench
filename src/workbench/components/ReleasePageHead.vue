@@ -1,7 +1,7 @@
 <script setup>
 // Heading of a release workspace page: its title and one short line. The
 // title takes focus when the page opens, so screen readers announce it.
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import { t } from "../i18n/index.js";
 import { pageTitle } from "../utils/releaseFlowFormat.js";
 
@@ -10,6 +10,7 @@ const props = defineProps({
   description: { type: String, default: "" },
 });
 
+const runContext = inject("releaseRunContext", null);
 const descriptionText = computed(() => props.description
   || t(`releaseFlow.page.${props.pageId}.description`));
 </script>
@@ -18,6 +19,7 @@ const descriptionText = computed(() => props.description
   <header class="wb-rf-page-head">
     <div class="wb-rf-page-title">
       <h3 tabindex="-1">{{ pageTitle(pageId) }}</h3>
+      <span v-if="runContext?.value" class="wb-rf-chip is-quiet">{{ runContext.value }}</span>
       <slot name="tag" />
     </div>
     <p>{{ descriptionText }}</p>
@@ -27,7 +29,8 @@ const descriptionText = computed(() => props.description
 <style scoped>
 .wb-rf-page-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
 }
 </style>

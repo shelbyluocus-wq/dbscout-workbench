@@ -171,51 +171,6 @@ function problemText(problem) {
           @focusout="setPlatform(platformDraft)"
         />
       </div>
-      <label class="wb-rf-field is-wide">
-        {{ t('releaseFlow.build.config') }}
-        <span class="wb-rf-path-field">
-          <input
-            class="wb-rf-code"
-            :value="target.buildConfig"
-            :placeholder="t('releaseFlow.build.configPlaceholder')"
-            :disabled="disabled"
-            spellcheck="false"
-            @change="field('buildConfig', $event.target.value)"
-          />
-          <button type="button" class="wb-rf-btn" :disabled="disabled" @click="pick('config')">
-            <FileJson :size="14" aria-hidden="true" />{{ t('releaseFlow.build.choose') }}
-          </button>
-        </span>
-      </label>
-      <div v-if="state.project?.buildConfigs?.length" class="wb-rf-field is-wide">
-        {{ t('releaseFlow.build.foundConfigs') }}
-        <div class="wb-rf-chips">
-          <button
-            v-for="config in state.project.buildConfigs"
-            :key="config"
-            type="button"
-            class="wb-rf-chip"
-            :class="{ 'is-accent': target.buildConfig === config }"
-            :disabled="disabled"
-            @click="field('buildConfig', config)"
-          >{{ config }}</button>
-        </div>
-      </div>
-      <label v-if="family >= 3" class="wb-rf-field">
-        {{ t('releaseFlow.build.outputName') }}
-        <input class="wb-rf-code" :value="target.buildOutputName" :placeholder="options.platform" :disabled="disabled" spellcheck="false" @change="field('buildOutputName', $event.target.value)" />
-      </label>
-      <div class="wb-rf-field wb-rf-build-flags">
-        <label v-if="!options.configPath" class="wb-rf-check">
-          <input type="checkbox" :checked="target.buildDebug" :disabled="disabled" @change="field('buildDebug', $event.target.checked)" />{{ t('releaseFlow.build.debug') }}
-        </label>
-        <label v-if="!options.configPath" class="wb-rf-check">
-          <input type="checkbox" :checked="target.buildMd5Cache" :disabled="disabled" @change="field('buildMd5Cache', $event.target.checked)" />{{ t('releaseFlow.build.md5Cache') }}
-        </label>
-        <label class="wb-rf-check" :title="state.project?.qaGuard ? '' : t('releaseFlow.build.noGuard')">
-          <input type="checkbox" :checked="target.buildQaGuard" :disabled="disabled || !state.project?.qaGuard" @change="field('buildQaGuard', $event.target.checked)" />{{ t('releaseFlow.build.qaGuard') }}
-        </label>
-      </div>
     </div>
 
     <p class="wb-rf-build-output">
@@ -231,17 +186,67 @@ function problemText(problem) {
         <span>{{ problemText(problem) }}</span>
       </li>
     </ul>
-    <p v-if="isNativeCocosPlatform(engine || options.version, options.platform)" class="wb-rf-hint">{{ t('releaseFlow.build.nativeHint') }}</p>
 
-    <details class="wb-rf-build-command">
-      <summary>{{ t('releaseFlow.cocos.command') }}</summary>
-      <div class="wb-rf-build-command-body">
-        <pre class="wb-rf-log wb-rf-command">{{ command.display }}</pre>
-        <button type="button" class="wb-rf-btn is-quiet is-small" @click="copyCommand">
-          <Check v-if="copied" :size="13" aria-hidden="true" />
-          <Copy v-else :size="13" aria-hidden="true" />
-          {{ t(copied ? 'releaseFlow.cocos.copied' : 'releaseFlow.cocos.copy') }}
-        </button>
+    <details class="wb-rf-fold wb-rf-build-more" :open="Boolean(target.buildConfig || target.buildDebug)">
+      <summary>{{ t('releaseFlow.build.moreOptions') }}</summary>
+      <div class="wb-rf-fold-body">
+        <div class="wb-rf-build-fields">
+          <label class="wb-rf-field is-wide">
+            {{ t('releaseFlow.build.config') }}
+            <span class="wb-rf-path-field">
+              <input
+                class="wb-rf-code"
+                :value="target.buildConfig"
+                :placeholder="t('releaseFlow.build.configPlaceholder')"
+                :disabled="disabled"
+                spellcheck="false"
+                @change="field('buildConfig', $event.target.value)"
+              />
+              <button type="button" class="wb-rf-btn" :disabled="disabled" @click="pick('config')">
+                <FileJson :size="14" aria-hidden="true" />{{ t('releaseFlow.build.choose') }}
+              </button>
+            </span>
+          </label>
+          <div v-if="state.project?.buildConfigs?.length" class="wb-rf-field is-wide">
+            {{ t('releaseFlow.build.foundConfigs') }}
+            <div class="wb-rf-chips">
+              <button
+                v-for="config in state.project.buildConfigs"
+                :key="config"
+                type="button"
+                class="wb-rf-chip"
+                :class="{ 'is-accent': target.buildConfig === config }"
+                :disabled="disabled"
+                @click="field('buildConfig', config)"
+              >{{ config }}</button>
+            </div>
+          </div>
+          <label v-if="family >= 3" class="wb-rf-field">
+            {{ t('releaseFlow.build.outputName') }}
+            <input class="wb-rf-code" :value="target.buildOutputName" :placeholder="options.platform" :disabled="disabled" spellcheck="false" @change="field('buildOutputName', $event.target.value)" />
+          </label>
+          <div class="wb-rf-field is-wide wb-rf-build-flags">
+            <label v-if="!options.configPath" class="wb-rf-check">
+              <input type="checkbox" :checked="target.buildDebug" :disabled="disabled" @change="field('buildDebug', $event.target.checked)" />{{ t('releaseFlow.build.debug') }}
+            </label>
+            <label v-if="!options.configPath" class="wb-rf-check">
+              <input type="checkbox" :checked="target.buildMd5Cache" :disabled="disabled" @change="field('buildMd5Cache', $event.target.checked)" />{{ t('releaseFlow.build.md5Cache') }}
+            </label>
+            <label class="wb-rf-check" :title="state.project?.qaGuard ? '' : t('releaseFlow.build.noGuard')">
+              <input type="checkbox" :checked="target.buildQaGuard" :disabled="disabled || !state.project?.qaGuard" @change="field('buildQaGuard', $event.target.checked)" />{{ t('releaseFlow.build.qaGuard') }}
+            </label>
+          </div>
+        </div>
+        <p v-if="isNativeCocosPlatform(engine || options.version, options.platform)" class="wb-rf-hint">{{ t('releaseFlow.build.nativeHint') }}</p>
+        <div class="wb-rf-build-command-body">
+          <span class="wb-rf-muted">{{ t('releaseFlow.cocos.command') }}</span>
+          <pre class="wb-rf-log wb-rf-command">{{ command.display }}</pre>
+          <button type="button" class="wb-rf-btn is-quiet is-small" @click="copyCommand">
+            <Check v-if="copied" :size="13" aria-hidden="true" />
+            <Copy v-else :size="13" aria-hidden="true" />
+            {{ t(copied ? 'releaseFlow.cocos.copied' : 'releaseFlow.cocos.copy') }}
+          </button>
+        </div>
       </div>
     </details>
   </div>

@@ -1,4 +1,4 @@
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { language, t } from "../i18n/index.js";
 import {
   RELEASE_PAGES,
@@ -9,6 +9,7 @@ import {
   adjacentPage,
   appendHistory,
   appendTaskLog,
+  appendTaskLogs,
   flowComplete,
   flowProgress,
   idleTaskState,
@@ -21,7 +22,15 @@ import {
   taskBlocker,
 } from "../releaseFlowState.js";
 import { CONFLICT_CHOICES, RELEASE_SPEEDS, cleanTableNames } from "../releaseWorkspaceState.js";
-import { countPlanChanges, isIsoDate, parsePlanNote, planChanges, planStatements } from "../utils/releasePlanNotes.js";
+import {
+  countPlanChanges,
+  isIsoDate,
+  parsePlanNote,
+  planChanges,
+  planFlagQueries,
+  planStatements,
+  planWriteGroups,
+} from "../utils/releasePlanNotes.js";
 import {
   DEMO_CLIENT_CHANGES,
   DEMO_CONFIG_TABLES,
@@ -33,7 +42,10 @@ import {
 import { cleanExclusionRules, excludingRule } from "../utils/releaseFileRules.js";
 import { cocosBuildCommand, cocosBuildOptions } from "../utils/cocosBuildCommand.js";
 import { formatDateTime } from "../utils/releaseFlowFormat.js";
+import { normalizeTableName } from "../utils/normalize.js";
+import { invokeWorkbench } from "../utils/tauriBridge.js";
 import { createAutopilot } from "./useReleaseAutopilot.js";
+import { resolvePlatformConnection } from "./useReleaseRealDriver.js";
 
 export { CONFLICT_CHOICES, RELEASE_SPEEDS };
 
@@ -77,6 +89,10 @@ export function createRunFlow({
   run,
   driver,
   templates = computed(() => []),
+  connections = computed(() => []),
+  databasesByConnection = computed(() => ({})),
+  invoke = invokeWorkbench,
+  realMode = false,
   sleep = abortableSleep,
   now = () => new Date(),
   flush = () => {},
@@ -85,7 +101,10 @@ export function createRunFlow({
   const state = run;
   const progress = reactive({ taskId: "", fraction: 0 });
   let controller = null;
+  const watchers = [];
+  const tickets = { db: 0, plans: 0, files: 0 };
 
+  const isReal = computed(() => Boolean(realMode) && state.demo === false);
   const platform = computed(() => workspace.platforms.find((entry) => entry.id === state.platformId) || workspace.platforms[0]);
   const runningTask = computed(() => runningTaskId(state.tasks));
   const busy = computed(() => Boolean(runningTask.value));
@@ -93,6 +112,39 @@ export function createRunFlow({
   const progressSummary = computed(() => flowProgress(state.tasks, state.brief));
   const complete = computed(() => flowComplete(state.tasks, state.brief));
   const templateList = computed(() => templates.value || []);
+  const connectionList = computed(() => connections.value || []);
+  const databaseMap = computed(() => databasesByConnection.value || {});
+  const resolvedConnection = computed(() => (
+    isReal.value ? resolvePlatformConnection(platform.value, connectionList.value, databaseMap.value) : null
+  ));
+
+  const liveSync = reactive({
+    ready: false,
+    loading: false,
+    error: "",
+    tables: [],
+    excluded: [],
+    rows: 0,
+    catalog: [],
+    warnings: [],
+  });
+  const livePlans = reactive({
+    ready: false,
+    loading: false,
+    error: "",
+    flags: {},
+    missingTables: [],
+  });
+  const liveFiles = reactive({
+    ready: false,
+    loading: false,
+    error: "",
+    copy: [],
+    remove: [],
+    kept: [],
+    excluded: [],
+    truncated: false,
+  });
 
   const pages = computed(() => RELEASE_PAGES.map((entry) => ({
     ...entry,
@@ -103,6 +155,18 @@ export function createRunFlow({
   /* ── Database ── */
   const syncExclusions = computed(() => workspace.rules.syncExclusions[platform.value.id] || []);
   const syncPlan = computed(() => {
+    if (isReal.value) {
+      return {
+        tables: liveSync.tables,
+        excluded: liveSync.excluded.length ? liveSync.excluded : [...syncExclusions.value],
+        rows: liveSync.rows,
+        catalog: liveSync.catalog,
+        warnings: liveSync.warnings,
+        loading: liveSync.loading,
+        error: liveSync.error,
+        ready: liveSync.ready,
+      };
+    }
     const excluded = new Set(syncExclusions.value);
     const tables = DEMO_CONFIG_TABLES.filter((table) => !excluded.has(table.name));
     return {
@@ -110,6 +174,10 @@ export function createRunFlow({
       excluded: DEMO_CONFIG_TABLES.filter((table) => excluded.has(table.name)).map((table) => table.name),
       rows: tables.reduce((sum, table) => sum + table.rows, 0),
       catalog: DEMO_CONFIG_TABLES.map((table) => table.name),
+      warnings: [],
+      loading: false,
+      error: "",
+      ready: true,
     };
   });
 
@@ -117,12 +185,8 @@ export function createRunFlow({
     return entry?.notes?.[platformId] ?? "";
   }
 
-  // The memo entries this update can write: a category with a plan table and
-  // an ID naming the row. Entries left out by the person stay listed but are
-  // not written.
-  const planGroups = computed(() => {
+  function buildPlanCategoryEntries() {
     const excluded = new Set(syncExclusions.value);
-    const flags = workspace.demoFlags[platform.value.id] || {};
     return RELEASE_PLAN_CATEGORIES.map((category) => {
       const synced = !excluded.has(category.table);
       const entries = workspace.plans.items
@@ -130,11 +194,27 @@ export function createRunFlow({
         .map((entry) => ({ entry, key: planEntryKey(entry) }))
         .filter(({ key }) => key !== null)
         .map(({ entry, key }) => ({ ...entry, key }));
+      return { ...category, synced, entries };
+    });
+  }
+
+  // The memo entries this update can write: a category with a plan table and
+  // an ID naming the row. Entries left out by the person stay listed but are
+  // not written.
+  const planGroups = computed(() => {
+    const flags = workspace.demoFlags[platform.value.id] || {};
+    return buildPlanCategoryEntries().map((category) => {
+      const { synced, entries } = category;
       const rows = planChanges(entries, {
         dateIso: state.brief.date,
         noteFor: (item) => noteFor(item),
-        currentFor: (item) => flags[item.id]
-          ?? demoDatabaseFlag(item, { synced, note: noteFor(item), dateIso: state.brief.date }),
+        currentFor: (item) => {
+          if (isReal.value) {
+            return livePlans.ready ? livePlans.flags[item.id] : null;
+          }
+          return flags[item.id]
+            ?? demoDatabaseFlag(item, { synced, note: noteFor(item), dateIso: state.brief.date });
+        },
       }).map((row) => ({ ...row, excluded: state.planSkips[row.item.id] === true }));
       return { ...category, synced, rows, counts: countPlanChanges(rows.filter((row) => !row.excluded)) };
     });
@@ -186,7 +266,10 @@ export function createRunFlow({
     const target = backup.value;
     if (!target) return [];
     const lines = [t("releaseFlow.backup.impact.tables", { count: target.tables, time: formatDateTime(target.at) })];
-    const written = state.tasks["db.plans"].status === TASK_STATUS.DONE ? Object.keys(state.tasks["db.plans"].result?.written || {}).length : 0;
+    const planResult = state.tasks["db.plans"].status === TASK_STATUS.DONE ? state.tasks["db.plans"].result : null;
+    const written = planResult
+      ? (Object.keys(planResult.written || {}).length || (Number(planResult.open || 0) + Number(planResult.close || 0)))
+      : 0;
     if (written) lines.push(t("releaseFlow.backup.impact.plans", { count: written }));
     lines.push(t("releaseFlow.backup.impact.rerun"));
     return lines;
@@ -195,6 +278,18 @@ export function createRunFlow({
   /* ── Client ── */
   const fileRules = computed(() => workspace.rules.fileExclusions[platform.value.id] || []);
   const fileSyncPlan = computed(() => {
+    if (isReal.value) {
+      return {
+        copy: liveFiles.copy,
+        remove: liveFiles.remove,
+        kept: liveFiles.kept,
+        excluded: liveFiles.excluded,
+        truncated: liveFiles.truncated,
+        loading: liveFiles.loading,
+        error: liveFiles.error,
+        ready: liveFiles.ready,
+      };
+    }
     const copy = [];
     const remove = [];
     const kept = [];
@@ -206,7 +301,7 @@ export function createRunFlow({
       else if (workspace.rules.mirrorDeletes) remove.push(change);
       else kept.push(change);
     }
-    return { copy, remove, kept, excluded };
+    return { copy, remove, kept, excluded, truncated: false, loading: false, error: "", ready: true };
   });
 
   const svnConflicts = computed(() => (state.tasks["client.svn"].result?.conflicts || []).map((path) => ({
@@ -222,6 +317,217 @@ export function createRunFlow({
 
   const buildOptions = computed(() => cocosBuildOptions(platform.value));
   const cocosCommand = computed(() => cocosBuildCommand(buildOptions.value));
+
+  /* ── Live previews (real mode only) ── */
+  async function refreshLiveDb() {
+    const ticket = ++tickets.db;
+    if (!isReal.value || typeof invoke !== "function") {
+      Object.assign(liveSync, { ready: false, loading: false, error: "", tables: [], excluded: [], rows: 0, catalog: [], warnings: [] });
+      return;
+    }
+    const connId = resolvedConnection.value?.id || "";
+    const sourceDatabase = String(platform.value?.sourceDatabase || "").trim();
+    const targetDatabase = String(platform.value?.targetDatabase || "").trim();
+    if (!connId || !sourceDatabase) {
+      Object.assign(liveSync, { ready: false, loading: false, error: "", tables: [], excluded: [...syncExclusions.value], rows: 0, catalog: [], warnings: [] });
+      return;
+    }
+    liveSync.loading = true;
+    liveSync.error = "";
+    try {
+      if (targetDatabase && targetDatabase.toLowerCase() !== sourceDatabase.toLowerCase()) {
+        const preview = await invoke("preview_database_sync", {
+          request: {
+            connectionId: connId,
+            sourceDatabase,
+            targetDatabase,
+            excludedTables: [...syncExclusions.value],
+          },
+        });
+        if (ticket !== tickets.db) return;
+        liveSync.tables = (preview?.includedTables || []).map((name) => ({ name }));
+        liveSync.excluded = preview?.excludedTables || [...syncExclusions.value];
+        liveSync.rows = Number(preview?.estimatedRows) || 0;
+        liveSync.catalog = preview?.sourceTables || [];
+        liveSync.warnings = preview?.warnings || [];
+        liveSync.ready = true;
+      } else {
+        const rawTables = await invoke("list_tables", { connectionId: connId, database: sourceDatabase });
+        if (ticket !== tickets.db) return;
+        const catalog = (Array.isArray(rawTables) ? rawTables : [])
+          .map((entry) => (typeof entry === "string" ? entry : normalizeTableName(entry) || entry?.name || ""))
+          .filter(Boolean);
+        const excludedSet = new Set(syncExclusions.value);
+        liveSync.catalog = catalog;
+        liveSync.tables = catalog.filter((name) => !excludedSet.has(name)).map((name) => ({ name }));
+        liveSync.excluded = catalog.filter((name) => excludedSet.has(name));
+        liveSync.rows = 0;
+        liveSync.warnings = [];
+        liveSync.ready = Boolean(targetDatabase);
+      }
+    } catch (error) {
+      if (ticket !== tickets.db) return;
+      liveSync.error = String(error?.message || error || "");
+      liveSync.ready = false;
+    } finally {
+      if (ticket === tickets.db) liveSync.loading = false;
+    }
+  }
+
+  async function refreshLivePlans({ forceTarget = false } = {}) {
+    const ticket = ++tickets.plans;
+    if (!isReal.value || typeof invoke !== "function") {
+      Object.assign(livePlans, { ready: false, loading: false, error: "", flags: {}, missingTables: [] });
+      return;
+    }
+    const connId = resolvedConnection.value?.id || "";
+    const sourceDatabase = String(platform.value?.sourceDatabase || "").trim();
+    const targetDatabase = String(platform.value?.targetDatabase || "").trim();
+    const syncSettled = forceTarget
+      || state.tasks["db.sync"].status === TASK_STATUS.DONE
+      || state.tasks["db.sync"].status === TASK_STATUS.SKIPPED
+      || !state.brief.scope.database;
+    if (!connId || (!sourceDatabase && !targetDatabase)) {
+      Object.assign(livePlans, { ready: false, loading: false, error: "", flags: {}, missingTables: [] });
+      return;
+    }
+    const byDb = new Map();
+    for (const group of buildPlanCategoryEntries()) {
+      if (!group.entries.length) continue;
+      const dbName = syncSettled
+        ? targetDatabase
+        : (group.synced ? (sourceDatabase || targetDatabase) : (targetDatabase || sourceDatabase));
+      if (!dbName) continue;
+      if (!byDb.has(dbName)) byDb.set(dbName, []);
+      byDb.get(dbName).push(group);
+    }
+    if (!byDb.size) {
+      Object.assign(livePlans, { ready: true, loading: false, error: "", flags: {}, missingTables: [] });
+      return;
+    }
+    livePlans.loading = true;
+    livePlans.error = "";
+    try {
+      const flags = {};
+      const missing = new Set();
+      await Promise.all([...byDb.entries()].map(async ([database, groups]) => {
+        const queries = planFlagQueries(groups);
+        if (!queries.length) return;
+        const response = await invoke("release_read_plan_flags", {
+          request: { connectionId: connId, database, groups: queries },
+        });
+        Object.assign(flags, response?.flags || {});
+        for (const table of response?.missingTables || []) missing.add(table);
+      }));
+      if (ticket !== tickets.plans) return;
+      livePlans.flags = flags;
+      livePlans.missingTables = [...missing];
+      livePlans.ready = true;
+    } catch (error) {
+      if (ticket !== tickets.plans) return;
+      livePlans.error = String(error?.message || error || "");
+      livePlans.ready = false;
+    } finally {
+      if (ticket === tickets.plans) livePlans.loading = false;
+    }
+  }
+
+  async function refreshLiveFiles() {
+    const ticket = ++tickets.files;
+    if (!isReal.value || typeof invoke !== "function") {
+      Object.assign(liveFiles, { ready: false, loading: false, error: "", copy: [], remove: [], kept: [], excluded: [], truncated: false });
+      return;
+    }
+    const sourceClient = String(platform.value?.sourceClient || "").trim();
+    const targetClient = String(platform.value?.targetClient || "").trim();
+    if (!sourceClient || !targetClient) {
+      Object.assign(liveFiles, { ready: false, loading: false, error: "", copy: [], remove: [], kept: [], excluded: [], truncated: false });
+      return;
+    }
+    liveFiles.loading = true;
+    liveFiles.error = "";
+    try {
+      const response = await invoke("release_client_sync_preview", {
+        request: {
+          sourceClient,
+          targetClient,
+          rules: [...fileRules.value],
+          mirrorDeletes: Boolean(workspace.rules.mirrorDeletes),
+        },
+      });
+      if (ticket !== tickets.files) return;
+      liveFiles.copy = response?.copy || [];
+      liveFiles.remove = response?.remove || [];
+      liveFiles.kept = response?.kept || [];
+      liveFiles.excluded = response?.excluded || [];
+      liveFiles.truncated = Boolean(response?.truncated);
+      liveFiles.ready = true;
+    } catch (error) {
+      if (ticket !== tickets.files) return;
+      liveFiles.error = String(error?.message || error || "");
+      liveFiles.ready = false;
+    } finally {
+      if (ticket === tickets.files) liveFiles.loading = false;
+    }
+  }
+
+  async function refreshLiveState({ all = false } = {}) {
+    if (!isReal.value) return;
+    const jobs = [];
+    if (all || state.page === "database") {
+      jobs.push(refreshLiveDb(), refreshLivePlans());
+    }
+    if (all || state.page === "clientSync") {
+      jobs.push(refreshLiveFiles());
+    }
+    await Promise.all(jobs);
+  }
+
+  if (realMode) {
+    watchers.push(
+      watch(
+        () => [
+          isReal.value,
+          state.page === "database",
+          resolvedConnection.value?.id || "",
+          platform.value?.sourceDatabase || "",
+          platform.value?.targetDatabase || "",
+          syncExclusions.value.join("\u001f"),
+        ],
+        ([real, onDbPage]) => {
+          if (real && onDbPage) {
+            void refreshLiveDb();
+            void refreshLivePlans();
+          }
+        },
+        { immediate: true },
+      ),
+      watch(
+        () => [
+          isReal.value,
+          state.page === "database",
+          workspace.plans.items.map((item) => `${item.id}:${item.category}:${item.ref}`),
+        ],
+        ([real, onDbPage]) => {
+          if (real && onDbPage) void refreshLivePlans();
+        },
+      ),
+      watch(
+        () => [
+          isReal.value,
+          state.page === "clientSync",
+          platform.value?.sourceClient || "",
+          platform.value?.targetClient || "",
+          fileRules.value.join("\u001f"),
+          workspace.rules.mirrorDeletes,
+        ],
+        ([real, onFilesPage]) => {
+          if (real && onFilesPage) void refreshLiveFiles();
+        },
+        { immediate: true },
+      ),
+    );
+  }
 
   /* ── Navigation ── */
   function go(pageId) {
@@ -335,13 +641,24 @@ export function createRunFlow({
     return {
       taskId,
       runId: state.id,
+      demoRun: !isReal.value,
+      connectionId: resolvedConnection.value?.id || "",
+      connections: plain(connectionList.value),
+      databasesByConnection: plain(databaseMap.value),
       brief: plain(state.brief),
       platform: plain(platform.value),
+      syncExclusions: [...syncExclusions.value],
       syncPlan: plain(syncPlan.value),
-      plan: { counts: { ...planCounts.value }, statements: [...planSql.value] },
+      plan: {
+        counts: { ...planCounts.value },
+        statements: [...planSql.value],
+        writes: planWriteGroups(writtenGroups.value),
+      },
+      rules: [...fileRules.value],
+      mirrorDeletes: Boolean(workspace.rules.mirrorDeletes),
       files: plain(fileSyncPlan.value),
       template: plain(selectedTemplate.value),
-      diff: diffFiles,
+      diff: isReal.value ? [] : diffFiles,
       build: plain(buildOptions.value),
       cocos: { command: plain(cocosCommand.value) },
       backup: plain(backup.value),
@@ -359,6 +676,9 @@ export function createRunFlow({
       log(line, tone = "") {
         appendTaskLog(entry, line, tone);
       },
+      logs(entries) {
+        appendTaskLogs(entry, entries);
+      },
       // A fraction from 0 to 1, or null while the tool reports no progress.
       progress(fraction) {
         if (progress.taskId !== taskId) return;
@@ -371,7 +691,6 @@ export function createRunFlow({
   }
 
   async function perform(taskId, driverTaskId, { fresh = true, conflicts = [], finish }) {
-    const context = { ...contextFor(taskId), conflicts, previous: plain(state.tasks[taskId].result) };
     const previous = state.tasks[taskId];
     state.tasks[taskId] = fresh
       ? { ...idleTaskState(), status: TASK_STATUS.RUNNING, startedAt: now().getTime() }
@@ -379,14 +698,28 @@ export function createRunFlow({
     const entry = state.tasks[taskId];
     progress.taskId = taskId;
     progress.fraction = 0;
+    flush();
     const current = new AbortController();
     controller = current;
     try {
+      if (isReal.value && taskId === "db.plans") {
+        await refreshLivePlans({ forceTarget: true });
+        if (current.signal.aborted) throw cancelledError();
+      }
+      const context = { ...contextFor(taskId), conflicts, previous: plain(previous.result) };
       const result = await driver.run(driverTaskId, context, createIo(entry, taskId, current.signal));
       if (current.signal.aborted) throw cancelledError();
       finish(entry, plain(result) || {});
       entry.finishedAt = now().getTime();
       record(taskId, entry.status);
+      if (isReal.value) {
+        if (["db.sync", "db.restore", "db.plans"].includes(taskId)) {
+          void refreshLiveDb();
+          await refreshLivePlans({ forceTarget: taskId !== "db.restore" });
+        } else if (["client.svn", "client.sync", "client.transfer"].includes(taskId) && state.page === "clientSync") {
+          void refreshLiveFiles();
+        }
+      }
       return true;
     } catch (error) {
       entry.finishedAt = now().getTime();
@@ -440,11 +773,15 @@ export function createRunFlow({
           // The platform database is back to its state before the overwrite:
           // the overwrite and everything built on it has to run again.
           invalidateTasks(state.tasks, ["db.sync"]);
-          workspace.demoFlags[platform.value.id] = {};
+          if (!isReal.value) workspace.demoFlags[platform.value.id] = {};
           return;
         }
-        const written = applyDemoDatabase(taskId);
-        entry.result = taskId === "db.plans" ? { ...result, written } : result;
+        if (isReal.value) {
+          entry.result = result;
+        } else {
+          const written = applyDemoDatabase(taskId);
+          entry.result = taskId === "db.plans" ? { ...result, written } : result;
+        }
         entry.status = taskId === "client.svn" && result.conflicts?.length ? TASK_STATUS.ATTENTION : TASK_STATUS.DONE;
       },
     });
@@ -491,6 +828,10 @@ export function createRunFlow({
   }
 
   function dispose() {
+    tickets.db += 1;
+    tickets.plans += 1;
+    tickets.files += 1;
+    while (watchers.length) watchers.pop()();
     autopilot?.dispose();
     controller?.abort();
   }
@@ -501,6 +842,11 @@ export function createRunFlow({
     state,
     workspace,
     progress,
+    isReal,
+    resolvedConnection,
+    liveSync,
+    livePlans,
+    liveFiles,
     locale: language.locale,
     platform,
     pages,
@@ -544,6 +890,7 @@ export function createRunFlow({
     setMirrorDeletes,
     setConflictChoice,
     setAllConflictChoices,
+    refreshLiveState,
     runTask,
     resolveConflicts,
     skipTask,

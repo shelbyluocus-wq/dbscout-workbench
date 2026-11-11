@@ -54,7 +54,8 @@ const briefLine = computed(() => [
 ].join(" · "));
 
 function reportText() {
-  const lines = [t("releaseFlow.summary.reportTitle"), briefLine.value, ""];
+  const real = Boolean(props.flow.isReal?.value);
+  const lines = [t(real ? "releaseFlow.summary.reportTitleReal" : "releaseFlow.summary.reportTitle"), briefLine.value, ""];
   for (const phase of phases.value) {
     lines.push(`【${phaseTitle(phase.id)}】`);
     for (const task of phase.tasks) {
@@ -64,8 +65,8 @@ function reportText() {
     }
     lines.push("");
   }
-  lines.push(t("releaseFlow.summary.reportFooter"));
-  return lines.join("\n");
+  if (!real) lines.push(t("releaseFlow.summary.reportFooter"));
+  return lines.join("\n").trimEnd();
 }
 
 async function copyReport() {

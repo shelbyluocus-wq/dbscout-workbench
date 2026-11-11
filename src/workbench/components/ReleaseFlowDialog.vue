@@ -11,6 +11,7 @@ import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useReleaseWorkspace } from "../composables/useReleaseWorkspace.js";
 import { composeDrivers, createReleaseBuildDriver } from "../composables/useCocosBuild.js";
+import { createReleaseRealDriver } from "../composables/useReleaseRealDriver.js";
 import { createReleaseDemoDriver } from "../utils/releaseFlowDemoDriver.js";
 import { isTauriRuntime } from "../utils/tauriBridge.js";
 import ReleasePlatformBoard from "./ReleasePlatformBoard.vue";
@@ -28,18 +29,33 @@ import "../releaseFlow.css";
 import "../releaseWorkspace.css";
 
 const props = defineProps({
+  connections: { type: Array, default: () => [] },
+  databasesByConnection: { type: Object, default: () => ({}) },
+  databaseSync: { type: Object, default: null },
+  backupCenter: { type: Object, default: null },
   transfer: { type: Object, default: null },
   exclusionTemplates: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(["close"]);
+const emit = defineEmits([
+  "close",
+  "open-database-sync",
+  "open-backup-center",
+  "open-table-transfer",
+]);
 
-// The build step runs Cocos Creator for real; everything else is the demo.
-// In the browser preview the backend is a mock, which can also fail a build.
+const realMode = isTauriRuntime();
+
+// On desktop, real drivers execute database sync, snapshots, plan SQL, SVN,
+// client sync, table conversion and Cocos builds; browser previews use mocks.
 const workspace = useReleaseWorkspace({
+  realMode,
+  connections: () => props.connections,
+  databasesByConnection: () => props.databasesByConnection,
   templates: () => props.transfer?.templates?.value || [],
   driver: composeDrivers(
-    createReleaseBuildDriver({ simulateFailure: (context) => !isTauriRuntime() && context.demo.buildFailure && context.attempt === 1 }),
+    createReleaseBuildDriver({ simulateFailure: (context) => !realMode && context.demo.buildFailure && context.attempt === 1 }),
+    createReleaseRealDriver(),
     createReleaseDemoDriver(),
   ),
 });
@@ -55,6 +71,12 @@ const newUpdate = reactive({ open: false, platformId: "" });
 provide("releaseNewUpdate", (platformId = "") => {
   newUpdate.platformId = platformId;
   newUpdate.open = true;
+});
+
+provide("releaseWorkbenchTools", {
+  openDatabaseSync: (target) => emit("open-database-sync", target),
+  openBackupCenter: (options) => emit("open-backup-center", options),
+  openTableTransfer: () => emit("open-table-transfer"),
 });
 
 // Confirmations and the new-update dialog are layers above the workspace and
@@ -117,6 +139,19 @@ watch(
   },
 );
 
+watch(
+  () => [
+    Boolean(props.databaseSync?.dialog?.open),
+    Boolean(props.backupCenter?.dialog?.open),
+    Boolean(props.transfer?.dialog?.open),
+  ],
+  (nextOpen, prevOpen = []) => {
+    if (nextOpen.some((open, idx) => prevOpen[idx] && !open)) {
+      void currentFlow.value?.refreshLiveState?.({ all: true });
+    }
+  },
+);
+
 // Open on the page's heading rather than its first field.
 onMounted(() => void nextTick(focusHeading));
 </script>
@@ -150,7 +185,7 @@ onMounted(() => void nextTick(focusHeading));
           </button>
         </nav>
         <div class="wb-rf-header-actions">
-          <ReleaseDemoMenu :workspace="workspace" />
+          <ReleaseDemoMenu v-if="!realMode || currentFlow?.state?.demo" :workspace="workspace" />
           <button
             type="button"
             class="wb-rf-btn is-quiet wb-rf-close"

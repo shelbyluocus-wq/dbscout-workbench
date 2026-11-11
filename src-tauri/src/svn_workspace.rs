@@ -74,6 +74,16 @@ pub struct SvnChangeResult {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct SvnUpdateResult {
+    pub revision: Option<u64>,
+    pub updated: u64,
+    pub conflicts: Vec<String>,
+    pub entries: Vec<SvnWcEntry>,
+    pub output: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SvnLogPath {
     pub action: String,
     pub kind: String,
@@ -299,6 +309,26 @@ pub fn committed_revision(output: &str) -> Option<u64> {
     })
 }
 
+/// Non-conflicted item notifications in `svn update` output (`U    path`,
+/// `A    path`, `D    path`, `G    path`, ` U   path`), skipping header and
+/// summary lines.
+pub fn count_updated_items(output: &str) -> u64 {
+    output
+        .lines()
+        .filter(|line| {
+            let bytes = line.as_bytes();
+            if bytes.len() < 6 || bytes[4] != b' ' {
+                return false;
+            }
+            let flags = &bytes[..4];
+            let valid = flags.iter().all(|b| matches!(b, b' ' | b'A' | b'D' | b'U' | b'C' | b'G' | b'E' | b'B'));
+            let has_action = flags.iter().any(|b| *b != b' ');
+            let has_conflict = flags.contains(&b'C');
+            valid && has_action && !has_conflict && !line[5..].trim().is_empty()
+        })
+        .count() as u64
+}
+
 /* ── Operations ─────────────────────────────────────────────────────────── */
 
 pub async fn info(client: &SvnClient, root: &Path) -> Result<SvnWcInfo, String> {
@@ -416,8 +446,87 @@ pub async fn resolve(client: &SvnClient, root: &Path, paths: &[String], accept: 
     if !RESOLVE_CHOICES.contains(&accept) {
         return Err(format!("failed: 不支持的解决方式：{accept}"));
     }
-    let output = client.run_targets(&["resolve", "--accept", accept, "--non-interactive"], &members(root, paths)?).await?;
-    Ok(SvnChangeResult { paths: paths.to_vec(), output: checked(output)? })
+    members(root, paths)?;
+    let entries = status(client, root).await.unwrap_or_default();
+    let is_tree = |path: &String| entries.iter().any(|entry| &entry.path == path && entry.tree_conflict);
+    let (tree_paths, normal_paths): (Vec<String>, Vec<String>) =
+        paths.iter().cloned().partition(|path| accept != "working" && is_tree(path));
+    let mut outputs = Vec::new();
+    if !normal_paths.is_empty() {
+        let output = client
+            .run_targets(&["resolve", "--accept", accept, "--non-interactive"], &members(root, &normal_paths)?)
+            .await?;
+        outputs.push(checked(output)?);
+    }
+    if !tree_paths.is_empty() {
+        let tree_targets = members(root, &tree_paths)?;
+        // SVN tree conflicts only accept `working`; when remote is chosen, clear
+        // the conflict marker, revert local tree edits, and pull remote state.
+        let resolved = client
+            .run_targets(&["resolve", "--accept", "working", "--non-interactive"], &tree_targets)
+            .await?;
+        outputs.push(checked(resolved)?);
+        if accept == "theirs-full" {
+            let reverted = client
+                .run_targets(&["revert", "--depth", "infinity", "--non-interactive"], &tree_targets)
+                .await?;
+            outputs.push(checked(reverted)?);
+            let updated = client
+                .run_targets(&["update", "--accept", "theirs-full", "--non-interactive"], &tree_targets)
+                .await?;
+            outputs.push(checked(updated)?);
+        }
+    }
+    Ok(SvnChangeResult { paths: paths.to_vec(), output: outputs.join("\n") })
+}
+
+pub async fn update(client: &mut SvnClient, root: &Path) -> Result<SvnUpdateResult, String> {
+    let notes: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let record_note = |line: String| {
+        if let Ok(mut list) = notes.lock() {
+            list.push(line);
+        }
+    };
+    let update_args = ["update", "--non-interactive", "--accept", "postpone"];
+    let mut output = client.run(&update_args, root, &record_note).await?;
+    if !output.status.success() && classify_error(&decode_text(&output.stderr).0) == "locked" {
+        record_note("检测到工作副本锁定，自动执行 svn cleanup 后重试…".into());
+        checked(client.run_targets(&["cleanup", "--non-interactive"], &[root.to_path_buf()]).await?)?;
+        output = client.run(&update_args, root, &record_note).await?;
+    }
+    let (stdout, _) = decode_text(&output.stdout);
+    let (stderr, _) = decode_text(&output.stderr);
+    if !output.status.success() && crate::svn_client::update_connection_failed(&stderr) {
+        return Err(svn_error(&output));
+    }
+    let entries = status(client, root).await?;
+    let conflicts: Vec<String> = entries
+        .iter()
+        .filter(|entry| entry.item == "conflicted" || entry.tree_conflict)
+        .map(|entry| entry.path.clone())
+        .collect();
+    if !output.status.success() && conflicts.is_empty() {
+        return Err(svn_error(&output));
+    }
+    let revision = info(client, root)
+        .await
+        .ok()
+        .map(|item| item.revision)
+        .or_else(|| committed_revision(&stdout));
+    let mut combined = notes.into_inner().unwrap_or_default();
+    if !stdout.trim().is_empty() {
+        combined.push(stdout.trim_end().to_string());
+    }
+    if !output.status.success() && !stderr.trim().is_empty() {
+        combined.push(stderr.trim_end().to_string());
+    }
+    Ok(SvnUpdateResult {
+        revision,
+        updated: count_updated_items(&stdout),
+        conflicts,
+        entries,
+        output: combined.join("\n"),
+    })
 }
 
 pub async fn log(client: &SvnClient, root: &Path, limit: u32) -> Result<Vec<SvnLogEntry>, String> {
@@ -470,6 +579,13 @@ pub async fn svn_wc_revert(app: AppHandle, request: SvnPathsRequest) -> Result<S
 pub async fn svn_wc_resolve(app: AppHandle, request: SvnPathsRequest) -> Result<SvnChangeResult, String> {
     let root = working_copy(&request.root)?;
     resolve(&client_for(&app, &root).await?, &root, &request.paths, &request.accept).await
+}
+
+#[tauri::command]
+pub async fn svn_wc_update(app: AppHandle, request: SvnPathsRequest) -> Result<SvnUpdateResult, String> {
+    let root = working_copy(&request.root)?;
+    let mut client = client_for(&app, &root).await?;
+    update(&mut client, &root).await
 }
 
 #[tauri::command]
@@ -547,6 +663,10 @@ mod tests {
         assert_eq!(committed_revision("Sending        a.ts\nTransmitting file data .done\nCommitting transaction...\nCommitted revision 52818.\n"), Some(52818));
         assert_eq!(committed_revision("正在发送       a.ts\n提交后的版本为 52819。\n"), Some(52819));
         assert_eq!(committed_revision(""), None);
+        assert_eq!(
+            count_updated_items("Updating '.':\nU    assets/a.ts\nA    assets/b.png\nC    assets/Config.ts\n   C assets/props\nUpdated to revision 52818.\nSummary of conflicts:\n  Text conflicts: 1\n"),
+            2
+        );
     }
 
     #[test]
@@ -587,14 +707,37 @@ mod tests {
         assert!(std::process::Command::new(&svnadmin).arg("create").arg(&repo).status().unwrap().success());
         let url = format!("file://{}", repo.to_string_lossy());
         assert!(std::process::Command::new(&svn).args(["checkout", "-q", &url]).arg(&wc).status().unwrap().success());
+        let wc_peer = temp.path().join("wc-peer");
+        assert!(std::process::Command::new(&svn).args(["checkout", "-q", &url]).arg(&wc_peer).status().unwrap().success());
         std::fs::create_dir_all(wc.join("assets")).unwrap();
         std::fs::write(wc.join("assets/a.ts"), "let a = 1;\nlet b = 2;\n").unwrap();
-        let client = SvnClient::for_tests(svn);
+        let mut client = SvnClient::for_tests(svn);
 
         let entries = status(&client, &wc).await.unwrap();
         assert_eq!(entries.iter().map(|entry| (entry.path.as_str(), entry.item.as_str())).collect::<Vec<_>>(), vec![("assets", "unversioned")]);
         let added = commit(&client, &wc, &["assets".into()], "首次提交").await.unwrap();
         assert_eq!((added.revision, added.added.clone()), (Some(1), vec!["assets".to_string()]));
+
+        // Peer working copy pulls r1 cleanly via `update`.
+        let pulled = update(&mut client, &wc_peer).await.unwrap();
+        assert_eq!((pulled.revision, pulled.conflicts.is_empty()), (Some(1), true));
+        assert!(pulled.updated >= 1);
+
+        // Create a real text conflict between wc (r2) and wc_peer, postpone on update, then resolve to theirs-full.
+        std::fs::write(wc.join("assets/a.ts"), "let a = 1;\nlet b = 20;\n").unwrap();
+        let r2 = commit(&client, &wc, &["assets/a.ts".into()], "remote edit").await.unwrap();
+        assert_eq!(r2.revision, Some(2));
+        std::fs::write(wc_peer.join("assets/a.ts"), "let a = 1;\nlet b = 99;\n").unwrap();
+        let conflicted = update(&mut client, &wc_peer).await.unwrap();
+        assert_eq!((conflicted.revision, conflicted.conflicts), (Some(2), vec!["assets/a.ts".to_string()]));
+        resolve(&client, &wc_peer, &["assets/a.ts".into()], "theirs-full").await.unwrap();
+        assert!(status(&client, &wc_peer).await.unwrap().is_empty());
+        assert_eq!(std::fs::read_to_string(wc_peer.join("assets/a.ts")).unwrap(), "let a = 1;\nlet b = 20;\n");
+
+        // Restore wc/assets/a.ts back to original text for the remaining assertions.
+        std::fs::write(wc.join("assets/a.ts"), "let a = 1;\nlet b = 2;\n").unwrap();
+        let r3 = commit(&client, &wc, &["assets/a.ts".into()], "reset a.ts").await.unwrap();
+        assert_eq!(r3.revision, Some(3));
 
         std::fs::write(wc.join("assets/a.ts"), "let a = 1;\nlet b = 3;\n").unwrap();
         let diff = file_diff(&client, &wc, "assets/a.ts", false).await.unwrap();
@@ -607,10 +750,10 @@ mod tests {
 
         std::fs::remove_file(wc.join("assets/a.ts")).unwrap();
         let removed = commit(&client, &wc, &["assets/a.ts".into()], "remove").await.unwrap();
-        assert_eq!((removed.revision, removed.deleted.len()), (Some(2), 1));
+        assert_eq!((removed.revision, removed.deleted.len()), (Some(4), 1));
         let history = log(&client, &wc, 10).await.unwrap();
-        assert_eq!(history.iter().map(|entry| entry.revision).collect::<Vec<_>>(), vec![2, 1]);
-        assert_eq!(history[1].message, "首次提交");
+        assert_eq!(history.iter().map(|entry| entry.revision).collect::<Vec<_>>(), vec![4, 3, 2, 1]);
+        assert_eq!(history[3].message, "首次提交");
         assert_eq!(info(&client, &wc).await.unwrap().url, url);
         assert!(commit(&client, &wc, &["../x".into()], "x").await.is_err());
     }

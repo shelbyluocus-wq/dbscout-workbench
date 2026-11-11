@@ -11,6 +11,7 @@ export function createSvnBackendSource({ invoke = invokeWorkbench } = {}) {
     kind: "backend",
     info: (root) => call("svn_wc_info", { root }),
     status: (root) => call("svn_wc_status", { root }),
+    update: (root) => call("svn_wc_update", { root }),
     fileDiff: (root, path, unversioned) => call("svn_wc_file_diff", { root, paths: [path], unversioned }),
     commit: (root, paths, message) => call("svn_wc_commit", { root, paths, message }),
     revert: (root, paths) => call("svn_wc_revert", { root, paths }),

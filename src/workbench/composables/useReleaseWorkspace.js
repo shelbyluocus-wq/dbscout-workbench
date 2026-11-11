@@ -43,6 +43,7 @@ function plain(value) {
 
 // Editing a platform field invalidates the first task of its open update that used it.
 const PLATFORM_FIELD_TASKS = Object.freeze({
+  connectionId: "db.sync",
   sourceDatabase: "db.sync",
   targetDatabase: "db.sync",
   sourceClient: "client.sync",
@@ -70,16 +71,20 @@ export function useReleaseWorkspace({
   storage = globalThis.localStorage,
   driver = createReleaseDemoDriver(),
   templates = () => [],
+  connections = () => [],
+  databasesByConnection = () => ({}),
+  invoke = undefined,
+  realMode = false,
   sleep = abortableSleep,
   now = () => new Date(),
   ticker = everySecond,
   translate = t,
-  seed = true,
+  seed = !realMode,
 } = {}) {
   const today = localDateIso(now());
   const stored = readStoredWorkspace(storage);
   const legacy = stored ? null : readLegacyFlow(storage);
-  const workspace = reactive(createWorkspaceData({ stored, legacy, today, translate, seedRuns: seed ? createDemoRuns : null }));
+  const workspace = reactive(createWorkspaceData({ stored, legacy, today, translate, seedRuns: seed ? createDemoRuns : null, realMode }));
   const storedHistory = readStoredHistory(storage);
   const history = ref(storedHistory ?? (seed ? compactHistory(createDemoHistory({ today, platforms: workspace.platforms })) : []));
   const view = workspace.view;
@@ -87,10 +92,15 @@ export function useReleaseWorkspace({
   const ui = reactive({ historyEntryId: "" });
 
   const templateList = computed(() => (typeof templates === "function" ? templates() : templates?.value || templates || []));
+  const connectionList = computed(() => (typeof connections === "function" ? connections() : connections?.value || connections || []));
+  const databaseMap = computed(() => (
+    typeof databasesByConnection === "function"
+      ? databasesByConnection()
+      : databasesByConnection?.value || databasesByConnection || {}
+  ));
 
   /* ── Persistence ── */
   const persistence = createCoalescedTask(() => writeStoredWorkspace(storage, plain(workspace)), { delayMs: 300, maxWaitMs: 1500 });
-  const stopPersisting = watch(() => workspace, () => persistence.schedule(), { deep: true });
   function writeHistory() {
     writeStoredHistory(storage, history.value);
   }
@@ -138,6 +148,10 @@ export function useReleaseWorkspace({
         run,
         driver,
         templates: templateList,
+        connections: connectionList,
+        databasesByConnection: databaseMap,
+        invoke,
+        realMode,
         sleep,
         now,
         flush: () => persistence.flush(),
@@ -170,6 +184,14 @@ export function useReleaseWorkspace({
     return [...flows.values()];
   });
   const anyBusy = computed(() => flowList.value.some((flow) => flow.busy.value));
+  // Pause deep workspace serialization while tasks stream logs; perform() flushes on start and settle.
+  const stopPersisting = watch(
+    () => (anyBusy.value ? null : workspace),
+    (target) => {
+      if (target) persistence.schedule();
+    },
+    { deep: true },
+  );
   // Updates in one-click mode only go on while the workspace is open.
   const autopilotRuns = computed(() => flowList.value.filter((flow) => flow.autopilot.active.value));
 
@@ -239,7 +261,7 @@ export function useReleaseWorkspace({
     const existing = runOf(platformId);
     if (existing && !existing.outcome) return { status: "open", runId: existing.id };
     if (existing) removeRun(existing.id);
-    const run = createRun({ platformId, today: localDateIso(now()), createdAt: now().getTime() });
+    const run = createRun({ platformId, today: localDateIso(now()), createdAt: now().getTime(), demo: !realMode });
     workspace.runs.push(run);
     syncFlows();
     openRun(run.id);
@@ -461,7 +483,10 @@ export function useReleaseWorkspace({
     anyBusy,
     autopilotRuns,
     clock,
+    realMode: Boolean(realMode),
     templates: templateList,
+    connections: connectionList,
+    databasesByConnection: databaseMap,
     flowFor,
     runOf,
     flowOfPlatform,

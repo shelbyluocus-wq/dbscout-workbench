@@ -4,7 +4,7 @@
 // write the open plan for this day. The plan itself is the memo
 // on the open plans page; this page writes the entries that name a table row
 // and lists the others.
-import { computed, ref } from "vue";
+import { computed, inject, ref } from "vue";
 import { ArrowDown, ArrowRight, ArrowUp, Database, DatabaseBackup, Plus, RotateCcw } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatPlanDate } from "../utils/releasePlanNotes.js";
@@ -22,7 +22,10 @@ const props = defineProps({
 });
 const emit = defineEmits(["run", "rerun", "navigate"]);
 
+const tools = inject("releaseWorkbenchTools", null);
 const state = props.flow.state;
+const isReal = computed(() => Boolean(props.flow.isReal?.value));
+const resolvedConnection = computed(() => props.flow.resolvedConnection?.value || null);
 const platform = computed(() => props.flow.platform.value);
 const plan = computed(() => props.flow.syncPlan.value);
 const excluded = computed(() => props.flow.syncExclusions.value);
@@ -60,10 +63,40 @@ function add(name) {
 function remove(name) {
   props.flow.setSyncExclusions(excluded.value.filter((table) => table !== name));
 }
+
+function openSyncTool() {
+  tools?.openDatabaseSync?.({
+    kind: "database",
+    connectionId: resolvedConnection.value?.id || "demo",
+    database: platform.value.sourceDatabase,
+    targetDatabase: platform.value.targetDatabase,
+    excludedTables: [...excluded.value],
+  });
+}
+
+function openBackupTool() {
+  tools?.openBackupCenter?.({
+    tab: "snapshots",
+    connectionId: resolvedConnection.value?.id || "",
+    database: platform.value.targetDatabase || "",
+  });
+}
 </script>
 
 <template>
-  <ReleasePageHead page-id="database" />
+  <ReleasePageHead page-id="database">
+    <template v-if="isReal && resolvedConnection" #tag>
+      <span class="wb-rf-chip is-quiet">{{ t('releaseFlow.database.connection', { name: resolvedConnection.name || resolvedConnection.host || resolvedConnection.id }) }}</span>
+    </template>
+  </ReleasePageHead>
+
+  <p v-if="isReal && !resolvedConnection" class="wb-rf-notice is-warning" role="status">
+    <span>{{ t('releaseFlow.database.noConnection') }}</span>
+    <button type="button" class="wb-rf-link" @click="emit('navigate', 'platforms')">
+      {{ t('releaseFlow.overview.platformSettings') }}<ArrowRight :size="13" aria-hidden="true" />
+    </button>
+  </p>
+  <p v-else-if="isReal && plan.error" class="wb-rf-notice is-danger" role="alert">{{ plan.error }}</p>
 
   <div class="wb-rf-route">
     <div class="wb-rf-route-node">
@@ -81,6 +114,17 @@ function remove(name) {
     <div class="wb-rf-group-head">
       <ReleaseStatusIcon :status="status('db.sync')" :size="16" />
       <h4 id="wb-rf-db-sync">{{ t('releaseFlow.database.sync') }}</h4>
+      <div v-if="tools" class="wb-rf-group-tools">
+        <button
+          type="button"
+          class="wb-rf-link"
+          data-release-open-sync-tool
+          :disabled="locked || (isReal && !resolvedConnection)"
+          @click="openSyncTool"
+        >
+          {{ t('releaseFlow.database.openSyncTool') }}<ArrowRight :size="13" aria-hidden="true" />
+        </button>
+      </div>
     </div>
     <div class="wb-rf-stats">
       <div class="wb-rf-stat"><strong>{{ formatReleaseCount(plan.tables.length) }}</strong><span>{{ t('releaseFlow.database.tables') }}</span></div>
@@ -120,7 +164,7 @@ function remove(name) {
     <p class="wb-rf-backup-line">
       <DatabaseBackup :size="14" aria-hidden="true" />
       <span>{{ t('releaseFlow.backup.before', { database: platform.targetDatabase }) }}</span>
-      <span class="wb-rf-chip is-quiet">{{ t('releaseFlow.backup.simulated') }}</span>
+      <span v-if="!isReal" class="wb-rf-chip is-quiet">{{ t('releaseFlow.backup.simulated') }}</span>
     </p>
     <ReleaseTaskPanel :flow="flow" task-id="db.sync">
       <template #done="{ result }">
@@ -134,17 +178,30 @@ function remove(name) {
     <div class="wb-rf-group-head">
       <ReleaseStatusIcon :status="restore.status === 'idle' ? (backup ? 'done' : 'pending') : status('db.restore')" :size="16" />
       <h4 id="wb-rf-db-backup">{{ t('releaseFlow.backup.title') }}</h4>
-      <span v-if="backup" class="wb-rf-chip is-quiet" :title="t('releaseFlow.backup.simulatedHint')">{{ t('releaseFlow.backup.simulated') }}</span>
+      <span v-if="backup && !isReal && backup.simulated !== false" class="wb-rf-chip is-quiet" :title="t('releaseFlow.backup.simulatedHint')">{{ t('releaseFlow.backup.simulated') }}</span>
+      <div v-if="tools" class="wb-rf-group-tools">
+        <button
+          type="button"
+          class="wb-rf-link"
+          data-release-open-backup-center
+          :disabled="busy"
+          @click="openBackupTool"
+        >
+          {{ t('releaseFlow.backup.openBackupCenter') }}<ArrowRight :size="13" aria-hidden="true" />
+        </button>
+      </div>
     </div>
     <template v-if="backup">
       <dl class="wb-rf-facts">
         <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.database') }}</dt><dd class="wb-rf-code">{{ backup.database }}</dd></div>
         <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.at') }}</dt><dd>{{ formatDateTime(backup.at) }}</dd></div>
         <div class="wb-rf-fact"><dt>{{ t('releaseFlow.backup.content') }}</dt><dd>{{ t('releaseFlow.backup.size', { tables: formatReleaseCount(backup.tables), rows: formatReleaseCount(backup.rows) }) }}</dd></div>
-        <div class="wb-rf-fact is-wide"><dt>{{ t('releaseFlow.backup.file') }}</dt><dd class="wb-rf-code">{{ backup.path }}</dd></div>
       </dl>
       <div class="wb-rf-backup-actions">
-        <p class="wb-rf-hint">{{ t('releaseFlow.backup.restoreHint', { database: platform.targetDatabase }) }}</p>
+        <details class="wb-rf-fold">
+          <summary>{{ t('releaseFlow.backup.file') }}</summary>
+          <p class="wb-rf-code wb-rf-muted wb-rf-backup-path">{{ backup.path }}</p>
+        </details>
         <button type="button" class="wb-rf-btn wb-rf-danger-text" data-release-restore :disabled="Boolean(flow.blockerOf('db.restore'))" @click="emit('run', 'db.restore')">
           <RotateCcw :size="14" aria-hidden="true" />{{ t('releaseFlow.backup.restore') }}
         </button>
@@ -155,7 +212,6 @@ function remove(name) {
     </p>
     <p v-else-if="syncDone" class="wb-rf-notice is-warning" role="status">{{ t('releaseFlow.backup.none') }}</p>
     <p v-else class="wb-rf-hint">{{ t('releaseFlow.backup.later') }}</p>
-    <p class="wb-rf-hint">{{ t('releaseFlow.backup.outer', { platform: platform.name }) }}</p>
     <ReleaseTaskPanel v-if="restore.status === 'running' || restore.status === 'failed'" :flow="flow" task-id="db.restore" />
   </section>
 
@@ -200,7 +256,7 @@ function remove(name) {
     <p v-if="reminders.length" class="wb-rf-notice is-warning wb-rf-reminders" role="note">
       {{ t('releaseFlow.database.reminders', { count: reminders.length, items: reminders.map((entry) => entry.name).join('、') }) }}
     </p>
-    <details v-if="statements.length" class="wb-rf-sql">
+    <details v-if="statements.length" class="wb-rf-fold wb-rf-sql">
       <summary>{{ t('releaseFlow.database.sql', { count: statements.length }) }}</summary>
       <pre class="wb-rf-log">{{ statements.join('\n') }}</pre>
     </details>
@@ -316,9 +372,13 @@ function remove(name) {
 .wb-rf-backup-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px 16px;
+}
+
+.wb-rf-backup-path {
+  margin: 6px 0 0;
 }
 
 .wb-rf-change-note {

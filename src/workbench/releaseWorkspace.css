@@ -40,7 +40,7 @@
   letter-spacing: 0.04em;
 }
 
-/* A platform as a note: a tinted card with a colored edge for its state. */
+/* A platform as a note: a tinted card with a crisp semantic border for its state. */
 .wb-rf-note {
   --wb-rf-note-edge: var(--wb-border-strong);
   --wb-rf-note-tint: transparent;
@@ -50,25 +50,16 @@
   flex: none;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--wb-border);
+  border: 1px solid color-mix(in srgb, var(--wb-rf-note-edge) 45%, var(--wb-border));
   border-radius: 12px;
   background: color-mix(in srgb, var(--wb-rf-note-tint) 100%, var(--wb-table-surface));
-  box-shadow: var(--wb-control-shadow);
-  transition: box-shadow var(--wb-duration-base) var(--wb-ease-out), border-color var(--wb-duration-base) var(--wb-ease-out);
-}
-
-.wb-rf-note::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--wb-rf-note-edge);
-  content: "";
+  box-shadow: none;
+  transition: background var(--wb-duration-base) var(--wb-ease-out), border-color var(--wb-duration-base) var(--wb-ease-out), box-shadow var(--wb-duration-base) var(--wb-ease-out);
 }
 
 .wb-rf-note.is-idle {
   --wb-rf-note-edge: var(--wb-border);
   border-style: dashed;
-  box-shadow: none;
 }
 
 .wb-rf-note.is-pending {
@@ -91,8 +82,10 @@
 }
 
 .wb-rf-note.is-selected {
-  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
-  box-shadow: 0 0 0 3px var(--wb-accent-soft), var(--wb-control-shadow);
+  border-style: solid;
+  border-color: var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-accent-soft) 42%, var(--wb-table-surface));
+  box-shadow: var(--wb-control-shadow);
 }
 
 .wb-rf-note-head {
@@ -101,7 +94,7 @@
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 12px 14px 12px 16px;
+  padding: 12px 14px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -368,8 +361,8 @@
 }
 
 .wb-rf-choice[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--wb-accent) 65%, transparent);
-  box-shadow: 0 0 0 3px var(--wb-accent-soft);
+  border-color: var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-accent-soft) 45%, var(--wb-table-surface));
 }
 
 .wb-rf-choice-name {
@@ -907,7 +900,6 @@
 
 .wb-rf-combobox.is-open .wb-rf-input {
   border-color: var(--wb-accent);
-  box-shadow: 0 0 0 3px var(--wb-accent-soft);
 }
 
 .wb-rf-combobox-list {
@@ -1155,7 +1147,8 @@
 
 .wb-rf-split-row.is-current,
 .wb-rf-split-line.is-current {
-  box-shadow: inset 3px 0 0 var(--wb-accent);
+  box-shadow: inset 1px 0 0 var(--wb-accent);
+  background: color-mix(in srgb, var(--wb-accent-soft) 28%, transparent);
 }
 
 .wb-rf-split-more {
@@ -1449,7 +1442,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 18px;
-  padding-top: 18px;
+}
+
+.wb-rf-build-more .wb-rf-fold-body {
+  gap: 14px;
 }
 
 .wb-rf-build-fields .wb-rf-chips .wb-rf-chip {

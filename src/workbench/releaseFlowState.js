@@ -237,6 +237,16 @@ export function appendTaskLog(state, line, tone = "") {
   if (state.logs.length > MAX_LOG_LINES) state.logs.splice(0, state.logs.length - MAX_LOG_LINES);
 }
 
+export function appendTaskLogs(state, entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  const normalized = entries
+    .filter((entry) => entry && entry.text !== undefined && entry.text !== null)
+    .map((entry) => ({ text: String(entry.text), tone: String(entry.tone || "") }));
+  if (!normalized.length) return;
+  state.logs.push(...normalized);
+  if (state.logs.length > MAX_LOG_LINES) state.logs.splice(0, state.logs.length - MAX_LOG_LINES);
+}
+
 export function appendHistory(history, entry) {
   history.push(entry);
   if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);

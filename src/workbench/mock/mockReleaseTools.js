@@ -14,6 +14,7 @@ const COMMANDS = new Set([
   "release_pick_exclusion",
   "svn_wc_info",
   "svn_wc_status",
+  "svn_wc_update",
   "svn_wc_file_diff",
   "svn_wc_commit",
   "svn_wc_revert",
@@ -102,6 +103,11 @@ async function svn(command, request) {
   const paths = request.paths || [];
   if (command === "svn_wc_info") return { ...(await copy.source.info(root)), url: "^/release/jswz", relativeUrl: "^/release/jswz" };
   if (command === "svn_wc_status") return [...(await copy.source.status(root)), ...copy.extras.map(extraEntry)];
+  if (command === "svn_wc_update") {
+    const info = await copy.source.info(root);
+    const conflicts = copy.extras.filter((entry) => entry.item === "conflicted").map((entry) => entry.path);
+    return { revision: info.revision, updated: 4, conflicts, lines: [`Updated to revision ${info.revision}.`], simulated: true };
+  }
   if (command === "svn_wc_file_diff") {
     const extra = copy.extras.find((entry) => entry.path === paths[0]);
     if (extra?.item === "unversioned") return { path: extra.path, diff: "", content: extra.content, binary: false, tooLarge: false, encoding: "utf-8" };

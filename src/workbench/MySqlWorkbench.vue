@@ -940,6 +940,7 @@ async function ensureValueSearchProgressListener() {
 const databaseSync = useDatabaseSync({
   connections,
   databases,
+  databasesByConnection,
   invokeWorkbench,
   listen: listenWorkbenchEvent,
 });
@@ -977,6 +978,7 @@ function openReleaseFlow() {
   // The conversion step shows each template's script; find the built-in
   // ones in the background, as the table transfer dialog does.
   void tableTransfer.discoverAndFill();
+  void fetchAllConnectionsDatabases();
 }
 
 // 配置关联：索引按（连接, 数据库）维护；侧栏入口的角标跟随当前配置库，
@@ -1155,6 +1157,17 @@ async function openBackupCenter() {
   backupCenter.setFilters({ connectionId: "", database: "", tableName: "" });
   // Local history is usable immediately; account metadata loads independently.
   backupCenter.open();
+  void account.loadAccount();
+}
+
+async function openBackupCenterFromRelease(options) {
+  const opts = options && typeof options === "object" && !("target" in options) ? options : null;
+  if (opts) {
+    backupCenter.open(opts);
+  } else {
+    backupCenter.setFilters({ connectionId: "", database: "", tableName: "" });
+    backupCenter.open();
+  }
   void account.loadAccount();
 }
 
@@ -5905,6 +5918,20 @@ onBeforeUnmount(() => {
       <button type="button" role="menuitem" @click="closeAllTabsFromMenu"><ListX :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_34f7336d3983') }}</button>
     </menu>
 
+    <ReleaseFlowDialog
+      v-if="releaseFlowOpen"
+      :connections="connections"
+      :databases-by-connection="databasesByConnection"
+      :database-sync="databaseSync"
+      :backup-center="backupCenter"
+      :transfer="tableTransfer"
+      :exclusion-templates="databaseSync.exclusionTemplates.value"
+      @open-database-sync="openDatabaseSync"
+      @open-backup-center="openBackupCenterFromRelease"
+      @open-table-transfer="openTableTransfer"
+      @close="releaseFlowOpen = false"
+    />
+
     <DatabaseSyncDialog
       v-if="databaseSync.dialog.open"
       :sync="databaseSync"
@@ -5976,13 +6003,6 @@ onBeforeUnmount(() => {
       v-if="tableTransfer.dialog.open"
       :transfer="tableTransfer"
       @close="tableTransfer.close"
-    />
-
-    <ReleaseFlowDialog
-      v-if="releaseFlowOpen"
-      :transfer="tableTransfer"
-      :exclusion-templates="databaseSync.exclusionTemplates.value"
-      @close="releaseFlowOpen = false"
     />
 
     <ConfigRelationsDialog

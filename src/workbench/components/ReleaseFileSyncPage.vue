@@ -189,9 +189,11 @@ function onMenuFocusOut(event) {
         <button type="submit" class="wb-rf-btn is-small" :disabled="locked || !draft.trim()">{{ t('releaseFlow.files.addRule') }}</button>
       </form>
       <ReleaseRuleList :rules="ownRules" :locked="ALWAYS_EXCLUDED_RULES" :label="t('releaseFlow.files.rules')" :disabled="locked" @update="setOwnRules" />
-      <details v-if="projectRules.length" class="wb-rf-project-rules">
+      <details v-if="projectRules.length" class="wb-rf-fold wb-rf-project-rules">
         <summary>{{ t('releaseFlow.files.projectRules', { count: projectRules.length }) }}</summary>
-        <ReleaseRuleList :rules="projectRules" :disabled="locked" @update="setProjectRules" />
+        <div class="wb-rf-fold-body">
+          <ReleaseRuleList :rules="projectRules" :disabled="locked" @update="setProjectRules" />
+        </div>
       </details>
       <label class="wb-rf-check">
         <input type="checkbox" :checked="flow.workspace.rules.mirrorDeletes" :disabled="locked" @change="flow.setMirrorDeletes($event.target.checked)" />
@@ -221,6 +223,7 @@ function onMenuFocusOut(event) {
         <div class="wb-rf-stat is-warning"><strong>{{ counts.deleted }}</strong><span>{{ t('releaseFlow.files.deleted') }}</span></div>
         <div class="wb-rf-stat is-muted"><strong>{{ counts.excluded }}</strong><span>{{ t('releaseFlow.files.excluded') }}</span></div>
       </div>
+      <p v-if="plan.error" class="wb-rf-notice is-danger" role="alert">{{ plan.error }}</p>
       <ul class="wb-rf-list wb-rf-file-list" :aria-label="t('releaseFlow.files.preview')">
         <li v-for="row in rows" :key="row.path" class="wb-rf-file" :class="`is-${row.kind}`">
           <span class="wb-rf-file-status" :class="`is-${row.status}`" :title="t(`releaseFlow.files.status.${row.status}`)">{{ row.status }}</span>
@@ -229,6 +232,7 @@ function onMenuFocusOut(event) {
           <span v-else-if="row.kind === 'kept'" class="wb-rf-file-rule">{{ t('releaseFlow.files.kept') }}</span>
         </li>
       </ul>
+      <p v-if="plan.truncated" class="wb-rf-hint">{{ t('releaseFlow.files.truncatedNotice', { count: rows.length }) }}</p>
     </section>
   </div>
 
@@ -250,14 +254,6 @@ function onMenuFocusOut(event) {
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 20px;
   align-items: start;
-}
-
-.wb-rf-project-rules summary {
-  width: fit-content;
-  margin-bottom: 8px;
-  color: var(--wb-secondary-text);
-  font-size: var(--wb-fs-body);
-  cursor: pointer;
 }
 
 .wb-rf-rule-form {

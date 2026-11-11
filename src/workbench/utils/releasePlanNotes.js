@@ -144,7 +144,9 @@ export function planChanges(items, { dateIso, noteFor, currentFor }) {
     const next = stateFlag(verdict.state);
     let change = PLAN_CHANGE.KEEP;
     if (next === null) change = PLAN_CHANGE.SKIP;
-    else if (next !== current) change = next === 1 ? PLAN_CHANGE.OPEN : PLAN_CHANGE.CLOSE;
+    else if (current !== null && next !== current) {
+      change = next === 1 ? PLAN_CHANGE.OPEN : PLAN_CHANGE.CLOSE;
+    }
     return { item, note, rule, verdict, current, next, change };
   });
 }
@@ -168,19 +170,65 @@ function keyTuple(key, columns) {
   return `(${columns.map((column) => sqlValue(key[column])).join(", ")})`;
 }
 
+export function keyTupleNumbers(key, columns) {
+  if (columns.length === 1) return [Number(typeof key === "object" ? key[columns[0]] : key)];
+  return columns.map((column) => Number(key[column]));
+}
+
+function mergePlanGroups(groups) {
+  const merged = new Map();
+  for (const { table, keyColumn, keyColumns, flagColumn, rows = [], entries = [] } of groups) {
+    const columns = keyColumns ? [...keyColumns] : [keyColumn];
+    const id = [table, columns.join(","), flagColumn].join("\u001f");
+    if (!merged.has(id)) merged.set(id, { table, columns, flagColumn, rows: [], items: [] });
+    const bucket = merged.get(id);
+    bucket.rows.push(...rows);
+    bucket.items.push(...(entries.length ? entries : rows.map((row) => row.item)));
+  }
+  return merged;
+}
+
+/**
+ * Grouped table read requests for `release_read_plan_flags`: merges categories
+ * sharing the same table, key columns and flag column into one query per table.
+ */
+export function planFlagQueries(groups) {
+  const queries = [];
+  for (const { table, columns, flagColumn, items } of mergePlanGroups(groups).values()) {
+    if (!items.length) continue;
+    queries.push({
+      table,
+      keyColumns: [...columns],
+      flagColumn,
+      items: items.map((item) => ({ id: item.id, keys: keyTupleNumbers(item.key, columns) })),
+    });
+  }
+  return queries;
+}
+
+/**
+ * Structured write payloads for `release_execute_plan_writes`, matching the
+ * exact table/flag grouping and order of `planStatements`.
+ */
+export function planWriteGroups(groups) {
+  const writes = [];
+  for (const { table, columns, flagColumn, rows } of mergePlanGroups(groups).values()) {
+    for (const [change, flag] of [[PLAN_CHANGE.OPEN, 1], [PLAN_CHANGE.CLOSE, 0]]) {
+      const keys = rows.filter((row) => row.change === change).map((row) => keyTupleNumbers(row.item.key, columns));
+      if (!keys.length) continue;
+      writes.push({ table, keyColumns: [...columns], flagColumn, flag, keys });
+    }
+  }
+  return writes;
+}
+
 /**
  * The statements a write would run: one UPDATE per table, switch column and
  * target flag, so groups sharing a table (heroes and mounts in heroprop)
  * write together. A composite key compares as a row value.
  */
 export function planStatements(groups) {
-  const merged = new Map();
-  for (const { table, keyColumn, keyColumns, flagColumn, rows } of groups) {
-    const columns = keyColumns ? [...keyColumns] : [keyColumn];
-    const id = [table, columns.join(","), flagColumn].join("\u001f");
-    if (!merged.has(id)) merged.set(id, { table, columns, flagColumn, rows: [] });
-    merged.get(id).rows.push(...rows);
-  }
+  const merged = mergePlanGroups(groups);
   const statements = [];
   for (const { table, columns, flagColumn, rows } of merged.values()) {
     const target = columns.length === 1

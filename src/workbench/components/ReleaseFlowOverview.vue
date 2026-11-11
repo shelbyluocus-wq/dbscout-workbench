@@ -97,10 +97,9 @@ const relativeDay = computed(() => {
   align-items: baseline;
   gap: 6px 18px;
   padding: 16px 18px;
-  border: 1px solid color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border));
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 50%, var(--wb-border));
   border-radius: 12px;
-  background: var(--wb-table-surface);
-  box-shadow: 0 0 0 3px var(--wb-accent-soft);
+  background: color-mix(in srgb, var(--wb-accent-soft) 36%, var(--wb-table-surface));
 }
 
 .wb-rf-platform-fixed strong {

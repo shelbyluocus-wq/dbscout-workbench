@@ -169,10 +169,13 @@ async function remove(item) {
     <p>{{ t(items.length ? 'releaseFlow.plan.noMatch' : 'releaseFlow.plan.empty') }}</p>
   </div>
 
-  <p class="wb-rf-hint wb-rf-plan-foot">
-    <span>{{ t('releaseFlow.plan.syntax') }}</span>
-    <span>{{ t('releaseFlow.plan.writes') }}</span>
-  </p>
+  <details class="wb-rf-fold wb-rf-plan-foot">
+    <summary>{{ t('releaseFlow.plan.help') }}</summary>
+    <div class="wb-rf-fold-body wb-rf-hint">
+      <span>{{ t('releaseFlow.plan.syntax') }}</span>
+      <span>{{ t('releaseFlow.plan.writes') }}</span>
+    </div>
+  </details>
 
   <ReleasePlanEntryEditor
     v-if="editing"

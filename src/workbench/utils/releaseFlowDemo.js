@@ -174,6 +174,7 @@ export function createDemoPlatforms() {
   return DEMO_PLATFORM_IDS.map((id) => ({
     id,
     name: PLATFORM_NAMES[id],
+    connectionId: "",
     sourceDatabase: DEMO_SOURCE_DATABASE,
     targetDatabase: `newsg_${id}_cfg`,
     sourceClient: DEMO_SOURCE_CLIENT,

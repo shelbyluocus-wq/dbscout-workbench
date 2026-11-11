@@ -555,7 +555,11 @@ async fn run_inner(
     let strategy = parse_conflict_strategy(request.conflict_strategy.as_deref());
     // Check the next stage before doing potentially expensive generation.
     let svn_target = resolve_svn_update_dir(&project_root).to_path_buf();
-    let mut svn = SvnClient::for_working_copy(app, &svn_target).await?;
+    let mut svn = if request.skip_svn_update {
+        None
+    } else {
+        Some(SvnClient::for_working_copy(app, &svn_target).await?)
+    };
 
     // 1. 解析脚本（.lnk 先解析出真实目标），并启动。完整路径进日志，状态
     //    消息保持简短（对话框状态行空间有限）。
@@ -608,19 +612,27 @@ async fn run_inner(
     let props_dir = assets.join("props");
     let src_props_dir = assets.join("src").join("props");
     ensure_not_cancelled(guard)?;
-    let svn_started = Instant::now();
-    let leftover = svn_update_with_strategy(&mut svn, &svn_target, strategy, progress).await?;
-    progress.log(
-        STAGE_SVN,
-        format!(
-            "SVN 更新结束，耗时 {:.1} 秒",
-            svn_started.elapsed().as_secs_f64()
-        ),
-    );
-    if !leftover.is_empty() {
-        return Err(format_manual_conflict_error(&svn_target, &leftover));
-    }
-    let updated_dirs = vec![svn_target.to_string_lossy().to_string()];
+    let updated_dirs = if let Some(svn) = svn.as_mut() {
+        let svn_started = Instant::now();
+        let leftover = svn_update_with_strategy(svn, &svn_target, strategy, progress).await?;
+        progress.log(
+            STAGE_SVN,
+            format!(
+                "SVN 更新结束，耗时 {:.1} 秒",
+                svn_started.elapsed().as_secs_f64()
+            ),
+        );
+        if !leftover.is_empty() {
+            return Err(format_manual_conflict_error(&svn_target, &leftover));
+        }
+        vec![svn_target.to_string_lossy().to_string()]
+    } else {
+        progress.log(
+            STAGE_SVN,
+            "已在版本更新前置步骤完成 SVN 更新与文件同步，跳过转表内 SVN 更新".to_string(),
+        );
+        Vec::new()
+    };
 
     // 4. 合并覆盖拷贝 props/* 与 src/props/* 进工程 assets。
     ensure_not_cancelled(guard)?;

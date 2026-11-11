@@ -61,7 +61,7 @@ function openHistory(entryId) {
 }
 
 const ACTIONS = Object.freeze([
-  { id: "new", icon: Plus },
+  { id: "new", icon: Plus, realInDesktop: true },
   { id: "build", icon: Package, real: true },
   { id: "svn", icon: FolderGit2, real: true },
   { id: "plans", icon: CalendarCheck2 },
@@ -92,7 +92,7 @@ function runAction(id) {
           <strong>{{ t(`releaseFlow.home.action.${action.id}`) }}</strong>
           <span>{{ t(`releaseFlow.home.action.${action.id}.hint`) }}</span>
         </span>
-        <span v-if="action.real" class="wb-rf-chip is-accent">{{ t('releaseFlow.real') }}</span>
+        <span v-if="action.real || (action.realInDesktop && workspace.realMode)" class="wb-rf-chip is-accent">{{ t('releaseFlow.real') }}</span>
       </button>
     </div>
   </section>

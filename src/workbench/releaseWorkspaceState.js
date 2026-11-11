@@ -52,7 +52,7 @@ const RECENT_WITH_LOGS = 15;
 const MAX_EVENTS = 120;
 
 export const PLATFORM_TEXT_FIELDS = Object.freeze([
-  "name", "sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "transferTemplateId",
+  "name", "connectionId", "sourceDatabase", "targetDatabase", "sourceClient", "targetClient", "transferTemplateId",
   "cocosVersion", "cocosPath", "buildPlatform", "buildConfig", "buildOutputName",
 ]);
 export const PLATFORM_FLAG_FIELDS = Object.freeze(["buildDebug", "buildMd5Cache", "buildQaGuard"]);
@@ -188,7 +188,7 @@ export function createRunId(now = Date.now()) {
   return `run-${now.toString(36)}-${runSequence.toString(36).padStart(2, "0")}`;
 }
 
-export function createRun({ id = createRunId(), platformId, today = localDateIso(), createdAt = Date.now() } = {}) {
+export function createRun({ id = createRunId(), platformId, today = localDateIso(), createdAt = Date.now(), demo = true } = {}) {
   const brief = createReleaseBrief(today);
   return {
     id,
@@ -210,7 +210,7 @@ export function createRun({ id = createRunId(), platformId, today = localDateIso
     svnDemo: { committed: [], reverted: [], revision: 0, commits: [] },
     // One-click mode of this update (releaseAutopilotState.js).
     autopilot: idleAutopilot(),
-    demo: true,
+    demo: Boolean(demo),
   };
 }
 
@@ -224,7 +224,7 @@ function restoreEvents(saved) {
     .map((entry) => ({ at: Number(entry.at), taskId: entry.taskId || "", event: String(entry.event || "") }));
 }
 
-export function restoreRun(saved, { platforms, today }) {
+export function restoreRun(saved, { platforms, today, realMode = false }) {
   if (!plainObject(saved) || typeof saved.id !== "string" || !saved.id) return null;
   if (!platforms.some((platform) => platform.id === saved.platformId)) return null;
   const fallback = createRun({ id: saved.id, platformId: saved.platformId, today, createdAt: Number(saved.createdAt) || Date.now() });
@@ -269,7 +269,7 @@ export function restoreRun(saved, { platforms, today }) {
         : [],
     },
     autopilot,
-    demo: true,
+    demo: realMode ? Boolean(saved.demo) : true,
   };
 }
 
@@ -306,12 +306,12 @@ function restoreView(saved, runs, platforms) {
  * `legacy` a v2 single-flow draft (migrated into one update); `seedRuns`
  * builds the demo's scheduled updates for a first open.
  */
-export function createWorkspaceData({ stored = null, legacy = null, today = localDateIso(), translate, seedRuns = null } = {}) {
+export function createWorkspaceData({ stored = null, legacy = null, today = localDateIso(), translate, seedRuns = null, realMode = false } = {}) {
   const base = stored || (legacy ? migrateLegacyFlow(legacy, { today, translate }) : null);
   const platforms = restorePlatforms(base?.platforms);
   const plans = restorePlans(base?.plans, { platforms, today, translate });
   const savedRuns = Array.isArray(base?.runs) ? base.runs : (base ? [] : seedRuns?.({ today, platforms }) || []);
-  const runs = onePerPlatform(savedRuns.map((run) => restoreRun(run, { platforms, today })).filter(Boolean));
+  const runs = onePerPlatform(savedRuns.map((run) => restoreRun(run, { platforms, today, realMode })).filter(Boolean));
   return {
     platforms,
     plans,

@@ -6,6 +6,7 @@ import {
   cocosBuildConfirmOptions,
   composeDrivers,
   createReleaseBuildDriver,
+  progressEntriesOf,
   useCocosBuildTool,
 } from "./composables/useCocosBuild.js";
 
@@ -190,3 +191,45 @@ test("a missing editor is replaced by the single installed copy of that version"
   assert.equal(platform.cocosVersion, "3.8.8");
   tool.dispose();
 });
+
+test("batched build progress payloads append in one step with dropped-line notices", async () => {
+  const entries = progressEntriesOf({
+    droppedLines: 140,
+    lines: [
+      { stage: "build", stream: "info", line: "> CocosCreator --build" },
+      { stage: "build", stream: "err", line: "[Error] Missing atlas" },
+      { stage: "build", stream: "out", line: "[Build] Done" },
+    ],
+  });
+  assert.equal(entries.length, 4);
+  assert.equal(entries[0].tone, "muted");
+  assert.match(entries[0].text, /140/);
+  assert.deepEqual(entries.slice(1), [
+    { text: "> CocosCreator --build", tone: "muted" },
+    { text: "[Error] Missing atlas", tone: "error" },
+    { text: "[Build] Done", tone: "" },
+  ]);
+
+  const batchChunks = [];
+  const backend = fakeBackend({
+    lines: [{
+      droppedLines: 12,
+      lines: [
+        { stage: "build", stream: "out", line: "[Build] Bundle main" },
+        { stage: "build", stream: "err", line: "warning: unused sprite" },
+      ],
+    }],
+  });
+  const driver = createReleaseBuildDriver({ backend });
+  const io = {
+    signal: new AbortController().signal,
+    log: () => assert.fail("driver should prefer bulk io.logs when present"),
+    logs: (chunk) => batchChunks.push(chunk),
+    progress: () => {},
+    wait: () => Promise.resolve(),
+  };
+  await driver.run("build.cocos", context(), io);
+  assert.equal(batchChunks.length, 1);
+  assert.equal(batchChunks[0].length, 3);
+});
+
