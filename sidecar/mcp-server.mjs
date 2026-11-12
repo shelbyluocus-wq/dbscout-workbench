@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { readFile } from "node:fs/promises";
+import { serveHttp } from "./mcpHttp.mjs";
 import { z } from "zod";
 
 import { appExecutableFromArgs, ControlClient } from "./controlClient.mjs";
@@ -524,12 +526,21 @@ function createServer() {
   return server;
 }
 
-const stdioServer = serveStdio(createServer);
+const httpConfigIndex = process.argv.indexOf("--http-config");
+const transportServer = httpConfigIndex < 0
+  ? serveStdio(createServer)
+  : await serveHttp(createServer, JSON.parse(await readFile(process.argv[httpConfigIndex + 1], "utf8")));
+
+if (httpConfigIndex >= 0) {
+  process.stdout.write("ready\n");
+  process.stdin.resume();
+  process.stdin.once("end", () => process.exit(0));
+}
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, async () => {
     control.close();
-    await stdioServer.close();
+    await transportServer.close();
     process.exit(0);
   });
 }

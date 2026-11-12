@@ -2,6 +2,8 @@
 import { releaseFlowEn } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
+  "blackcatMcp.httpUrl": "HTTP URL (Cindy and other clients)",
+  "blackcatMcp.httpHint": "Select HTTP / Streamable HTTP and enter the URL and Bearer Token separately. Local access only; keep Blackcat running. Both transports share the same permissions. Requires Node.js 20 or later.",
   "createTable.title": "Create table",
   "createTable.name": "Name",
   "createTable.namePlaceholder": "e.g. rewardprop",

@@ -50,6 +50,10 @@ const groups = [
 
 const genericMcpConfig = computed(() => genericMcpConfigJson(status.value));
 const connectBlocks = computed(() => [
+  ...(status.value.http?.url ? [
+    { id: "http", label: t("blackcatMcp.httpUrl"), copyLabel: t("blackcatMcp.copy"), text: status.value.http.url },
+    { id: "token", label: "Bearer Token", copyLabel: t("blackcatMcp.copy"), text: status.value.http.token },
+  ] : []),
   { id: "codex", label: t("m_c6fd552b6aed"), copyLabel: t("m_685e3d12e56e"), text: String(status.value.codexInstallCommand || "") },
   { id: "claude", label: t("m_a02299dd496a"), copyLabel: t("m_b30c0a6045d3"), text: String(status.value.installCommand || "") },
   { id: "generic", label: t("m_d37776c322a2"), copyLabel: t("blackcatMcp.copy"), text: genericMcpConfig.value },
@@ -159,6 +163,8 @@ onBeforeUnmount(() => {
                 <span>{{ t("blackcatMcp.connectTitle") }}</span>
               </summary>
               <div class="wb-mcp-connect-body">
+                <p class="wb-mcp-note">{{ t("blackcatMcp.httpHint") }}</p>
+                <p v-if="status.http?.error" class="wb-mcp-error" role="alert">{{ status.http.error }}</p>
                 <div v-for="block in connectBlocks" :key="block.id" class="wb-mcp-connect-block">
                   <div class="wb-mcp-connect-head">
                     <span>{{ block.label }}</span>
@@ -168,8 +174,19 @@ onBeforeUnmount(() => {
                       @click="copySnippet(block)"
                     >{{ copiedTarget === block.id ? t("m_8f6f8d979c98") : block.copyLabel }}</button>
                   </div>
-                  <textarea
+                  <input
+                    v-if="block.id === 'token'"
+                    type="password"
                     class="wb-mcp-connect-code"
+                    :value="block.text"
+                    aria-label="Bearer Token"
+                    readonly
+                    autocomplete="off"
+                  />
+                  <textarea
+                    v-else
+                    class="wb-mcp-connect-code"
+                    :aria-label="block.label"
                     :value="block.text"
                     :rows="block.id === 'generic' ? 7 : 2"
                     readonly

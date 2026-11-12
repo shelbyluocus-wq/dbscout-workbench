@@ -161,6 +161,7 @@ impl McpPermission {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalMcpStatus {
+    http: HttpMcpStatus,
     enabled: bool,
     running: bool,
     connected_clients: usize,
@@ -174,7 +175,17 @@ pub struct ExternalMcpStatus {
     permissions: McpPermissions,
 }
 
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpMcpStatus {
+    url: String,
+    token: String,
+    error: String,
+}
+
 pub struct ControlServerState {
+    http_status: RwLock<HttpMcpStatus>,
+    http_child: Mutex<Option<tokio::process::Child>>,
     enabled: AtomicBool,
     permissions: RwLock<McpPermissions>,
     ui_ready: AtomicBool,
@@ -188,6 +199,8 @@ pub struct ControlServerState {
 impl Default for ControlServerState {
     fn default() -> Self {
         Self {
+            http_status: RwLock::new(HttpMcpStatus::default()),
+            http_child: Mutex::new(None),
             enabled: AtomicBool::new(true),
             permissions: RwLock::new(McpPermissions::default()),
             ui_ready: AtomicBool::new(false),
@@ -534,6 +547,13 @@ async fn run(app: AppHandle) -> Result<(), String> {
     };
     *app.state::<ControlServerState>().endpoint.write().await = Some(endpoint);
     write_discovery_file(&app, port, &token)?;
+
+    let http_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = start_http_mcp(&http_app).await {
+            http_app.state::<ControlServerState>().http_status.write().await.error = error;
+        }
+    });
 
     loop {
         let (stream, _) = match listener.accept().await {
@@ -1240,6 +1260,56 @@ fn quote_cli_arg(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\\\""))
 }
 
+async fn start_http_mcp(app: &AppHandle) -> Result<(), String> {
+    let config_path = app_data_file(app, "mcp-http.json")?;
+    let config = if config_path.exists() {
+        serde_json::from_slice::<Value>(&std::fs::read(&config_path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("HTTP MCP 配置损坏: {error}"))?
+    } else {
+        let config = serde_json::json!({
+            "port": 17839,
+            "token": format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+        });
+        write_private_file(&config_path, &serde_json::to_vec(&config).map_err(|error| error.to_string())?)?;
+        config
+    };
+    let port = config.get("port").and_then(Value::as_u64).filter(|port| *port > 0 && *port <= 65535)
+        .ok_or("HTTP MCP 端口无效")?;
+    let token = config.get("token").and_then(Value::as_str)
+        .filter(|token| token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("HTTP MCP 令牌无效")?;
+    let (mut node, server) = resolve_mcp_paths(app);
+    if node == "node" {
+        for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+            if std::path::Path::new(candidate).exists() {
+                node = candidate.to_string();
+                break;
+            }
+        }
+    }
+    let mut command = tokio::process::Command::new(node);
+    command.args([server.as_str(), "--http-config", &config_path.to_string_lossy()])
+        .env("DBSCOUT_CONTROL_ENDPOINT", app_data_file(app, DISCOVERY_FILE_NAME)?)
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null()).kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let mut child = command.spawn().map_err(|error| format!("HTTP MCP 启动失败，请安装 Node.js 20 或更高版本: {error}"))?;
+    let stdout = child.stdout.take().ok_or("HTTP MCP 无法读取启动状态")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let ready = timeout(Duration::from_secs(15), lines.next_line()).await
+        .map_err(|_| "HTTP MCP 启动超时")?.map_err(|error| error.to_string())?;
+    if ready.as_deref() != Some("ready") {
+        return Err("HTTP MCP 启动失败，请检查 Node.js 版本和端口 17839 是否被占用".to_string());
+    }
+    let state = app.state::<ControlServerState>();
+    *state.http_child.lock().await = Some(child);
+    *state.http_status.write().await = HttpMcpStatus {
+        url: format!("http://127.0.0.1:{port}/mcp"), token: token.to_string(), error: String::new(),
+    };
+    Ok(())
+}
+
 fn resolve_mcp_paths(app: &AppHandle) -> (String, String) {
     if let Ok(resource_dir) = app.path().resource_dir() {
         let node_names: &[&str] = if cfg!(target_os = "windows") {
@@ -1275,6 +1345,14 @@ async fn external_mcp_status(
     app: &AppHandle,
     state: &ControlServerState,
 ) -> Result<ExternalMcpStatus, String> {
+    if let Some(child) = state.http_child.lock().await.as_mut() {
+        if child.try_wait().map_err(|error| error.to_string())?.is_some() {
+            let mut http = state.http_status.write().await;
+            http.url.clear();
+            http.token.clear();
+            http.error = "HTTP MCP 已退出，请重启黑猫恢复连接".to_string();
+        }
+    }
     let (node_path, server_path) = resolve_mcp_paths(app);
     let app_path = std::env::current_exe()
         .map_err(|error| format!("无法获取黑猫程序路径: {error}"))?
@@ -1293,6 +1371,7 @@ async fn external_mcp_status(
         quote_cli_arg(&app_path),
     );
     Ok(ExternalMcpStatus {
+        http: state.http_status.read().await.clone(),
         enabled: state.enabled.load(Ordering::Acquire),
         running: state.endpoint.read().await.is_some(),
         connected_clients: state.active_clients.load(Ordering::Acquire),

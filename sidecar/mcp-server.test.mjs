@@ -10,6 +10,9 @@ import { Client as ModernClient } from "@modelcontextprotocol/client";
 import { StdioClientTransport as ModernStdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = process.env.DBSCOUT_MCP_SERVER_PATH
@@ -117,7 +120,8 @@ test("external MCP is selected as modern during automatic protocol negotiation",
   }
 });
 
-test("mutation calls preserve explicit targets and reject missing confirmation before dispatch", async () => {
+for (const transport of ["stdio", "http"]) {
+test(`${transport} mutation calls preserve explicit targets and reject missing confirmation before dispatch`, async () => {
   const requests = [];
   const sockets = new Set();
   const listener = net.createServer((socket) => {
@@ -147,11 +151,35 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
     port: listener.address().port, token: "test", pid: process.pid, protocolVersion: 1,
   }));
   const client = new Client({ name: "write-routing-test", version: "1.0.0" });
+  let child;
   try {
+    if (transport === "http") {
+      const config = path.join(temp, "http.json");
+      const reservation = net.createServer();
+      await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+      const port = reservation.address().port;
+      await new Promise((resolve) => reservation.close(resolve));
+      const token = "b".repeat(64);
+      await writeFile(config, JSON.stringify({ port, token }));
+      child = spawn(process.execPath, [serverPath, "--http-config", config], {
+        env: { ...process.env, DBSCOUT_CONTROL_ENDPOINT: discovery }, stdio: ["pipe", "pipe", "inherit"],
+      });
+      const lines = createInterface({ input: child.stdout });
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("HTTP startup timed out")), 10000);
+        lines.once("line", (line) => { clearTimeout(timer); line === "ready" ? resolve() : reject(new Error(line)); });
+        child.once("error", (error) => { clearTimeout(timer); reject(error); });
+      });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${token}` } },
+      }));
+      assertCuratedTools((await client.listTools()).tools);
+    } else {
     await client.connect(new StdioClientTransport({
       ...serverOptions,
       env: { ...process.env, DBSCOUT_CONTROL_ENDPOINT: discovery },
     }));
+    }
     const context = { connectionId: "mysql-explicit", database: "explicit_db" };
     const capabilities = await client.callTool({ name: "get_mcp_capabilities", arguments: {} });
     assert.notEqual(capabilities.isError, true);
@@ -224,8 +252,14 @@ test("mutation calls preserve explicit targets and reject missing confirmation b
     }
   } finally {
     await client.close();
+    if (child) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.stdin.end();
+      await exited;
+    }
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => listener.close(resolve));
     await rm(temp, { recursive: true, force: true });
   }
 });
+}

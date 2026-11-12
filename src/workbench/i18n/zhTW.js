@@ -3,6 +3,8 @@
 import { releaseFlowZhTW } from "./releaseFlowMessages.js";
 
 export default Object.freeze({
+  "blackcatMcp.httpUrl": "HTTP 位址（Cindy 等用戶端）",
+  "blackcatMcp.httpHint": "選擇 HTTP / Streamable HTTP，分別填入位址與 Bearer Token。僅限本機存取，使用時保持黑貓執行；與本機接入共用權限。需要 Node.js 20 或更新版本。",
   "createTable.title": "建立資料表",
   "createTable.name": "表名",
   "createTable.namePlaceholder": "例如 rewardprop",

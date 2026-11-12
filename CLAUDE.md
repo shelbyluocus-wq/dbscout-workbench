@@ -15,6 +15,13 @@ as source only; shared Rust SQL validation/database bridges still support MCP.
 the current product or packaging contract. Desktop dev no longer fetches Node.
 
 External MCP navigation: `get_mcp_capabilities` exposes the tool catalog and live
+desktop capabilities through both stdio and authenticated loopback Streamable
+HTTP. The app starts the HTTP sidecar asynchronously (system Node.js 20+ required),
+keeps its lifetime tied to the app, and shows its URL/token or startup error in
+the MCP connection dialog. `mcp-http.json` stores a stable port (default 17839)
+and bearer token; the listener rejects browser origins and unexpected hosts.
+Both transports use the same control endpoint and permission checks.
+`get_mcp_capabilities` exposes the tool catalog and live
 desktop capabilities/permissions; `list_connections` discovers credential-free
 targets. Context reads fetch fresh viewport/selection state without revealing the
 window. `scroll_table` browses actual grids; complete-primary-key focus can open a

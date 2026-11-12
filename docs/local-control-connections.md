@@ -130,3 +130,27 @@ Consumers such as Activity Studio match their configured server by host/port, ve
 Legacy hosts without this capability remain usable when `get_context` identifies a current connection whose `list_databases` response contains the requested database. Otherwise the client should request switching the selected connection or updating Blackcat.
 
 Validation: `cargo test --manifest-path src-tauri/Cargo.toml --lib control_server::tests` covers request parsing, restoration readiness, metadata allowlisting and existing authorization/dispatch contracts. Activity Studio's socket tests cover cross-server selection and legacy fallback. Rebuild/update the desktop executable for this capability to be available in an already installed Blackcat.
+# Local Streamable HTTP MCP
+
+Blackcat also serves `http://127.0.0.1:17839/mcp` while the desktop app is running.
+In More → Blackcat MCP → connection instructions, copy the HTTP URL and Bearer
+Token into Cindy (HTTP transport) or another Streamable HTTP client. This is not
+the legacy SSE transport. Restart/newly create the client session after saving.
+The token is masked in the dialog and copied separately; never place it in a URL.
+
+The listener requires Node.js 20+ installed on the computer; it does not download
+or bundle a runtime. Missing Node, an occupied port, or a failed process is shown
+in the connection instructions without blocking database browsing or stdio MCP.
+The app starts it asynchronously and closes it when the app exits. A closed or
+hidden window is not necessarily an app exit. The MCP master switch and all
+permission groups continue to gate tool calls through the existing control server.
+
+The stable port and random 256-bit bearer token are stored in `mcp-http.json` in
+the app data directory (owner-only file mode on Unix). To change the port or
+rotate a compromised token, quit Blackcat, edit that file (token: 64 lowercase
+hex characters), restart, then update clients. Invalid configuration is reported,
+not silently replaced. Never expose this endpoint through a public proxy.
+Only IPv4 loopback is bound; Host must match the endpoint and browser Origin
+headers are rejected even with a token. Requests are limited to 4 MiB.
+
+Checks: `node --test sidecar/mcpHttp.test.mjs sidecar/mcp-server.test.mjs`.
