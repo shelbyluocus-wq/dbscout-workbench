@@ -1196,6 +1196,8 @@ export default Object.freeze({
   "updater.title.error": "更新检查失败",
   "updater.title.unavailable": "桌面 SVN 更新器不可用",
   "updater.title.current": "已是最新版本",
+  "updater.notice.moreNotes": "另有 {count} 项更新",
+  "updater.dialog.notesTitle": "更新内容",
   "selectionStats.average": "平均值",
   "selectionStats.count": "计数",
   "selectionStats.sum": "求和",
