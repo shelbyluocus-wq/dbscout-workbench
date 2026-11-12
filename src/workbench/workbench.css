@@ -12230,6 +12230,8 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   width: 30px;
   height: 30px;
+  min-height: 0;
+  padding: 0;
   place-items: center;
   border-radius: 6px;
   color: var(--wb-secondary-text);
@@ -12253,6 +12255,12 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-home-favorite-rail[aria-pressed="true"]:hover,
 .wb-home-favorite-rail[aria-pressed="true"]:focus-visible {
   color: var(--wb-accent-strong);
+}
+
+.wb-home-favorite-shortcut:has(kbd) {
+  width: auto;
+  min-width: 30px;
+  padding: 0 4px;
 }
 
 .wb-home-favorite-shortcut kbd {
