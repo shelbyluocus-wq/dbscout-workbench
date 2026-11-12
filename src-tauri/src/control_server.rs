@@ -1280,6 +1280,14 @@ async fn start_http_mcp(app: &AppHandle) -> Result<(), String> {
         .ok_or("HTTP MCP 令牌无效")?;
     let (mut node, server) = resolve_mcp_paths(app);
     if node == "node" {
+        if let Some(home) = std::env::var_os("HOME") {
+            let candidate = PathBuf::from(home).join(".local/bin/node");
+            if candidate.exists() {
+                node = candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+    if node == "node" {
         for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
             if std::path::Path::new(candidate).exists() {
                 node = candidate.to_string();
