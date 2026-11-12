@@ -150,18 +150,20 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
     finishSidebarPaneAnimation();
   }
 
+  // Unitless px counts: the stylesheet registers these as <number> (see the
+  // @property note in workbench.css) and multiplies them by 1px.
   const sidebarLayoutVars = computed(() => ({
     "--wb-sidebar-slot-width": sidebarCollapsed.value
-      ? "0px"
-      : `${sidebarWidth.value}px`,
+      ? "0"
+      : String(sidebarWidth.value),
     "--wb-sidebar-titlebar-width": sidebarCollapsed.value
-      ? `${SIDEBAR_TITLEBAR_COLLAPSED_WIDTH}px`
-      : `${ACTIVITY_RAIL_WIDTH + sidebarWidth.value}px`,
-    "--wb-sidebar-content-width": `${sidebarWidth.value}px`,
+      ? String(SIDEBAR_TITLEBAR_COLLAPSED_WIDTH)
+      : String(ACTIVITY_RAIL_WIDTH + sidebarWidth.value),
+    "--wb-sidebar-content-width": String(sidebarWidth.value),
   }));
 
   const sidebarSlotStyle = computed(() => ({
-    width: sidebarLayoutVars.value["--wb-sidebar-slot-width"],
+    width: `${sidebarLayoutVars.value["--wb-sidebar-slot-width"]}px`,
   }));
 
   const inspectorStyle = computed(() => {

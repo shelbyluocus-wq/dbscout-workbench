@@ -93,9 +93,10 @@
   --wb-list-selected: color-mix(in srgb, var(--wb-accent) 13%, transparent);
   --wb-list-selected-hover: color-mix(in srgb, var(--wb-accent) 17%, transparent);
   --wb-activity-rail-width: 40px;
-  --wb-sidebar-slot-width: 292px;
-  --wb-sidebar-titlebar-width: calc(var(--wb-activity-rail-width) + 292px);
-  --wb-sidebar-content-width: 292px;
+  /* Unitless px counts (see the @property block); titlebar = rail + slot. */
+  --wb-sidebar-slot-width: 292;
+  --wb-sidebar-titlebar-width: 332;
+  --wb-sidebar-content-width: 292;
   --wb-sidebar-tab-clearance: var(--wb-activity-rail-width);
   --wb-titlebar-height: 40px;
   --wb-main-min-width: 400px;
@@ -608,7 +609,7 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-activity-rail-width) - var(--wb-sidebar-slot-width)));
+  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-activity-rail-width) - var(--wb-sidebar-slot-width) * 1px));
   --wb-titlebar-update-right: 142px;
   --wb-titlebar-agent-right: 176px;
   --wb-titlebar-pin-right: 210px;
@@ -677,22 +678,27 @@ label:has(input[type="checkbox"]:disabled) {
   -webkit-app-region: no-drag;
 }
 
+/* Registered so the root can interpolate them while the sidebar collapses.
+   They hold unitless px counts and become lengths with `* 1px` where used:
+   WebKit applies page zoom to a registered <length> when computing it and
+   again where var() substitutes it, so at any zoom but 100% the sidebar and
+   its titlebar strip (which also spans the unregistered rail) drifted apart. */
 @property --wb-sidebar-slot-width {
-  syntax: "<length>";
+  syntax: "<number>";
   inherits: true;
-  initial-value: 0px;
+  initial-value: 0;
 }
 
 @property --wb-sidebar-titlebar-width {
-  syntax: "<length>";
+  syntax: "<number>";
   inherits: true;
-  initial-value: 40px;
+  initial-value: 40;
 }
 
 @property --wb-sidebar-content-width {
-  syntax: "<length>";
+  syntax: "<number>";
   inherits: true;
-  initial-value: 292px;
+  initial-value: 292;
 }
 
 .wb-titlebar-sidebar {
@@ -702,7 +708,7 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   align-items: center;
   gap: 3px;
-  width: var(--wb-sidebar-titlebar-width);
+  width: calc(var(--wb-sidebar-titlebar-width) * 1px);
   /* Centers the 30px collapse toggle over the activity rail, so the toggle and
      the rail entries share one column whether the sidebar is open or not. */
   padding-inline: calc((var(--wb-activity-rail-width) - 30px) / 2) 8px;
@@ -7854,7 +7860,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sidebar-slot {
   flex: 0 0 auto;
-  width: var(--wb-sidebar-slot-width);
+  width: calc(var(--wb-sidebar-slot-width) * 1px);
   min-width: 0;
   overflow: hidden;
   transition: width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
@@ -7866,9 +7872,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sidebar {
   position: relative;
-  width: var(--wb-sidebar-content-width);
+  width: calc(var(--wb-sidebar-content-width) * 1px);
   height: 100%;
-  min-width: var(--wb-sidebar-content-width);
+  min-width: calc(var(--wb-sidebar-content-width) * 1px);
   overflow: hidden;
   border: none;
   border-radius: 0;

@@ -122,9 +122,9 @@ test("dragging the sidebar publishes its live width for aligned companion surfac
 
     assert.equal(resize.sidebarWidth.value, 332);
     assert.equal(resize.sidebarSlotStyle.value.width, "332px");
-    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "332px");
-    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "372px");
-    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "332px");
+    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "332");
+    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "372");
+    assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "332");
     assert.equal(pane.style.width, undefined, "sidebar DOM width should be rendered from reactive style only");
   } finally {
     globalThis.document = originalDocument;
@@ -136,9 +136,9 @@ test("expand immediately publishes synchronized reveal widths", () => {
   const resize = usePaneResize({ initialCollapsed: false });
   resize.sidebarWidth.value = 318;
   resize.toggleSidebar();
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "0px");
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "40px");
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318px");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "0");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "40");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318");
   resize.sidebarPaneAnimating.value = false;
   resize.sidebarPanePhase.value = null;
 
@@ -146,9 +146,9 @@ test("expand immediately publishes synchronized reveal widths", () => {
   assert.equal(resize.sidebarPanePhase.value, "expanding");
   assert.equal(resize.sidebarCollapsed.value, false);
   assert.equal(resize.sidebarWidth.value, 318);
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "318px");
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "358px");
-  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318px");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-slot-width"], "318");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-titlebar-width"], "358");
+  assert.equal(resize.sidebarLayoutVars.value["--wb-sidebar-content-width"], "318");
 });
 
 test("inspector drag stops before its titlebar controls can collide", () => {

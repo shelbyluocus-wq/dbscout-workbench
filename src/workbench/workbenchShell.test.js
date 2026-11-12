@@ -2045,14 +2045,14 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /provide\("suspendGridAutoFit", sidebarPaneAnimating\)/);
   assert.match(styles, /@property --wb-sidebar-slot-width/);
   assert.match(styles, /@property --wb-sidebar-content-width/);
-  assert.match(styles, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
+  assert.match(styles, /\.wb-sidebar-slot\s*\{[^}]*width:\s*calc\(var\(--wb-sidebar-slot-width\) \* 1px\)/s);
   assert.match(styles, /\.wb-sidebar-slot\s*\{[^}]*transition:\s*width var\(--wb-pane-collapse-duration\)/s);
   assert.match(orchestrator, /'is-pane-animating': sidebarPaneAnimating/);
   assert.match(orchestrator, /'is-expanding': sidebarPanePhase === 'expanding'/);
-  assert.match(styles, /\.wb-sidebar\s*\{[^}]*width:\s*var\(--wb-sidebar-content-width\)/s);
+  assert.match(styles, /\.wb-sidebar\s*\{[^}]*width:\s*calc\(var\(--wb-sidebar-content-width\) \* 1px\)/s);
   assert.doesNotMatch(styles, /@keyframes wb-sidebar-push-flash/);
   assert.doesNotMatch(styles, /filter:\s*brightness/);
-  assert.doesNotMatch(styles, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.doesNotMatch(styles, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*(?:calc\()?var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(styles, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(styles, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
@@ -2061,7 +2061,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
   assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
   assert.match(styles, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
-  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\)\)\)/s);
+  assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\) \* 1px\)\)/s);
   assert.doesNotMatch(styles, /wb-quick-open-entry/);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*0px/s);
   assert.match(styles, /\.mysql-workbench\.is-inspector-collapsed\s*\{[^}]*--wb-titlebar-tab-right-clearance:\s*var\(--wb-titlebar-collapsed-controls-clearance\)/s);

@@ -375,6 +375,12 @@ capabilities:
   stay unchanged. `Cmd` / `Ctrl` + `0` resets to the default 100% size.
   Successful zoom changes persist locally (`dbscout.page-zoom.v1`); desktop
   windows restore the last saved scale on startup without blocking data loading.
+  WebKit zooms a registered `<length>` custom property twice, so `@property`
+  registrations hold unitless numbers turned into px with `* 1px` where used
+  (the sidebar widths; `workbenchCssPolish.test.js` enforces it). Check:
+  `node scripts/test-sidebar-zoom-browser.mjs` against a Vite dev server
+  (`DBSCOUT_SIDEBAR_ZOOM_TEST_URL`, default `http://127.0.0.1:1431`; WebKit
+  and Chromium at 80/100/130/200%).
 - **Desktop integration** — system tray with hide-to-tray, global shortcut
   (`Alt+Shift+F`) to toggle the window, light/dark theme, a switchable color-theme system (slate / teal /
   azure presets with a settings-drawer picker), and an SVN-based

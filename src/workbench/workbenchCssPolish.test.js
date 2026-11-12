@@ -983,7 +983,7 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   const sidebarRule = ruleBody(".wb-sidebar");
   const leftEdgePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane .wb-object-tabs");
   const workbenchRule = ruleBody(".mysql-workbench");
-  assert.match(titlebarSidebarRule, /width:\s*var\(--wb-sidebar-titlebar-width\)/);
+  assert.match(titlebarSidebarRule, /width:\s*calc\(var\(--wb-sidebar-titlebar-width\) \* 1px\)/);
   assert.match(titlebarSidebarRule, /padding-inline:\s*calc\(\(var\(--wb-activity-rail-width\) - 30px\) \/ 2\) 8px/);
   assert.match(collapsedRule, /position\s*:\s*absolute/);
   assert.match(collapsedRule, /width\s*:\s*var\(--wb-activity-rail-width\)/);
@@ -993,21 +993,34 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(hiddenActionsRule, /max-width\s*:\s*0/);
   assert.match(hiddenActionsRule, /opacity\s*:\s*0/);
   assert.match(collapseButtonRule, /width\s*:\s*32px/);
-  assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*width:\s*var\(--wb-sidebar-slot-width\)/s);
+  assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*width:\s*calc\(var\(--wb-sidebar-slot-width\) \* 1px\)/s);
   assert.match(css, /\.wb-sidebar-slot\s*\{[^}]*transition:\s*width var\(--wb-pane-collapse-duration\)/s);
   assert.match(sidebarRule, /contain\s*:\s*layout paint/);
-  assert.match(sidebarRule, /width:\s*var\(--wb-sidebar-content-width\)/);
-  assert.match(sidebarRule, /min-width:\s*var\(--wb-sidebar-content-width\)/);
+  assert.match(sidebarRule, /width:\s*calc\(var\(--wb-sidebar-content-width\) \* 1px\)/);
+  assert.match(sidebarRule, /min-width:\s*calc\(var\(--wb-sidebar-content-width\) \* 1px\)/);
   assert.match(css, /@property --wb-sidebar-content-width/);
   assert.doesNotMatch(css, /@keyframes wb-sidebar-push-flash/);
   assert.doesNotMatch(css, /filter:\s*brightness/);
-  assert.doesNotMatch(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*var\(--wb-sidebar-titlebar-width\)/s);
+  assert.doesNotMatch(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*(?:calc\()?var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(leftEdgePaneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
   assert.match(css, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
-  assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\)\)\)/);
+  assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\) \* 1px\)\)/);
+});
+
+test("registered custom properties never hold lengths, so page zoom applies once", () => {
+  const registrations = [...css.matchAll(/@property\s+(--[\w-]+)\s*\{([^}]*)\}/g)];
+  assert.ok(registrations.length > 0);
+  for (const [, name, body] of registrations) {
+    assert.doesNotMatch(body, /syntax:\s*"[^"]*<(?:length|length-percentage|percentage)>/, name);
+  }
+  for (const name of ["--wb-sidebar-slot-width", "--wb-sidebar-titlebar-width", "--wb-sidebar-content-width"]) {
+    const body = registrations.find(([, registered]) => registered === name)?.[2] || "";
+    assert.match(body, /syntax:\s*"<number>"/, name);
+    assert.doesNotMatch(css, new RegExp(`var\\(${name}\\)(?!\\s*\\*\\s*1px)`), `${name} must become px with * 1px`);
+  }
 });
 
 test("tab dragging cursor stays scoped to tab bodies, not the shifted tabbar gap", () => {
