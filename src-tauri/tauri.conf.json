@@ -55,6 +55,9 @@
         "uninstallerIcon": "icons/icon.ico"
       }
     },
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "resources": {
       "resources/mcp-server.mjs": "mcp-server.mjs",
       "resources/svn/": "svn/"
