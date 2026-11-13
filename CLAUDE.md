@@ -476,9 +476,9 @@ working-tree code and installing it locally, without an SVN path, version bump,
 or automatic commit/push. Lower-level helpers are
 `npm run release:sync-version` (sync application versions) and
 `npm run release:svn-manifest` (generate the SVN updater manifest). There is no
-lint script defined in `package.json`. `release:package` rejects a Windows
-installer larger than 20 MB or any configuration that puts Node / the native
-Claude CLI back into the main bundle. Windows builds fetch a pinned Apache
+lint script defined in `package.json`. `release:package` rejects any
+configuration that puts Node / the native Claude CLI back into the main bundle.
+Windows builds fetch a pinned Apache
 Subversion command-line client into `src-tauri/resources/svn/` (`npm run
 ensure-svn` / `npm run fetch-svn`) and ship it with the installer so in-app
 updates work without a system `svn.exe`. The default 1.14.5 client and the

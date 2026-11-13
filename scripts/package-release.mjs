@@ -11,7 +11,6 @@ import { bundledSvnClientsExist } from "./fetch-svn.mjs";
 import { ensureSvn } from "./ensure-svn.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const MAX_WINDOWS_INSTALLER_BYTES = 20 * 1024 * 1024;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -78,11 +77,8 @@ export function finalizeWindowsRelease({
     throw new Error(`release installer already exists: ${artifactPath}`);
   }
   const installerSize = fs.statSync(sourcePath).size;
-  if (installerSize > MAX_WINDOWS_INSTALLER_BYTES) {
-    throw new Error(
-      `main installer is ${(installerSize / 1024 / 1024).toFixed(1)} MB; ` +
-      `it must stay at or below ${MAX_WINDOWS_INSTALLER_BYTES / 1024 / 1024} MB`,
-    );
+  if (installerSize <= 0) {
+    throw new Error(`main installer is empty: ${sourcePath}`);
   }
 
   const manifest = createManifest({

@@ -121,7 +121,7 @@ npm run release:agent-runtime -- --version <AI正整数版本> --min-app-version
 
 主程序产物验证：
 
-- 安装包存在且不超过 20 MiB；
+- 安装包存在且大于 0 字节；
 - `latest.json.version` 是本次版本；
 - `latest.json.platforms.windows-x86_64.path` 与安装包文件名一致；
 - `notes` 与本次公告一致，非空行编号从 `1.` 开始连续递增；

@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import {
   assertSlimBundleConfiguration,
   finalizeWindowsRelease,
-  MAX_WINDOWS_INSTALLER_BYTES,
 } from "./package-release.mjs";
 
 function createReleaseRoot(t) {
@@ -99,18 +98,17 @@ test("finalizeWindowsRelease does not overwrite an existing canonical installer"
   assert.equal(fs.existsSync(path.join(root, "latest.json")), false);
 });
 
-test("release guard rejects a main installer above 20 MB", (t) => {
+test("finalizeWindowsRelease accepts a main installer larger than 20 MB", (t) => {
   const { root, nsisDir } = createReleaseRoot(t);
   const sourcePath = path.join(nsisDir, "黑猫_0.1.13_x64-setup.exe");
   fs.closeSync(fs.openSync(sourcePath, "w"));
-  fs.truncateSync(sourcePath, MAX_WINDOWS_INSTALLER_BYTES + 1);
+  fs.truncateSync(sourcePath, 20 * 1024 * 1024 + 1);
 
-  assert.throws(
-    () => finalizeWindowsRelease({ root, version: "0.1.13" }),
-    /must stay at or below 20 MB/,
-  );
-  assert.equal(fs.existsSync(sourcePath), true);
-  assert.equal(fs.existsSync(path.join(root, "latest.json")), false);
+  const result = finalizeWindowsRelease({ root, version: "0.1.13" });
+
+  assert.equal(result.installerSize, 20 * 1024 * 1024 + 1);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.equal(fs.existsSync(result.artifactPath), true);
 });
 
 test("release guard rejects accidentally rebundling Node or the native CLI", (t) => {

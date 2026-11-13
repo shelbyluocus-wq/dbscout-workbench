@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const WINDOWS_PLATFORM = "windows-x86_64";
-const MAX_MAIN_INSTALLER_BYTES = 20 * 1024 * 1024;
 const scriptPath = fileURLToPath(import.meta.url);
 
 function numericVersionParts(value, label) {
@@ -109,8 +108,8 @@ async function buildMainArtifacts({ svnDirectory, latestPath, installerPath }) {
     throw new Error("installer filename does not match the application version");
   }
   const installerStat = await fs.promises.stat(installerSource);
-  if (installerStat.size <= 0 || installerStat.size > MAX_MAIN_INSTALLER_BYTES) {
-    throw new Error(`release installer must be between 1 byte and 20 MiB (${installerStat.size})`);
+  if (installerStat.size <= 0) {
+    throw new Error(`release installer is empty (${installerStat.size})`);
   }
   return {
     version: version.value,

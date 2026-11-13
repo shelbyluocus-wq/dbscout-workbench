@@ -46,8 +46,7 @@ It builds the desktop app, renames the installer to
 exact filename. The installed product name remains **黑猫**.
 
 The main installer deliberately excludes portable Node and the native Claude
-CLI, and the release command fails if those resources are added back or the
-Windows installer exceeds 20 MB. Windows builds do include a pinned Apache
+CLI, and the release command fails if those resources are added back. Windows builds do include a pinned Apache
 Subversion command-line client (`npm run ensure-svn`) so in-app updates work
 without a system-wide `svn.exe`.
 
