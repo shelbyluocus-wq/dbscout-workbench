@@ -8,6 +8,7 @@ import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
+import WallpaperSettingsDialog from "./WallpaperSettingsDialog.vue";
 import { useCellHighlight } from "../composables/useCellHighlight.js";
 import { useFieldCommentColor } from "../composables/useFieldCommentColor.js";
 import { GLOW_COLOR_PRESETS, resolveGlowColorCss, useGlowColor } from "../composables/useDatabaseSwitchGlow.js";
@@ -125,6 +126,7 @@ const settingsSheetRef = ref(null);
 const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
 const fontSettingsOpen = ref(false);
+const wallpaperSettingsOpen = ref(false);
 // 设计调试面板仅 dev 模式可见（npm run dev / tauri dev），正式打包不出现
 const isDev = import.meta.env.DEV;
 const designDebugOpen = ref(false);
@@ -195,6 +197,16 @@ function closeSettings({ restoreFocus = false } = {}) {
 
 function openFontSettings() {
   fontSettingsOpen.value = true;
+}
+
+function openWallpaperSettings() {
+  closeSettings();
+  wallpaperSettingsOpen.value = true;
+}
+
+function closeWallpaperSettings() {
+  wallpaperSettingsOpen.value = false;
+  nextTick(() => settingsRailTrigger()?.focus?.());
 }
 
 function openDesignDebug() {
@@ -1010,6 +1022,15 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <circle cx="8" cy="9" r="1.5" />
+              <path d="m3 17 5-5 4 4 3-3 6 6" />
+            </svg> {{ t('wallpaper.title') }} </span>
+          <button type="button" class="wb-sidebar-settings-action" aria-haspopup="dialog" @click.stop="openWallpaperSettings">{{ t('wallpaper.open') }}</button>
+        </div>
+        <div class="wb-sidebar-settings-row">
+          <span class="wb-sidebar-settings-label">
             <span class="wb-sidebar-font-icon" aria-hidden="true">Aa</span> {{ t('m_52a039f438fd') }} </span>
           <button
             type="button"
@@ -1138,6 +1159,12 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
       :invoke-workbench="invokeWorkbench"
       @apply="emit('change-font', $event)"
       @close="closeFontSettings"
+    />
+    <WallpaperSettingsDialog
+      v-if="wallpaperSettingsOpen"
+      :open="wallpaperSettingsOpen"
+      :theme="currentTheme"
+      @close="closeWallpaperSettings"
     />
     <DesignDebugDialog
       v-if="isDev"

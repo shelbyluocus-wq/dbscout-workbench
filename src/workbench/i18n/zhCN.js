@@ -1,5 +1,6 @@
 // Application-owned interface messages. Never translate user data.
 import { releaseFlowZhCN } from "./releaseFlowMessages.js";
+import { wallpaperZhCN } from "./wallpaperMessages.js";
 
 export default Object.freeze({
   "m_a49b9e3cc423": "展开全部连接",
@@ -1913,4 +1914,5 @@ export default Object.freeze({
   "railDatabase.icon.sun": "太阳",
   "railDatabase.icon.moon": "月亮",
   ...releaseFlowZhCN,
+  ...wallpaperZhCN,
 });

@@ -1,0 +1,207 @@
+.wb-shortcut-dialog.wb-wallpaper-dialog {
+  width: min(720px, calc(100vw - 32px));
+  background: linear-gradient(var(--wb-dialog-surface), var(--wb-dialog-surface)), var(--wb-chrome-surface);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-wallpaper-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.wb-wallpaper-hint {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.5;
+}
+
+.wb-wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+
+.wb-wallpaper-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.wb-wallpaper-thumbnail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1.6;
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-secondary-text);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.wb-wallpaper-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wb-wallpaper-tile-label {
+  width: 100%;
+  font-size: var(--wb-fs-caption);
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.wb-wallpaper-tile:hover .wb-wallpaper-thumbnail {
+  border-color: var(--wb-accent);
+}
+
+.wb-wallpaper-tile.is-selected .wb-wallpaper-thumbnail {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px var(--wb-accent);
+}
+
+.wb-wallpaper-tile.is-selected .wb-wallpaper-tile-label {
+  color: var(--wb-accent-strong);
+}
+
+.wb-wallpaper-selected {
+  position: absolute;
+  bottom: 5px;
+  padding: 3px;
+  border-radius: 5px;
+  background: var(--wb-surface);
+  color: var(--wb-text);
+}
+
+.wb-wallpaper-selected {
+  right: 5px;
+  display: flex;
+  color: var(--wb-accent-strong);
+}
+
+.wb-wallpaper-upload-tile .wb-wallpaper-thumbnail {
+  border-style: dashed;
+}
+
+.wb-wallpaper-upload-row,
+.wb-wallpaper-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-wallpaper-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-wallpaper-controls {
+  padding-top: 18px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-wallpaper-slider-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 60px;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-wallpaper-slider-row input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-wallpaper-slider-row output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-secondary-text);
+}
+
+.wb-wallpaper-motion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-wallpaper-motion input {
+  accent-color: var(--wb-accent);
+}
+
+.wb-wallpaper-motion small {
+  display: block;
+  margin-top: 3px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-wallpaper-action {
+  padding: 6px 12px;
+  border: 1px solid var(--wb-line);
+  border-radius: 6px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-wallpaper-action:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+}
+
+.wb-wallpaper-dialog button:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
+.wb-wallpaper-dialog :is(button, input):focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 3px;
+}
+
+.wb-wallpaper-error {
+  margin: 0;
+  color: var(--wb-danger);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-wallpaper-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.wb-wallpaper-footer .wb-wallpaper-hint {
+  flex: 1;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .wb-wallpaper-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wb-wallpaper-slider-row { grid-template-columns: 80px minmax(0, 1fr) 52px; gap: 8px; }
+  .wb-wallpaper-footer { flex-wrap: wrap; }
+  .wb-wallpaper-footer .wb-wallpaper-hint { order: 1; flex-basis: 100%; }
+}

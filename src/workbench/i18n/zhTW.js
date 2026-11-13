@@ -1,6 +1,7 @@
 // Application-owned interface messages in Traditional Chinese (Taiwan).
 // Never translate user data.
 import { releaseFlowZhTW } from "./releaseFlowMessages.js";
+import { wallpaperZhTW } from "./wallpaperMessages.js";
 
 export default Object.freeze({
   "blackcatMcp.httpUrl": "HTTP 位址（Cindy 等用戶端）",
@@ -1914,4 +1915,5 @@ export default Object.freeze({
   "railDatabase.icon.sun": "太陽",
   "railDatabase.icon.moon": "月亮",
   ...releaseFlowZhTW,
+  ...wallpaperZhTW,
 });

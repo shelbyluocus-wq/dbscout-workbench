@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+## Local wallpaper appearance
+
+Settings → Wallpaper provides eight bundled stills and local PNG/JPEG/WebP/MP4
+selection, visibility/blur, static/dynamic video, reset and removal. Defaults to
+None. `wallpaperState.js` / `wallpaperStorage.js` own settings and custom media;
+`WallpaperCanvas.vue` and `WallpaperSettingsDialog.vue` own presentation. Keep
+foreground text, grid selection/frozen cells, floating dialogs and code editors
+readable. See `docs/wallpapers.md` for storage, attribution and regression checks.
+
 ## Current navigation and AI scope (2026-11-05)
 
 Table folders, the backup center, Blackcat MCP and the window pin live in the

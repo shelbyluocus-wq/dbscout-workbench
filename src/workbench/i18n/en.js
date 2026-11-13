@@ -1,5 +1,6 @@
 // Application-owned interface messages. Never translate user data.
 import { releaseFlowEn } from "./releaseFlowMessages.js";
+import { wallpaperEn } from "./wallpaperMessages.js";
 
 export default Object.freeze({
   "blackcatMcp.httpUrl": "HTTP URL (Cindy and other clients)",
@@ -1913,4 +1914,5 @@ export default Object.freeze({
   "railDatabase.icon.sun": "Sun",
   "railDatabase.icon.moon": "Moon",
   ...releaseFlowEn,
+  ...wallpaperEn,
 });

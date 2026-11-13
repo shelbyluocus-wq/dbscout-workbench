@@ -1,0 +1,48 @@
+/* One viewport-sized canvas. Never apply opacity/filter to foreground content. */
+.mysql-workbench.has-wallpaper { isolation: isolate; }
+.wb-wallpaper-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--wb-chrome-surface);
+}
+.wb-wallpaper-art {
+  position: absolute;
+  inset: calc(-1 * var(--wb-wallpaper-overscan));
+  width: calc(100% + var(--wb-wallpaper-overscan) * 2);
+  height: calc(100% + var(--wb-wallpaper-overscan) * 2);
+  max-width: none;
+  object-fit: cover;
+  opacity: var(--wb-wallpaper-visibility);
+  filter: blur(var(--wb-wallpaper-blur));
+}
+/* Only named page canvases become transparent; menus, editors, sticky/frozen
+   cells and dialogs keep their original opaque surfaces and contrast. */
+.mysql-workbench.has-wallpaper :is(
+  .wb-titlebar, .wb-titlebar-sidebar, .wb-titlebar-tabs,
+  .wb-titlebar-inspector-controls, .wb-workspace, .wb-activity-rail,
+  .wb-sidebar, .wb-main, .wb-workbench-pane, .wb-inspector,
+  .wb-grid-wrap, .wb-grid-shell, .wb-table-panel,
+  .wb-pane-tabbar, .wb-database-home
+) { background: transparent; }
+.mysql-workbench.has-wallpaper .wb-pane-tabbar .wb-object-tabs { background: transparent; }
+/* Keep the sidebar, rail and inspector readable at the slider's extremes. */
+.mysql-workbench.has-wallpaper :is(.wb-sidebar, .wb-activity-rail, .wb-inspector,
+  .wb-titlebar-sidebar, .wb-titlebar-inspector-controls, .wb-pane-tabbar) {
+  background: color-mix(in srgb, var(--wb-chrome-surface) 84%, transparent);
+}
+.mysql-workbench.has-wallpaper .wb-dbhome-table-surface {
+  background: color-mix(in srgb, var(--wb-grid-canvas) 84%, transparent);
+}
+.mysql-workbench.has-wallpaper .wb-main::before,
+.mysql-workbench.has-wallpaper .wb-main::after { display: none; }
+/* At most 16% of arbitrary artwork reaches the data reading surface, even
+   at full visibility. Highlight, pending, selection and frozen states win. */
+.mysql-workbench.has-wallpaper .wb-grid-row:not(.row-selected):not(:hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .editing, .pending, .error, .search-match) {
+  background-color: color-mix(in srgb, var(--wb-grid-row) 84%, transparent);
+}
+.mysql-workbench.has-wallpaper .wb-grid-row.row-even:not(.row-selected):not(:hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .editing, .pending, .error, .search-match) {
+  background-color: color-mix(in srgb, var(--wb-grid-row-alt) 84%, transparent);
+}

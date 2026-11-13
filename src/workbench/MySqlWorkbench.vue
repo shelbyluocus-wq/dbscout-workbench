@@ -1,5 +1,8 @@
 <script setup>
 import { t } from "./i18n/index.js";
+import WallpaperCanvas from "./components/WallpaperCanvas.vue";
+import { useWallpaper } from "./composables/useWallpaper.js";
+const { source: wallpaperSource } = useWallpaper();
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, Upload, X } from "lucide-vue-next";
 
@@ -5571,6 +5574,7 @@ onBeforeUnmount(() => {
       'is-opening-table': pendingTableOpenCount > 0,
       'is-native-macos': usesNativeMacWindowControls,
       'is-fullscreen': macosFullscreen,
+      'has-wallpaper': Boolean(wallpaperSource),
     }"
     :data-theme="effectiveTheme"
     :style="sidebarLayoutVars"
@@ -5579,6 +5583,7 @@ onBeforeUnmount(() => {
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
+    <WallpaperCanvas />
     <div class="wb-save-reminder-layer" aria-hidden="true">
       <span
         v-for="reminder in saveReminders"
