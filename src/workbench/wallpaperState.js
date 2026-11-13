@@ -2,16 +2,33 @@ import { computed, readonly, ref } from "vue";
 import { createWallpaperStorage, WALLPAPER_STORAGE_KEY, wallpaperError } from "./wallpaperStorage.js";
 
 export { WALLPAPER_STORAGE_KEY } from "./wallpaperStorage.js";
+export const WALLPAPER_APPEARANCES = Object.freeze(["light", "dark"]);
+// suits: the appearance in which a picture shows at full strength, because
+// frame text stays readable over all of it (see wallpaperTone.js); "" for
+// pictures that are dimmed in both. pair: its counterpart for the other
+// appearance.
 export const WALLPAPERS = Object.freeze([
-  "night-launch", "silent-orbits", "dune-dawn", "planet-dawn",
-  "indigo-folds", "dune-sphere", "ocean-clouds", "rose-quartz",
-].map((id) => Object.freeze({
+  ["mist-ridges", "light", "night-ridges"], ["frost-folds", "light", "indigo-folds"],
+  ["dune-dawn", "", "dune-night"], ["ocean-clouds"],
+  ["night-ridges", "dark", "mist-ridges"], ["indigo-folds", "dark", "frost-folds"],
+  ["dune-night", "dark", "dune-dawn"], ["night-launch"], ["silent-orbits"], ["planet-dawn"],
+  ["dune-sphere"], ["rose-quartz"],
+].map(([id, suits = "", pair = ""]) => Object.freeze({
   id,
+  suits,
+  pair,
   labelKey: `wallpaper.builtin.${id}`,
   src: `/wallpapers/${id}.webp`,
   thumbnail: `/wallpapers/thumbnails/${id}.webp`,
 })));
-export const WALLPAPER_DEFAULTS = Object.freeze({ id: "none", visibility: 0.25, blur: 0, motion: false });
+// Each appearance keeps its own picture, visibility and blur; the recommended
+// pair is what a new installation and Reset show.
+export const WALLPAPER_DEFAULTS = Object.freeze({
+  light: Object.freeze({ id: "mist-ridges", visibility: 0.6, blur: 0 }),
+  dark: Object.freeze({ id: "night-ridges", visibility: 0.6, blur: 0 }),
+  motion: false,
+});
+const defaults = () => ({ light: { ...WALLPAPER_DEFAULTS.light }, dark: { ...WALLPAPER_DEFAULTS.dark }, motion: false });
 export const WALLPAPER_LIMITS = Object.freeze({ image: 20 * 1024 * 1024, video: 100 * 1024 * 1024 });
 export const WALLPAPER_ERROR_KEYS = Object.freeze([
   "unsupportedType", "imageTooLarge", "videoTooLarge", "invalidFile", "decode", "playback",
@@ -22,16 +39,34 @@ const mimeKinds = { "image/png": "image", "image/jpeg": "image", "image/webp": "
 const clamp = (value, min, max, fallback) => typeof value === "number" && Number.isFinite(value)
   ? Math.max(min, Math.min(max, value)) : fallback;
 
-// Visibility is a fraction; blur is CSS pixels (0–24). Unknown persisted values
-// fall back to defaults. Callers change settings through methods, not ref writes.
-export function normalizeWallpaperSettings(value = {}) {
+const isAppearance = (value) => WALLPAPER_APPEARANCES.includes(value);
+const usesCustom = (settings) => WALLPAPER_APPEARANCES.some((appearance) => settings[appearance].id === "custom");
+function normalizeAppearance(value, fallbackVisibility) {
   value = value && typeof value === "object" ? value : {};
   return {
     id: ids.has(value.id) ? value.id : "none",
-    visibility: clamp(value.visibility, 0, 1, 0.25),
+    visibility: clamp(value.visibility, 0, 1, fallbackVisibility),
     blur: clamp(value.blur, 0, 24, 0),
-    motion: typeof value.motion === "boolean" ? value.motion : false,
   };
+}
+
+// Visibility is a fraction of what the picture can show while frame text stays
+// readable (see wallpaperTone.js); blur is CSS pixels (0–24). Nothing saved
+// yields the recommended pair. Settings saved by the single-wallpaper version
+// ({ id, visibility, blur }) apply to both appearances. Unknown values fall
+// back per field. Callers change settings through methods, not ref writes.
+export function normalizeWallpaperSettings(value) {
+  if (!value || typeof value !== "object") return defaults();
+  const motion = typeof value.motion === "boolean" ? value.motion : false;
+  if ("light" in value || "dark" in value) {
+    return {
+      light: normalizeAppearance(value.light, WALLPAPER_DEFAULTS.light.visibility),
+      dark: normalizeAppearance(value.dark, WALLPAPER_DEFAULTS.dark.visibility),
+      motion,
+    };
+  }
+  const shared = normalizeAppearance(value, 0.25);
+  return { light: shared, dark: { ...shared }, motion };
 }
 
 export async function validateWallpaperFile(file) {
@@ -118,9 +153,12 @@ export function decodeWallpaperFile(file, kind, {
 /**
  * Framework-facing store, independently constructible for tests.
  * Async actions return Promise<boolean> (false = failed or superseded), never raw
- * browser errors. `source` is a URL string or ""; customKind is "image" /
- * "video" / "" and is available even when custom is not selected.
- * Reset selects none and restores defaults but retains the custom Blob.
+ * browser errors. `appearance` is the appearance on screen (set by the shell);
+ * `active` and `source` (a URL string or "") follow it. select, updateSettings
+ * and importFile take the appearance to change and default to the one on
+ * screen. customKind is "image" / "video" / "" and is available even when
+ * custom is not selected.
+ * Reset restores the recommended pair but retains the custom Blob.
  * Initialization is scheduled, not awaited by the shell; ready is optional.
  * All mutation decisions run inside the storage adapter's serialized transaction.
  */
@@ -132,7 +170,10 @@ export function createWallpaperState({
   schedule = (run) => setTimeout(run, 0),
   revision = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
 } = {}) {
-  const settings = ref({ ...WALLPAPER_DEFAULTS });
+  // The small settings record is readable synchronously, so a bundled picture
+  // is on screen from the first frame; custom media joins after its decode.
+  const settings = ref(normalizeWallpaperSettings(storage.peek?.()?.settings));
+  const appearance = ref("light");
   const customUrl = ref("");
   const customKind = ref("");
   const busy = ref(false);
@@ -144,8 +185,10 @@ export function createWallpaperState({
   let refreshController;
   let refreshSequence = 0;
   let refreshPending = false;
-  const source = computed(() => settings.value.id === "custom" ? customUrl.value
-    : WALLPAPERS.find(({ id }) => id === settings.value.id)?.src || "");
+  const active = computed(() => settings.value[appearance.value]);
+  const source = computed(() => active.value.id === "custom" ? customUrl.value
+    : WALLPAPERS.find(({ id }) => id === active.value.id)?.src || "");
+  const target = (value) => isAppearance(value) ? value : appearance.value;
   const localizedError = (cause) => WALLPAPER_ERROR_KEYS.includes(cause?.message)
     ? cause.message : "wallpaper.error.storage";
   const isCurrent = (token) => !disposed && token === epoch;
@@ -153,7 +196,7 @@ export function createWallpaperState({
 
   function install(snapshot, url) {
     const nextSettings = normalizeWallpaperSettings(snapshot.metadata?.settings);
-    if (nextSettings.id === "custom" && !snapshot.custom) throw wallpaperError("customMissing");
+    if (usesCustom(nextSettings) && !snapshot.custom) throw wallpaperError("customMissing");
     const oldUrl = customUrl.value;
     settings.value = nextSettings;
     customUrl.value = url;
@@ -188,7 +231,7 @@ export function createWallpaperState({
       // let an unsupported video codec block restoring the saved appearance.
       // Keep an already decoded URL only if it belongs to this exact revision;
       // otherwise defer decoding until the user explicitly selects custom.
-      url = normalizeWallpaperSettings(snapshot.metadata?.settings).id === "custom"
+      url = usesCustom(normalizeWallpaperSettings(snapshot.metadata?.settings))
         ? await prepare(snapshot, refreshAbort.signal)
         : snapshot.custom?.revision === customRevision ? customUrl.value : "";
       if (!isCurrent(token) || sequence !== refreshSequence) {
@@ -234,7 +277,7 @@ export function createWallpaperState({
       if (!isCurrent(token)) return false;
       const planned = makeChange(normalizeWallpaperSettings(before.metadata?.settings), before.custom, candidate);
       if (!candidateUrl && !discardCustom) {
-        candidateUrl = planned.settings.id === "custom" ? await prepare(before, signal)
+        candidateUrl = usesCustom(planned.settings) ? await prepare(before, signal)
           : before.custom?.revision === customRevision ? customUrl.value : "";
       }
       if (!isCurrent(token)) return false;
@@ -246,7 +289,7 @@ export function createWallpaperState({
           throw wallpaperError("storage");
         }
         const next = makeChange(normalizeWallpaperSettings(current.metadata?.settings), current.custom, candidate);
-        if (next.settings.id === "custom" && !next.custom) throw wallpaperError("customMissing");
+        if (usesCustom(next.settings) && !next.custom) throw wallpaperError("customMissing");
         return { metadata: { settings: next.settings, revision: revision() }, custom: next.custom };
       }, candidate);
       if (!snapshot) return false;
@@ -271,22 +314,40 @@ export function createWallpaperState({
     }
   }
 
-  const select = (id) => change((current, custom) => {
-    if (!ids.has(id)) throw wallpaperError("unknownId");
-    return { settings: { ...current, id }, custom };
-  });
-  const updateSettings = (patch = {}) => change((current, custom) => {
-    // Selection has its own validated action. Do not accept arbitrary metadata.
-    const { visibility = current.visibility, blur = current.blur, motion = current.motion } = patch || {};
-    return { settings: normalizeWallpaperSettings({ ...current, visibility, blur, motion }), custom };
-  });
-  const reset = () => change((_current, custom) => ({ settings: { ...WALLPAPER_DEFAULTS }, custom }));
-  const importFile = (file) => change((current, _custom, candidate) => ({
-    settings: { ...current, id: "custom" }, custom: candidate,
-  }), file ?? null);
+  // The appearance is fixed when the action starts: a theme switch during a
+  // slow decode must not move the change to the other appearance.
+  const select = (id, appearanceToChange) => {
+    const key = target(appearanceToChange);
+    return change((current, custom) => {
+      if (!ids.has(id)) throw wallpaperError("unknownId");
+      return { settings: { ...current, [key]: { ...current[key], id } }, custom };
+    });
+  };
+  const updateSettings = (patch = {}, appearanceToChange) => {
+    const key = target(appearanceToChange);
+    return change((current, custom) => {
+      // Selection has its own validated action. Do not accept arbitrary metadata.
+      const { visibility = current[key].visibility, blur = current[key].blur, motion = current.motion } = patch || {};
+      return {
+        settings: normalizeWallpaperSettings({ ...current, [key]: { ...current[key], visibility, blur }, motion }),
+        custom,
+      };
+    });
+  };
+  const reset = () => change((_current, custom) => ({ settings: defaults(), custom }));
+  const importFile = (file, appearanceToChange) => {
+    const key = target(appearanceToChange);
+    return change((current, _custom, candidate) => ({
+      settings: { ...current, [key]: { ...current[key], id: "custom" } }, custom: candidate,
+    }), file ?? null);
+  };
+  const withoutCustom = (entry) => entry.id === "custom" ? { ...entry, id: "none" } : entry;
   const removeCustom = () => change((current) => ({
-    settings: { ...current, id: current.id === "custom" ? "none" : current.id }, custom: null,
+    settings: { ...current, light: withoutCustom(current.light), dark: withoutCustom(current.dark) }, custom: null,
   }), undefined, true);
+  function setAppearance(value) {
+    if (!disposed && isAppearance(value)) appearance.value = value;
+  }
 
   // Canvas/media consumers report localized failures without mutating the
   // readonly ref. Unknown text is rejected; an empty key explicitly clears it.
@@ -324,8 +385,9 @@ export function createWallpaperState({
   function onPageHide(event) { if (!event.persisted) dispose(); }
   eventTarget?.addEventListener("pagehide", onPageHide);
   return {
-    settings: readonly(settings), customUrl: readonly(customUrl), customKind: readonly(customKind),
+    settings: readonly(settings), appearance: readonly(appearance), active,
+    customUrl: readonly(customUrl), customKind: readonly(customKind),
     busy: readonly(busy), error: readonly(error), source,
-    select, updateSettings, reset, importFile, removeCustom, reportError, ready, refresh, dispose,
+    select, updateSettings, reset, importFile, removeCustom, setAppearance, reportError, ready, refresh, dispose,
   };
 }

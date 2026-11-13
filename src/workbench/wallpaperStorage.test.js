@@ -99,6 +99,21 @@ test("storage writes ArrayBuffer/MIME and restores the Blob-facing API", async (
   f.storage.close();
 });
 
+test("peek returns saved settings without IndexedDB and never throws", () => {
+  const f = fixture();
+  assert.deepEqual(f.storage.peek(), { settings: { id: "custom" }, revision: "old" });
+  f.storage.close();
+  for (const local of [
+    { getItem: () => null }, { getItem: () => "{broken" }, { getItem() { throw new Error("denied"); } },
+  ]) {
+    const storage = createWallpaperStorage({
+      getLocalStorage: () => local, getIndexedDB() { throw new Error("IndexedDB must not be opened"); },
+    });
+    assert.equal(storage.peek(), null);
+  }
+  assert.equal(createWallpaperStorage({ getLocalStorage() { throw new Error("denied"); } }).peek(), null);
+});
+
 test("Blob conversion failures happen before any storage write", async () => {
   const f = fixture();
   const before = f.blob;
@@ -145,13 +160,13 @@ test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize re
         }
         const [first, second] = pages;
         assert.equal(await first.evaluate(async () => wallpaper.importFile(await makePng("red"))), true, engine.name());
-        await second.waitForFunction(() => wallpaper.settings.value.id === "custom" && wallpaper.customUrl.value);
+        await second.waitForFunction(() => wallpaper.active.value.id === "custom" && wallpaper.customUrl.value);
         const previousUrl = await second.evaluate(() => wallpaper.customUrl.value);
         assert.equal(await first.evaluate(async () => wallpaper.importFile(await makePng("blue"))), true);
         await second.waitForFunction((old) => wallpaper.customUrl.value !== old, previousUrl);
         await second.reload();
         await initialize(second);
-        assert.deepEqual(await second.evaluate(() => [wallpaper.settings.value.id, wallpaper.customKind.value, wallpaper.error.value]), ["custom", "image", ""]);
+        assert.deepEqual(await second.evaluate(() => [wallpaper.active.value.id, wallpaper.customKind.value, wallpaper.error.value]), ["custom", "image", ""]);
         assert.equal(await second.evaluate(async () => {
           const { createWallpaperStorage, WALLPAPER_DATABASE } = await import("/src/workbench/wallpaperStorage.js");
           const record = await new Promise((resolve, reject) => {
@@ -187,7 +202,7 @@ test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize re
           return retained;
         }), true);
         await first.evaluate(() => wallpaper.removeCustom());
-        await second.waitForFunction(() => wallpaper.settings.value.id === "none" && !wallpaper.customUrl.value);
+        await second.waitForFunction(() => wallpaper.active.value.id === "none" && !wallpaper.customUrl.value);
       } finally { await browser.close(); }
     }
   } finally { await server.close(); }

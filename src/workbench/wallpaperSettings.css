@@ -1,5 +1,5 @@
 .wb-shortcut-dialog.wb-wallpaper-dialog {
-  width: min(720px, calc(100vw - 32px));
+  width: min(760px, calc(100vw - 32px));
   background: linear-gradient(var(--wb-dialog-surface), var(--wb-dialog-surface)), var(--wb-chrome-surface);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
@@ -21,16 +21,179 @@
   line-height: 1.5;
 }
 
+/* ── Preview and the settings of the appearance being edited ───────────── */
+.wb-wallpaper-stage {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+}
+
+/* A miniature of the window in the edited appearance: the picture shows in
+   the frame at the strength the window will use, the content sheet veils it. */
+.wb-wallpaper-preview {
+  --wb-wallpaper-preview-scale: 0.22;
+  position: relative;
+  aspect-ratio: 1.6;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-chrome-surface);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* The dialog only carries the tokens of the appearance on screen. The dark
+   block reaches the preview through wb-floating-themed; a light preview in a
+   dark window needs the base light surfaces spelled out. */
+.wb-wallpaper-overlay[data-theme="dark"] .wb-wallpaper-preview[data-theme="light"] {
+  --wb-chrome-surface: #f6f6f4;
+  --wb-workspace-mist: #f9f9f7;
+  --wb-workspace-mist-border: rgba(45, 55, 72, 0.22);
+}
+
+.wb-wallpaper-preview-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--wb-wallpaper-preview-strength);
+  filter: blur(calc(var(--wb-wallpaper-preview-blur) * var(--wb-wallpaper-preview-scale)));
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wb-wallpaper-preview-sheet {
+  position: absolute;
+  inset: 13% 0 0 30%;
+  border-top: 1px solid var(--wb-workspace-mist-border);
+  border-left: 1px solid var(--wb-workspace-mist-border);
+  border-top-left-radius: 5px;
+  background: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
+}
+
+.wb-wallpaper-preview-tab {
+  position: absolute;
+  bottom: 100%;
+  left: 14%;
+  width: 22%;
+  height: 12%;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
+}
+
+.wb-wallpaper-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wb-wallpaper-segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+}
+
+.wb-wallpaper-segment button {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wb-wallpaper-segment button.active {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+
+.wb-wallpaper-segment small {
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 500;
+}
+
+.wb-wallpaper-slider-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-wallpaper-slider-row input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-wallpaper-slider-row output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-secondary-text);
+}
+
+.wb-wallpaper-motion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-wallpaper-motion input {
+  accent-color: var(--wb-accent);
+}
+
+.wb-wallpaper-motion small {
+  display: block;
+  margin-top: 3px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-wallpaper-pair {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wb-accent-strong);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--wb-accent-strong) 40%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.wb-wallpaper-pair:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
+
+/* ── Pictures ──────────────────────────────────────────────────────────── */
 .wb-wallpaper-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px 12px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--wb-line);
 }
 
 .wb-wallpaper-tile {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -48,7 +211,7 @@
   justify-content: center;
   width: 100%;
   aspect-ratio: 1.6;
-  border: 1px solid var(--wb-line);
+  border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-secondary-text);
@@ -85,28 +248,37 @@
 
 .wb-wallpaper-selected {
   position: absolute;
+  right: 5px;
   bottom: 5px;
+  display: flex;
   padding: 3px;
   border-radius: 5px;
   background: var(--wb-surface);
-  color: var(--wb-text);
+  color: var(--wb-accent-strong);
 }
 
-.wb-wallpaper-selected {
-  right: 5px;
-  display: flex;
-  color: var(--wb-accent-strong);
+.wb-wallpaper-recommended {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--wb-surface);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-micro);
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .wb-wallpaper-upload-tile .wb-wallpaper-thumbnail {
   border-style: dashed;
 }
 
-.wb-wallpaper-upload-row,
-.wb-wallpaper-controls {
+.wb-wallpaper-upload-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
 }
 
 .wb-wallpaper-upload-actions {
@@ -115,50 +287,9 @@
   gap: 8px;
 }
 
-.wb-wallpaper-controls {
-  padding-top: 18px;
-  border-top: 1px solid var(--wb-line);
-}
-
-.wb-wallpaper-slider-row {
-  display: grid;
-  grid-template-columns: 100px minmax(0, 1fr) 60px;
-  align-items: center;
-  gap: 12px;
-}
-
-.wb-wallpaper-slider-row input {
-  width: 100%;
-  margin: 0;
-  accent-color: var(--wb-accent);
-}
-
-.wb-wallpaper-slider-row output {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--wb-secondary-text);
-}
-
-.wb-wallpaper-motion {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.wb-wallpaper-motion input {
-  accent-color: var(--wb-accent);
-}
-
-.wb-wallpaper-motion small {
-  display: block;
-  margin-top: 3px;
-  color: var(--wb-secondary-text);
-  font-size: var(--wb-fs-caption);
-}
-
 .wb-wallpaper-action {
   padding: 6px 12px;
-  border: 1px solid var(--wb-line);
+  border: 1px solid var(--wb-border);
   border-radius: 6px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
@@ -199,9 +330,13 @@
   text-align: center;
 }
 
-@media (max-width: 560px) {
-  .wb-wallpaper-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .wb-wallpaper-slider-row { grid-template-columns: 80px minmax(0, 1fr) 52px; gap: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .wb-wallpaper-preview-art { transition: none; }
+}
+
+@media (max-width: 640px) {
+  .wb-wallpaper-stage { grid-template-columns: minmax(0, 1fr); }
+  .wb-wallpaper-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .wb-wallpaper-footer { flex-wrap: wrap; }
   .wb-wallpaper-footer .wb-wallpaper-hint { order: 1; flex-basis: 100%; }
 }

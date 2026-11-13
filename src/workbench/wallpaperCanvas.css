@@ -1,5 +1,17 @@
-/* One viewport-sized canvas. Never apply opacity/filter to foreground content. */
-.mysql-workbench.has-wallpaper { isolation: isolate; }
+/* One viewport-sized canvas paints the artwork once, over the frame colour.
+   The frame (title bar, rail, sidebar, tab strips) is transparent above it, so
+   it reads as a single continuous surface; the content sheet adds one veil of
+   its own. Never stack a second tint on a frame pane: two layers are what make
+   neighbouring strips differ. Never apply opacity/filter to foreground content. */
+.mysql-workbench.has-wallpaper {
+  isolation: isolate;
+  --wb-wallpaper-frame-solid: var(--wb-chrome-surface);
+  --wb-wallpaper-sheet: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
+  --wb-wallpaper-stripe: rgba(0, 0, 0, 0.018);
+}
+.mysql-workbench.has-wallpaper[data-theme="dark"] {
+  --wb-wallpaper-stripe: rgba(255, 255, 255, 0.04);
+}
 .wb-wallpaper-canvas {
   position: absolute;
   inset: 0;
@@ -15,34 +27,81 @@
   height: calc(100% + var(--wb-wallpaper-overscan) * 2);
   max-width: none;
   object-fit: cover;
-  opacity: var(--wb-wallpaper-visibility);
+  opacity: var(--wb-wallpaper-strength);
   filter: blur(var(--wb-wallpaper-blur));
 }
-/* Only named page canvases become transparent; menus, editors, sticky/frozen
-   cells and dialogs keep their original opaque surfaces and contrast. */
+/* A picture fades in once, when its strength is known; the sliders stay
+   immediate. An animation, not a transition: a cached picture can be measured
+   before it was ever painted, which gives a transition nothing to start from. */
+.wb-wallpaper-art.is-measured { animation: wb-wallpaper-reveal 0.32s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes wb-wallpaper-reveal { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .wb-wallpaper-art.is-measured { animation: none; }
+}
+
+/* ── Frame ─────────────────────────────────────────────────────────────── */
+/* Frame panes paint with the chrome token, so clearing the token inside them
+   keeps every state (hover, current database, drag) that layers on top of it. */
+.mysql-workbench.has-wallpaper :is(.wb-titlebar, .wb-activity-rail, .wb-sidebar-slot, .wb-pane-tabbar) {
+  --wb-chrome-surface: transparent;
+}
+/* Pieces that float over their neighbours still need the solid colour. */
+.mysql-workbench.has-wallpaper .wb-activity-rail :is(.wb-activity-rail-tip, .is-rail-dragging, .is-rail-settling) {
+  --wb-chrome-surface: var(--wb-wallpaper-frame-solid);
+}
+.mysql-workbench.has-wallpaper :is(.wb-workspace, .wb-main) { background: transparent; }
+/* Table rows scroll beneath the pinned sidebar search; soften them instead of
+   tinting the strip, which would show as a block at rest. */
+.mysql-workbench.has-wallpaper .wb-table-search-wrap {
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+/* ── Content sheet ─────────────────────────────────────────────────────── */
+/* The corner mask becomes the sheet itself: one veil under every pane of the
+   main area, rounded where the outline is. */
+.mysql-workbench.has-wallpaper .wb-main::before {
+  inset: var(--wb-titlebar-height) 0 0 1px;
+  z-index: -1;
+  width: auto;
+  height: auto;
+  border-top-left-radius: calc(var(--wb-workspace-corner-radius) - 1px);
+  background: var(--wb-wallpaper-sheet);
+}
+.mysql-workbench.has-wallpaper .wb-main::after { background: none; }
+.mysql-workbench.has-wallpaper .wb-inspector { background: var(--wb-wallpaper-sheet); }
+/* Surfaces that only repeated the sheet colour step aside for the veil; menus,
+   editors, headers, sticky/frozen cells and dialogs keep their own surfaces. */
 .mysql-workbench.has-wallpaper :is(
-  .wb-titlebar, .wb-titlebar-sidebar, .wb-titlebar-tabs,
-  .wb-titlebar-inspector-controls, .wb-workspace, .wb-activity-rail,
-  .wb-sidebar, .wb-main, .wb-workbench-pane, .wb-inspector,
-  .wb-grid-wrap, .wb-grid-shell, .wb-table-panel,
-  .wb-pane-tabbar, .wb-database-home
+  .wb-workbench-pane, .wb-table-panel, .wb-table-toolbar, .wb-grid-shell, .wb-grid-wrap,
+  .wb-database-home, .wb-dbhome-header, .wb-dbhome-table-surface
 ) { background: transparent; }
-.mysql-workbench.has-wallpaper .wb-pane-tabbar .wb-object-tabs { background: transparent; }
-/* Keep the sidebar, rail and inspector readable at the slider's extremes. */
-.mysql-workbench.has-wallpaper :is(.wb-sidebar, .wb-activity-rail, .wb-inspector,
-  .wb-titlebar-sidebar, .wb-titlebar-inspector-controls, .wb-pane-tabbar) {
-  background: color-mix(in srgb, var(--wb-chrome-surface) 84%, transparent);
+/* Pages with opaque headers follow the sheet's rounded corner themselves. */
+.mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane ~ *,
+.mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane + * > header:first-child {
+  border-top-left-radius: var(--wb-workspace-corner-radius);
 }
-.mysql-workbench.has-wallpaper .wb-dbhome-table-surface {
-  background: color-mix(in srgb, var(--wb-grid-canvas) 84%, transparent);
+/* The active tab is a piece of the sheet reaching into the frame: same veil,
+   and its curves are drawn without overlapping it (overlaps would double up). */
+.mysql-workbench.has-wallpaper .wb-tab { --wb-active-tab-surface: var(--wb-wallpaper-sheet); }
+.mysql-workbench.has-wallpaper .wb-tab.active { border-bottom-color: transparent; }
+.mysql-workbench.has-wallpaper .wb-tab.active::before,
+.mysql-workbench.has-wallpaper .wb-tab.active::after {
+  border-radius: 0;
+  box-shadow: none;
+  background: radial-gradient(
+    circle at var(--wb-tab-curve-origin) 0,
+    transparent calc(var(--wb-tab-curve-size) - 0.5px),
+    var(--wb-active-tab-surface) calc(var(--wb-tab-curve-size) + 0.5px)
+  );
 }
-.mysql-workbench.has-wallpaper .wb-main::before,
-.mysql-workbench.has-wallpaper .wb-main::after { display: none; }
-/* At most 16% of arbitrary artwork reaches the data reading surface, even
-   at full visibility. Highlight, pending, selection and frozen states win. */
-.mysql-workbench.has-wallpaper .wb-grid-row:not(.row-selected):not(:hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .editing, .pending, .error, .search-match) {
-  background-color: color-mix(in srgb, var(--wb-grid-row) 84%, transparent);
+.mysql-workbench.has-wallpaper .wb-tab.active::before { --wb-tab-curve-origin: 0; }
+.mysql-workbench.has-wallpaper .wb-tab.active::after { --wb-tab-curve-origin: 100%; }
+/* Plain rows show the sheet; alternate rows keep their stripe as a tint.
+   Highlight, pending, selection, active and frozen states win. */
+.mysql-workbench.has-wallpaper .wb-grid-row:not(.row-selected, .row-active, .row-range-active, :hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
+  background-color: transparent;
 }
-.mysql-workbench.has-wallpaper .wb-grid-row.row-even:not(.row-selected):not(:hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .editing, .pending, .error, .search-match) {
-  background-color: color-mix(in srgb, var(--wb-grid-row-alt) 84%, transparent);
+.mysql-workbench.has-wallpaper .wb-grid-row.row-even:not(.row-selected, .row-active, .row-range-active, :hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
+  background-color: var(--wb-wallpaper-stripe);
 }

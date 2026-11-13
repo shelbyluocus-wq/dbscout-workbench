@@ -2,7 +2,7 @@
 import { t } from "./i18n/index.js";
 import WallpaperCanvas from "./components/WallpaperCanvas.vue";
 import { useWallpaper } from "./composables/useWallpaper.js";
-const { source: wallpaperSource } = useWallpaper();
+const { source: wallpaperSource, setAppearance: setWallpaperAppearance } = useWallpaper();
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, Upload, X } from "lucide-vue-next";
 
@@ -1416,6 +1416,7 @@ const {
 const { effectiveTheme, isDark, toggleTheme, preference: themePreference, setThemePreference, refresh: refreshTheme } = useTheme({
   applyNativeTheme: applyNativeThemeKeepingTrafficLights,
 });
+watch(effectiveTheme, setWallpaperAppearance, { immediate: true });
 const macosVibrancy = useMacosVibrancy({ themeRefresh: refreshTheme });
 macosVibrancy.start();
 const {

@@ -24856,14 +24856,16 @@ button.wb-table-mention:active {
   --wb-vibrancy-sidebar: rgba(28, 29, 31, 0.5);
   --wb-vibrancy-titlebar: rgba(25, 25, 27, 0.45);
 }
-:root[data-wb-platform="macos"].is-vibrancy .wb-activity-rail {
+/* A wallpaper covers the window, so the native material is out of sight and
+   these tints would only stack three different veils on its frame. */
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-activity-rail {
   background: var(--wb-vibrancy-rail);
 }
-:root[data-wb-platform="macos"].is-vibrancy .wb-sidebar-slot,
-:root[data-wb-platform="macos"].is-vibrancy .wb-sidebar {
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-sidebar-slot,
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-sidebar {
   background: var(--wb-vibrancy-sidebar);
 }
-:root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar {
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-titlebar-sidebar {
   background: var(--wb-vibrancy-titlebar);
 }
 /* Collapsed, the slot is just the toggle beside the traffic lights; tinting

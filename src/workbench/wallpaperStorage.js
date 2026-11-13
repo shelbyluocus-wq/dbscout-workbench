@@ -155,7 +155,19 @@ export function createWallpaperStorage({
     });
   }
 
+  // Settings only, without waiting for IndexedDB. Unreadable settings are
+  // reported by read(); here they simply yield nothing.
+  function peek() {
+    try {
+      const raw = getLocalStorage().getItem(WALLPAPER_STORAGE_KEY);
+      return raw === null ? null : JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   return {
+    peek,
     read: () => transaction(),
     mutate: (change, candidate) => transaction(change, candidate),
     close() {

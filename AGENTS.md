@@ -2,9 +2,14 @@
 
 ## Local wallpaper appearance
 
-Settings → Wallpaper provides eight bundled stills and local PNG/JPEG/WebP/MP4
-selection, visibility/blur, static/dynamic video, reset and removal. Defaults to
-None. `wallpaperState.js` / `wallpaperStorage.js` own settings and custom media;
+Settings → Wallpaper provides twelve bundled stills and local PNG/JPEG/WebP/MP4
+selection. Light and dark appearance each keep their own picture, visibility and
+blur; new installations start with the recommended pair (mist-ridges /
+night-ridges) and older single-wallpaper settings apply to both. The frame
+(title bar, rail, sidebar, tab strips) is transparent over one canvas and must
+never get a tint of its own; the main area sits on one sheet veil.
+`wallpaperTone.js` caps a picture's opacity where frame labels still meet AA.
+`wallpaperState.js` / `wallpaperStorage.js` own settings and custom media;
 `WallpaperCanvas.vue` and `WallpaperSettingsDialog.vue` own presentation. Keep
 foreground text, grid selection/frozen cells, floating dialogs and code editors
 readable. See `docs/wallpapers.md` for storage, attribution and regression checks.

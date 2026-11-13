@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import {
-  createWallpaperState, decodeWallpaperFile, normalizeWallpaperSettings,
-  validateWallpaperFile, WALLPAPERS, WALLPAPER_DEFAULTS, WALLPAPER_LIMITS, WALLPAPER_STORAGE_KEY,
+  createWallpaperState, decodeWallpaperFile, normalizeWallpaperSettings, validateWallpaperFile,
+  WALLPAPERS, WALLPAPER_APPEARANCES, WALLPAPER_DEFAULTS, WALLPAPER_LIMITS, WALLPAPER_STORAGE_KEY,
 } from "./wallpaperState.js";
 import { createWallpaperStorage } from "./wallpaperStorage.js";
 
@@ -19,6 +20,7 @@ function memoryStorage() {
   return {
     fail: false,
     get snapshot() { return snapshot; },
+    peek() { return snapshot.metadata; },
     set snapshot(value) { snapshot = value; },
     async read() { await queue; return snapshot; },
     mutate(change) {
@@ -53,20 +55,35 @@ function storageEvent(target) {
 }
 
 test("registry, defaults and bounded settings contract", () => {
-  assert.deepEqual(WALLPAPERS.map(({ id }) => id), [
-    "night-launch", "silent-orbits", "dune-dawn", "planet-dawn", "indigo-folds", "dune-sphere", "ocean-clouds", "rose-quartz",
+  assert.deepEqual(WALLPAPERS.map(({ id, suits }) => `${suits}:${id}`), [
+    "light:mist-ridges", "light:frost-folds", ":dune-dawn", ":ocean-clouds",
+    "dark:night-ridges", "dark:indigo-folds", "dark:dune-night", ":night-launch", ":silent-orbits", ":planet-dawn",
+    ":dune-sphere", ":rose-quartz",
   ]);
   for (const entry of WALLPAPERS) {
     assert.equal(entry.src, `/wallpapers/${entry.id}.webp`);
     assert.equal(entry.thumbnail, `/wallpapers/thumbnails/${entry.id}.webp`);
+    assert.ok(existsSync(new URL(`../../public${entry.src}`, import.meta.url)), entry.src);
+    assert.ok(existsSync(new URL(`../../public${entry.thumbnail}`, import.meta.url)), entry.thumbnail);
+    if (!entry.pair) continue;
+    const partner = WALLPAPERS.find(({ id }) => id === entry.pair);
+    assert.equal(partner.pair, entry.id);
+    assert.notEqual(partner.suits, entry.suits);
   }
+  // The recommended pair suits its appearance and belongs together.
+  for (const appearance of WALLPAPER_APPEARANCES) {
+    assert.equal(WALLPAPERS.find(({ id }) => id === WALLPAPER_DEFAULTS[appearance].id).suits, appearance);
+  }
+  assert.equal(WALLPAPERS.find(({ id }) => id === WALLPAPER_DEFAULTS.light.id).pair, WALLPAPER_DEFAULTS.dark.id);
   assert.deepEqual(normalizeWallpaperSettings(null), WALLPAPER_DEFAULTS);
-  assert.deepEqual(normalizeWallpaperSettings({ id: "unknown", visibility: 12, blur: -1, motion: "yes" }), {
-    id: "none", visibility: 1, blur: 0, motion: false,
+  assert.notEqual(normalizeWallpaperSettings(null).light, WALLPAPER_DEFAULTS.light);
+  assert.deepEqual(normalizeWallpaperSettings({
+    light: { id: "unknown", visibility: 12, blur: -1 }, dark: { id: "dune-night", visibility: "0.2", blur: 25 }, motion: "yes",
+  }), {
+    light: { id: "none", visibility: 1, blur: 0 }, dark: { id: "dune-night", visibility: 0.6, blur: 24 }, motion: false,
   });
-  assert.equal(normalizeWallpaperSettings({ blur: Infinity }).blur, 0);
-  assert.equal(normalizeWallpaperSettings({ blur: 25 }).blur, 24);
-  assert.equal(normalizeWallpaperSettings({ blur: 24 }).blur, 24);
+  assert.equal(normalizeWallpaperSettings({ blur: Infinity }).light.blur, 0);
+  assert.equal(normalizeWallpaperSettings({ blur: 25 }).dark.blur, 24);
 });
 
 test("reportError accepts localized media errors only and never changes selection", async () => {
@@ -79,11 +96,11 @@ test("reportError accepts localized media errors only and never changes selectio
   }
   assert.equal(state.reportError("private browser failure"), false);
   assert.equal(state.error.value, "wallpaper.error.playback");
-  assert.equal(state.settings.value.id, "rose-quartz");
+  assert.equal(state.active.value.id, "rose-quartz");
   assert.equal(state.reportError(""), true);
   assert.equal(state.error.value, "");
   await state.updateSettings({ blur: 40 });
-  assert.equal(state.settings.value.blur, 24);
+  assert.equal(state.active.value.blur, 24);
   state.dispose();
   assert.equal(state.reportError("wallpaper.error.decode"), false);
 });
@@ -107,11 +124,12 @@ test("MIME, bounded header magic, empty input and exact binary size limits", asy
 test("selection, settings, import, retained reset, removal and URL cleanup", async () => {
   const { state, storage, active, revoked } = fixture();
   await state.ready;
-  assert.equal(state.source.value, "");
+  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
   assert.equal(await state.select("night-launch"), true);
   assert.equal(state.source.value, "/wallpapers/night-launch.webp");
   await state.updateSettings({ visibility: 0.6, blur: 5, motion: true, id: "custom", secret: "ignored" });
-  assert.equal(state.settings.value.id, "night-launch");
+  assert.equal(state.active.value.id, "night-launch");
+  assert.equal(state.settings.value.light.secret, undefined);
   assert.equal(await state.importFile(png()), true);
   assert.equal(state.customKind.value, "image");
   const firstUrl = state.source.value;
@@ -124,10 +142,10 @@ test("selection, settings, import, retained reset, removal and URL cleanup", asy
   await state.reset();
   assert.deepEqual(state.settings.value, WALLPAPER_DEFAULTS);
   assert.ok(state.customUrl.value);
-  assert.equal(state.source.value, "");
+  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
   await state.select("custom");
   await state.removeCustom();
-  assert.equal(state.settings.value.id, "none");
+  assert.equal(state.active.value.id, "none");
   assert.equal(state.customKind.value, "");
   assert.equal(storage.snapshot.custom, null);
   assert.equal(active.size, 0);
@@ -135,7 +153,7 @@ test("selection, settings, import, retained reset, removal and URL cleanup", asy
   assert.equal(state.error.value, "wallpaper.error.customMissing");
   await state.select("ocean-clouds");
   await state.removeCustom();
-  assert.equal(state.settings.value.id, "ocean-clouds");
+  assert.equal(state.active.value.id, "ocean-clouds");
   state.dispose();
 });
 
@@ -176,7 +194,7 @@ test("latest intent wins slow imports; stale failures do not replace newer error
   await state.select("silent-orbits");
   gate.resolve();
   assert.equal(await oldImport, false);
-  assert.equal(state.settings.value.id, "silent-orbits");
+  assert.equal(state.active.value.id, "silent-orbits");
   assert.equal(state.busy.value, false);
   assert.equal(state.error.value, "");
   assert.equal(active.size, 0);
@@ -206,7 +224,7 @@ test("initialization is deferred and cannot overwrite an immediate selection", a
   await state.select("rose-quartz");
   initialize();
   await state.ready;
-  assert.equal(state.settings.value.id, "rose-quartz");
+  assert.equal(state.active.value.id, "rose-quartz");
   state.dispose();
 });
 
@@ -227,10 +245,10 @@ test("cross-window sync reloads same-ID custom replacements and revokes old URLs
   assert.ok(second.revoked.includes(oldUrl));
   await first.state.updateSettings({ visibility: 0.9 });
   await second.state.updateSettings({ blur: 7 });
-  assert.equal(storage.snapshot.metadata.settings.visibility, 0.9);
+  assert.equal(storage.snapshot.metadata.settings.light.visibility, 0.9);
   storageEvent(first.events);
   await tick();
-  assert.equal(first.state.settings.value.blur, 7);
+  assert.equal(first.state.settings.value.light.blur, 7);
   await first.state.removeCustom();
   storageEvent(second.events);
   await tick();
@@ -253,7 +271,7 @@ test("late refresh does not overwrite user action; disposed imports cannot persi
   await state.select("indigo-folds");
   gate.resolve({ metadata: { settings: { id: "dune-dawn" } }, custom: null });
   await refresh;
-  assert.equal(state.settings.value.id, "indigo-folds");
+  assert.equal(state.active.value.id, "indigo-folds");
   state.dispose();
   assert.equal(await state.importFile(png()), false);
   assert.equal(active.size, 0);
@@ -264,19 +282,84 @@ test("missing custom restoration reports a localized error and removal repairs i
   storage.snapshot = { metadata: { settings: { id: "custom" } }, custom: null };
   const { state } = fixture({ storage });
   await state.ready;
-  assert.equal(state.settings.value.id, "none");
+  assert.equal(state.source.value, "");
   assert.equal(state.error.value, "wallpaper.error.customMissing");
   assert.equal(await state.removeCustom(), true);
   assert.equal(state.error.value, "");
+  assert.deepEqual([state.settings.value.light.id, state.settings.value.dark.id], ["none", "none"]);
   state.dispose();
 });
 
+test("each appearance keeps its own wallpaper; the shell picks which one shows", async () => {
+  const { state, storage } = fixture();
+  await state.ready;
+  assert.equal(state.appearance.value, "light");
+  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
+  assert.equal(await state.select("dune-night", "dark"), true);
+  assert.equal(state.active.value.id, "mist-ridges");
+  assert.equal(state.settings.value.dark.id, "dune-night");
+  await state.updateSettings({ visibility: 0.3, blur: 9, motion: true }, "dark");
+  assert.deepEqual(state.settings.value.light, WALLPAPER_DEFAULTS.light);
+  assert.deepEqual(state.settings.value.dark, { id: "dune-night", visibility: 0.3, blur: 9 });
+  assert.equal(state.settings.value.motion, true);
+  state.setAppearance("dark");
+  assert.equal(state.source.value, "/wallpapers/dune-night.webp");
+  assert.equal(state.active.value.blur, 9);
+  state.setAppearance("sepia");
+  assert.equal(state.appearance.value, "dark");
+  await state.select("none");
+  assert.equal(state.source.value, "");
+  assert.equal(state.settings.value.light.id, "mist-ridges");
+  await state.importFile(png(), "light");
+  assert.equal(state.settings.value.light.id, "custom");
+  assert.equal(state.source.value, "");
+  await state.select("custom");
+  assert.ok(state.source.value.startsWith("blob:"));
+  await state.removeCustom();
+  assert.deepEqual([state.settings.value.light.id, state.settings.value.dark.id], ["none", "none"]);
+  assert.deepEqual(storage.snapshot.metadata.settings, {
+    light: { id: "none", visibility: 0.6, blur: 0 }, dark: { id: "none", visibility: 0.3, blur: 9 }, motion: true,
+  });
+  state.dispose();
+});
+
+test("a theme switch during a slow import keeps the change on the appearance it started for", async () => {
+  const gate = deferred();
+  const { state } = fixture({ decode: () => gate.promise });
+  await state.ready;
+  const pending = state.importFile(png());
+  await tick();
+  state.setAppearance("dark");
+  gate.resolve();
+  assert.equal(await pending, true);
+  assert.equal(state.settings.value.light.id, "custom");
+  assert.equal(state.settings.value.dark.id, "night-ridges");
+  state.dispose();
+});
+
+test("saved settings show from the first frame; single-wallpaper settings carry over to both appearances", async () => {
+  const storage = memoryStorage();
+  storage.snapshot = { metadata: { settings: { id: "indigo-folds", visibility: 0.4, blur: 3, motion: true } }, custom: null };
+  const { state } = fixture({ storage, schedule() {} });
+  const carried = { id: "indigo-folds", visibility: 0.4, blur: 3 };
+  assert.deepEqual(state.settings.value, { light: carried, dark: carried, motion: true });
+  assert.equal(state.source.value, "/wallpapers/indigo-folds.webp");
+  state.dispose();
+  assert.deepEqual(normalizeWallpaperSettings({}), {
+    light: { id: "none", visibility: 0.25, blur: 0 }, dark: { id: "none", visibility: 0.25, blur: 0 }, motion: false,
+  });
+  assert.deepEqual(normalizeWallpaperSettings({ light: { id: "frost-folds" } }), {
+    light: { id: "frost-folds", visibility: 0.6, blur: 0 }, dark: { id: "none", visibility: 0.6, blur: 0 }, motion: false,
+  });
+});
 for (const id of ["none", "night-launch"]) {
   test(`startup and cross-window ${id} restoration ignore undecodable retained video`, async () => {
     const storage = memoryStorage();
     const blob = new Blob([new Uint8Array([0, 0, 0, 20]), "ftypisom", new Uint8Array(4), "mp42"], { type: "video/mp4" });
     const custom = { blob, kind: "video", revision: "unsupported-codec" };
-    const saved = { id, visibility: 0.7, blur: 12, motion: true };
+    const saved = {
+      light: { id, visibility: 0.7, blur: 12 }, dark: { id: "none", visibility: 0.5, blur: 0 }, motion: true,
+    };
     storage.snapshot = { metadata: { settings: saved }, custom };
     let decodeCalls = 0;
     const { state, events, active, revoked } = fixture({ storage, decode: async (_blob, kind) => {
@@ -336,7 +419,7 @@ test("reset and builtin selection can escape a retained undecodable custom Blob"
   assert.ok(storage.snapshot.custom);
   assert.equal(await state.select("planet-dawn"), true);
   assert.equal(await state.removeCustom(), true);
-  assert.equal(state.settings.value.id, "planet-dawn");
+  assert.equal(state.active.value.id, "planet-dawn");
   state.dispose();
 });
 
