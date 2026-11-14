@@ -1144,6 +1144,11 @@ and a bottom status bar. Panes are resizable/collapsible via `PaneDivider.vue`
   cell-detail editor retains its own draft-aware menu. Destructive confirmations
   focus Cancel; others focus the primary button. F5 is the rebindable
   `refresh` shortcut and must never fall through to a WebView reload.
+- **Toolbar collapse** — The table and database-home toolbars collapse by
+  measured fit, not fixed widths: `useToolbarFit` / `utils/toolbarFit.js` set
+  `data-fit` to the fullest level that fits (chips, translations and split-pane
+  buttons included) and the CSS keys each step on it. Toolbar actions sit in the
+  row and never float over the search field.
 - **Safety layers** — Writes flow through backup (layer 1) + audit (layer 2); a
   successful mutation always has a committed audit row so it can be rolled back.
 - **Node.js test runner** — JS/sidecar tests use `node:test` and
