@@ -76,8 +76,25 @@
    editors, headers, sticky/frozen cells and dialogs keep their own surfaces. */
 .mysql-workbench.has-wallpaper :is(
   .wb-workbench-pane, .wb-table-panel, .wb-table-toolbar, .wb-grid-shell, .wb-grid-wrap,
-  .wb-database-home, .wb-dbhome-header, .wb-dbhome-table-surface
+  .wb-database-home, .wb-dbhome-header, .wb-dbhome-toolbar, .wb-dbhome-table-surface,
+  .wb-dbhome-table-header
 ) { background: transparent; }
+/* The home list's sticky header is part of the sheet at rest; once rows scroll
+   beneath it, it turns near-solid sheet colour (frosting the rest) so labels
+   never sit on row text. */
+.mysql-workbench.has-wallpaper .wb-dbhome-table-surface.is-scrolled .wb-dbhome-table-header {
+  background: color-mix(in srgb, var(--wb-workspace-mist) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+/* The cell detail panel is a strip of the same sheet below the grid, divided
+   by its hairline: the picture is the ambience, so its own glass card and
+   time-of-day haze step aside. */
+.mysql-workbench.has-wallpaper .wb-cell-detail {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 /* Every page sits on the same sheet, so the veil (and with it the scope) is
    one setting: SQL, table design, table folders and the inspector drop their
    page colours too. Sticky headers, row numbers, frozen cells, code gutters,

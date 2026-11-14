@@ -44,7 +44,10 @@ apply to both appearances, so an existing choice, including None, is kept.
   workspace colour at `--wb-wallpaper-veil`, a percentage set on the shell);
   the inspector and the active tab use the same veil. Page backgrounds (grid,
   database home, SQL library/editor/results, table design, table folders) step
-  aside for it. Table headers, row numbers, frozen cells, code gutters,
+  aside for it, and so do the database home's search row and the cell detail
+  panel under the grid (its glass card and time-of-day haze give way to the
+  picture). The home list header is clear at rest and turns near-solid sheet
+  colour once rows scroll beneath it. Table headers, row numbers, frozen cells, code gutters,
   selections, inputs, menus and dialogs stay opaque so scrolled content never
   shows through them.
 - Frame labels are drawn straight on the picture, so `wallpaperTone.js` measures

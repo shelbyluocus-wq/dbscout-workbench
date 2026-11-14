@@ -588,6 +588,7 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
   <div
     ref="scrollerRef"
     class="wb-dbhome-table-surface"
+    :class="{ 'is-scrolled': scrollTop > 0 }"
     tabindex="0"
     role="listbox"
     :aria-label="t('m_ad3702d6aeb7')"
