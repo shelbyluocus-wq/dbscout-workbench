@@ -102,7 +102,7 @@
 
 .wb-wallpaper-segment button {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   gap: 6px;
   min-height: 28px;

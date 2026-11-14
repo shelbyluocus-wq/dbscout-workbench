@@ -160,6 +160,24 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
       await start(theme);
       await open();
       await page.waitForTimeout(400);
+      // Both segmented controls center their text, including the appearance hint.
+      const segments = await page.locator(".wb-wallpaper-segment button").evaluateAll((buttons) => buttons.map((button) => {
+        const box = button.getBoundingClientRect();
+        const text = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const label = range.getBoundingClientRect();
+        return {
+          label: button.textContent,
+          alignment: getComputedStyle(button).alignItems,
+          centerOffset: Math.abs(label.top + label.height / 2 - box.top - box.height / 2),
+        };
+      }));
+      assert.equal(segments.length, 4);
+      for (const segment of segments) {
+        assert.equal(segment.alignment, "center", `${name}/${theme}: ${segment.label}`);
+        assert.ok(segment.centerOffset <= 2, `${name}/${theme}: ${JSON.stringify(segment)}`);
+      }
       await page.screenshot({ path: `${output}/${name}-${theme}-dialog.png` });
       await close();
     }
