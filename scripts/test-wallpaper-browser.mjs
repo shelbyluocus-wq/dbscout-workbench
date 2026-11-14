@@ -92,11 +92,11 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     // A new installation shows the recommended pair, each at its own strength,
     // on the whole window.
     await start("dark");
-    await waitForArt("/wallpapers/night-ridges.webp", 0.8);
+    await waitForArt("/wallpapers/indigo-folds.webp", 0.48);
     await start("light");
-    await waitForArt("/wallpapers/mist-ridges.webp", 0.8);
+    await waitForArt("/wallpapers/frost-folds.webp", 1);
     assert.equal(await page.locator(".mysql-workbench").getAttribute("data-wallpaper-scope"), "window");
-    assert.match(await sheetVeil(), /0\.51\)$/);
+    assert.match(await sheetVeil(), /0\.463\)$/);
 
     await open();
     // A side panel over a clear backdrop: the window beside it stays in view.
@@ -120,7 +120,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     await setSlider("wb-wallpaper-content", 50);
     assert.match(await sheetVeil(), /0\.51\)$/);
     assert.equal(await page.locator(".wb-wallpaper-grid [role=radio]").count(), BUILTIN.length + 2);
-    assert.equal(await page.getByRole("radio", { name: "晨雾山脊（推荐）", exact: true }).getAttribute("aria-checked"), "true");
+    assert.equal(await page.getByRole("radio", { name: "霜白层叠（推荐）", exact: true }).getAttribute("aria-checked"), "true");
     for (const id of BUILTIN) {
       await pick(id);
       await page.waitForFunction((value) => {
@@ -181,7 +181,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
       await page.screenshot({ path: `${output}/${name}-${theme}-dialog.png` });
       await close();
     }
-    await waitForArt("/wallpapers/dune-night.webp", 0.8);
+    await waitForArt("/wallpapers/dune-night.webp", 0.48);
     assert.equal(await art.evaluate((element) => getComputedStyle(element).filter), "blur(6px)");
 
     // The frame is one surface: a flat-colour picture must look identical in
@@ -247,14 +247,15 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     await page.waitForFunction(() => document.querySelector(".wb-wallpaper-art")?.getAttribute("src")?.startsWith("blob:"));
     await open();
     await page.getByRole("button", { name: "恢复推荐搭配", exact: true }).click();
-    await waitForArt("/wallpapers/mist-ridges.webp", 0.8);
+    await waitForArt("/wallpapers/frost-folds.webp", 1);
+    assert.match(await sheetVeil(), /0\.463\)$/);
     assert.equal(await page.locator('[data-wallpaper-id="custom"] img').count(), 1, "reset retains custom media");
     await pick("none");
     await page.waitForFunction(() => !document.querySelector(".wb-wallpaper-canvas"));
     assert.equal(await page.locator(".mysql-workbench.has-wallpaper").count(), 0);
     await close();
     await start("dark");
-    await waitForArt("/wallpapers/night-ridges.webp", 0.8);
+    await waitForArt("/wallpapers/indigo-folds.webp", 0.48);
     assert.deepEqual(errors, []);
     console.log(`${name}: recommended pair, side panel, scope and content veil, twelve pictures, keyboard, dimming, per-mode settings, drop, one continuous frame, reload and reset passed`);
   } finally { await browser.close(); }

@@ -30,11 +30,11 @@ export const WALLPAPER_SCOPES = Object.freeze(["window", "frame"]);
 // pair is what a new installation and Reset show. Scope, content reveal and
 // motion are shared by both appearances.
 export const WALLPAPER_DEFAULTS = Object.freeze({
-  light: Object.freeze({ id: "mist-ridges", visibility: 0.8, blur: 0 }),
-  dark: Object.freeze({ id: "night-ridges", visibility: 0.8, blur: 0 }),
+  light: Object.freeze({ id: "frost-folds", visibility: 1, blur: 0 }),
+  dark: Object.freeze({ id: "indigo-folds", visibility: 0.48, blur: 0 }),
   motion: false,
   scope: "window",
-  contentReveal: 0.5,
+  contentReveal: 0.56,
 });
 const defaults = () => ({
   light: { ...WALLPAPER_DEFAULTS.light }, dark: { ...WALLPAPER_DEFAULTS.dark },

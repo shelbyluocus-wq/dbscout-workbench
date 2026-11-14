@@ -14,7 +14,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-const SHARED_DEFAULTS = { motion: false, scope: "window", contentReveal: 0.5 };
+const SHARED_DEFAULTS = { motion: false, scope: "window", contentReveal: 0.56 };
 function memoryStorage() {
   let snapshot = { metadata: null, custom: null };
   let queue = Promise.resolve();
@@ -76,6 +76,11 @@ test("registry, defaults and bounded settings contract", () => {
     assert.equal(WALLPAPERS.find(({ id }) => id === WALLPAPER_DEFAULTS[appearance].id).suits, appearance);
   }
   assert.equal(WALLPAPERS.find(({ id }) => id === WALLPAPER_DEFAULTS.light.id).pair, WALLPAPER_DEFAULTS.dark.id);
+  assert.deepEqual(WALLPAPER_DEFAULTS, {
+    light: { id: "frost-folds", visibility: 1, blur: 0 },
+    dark: { id: "indigo-folds", visibility: 0.48, blur: 0 },
+    ...SHARED_DEFAULTS,
+  });
   assert.deepEqual(normalizeWallpaperSettings(null), WALLPAPER_DEFAULTS);
   assert.notEqual(normalizeWallpaperSettings(null).light, WALLPAPER_DEFAULTS.light);
   assert.deepEqual(normalizeWallpaperSettings({
@@ -88,7 +93,23 @@ test("registry, defaults and bounded settings contract", () => {
   assert.equal(normalizeWallpaperSettings({ blur: Infinity }).light.blur, 0);
   assert.equal(normalizeWallpaperSettings({ blur: 25 }).dark.blur, 24);
   assert.equal(normalizeWallpaperSettings({ scope: "frame" }).scope, "frame");
-  assert.equal(normalizeWallpaperSettings({ contentReveal: "0.3" }).contentReveal, 0.5);
+  assert.equal(normalizeWallpaperSettings({ contentReveal: "0.3" }).contentReveal, 0.56);
+});
+
+test("previous per-appearance preferences are preserved on startup", async () => {
+  const saved = {
+    light: { id: "mist-ridges", visibility: 0.8, blur: 0 },
+    dark: { id: "night-ridges", visibility: 0.8, blur: 0 },
+    motion: false, scope: "window", contentReveal: 0.5,
+  };
+  const storage = memoryStorage();
+  storage.snapshot = { metadata: { settings: saved }, custom: null };
+  const { state } = fixture({ storage });
+  assert.deepEqual(state.settings.value, saved);
+  await state.ready;
+  assert.deepEqual(state.settings.value, saved);
+  assert.deepEqual(storage.snapshot.metadata.settings, saved);
+  state.dispose();
 });
 
 test("the content veil follows the scope and the content reveal", () => {
@@ -166,7 +187,7 @@ test("MIME, bounded header magic, empty input and exact binary size limits", asy
 test("selection, settings, import, retained reset, removal and URL cleanup", async () => {
   const { state, storage, active, revoked } = fixture();
   await state.ready;
-  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
+  assert.equal(state.source.value, "/wallpapers/frost-folds.webp");
   assert.equal(await state.select("night-launch"), true);
   assert.equal(state.source.value, "/wallpapers/night-launch.webp");
   await state.updateSettings({ visibility: 0.6, blur: 5, motion: true, id: "custom", secret: "ignored" });
@@ -184,7 +205,7 @@ test("selection, settings, import, retained reset, removal and URL cleanup", asy
   await state.reset();
   assert.deepEqual(state.settings.value, WALLPAPER_DEFAULTS);
   assert.ok(state.customUrl.value);
-  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
+  assert.equal(state.source.value, "/wallpapers/frost-folds.webp");
   await state.select("custom");
   await state.removeCustom();
   assert.equal(state.active.value.id, "none");
@@ -336,9 +357,9 @@ test("each appearance keeps its own wallpaper; the shell picks which one shows",
   const { state, storage } = fixture();
   await state.ready;
   assert.equal(state.appearance.value, "light");
-  assert.equal(state.source.value, "/wallpapers/mist-ridges.webp");
+  assert.equal(state.source.value, "/wallpapers/frost-folds.webp");
   assert.equal(await state.select("dune-night", "dark"), true);
-  assert.equal(state.active.value.id, "mist-ridges");
+  assert.equal(state.active.value.id, "frost-folds");
   assert.equal(state.settings.value.dark.id, "dune-night");
   await state.updateSettings({ visibility: 0.3, blur: 9, motion: true }, "dark");
   assert.deepEqual(state.settings.value.light, WALLPAPER_DEFAULTS.light);
@@ -351,7 +372,7 @@ test("each appearance keeps its own wallpaper; the shell picks which one shows",
   assert.equal(state.appearance.value, "dark");
   await state.select("none");
   assert.equal(state.source.value, "");
-  assert.equal(state.settings.value.light.id, "mist-ridges");
+  assert.equal(state.settings.value.light.id, "frost-folds");
   await state.importFile(png(), "light");
   assert.equal(state.settings.value.light.id, "custom");
   assert.equal(state.source.value, "");
@@ -376,7 +397,7 @@ test("a theme switch during a slow import keeps the change on the appearance it 
   gate.resolve();
   assert.equal(await pending, true);
   assert.equal(state.settings.value.light.id, "custom");
-  assert.equal(state.settings.value.dark.id, "night-ridges");
+  assert.equal(state.settings.value.dark.id, "indigo-folds");
   state.dispose();
 });
 
@@ -393,7 +414,8 @@ test("saved settings show from the first frame; single-wallpaper settings carry 
   });
   const visibility = WALLPAPER_DEFAULTS.light.visibility;
   assert.deepEqual(normalizeWallpaperSettings({ light: { id: "frost-folds" } }), {
-    light: { id: "frost-folds", visibility, blur: 0 }, dark: { id: "none", visibility, blur: 0 }, ...SHARED_DEFAULTS,
+    light: { id: "frost-folds", visibility, blur: 0 },
+    dark: { id: "none", visibility: WALLPAPER_DEFAULTS.dark.visibility, blur: 0 }, ...SHARED_DEFAULTS,
   });
 });
 for (const id of ["none", "night-launch"]) {

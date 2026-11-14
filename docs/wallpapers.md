@@ -8,9 +8,9 @@ database data, account preference or remote service is used.
 
 Light and dark appearance each keep their own choice, visibility and blur; the
 workbench shows the one that matches the current appearance (including Follow
-system). A new installation starts with the recommended pair: `mist-ridges` in
-light and `night-ridges` in dark, both at 80% visibility with no blur, shown on
-the whole window with 50% behind content. Restore recommended pair returns to
+system). A new installation starts with the recommended pair: `frost-folds` in
+light at 100% visibility and `indigo-folds` in dark at 48%, both with no blur,
+shown on the whole window with 56% behind content. Restore recommended pair returns to
 that and static playback, but retains the custom file until Remove is used. The picker edits either appearance without switching
 the app, lists pictures made for the edited appearance first (marked
 Recommended), and offers the matching counterpart for the other appearance

@@ -4,8 +4,8 @@
 
 Settings → Wallpaper provides twelve bundled stills and local PNG/JPEG/WebP/MP4
 selection. Light and dark appearance each keep their own picture, visibility and
-blur; new installations start with the recommended pair (mist-ridges /
-night-ridges) and older single-wallpaper settings apply to both. The frame
+blur; new installations start with the recommended pair (frost-folds at 100% /
+indigo-folds at 48%, no blur, whole window with 56% behind content) and older single-wallpaper settings apply to both. The frame
 (title bar, rail, sidebar, tab strips) is transparent over one canvas and must
 never get a tint of its own; every page of the main area sits on one sheet
 veil. A shared scope chooses Whole window (default; the veil follows the
