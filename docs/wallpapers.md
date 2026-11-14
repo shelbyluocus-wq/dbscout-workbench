@@ -1,18 +1,36 @@
 # Local wallpapers
 
-Settings → Wallpaper opens a live picker with None, twelve bundled stills and a
-custom-media slot. No database data, account preference or remote service is used.
+Settings → Wallpaper opens a side panel with None, twelve bundled stills and a
+custom-media slot. The backdrop stays clear, so the window beside the panel
+shows every change as it happens; the miniature at the top shows the edited
+appearance (which may be the one not on screen) and the chosen scope. No
+database data, account preference or remote service is used.
 
 Light and dark appearance each keep their own choice, visibility and blur; the
 workbench shows the one that matches the current appearance (including Follow
 system). A new installation starts with the recommended pair: `mist-ridges` in
-light and `night-ridges` in dark, both at 60% visibility with no blur. Restore
-recommended pair returns to that and static playback, but retains the custom
-file until Remove is used. The picker edits either appearance without switching
+light and `night-ridges` in dark, both at 80% visibility with no blur, shown on
+the whole window with 50% behind content. Restore recommended pair returns to
+that and static playback, but retains the custom file until Remove is used. The picker edits either appearance without switching
 the app, lists pictures made for the edited appearance first (marked
 Recommended), and offers the matching counterpart for the other appearance
 (`mist-ridges` ↔ `night-ridges`, `frost-folds` ↔ `indigo-folds`,
 `dune-dawn` ↔ `dune-night`).
+
+Scope and the "behind content" amount are shared by both appearances:
+
+- **Whole window** (default, also for settings saved before scopes existed):
+  the picture shows behind every page. The content veil is
+  `0.9 − 0.78 × behind content` (90% at 0, 12% at 100%). Text stays readable
+  at any amount because the frame ceiling already holds on the bare picture and
+  the veil only moves colours toward the workspace colour.
+- **Frame only**: the original near-solid sheet (90%).
+
+Slider changes and bundled pictures show at once and are saved behind them;
+during a drag only the latest value is kept and an older save never makes the
+slider jump back. A failed save puts the saved settings back and shows the
+error. Custom media is shown only after its decode. The panel's arrow keys
+follow the 4-column grid, and a picture or MP4 can be dropped onto the panel.
 
 Saved settings from the single-wallpaper version (`{ id, visibility, blur }`)
 apply to both appearances, so an existing choice, including None, is kept.
@@ -22,9 +40,13 @@ apply to both appearances, so an existing choice, including None, is kept.
 - The frame (title bar, activity rail, sidebar, tab strips) is transparent over
   one canvas, so it reads as a single continuous surface. Never give a frame
   pane a tint of its own: a second layer is what makes neighbouring strips differ.
-- The main area sits on one rounded sheet (`--wb-wallpaper-sheet`, 90% of the
-  workspace colour); the inspector and the active tab use the same veil. Table
-  headers, frozen cells, selections, editors, menus and dialogs stay opaque.
+- The main area sits on one rounded sheet (`--wb-wallpaper-sheet`, the
+  workspace colour at `--wb-wallpaper-veil`, a percentage set on the shell);
+  the inspector and the active tab use the same veil. Page backgrounds (grid,
+  database home, SQL library/editor/results, table design, table folders) step
+  aside for it. Table headers, row numbers, frozen cells, code gutters,
+  selections, inputs, menus and dialogs stay opaque so scrolled content never
+  shows through them.
 - Frame labels are drawn straight on the picture, so `wallpaperTone.js` measures
   the loaded picture and caps its opacity where the quietest frame label still
   meets WCAG AA (4.5:1) against its harshest region. Shown opacity is
@@ -50,9 +72,10 @@ apply to both appearances, so an existing choice, including None, is kept.
   initialization. `MySqlWorkbench.vue` feeds it the effective theme.
 - `WallpaperCanvas.vue` + `wallpaperCanvas.css`: one continuous cover-fit canvas,
   image/video-only opacity and blur. Hidden windows and reduced motion pause video.
-- `WallpaperSettingsDialog.vue` + `wallpaperSettings.css`: preview, light/dark
-  switch, radio-grid keyboard selection, local file input, visibility / blur and
-  video motion controls.
+- `WallpaperSettingsDialog.vue` + `wallpaperSettings.css`: the side panel —
+  light/dark switch, miniature, scope / visibility / behind content / blur and
+  video motion controls, radio-grid keyboard selection, local file input and
+  drop target. The sidebar settings row names the picture on screen.
 - `i18n/wallpaperMessages.js`: English, Simplified Chinese and Traditional Chinese.
 
 PNG/JPEG/WebP: at most 20 MiB. MP4: at most 100 MiB; actual playback depends on

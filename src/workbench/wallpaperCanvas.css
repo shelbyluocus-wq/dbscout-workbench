@@ -6,7 +6,9 @@
 .mysql-workbench.has-wallpaper {
   isolation: isolate;
   --wb-wallpaper-frame-solid: var(--wb-chrome-surface);
-  --wb-wallpaper-sheet: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
+  /* --wb-wallpaper-veil (a percentage) is set on the shell from the scope and
+     content reveal. A plain percentage, not calc(), for older WebKit. */
+  --wb-wallpaper-sheet: color-mix(in srgb, var(--wb-workspace-mist) var(--wb-wallpaper-veil, 90%), transparent);
   --wb-wallpaper-stripe: rgba(0, 0, 0, 0.018);
 }
 .mysql-workbench.has-wallpaper[data-theme="dark"] {
@@ -76,6 +78,18 @@
   .wb-workbench-pane, .wb-table-panel, .wb-table-toolbar, .wb-grid-shell, .wb-grid-wrap,
   .wb-database-home, .wb-dbhome-header, .wb-dbhome-table-surface
 ) { background: transparent; }
+/* Every page sits on the same sheet, so the veil (and with it the scope) is
+   one setting: SQL, table design, table folders and the inspector drop their
+   page colours too. Sticky headers, row numbers, frozen cells, code gutters,
+   inputs and buttons keep their surfaces so scrolled content never shows
+   through them. */
+.mysql-workbench.has-wallpaper :is(
+  .wb-sql-library, .wb-sql-library-header, .wb-sql-library-toolbar, .wb-sql-library-scroll,
+  .wb-sql-library-section, .wb-sql-workspace, .wb-sql-toolbar, .wb-sql-filebar, .wb-sql-editor-pane,
+  .wb-sql-code-editor, .wb-sql-output, .wb-sql-result-scroll, .wb-design-editor, .wb-design-header, .wb-design-grid-wrap,
+  .wb-folder-page, .wb-inspector-table-status
+) { background: transparent; }
+.mysql-workbench.has-wallpaper .wb-design-grid tbody tr:not(:hover, .is-selected) td { background: transparent; }
 /* Pages with opaque headers follow the sheet's rounded corner themselves. */
 .mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane ~ *,
 .mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane + * > header:first-child {

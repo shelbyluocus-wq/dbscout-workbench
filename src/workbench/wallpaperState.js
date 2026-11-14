@@ -21,14 +21,25 @@ export const WALLPAPERS = Object.freeze([
   src: `/wallpapers/${id}.webp`,
   thumbnail: `/wallpapers/thumbnails/${id}.webp`,
 })));
+// Where the picture shows: "window" also behind the content panes, under a
+// veil the person sets (contentReveal: 0 = as veiled as "frame", 1 = the
+// lightest veil that still separates content from the picture); "frame" only
+// in the title bar, rail, sidebar and tab strips.
+export const WALLPAPER_SCOPES = Object.freeze(["window", "frame"]);
 // Each appearance keeps its own picture, visibility and blur; the recommended
-// pair is what a new installation and Reset show.
+// pair is what a new installation and Reset show. Scope, content reveal and
+// motion are shared by both appearances.
 export const WALLPAPER_DEFAULTS = Object.freeze({
-  light: Object.freeze({ id: "mist-ridges", visibility: 0.6, blur: 0 }),
-  dark: Object.freeze({ id: "night-ridges", visibility: 0.6, blur: 0 }),
+  light: Object.freeze({ id: "mist-ridges", visibility: 0.8, blur: 0 }),
+  dark: Object.freeze({ id: "night-ridges", visibility: 0.8, blur: 0 }),
   motion: false,
+  scope: "window",
+  contentReveal: 0.5,
 });
-const defaults = () => ({ light: { ...WALLPAPER_DEFAULTS.light }, dark: { ...WALLPAPER_DEFAULTS.dark }, motion: false });
+const defaults = () => ({
+  light: { ...WALLPAPER_DEFAULTS.light }, dark: { ...WALLPAPER_DEFAULTS.dark },
+  motion: false, scope: WALLPAPER_DEFAULTS.scope, contentReveal: WALLPAPER_DEFAULTS.contentReveal,
+});
 export const WALLPAPER_LIMITS = Object.freeze({ image: 20 * 1024 * 1024, video: 100 * 1024 * 1024 });
 export const WALLPAPER_ERROR_KEYS = Object.freeze([
   "unsupportedType", "imageTooLarge", "videoTooLarge", "invalidFile", "decode", "playback",
@@ -57,16 +68,30 @@ function normalizeAppearance(value, fallbackVisibility) {
 // back per field. Callers change settings through methods, not ref writes.
 export function normalizeWallpaperSettings(value) {
   if (!value || typeof value !== "object") return defaults();
-  const motion = typeof value.motion === "boolean" ? value.motion : false;
+  const shared = {
+    motion: typeof value.motion === "boolean" ? value.motion : false,
+    scope: WALLPAPER_SCOPES.includes(value.scope) ? value.scope : WALLPAPER_DEFAULTS.scope,
+    contentReveal: clamp(value.contentReveal, 0, 1, WALLPAPER_DEFAULTS.contentReveal),
+  };
   if ("light" in value || "dark" in value) {
     return {
       light: normalizeAppearance(value.light, WALLPAPER_DEFAULTS.light.visibility),
       dark: normalizeAppearance(value.dark, WALLPAPER_DEFAULTS.dark.visibility),
-      motion,
+      ...shared,
     };
   }
-  const shared = normalizeAppearance(value, 0.25);
-  return { light: shared, dark: { ...shared }, motion };
+  const single = normalizeAppearance(value, 0.25);
+  return { light: single, dark: { ...single }, ...shared };
+}
+
+// Opacity of the content veil (the workspace colour over the picture). The
+// frame-only scope keeps the original near-solid sheet.
+export const WALLPAPER_FRAME_VEIL = 0.9;
+export const WALLPAPER_MIN_VEIL = 0.12;
+export function wallpaperContentVeil({ scope, contentReveal }) {
+  if (scope !== "window") return WALLPAPER_FRAME_VEIL;
+  const veil = WALLPAPER_FRAME_VEIL - (WALLPAPER_FRAME_VEIL - WALLPAPER_MIN_VEIL) * contentReveal;
+  return Math.round(veil * 1000) / 1000;
 }
 
 export async function validateWallpaperFile(file) {
@@ -154,7 +179,8 @@ export function decodeWallpaperFile(file, kind, {
  * Framework-facing store, independently constructible for tests.
  * Async actions return Promise<boolean> (false = failed or superseded), never raw
  * browser errors. `appearance` is the appearance on screen (set by the shell);
- * `active` and `source` (a URL string or "") follow it. select, updateSettings
+ * `active` and `source` (a URL string or "") follow it; `contentVeil` is the
+ * opacity of the workspace colour over the picture behind content panes. select, updateSettings
  * and importFile take the appearance to change and default to the one on
  * screen. customKind is "image" / "video" / "" and is available even when
  * custom is not selected.
@@ -188,6 +214,7 @@ export function createWallpaperState({
   const active = computed(() => settings.value[appearance.value]);
   const source = computed(() => active.value.id === "custom" ? customUrl.value
     : WALLPAPERS.find(({ id }) => id === active.value.id)?.src || "");
+  const contentVeil = computed(() => wallpaperContentVeil(settings.value));
   const target = (value) => isAppearance(value) ? value : appearance.value;
   const localizedError = (cause) => WALLPAPER_ERROR_KEYS.includes(cause?.message)
     ? cause.message : "wallpaper.error.storage";
@@ -215,7 +242,7 @@ export function createWallpaperState({
     return urls.createObjectURL(snapshot.custom.blob);
   }
 
-  async function refresh() {
+  async function refresh({ keepError = false } = {}) {
     if (disposed) return false;
     if (busy.value) { refreshPending = true; return false; }
     refreshController?.abort();
@@ -239,7 +266,7 @@ export function createWallpaperState({
         return false;
       }
       install(snapshot, url);
-      error.value = "";
+      if (!keepError) error.value = "";
       return true;
     } catch (cause) {
       if (url !== customUrl.value) release(url);
@@ -257,11 +284,17 @@ export function createWallpaperState({
     return { token: ++epoch, signal: controller.signal };
   }
 
-  async function change(makeChange, file, discardCustom = false) {
+  // optimistic: settings to show at once (slider drags, picking a bundled
+  // picture) instead of after the write; a failed write puts the saved
+  // settings back.
+  async function change(makeChange, file, discardCustom = false, optimistic) {
     if (disposed) return false;
     const { token, signal } = begin();
+    const shown = settings.value;
+    if (optimistic) settings.value = optimistic;
     let candidateUrl = "";
     let candidate;
+    let failed = false;
     try {
       if (file !== undefined) {
         const kind = await validateWallpaperFile(file);
@@ -295,20 +328,28 @@ export function createWallpaperState({
       if (!snapshot) return false;
       if (disposed) return false;
       // A transaction already in flight commits before any newer transaction;
-      // do not drop its durable result just because a new intent has started.
+      // do not drop its durable result just because a new intent has started,
+      // unless it only changed settings: then the newer intent is already on
+      // screen and installing this one would make a dragged slider jump back.
+      const settingsOnly = (snapshot.custom?.revision || "") === customRevision;
+      if (!isCurrent(token) && settingsOnly) return false;
       install(snapshot, snapshot.custom ? candidateUrl : "");
       if (snapshot.custom) candidateUrl = ""; // Ownership transferred to store.
       return true;
     } catch (cause) {
-      if (isCurrent(token)) error.value = localizedError(cause);
+      if (isCurrent(token)) {
+        error.value = localizedError(cause);
+        failed = true;
+        if (optimistic) settings.value = shown;
+      }
       return false;
     } finally {
       if (candidateUrl !== customUrl.value) release(candidateUrl);
       if (isCurrent(token)) {
         busy.value = false;
-        if (refreshPending) {
+        if (refreshPending || (failed && optimistic)) {
           refreshPending = false;
-          void refresh();
+          void refresh({ keepError: failed });
         }
       }
     }
@@ -318,21 +359,27 @@ export function createWallpaperState({
   // slow decode must not move the change to the other appearance.
   const select = (id, appearanceToChange) => {
     const key = target(appearanceToChange);
+    const plan = (current) => ({ ...current, [key]: { ...current[key], id } });
+    // Custom media is shown only after its decode, so it is never optimistic.
+    const optimistic = ids.has(id) && id !== "custom" ? plan(settings.value) : undefined;
     return change((current, custom) => {
       if (!ids.has(id)) throw wallpaperError("unknownId");
-      return { settings: { ...current, [key]: { ...current[key], id } }, custom };
-    });
+      return { settings: plan(current), custom };
+    }, undefined, false, optimistic);
   };
   const updateSettings = (patch = {}, appearanceToChange) => {
     const key = target(appearanceToChange);
-    return change((current, custom) => {
+    const plan = (current) => {
       // Selection has its own validated action. Do not accept arbitrary metadata.
-      const { visibility = current[key].visibility, blur = current[key].blur, motion = current.motion } = patch || {};
-      return {
-        settings: normalizeWallpaperSettings({ ...current, [key]: { ...current[key], visibility, blur }, motion }),
-        custom,
-      };
-    });
+      const {
+        visibility = current[key].visibility, blur = current[key].blur, motion = current.motion,
+        scope = current.scope, contentReveal = current.contentReveal,
+      } = patch || {};
+      return normalizeWallpaperSettings({
+        ...current, [key]: { ...current[key], visibility, blur }, motion, scope, contentReveal,
+      });
+    };
+    return change((current, custom) => ({ settings: plan(current), custom }), undefined, false, plan(settings.value));
   };
   const reset = () => change((_current, custom) => ({ settings: defaults(), custom }));
   const importFile = (file, appearanceToChange) => {
@@ -387,7 +434,7 @@ export function createWallpaperState({
   return {
     settings: readonly(settings), appearance: readonly(appearance), active,
     customUrl: readonly(customUrl), customKind: readonly(customKind),
-    busy: readonly(busy), error: readonly(error), source,
+    busy: readonly(busy), error: readonly(error), source, contentVeil,
     select, updateSettings, reset, importFile, removeCustom, setAppearance, reportError, ready, refresh, dispose,
   };
 }

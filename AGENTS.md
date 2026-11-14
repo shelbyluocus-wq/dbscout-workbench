@@ -7,7 +7,12 @@ selection. Light and dark appearance each keep their own picture, visibility and
 blur; new installations start with the recommended pair (mist-ridges /
 night-ridges) and older single-wallpaper settings apply to both. The frame
 (title bar, rail, sidebar, tab strips) is transparent over one canvas and must
-never get a tint of its own; the main area sits on one sheet veil.
+never get a tint of its own; every page of the main area sits on one sheet
+veil. A shared scope chooses Whole window (default; the veil follows the
+"behind content" slider) or Frame only (near-solid sheet); sticky headers, row
+numbers, frozen cells and code gutters stay opaque either way. Settings open as
+a right-side panel over a clear backdrop so the window previews changes live;
+slider and bundled-picture changes show before their save completes.
 `wallpaperTone.js` caps a picture's opacity where frame labels still meet AA.
 `wallpaperState.js` / `wallpaperStorage.js` own settings and custom media;
 `WallpaperCanvas.vue` and `WallpaperSettingsDialog.vue` own presentation. Keep

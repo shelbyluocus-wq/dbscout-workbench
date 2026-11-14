@@ -1,102 +1,103 @@
-.wb-shortcut-dialog.wb-wallpaper-dialog {
-  width: min(760px, calc(100vw - 32px));
+/* Wallpaper settings: a side panel over a clear backdrop, so the window
+   beside it shows every change as it happens. */
+.wb-wallpaper-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.wb-wallpaper-panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 16px));
+  border: 1px solid var(--wb-border);
+  border-radius: 12px;
   background: linear-gradient(var(--wb-dialog-surface), var(--wb-dialog-surface)), var(--wb-chrome-surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24), 0 2px 8px rgba(0, 0, 0, 0.08);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
+  overflow: hidden;
+  animation: wb-wallpaper-panel-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wb-wallpaper-panel:focus { outline: none; }
+
+@keyframes wb-wallpaper-panel-in {
+  from { opacity: 0; transform: translateX(16px); }
+}
+
+.wb-wallpaper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px 16px;
+  font-size: var(--wb-fs-title);
+  font-weight: 700;
+}
+
+.wb-wallpaper-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+}
+
+.wb-wallpaper-close:hover:not(:disabled) {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
 }
 
 .wb-wallpaper-body {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 18px;
-  padding: 20px;
-  overflow-y: auto;
+  gap: 14px;
   min-height: 0;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
-.wb-wallpaper-hint {
+.wb-wallpaper-note {
   margin: 0;
   color: var(--wb-secondary-text);
   font-size: var(--wb-fs-caption);
   line-height: 1.5;
 }
 
-/* ── Preview and the settings of the appearance being edited ───────────── */
-.wb-wallpaper-stage {
-  display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
-  gap: 20px;
-  align-items: center;
-}
-
-/* A miniature of the window in the edited appearance: the picture shows in
-   the frame at the strength the window will use, the content sheet veils it. */
-.wb-wallpaper-preview {
-  --wb-wallpaper-preview-scale: 0.22;
-  position: relative;
-  aspect-ratio: 1.6;
-  border: 1px solid var(--wb-border);
-  border-radius: 8px;
-  background: var(--wb-chrome-surface);
-  overflow: hidden;
-  isolation: isolate;
-}
-
-/* The dialog only carries the tokens of the appearance on screen. The dark
-   block reaches the preview through wb-floating-themed; a light preview in a
-   dark window needs the base light surfaces spelled out. */
-.wb-wallpaper-overlay[data-theme="dark"] .wb-wallpaper-preview[data-theme="light"] {
-  --wb-chrome-surface: #f6f6f4;
-  --wb-workspace-mist: #f9f9f7;
-  --wb-workspace-mist-border: rgba(45, 55, 72, 0.22);
-}
-
-.wb-wallpaper-preview-art {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: var(--wb-wallpaper-preview-strength);
-  filter: blur(calc(var(--wb-wallpaper-preview-blur) * var(--wb-wallpaper-preview-scale)));
-  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.wb-wallpaper-preview-sheet {
-  position: absolute;
-  inset: 13% 0 0 30%;
-  border-top: 1px solid var(--wb-workspace-mist-border);
-  border-left: 1px solid var(--wb-workspace-mist-border);
-  border-top-left-radius: 5px;
-  background: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
-}
-
-.wb-wallpaper-preview-tab {
-  position: absolute;
-  bottom: 100%;
-  left: 14%;
-  width: 22%;
-  height: 12%;
-  border: 1px solid var(--wb-workspace-mist-border);
-  border-bottom: 0;
-  border-radius: 4px 4px 0 0;
-  background: color-mix(in srgb, var(--wb-workspace-mist) 90%, transparent);
-}
-
-.wb-wallpaper-controls {
+.wb-wallpaper-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-width: 0;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--wb-line);
 }
 
+.wb-wallpaper-section-title {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  font-weight: 650;
+}
+
+/* ── Segments (appearance, scope) ──────────────────────────────────────── */
 .wb-wallpaper-segment {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
   gap: 2px;
   padding: 2px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
 }
 
 .wb-wallpaper-segment button {
@@ -110,15 +111,19 @@
   border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
-  font: inherit;
-  font-weight: 650;
-  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wb-wallpaper-segment button:hover:not(:disabled, .active) {
+  background: color-mix(in srgb, var(--wb-text) 5%, transparent);
+  color: var(--wb-text);
 }
 
 .wb-wallpaper-segment button.active {
-  background: var(--wb-control-hover);
+  background: var(--wb-surface);
   color: var(--wb-text);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
 .wb-wallpaper-segment small {
@@ -127,32 +132,298 @@
   font-weight: 500;
 }
 
-.wb-wallpaper-slider-row {
+.wb-wallpaper-segment.is-compact button { min-height: 24px; }
+
+/* ── Miniature of the window in the edited appearance ──────────────────── */
+.wb-wallpaper-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.wb-wallpaper-stage figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+  min-height: 18px;
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-wallpaper-current {
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
+/* The picture shows in the frame at the strength the window will use; the
+   sheet veils it as the chosen scope does. */
+.wb-wallpaper-preview {
+  --wb-mini-ink: color-mix(in srgb, var(--wb-text) 16%, transparent);
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-chrome-surface);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* The panel only carries the tokens of the appearance on screen. The dark
+   block reaches the miniature through wb-floating-themed; a light miniature
+   in a dark window needs the base light surfaces spelled out. */
+.wb-wallpaper-overlay[data-theme="dark"] .wb-wallpaper-preview[data-theme="light"] {
+  --wb-chrome-surface: #f6f6f4;
+  --wb-workspace-mist: #f9f9f7;
+  --wb-workspace-mist-border: rgba(45, 55, 72, 0.22);
+  --wb-grid-header: #eff1f4;
+  --wb-text: #1a1c20;
+  --wb-line: rgba(0, 0, 0, 0.06);
+}
+
+.wb-wallpaper-preview-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--wb-wallpaper-preview-strength);
+  /* The miniature is about a quarter of the window's width. */
+  filter: blur(calc(var(--wb-wallpaper-preview-blur) * 0.28));
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wb-wallpaper-preview i,
+.wb-wallpaper-preview span { position: absolute; display: block; }
+
+.wb-wallpaper-mini-rail {
+  top: 15%;
+  left: 2.4%;
+  display: flex !important;
+  flex-direction: column;
+  gap: 9%;
+  width: 3.4%;
+  height: 40%;
+}
+
+.wb-wallpaper-mini-rail i {
+  position: static !important;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--wb-mini-ink);
+}
+
+.wb-wallpaper-mini-sidebar {
+  top: 15%;
+  left: 9%;
+  display: flex !important;
+  flex-direction: column;
+  gap: 7px;
+  width: 17%;
+}
+
+.wb-wallpaper-mini-sidebar i {
+  position: static !important;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--wb-mini-ink);
+}
+
+.wb-wallpaper-mini-sidebar i:nth-child(2n) { width: 72%; }
+.wb-wallpaper-mini-sidebar i:nth-child(3n) { width: 86%; }
+
+.wb-wallpaper-mini-sheet {
+  inset: 12% 0 0 29%;
+  border-top: 1px solid var(--wb-workspace-mist-border);
+  border-left: 1px solid var(--wb-workspace-mist-border);
+  border-top-left-radius: 6px;
+  background: color-mix(in srgb, var(--wb-workspace-mist) var(--wb-wallpaper-preview-veil), transparent);
+  transition: background-color 0.2s ease;
+}
+
+.wb-wallpaper-mini-tab {
+  bottom: 100%;
+  left: 5%;
+  width: 20%;
+  height: 11px;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  background: inherit;
+}
+
+.wb-wallpaper-mini-toolbar {
+  top: 7px;
+  left: 5%;
+  width: 46%;
+  height: 7px;
+  border-radius: 3px;
+  background: var(--wb-mini-ink);
+  opacity: 0.7;
+}
+
+.wb-wallpaper-mini-header {
+  top: 22px;
+  right: 0;
+  left: 0;
+  height: 10px;
+  background: var(--wb-grid-header);
+  box-shadow: 0 1px 0 var(--wb-line);
+}
+
+.wb-wallpaper-mini-rows {
+  top: 32px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.wb-wallpaper-mini-rows i {
+  position: static !important;
+  height: 13px;
+  border-bottom: 1px solid var(--wb-line);
+  background:
+    linear-gradient(var(--wb-mini-ink), var(--wb-mini-ink)) 5% 50% / 18% 3px no-repeat,
+    linear-gradient(var(--wb-mini-ink), var(--wb-mini-ink)) 32% 50% / 26% 3px no-repeat,
+    linear-gradient(var(--wb-mini-ink), var(--wb-mini-ink)) 74% 50% / 14% 3px no-repeat;
+}
+
+/* ── Pictures ──────────────────────────────────────────────────────────── */
+.wb-wallpaper-grid {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) 56px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wb-wallpaper-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  border: 1px solid var(--wb-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--wb-text) 4%, transparent);
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.wb-wallpaper-tile img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wb-wallpaper-tile:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--wb-accent) 70%, transparent);
+  background: color-mix(in srgb, var(--wb-text) 4%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-wallpaper-tile:active:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
+}
+
+.wb-wallpaper-tile.is-selected {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 1.5px var(--wb-accent);
+  color: var(--wb-text);
+}
+
+.wb-wallpaper-tile.is-upload { border-style: dashed; }
+
+.wb-wallpaper-tile:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 2px;
+}
+
+.wb-wallpaper-selected {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--wb-accent-control);
+  color: var(--wb-accent-control-text);
+  box-shadow: 0 0 0 1.5px var(--wb-surface);
+}
+
+.wb-wallpaper-tile.is-word .wb-wallpaper-selected { box-shadow: none; }
+
+.wb-wallpaper-recommended {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wb-surface) 88%, transparent);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-micro);
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.wb-wallpaper-file {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.wb-wallpaper-slider-row input {
+.wb-wallpaper-file-actions {
+  display: flex;
+  flex: none;
+  gap: 12px;
+}
+
+/* ── Display settings ──────────────────────────────────────────────────── */
+.wb-wallpaper-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.wb-wallpaper-row > :is(span, label) { color: var(--wb-text); }
+.wb-wallpaper-row .wb-wallpaper-segment { grid-column: 2 / -1; }
+
+.wb-wallpaper-row input {
   width: 100%;
   margin: 0;
   accent-color: var(--wb-accent);
 }
 
-.wb-wallpaper-slider-row output {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.wb-wallpaper-row output {
   color: var(--wb-secondary-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
+
+.wb-wallpaper-row input:disabled + output { color: var(--wb-disabled); }
 
 .wb-wallpaper-motion {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
 }
 
 .wb-wallpaper-motion input {
+  margin: 2px 0 0;
   accent-color: var(--wb-accent);
 }
 
@@ -163,180 +434,67 @@
   font-size: var(--wb-fs-caption);
 }
 
-.wb-wallpaper-pair {
-  align-self: flex-start;
+/* ── Text buttons, footer, drop target ─────────────────────────────────── */
+.wb-wallpaper-link {
+  min-height: 0;
   padding: 0;
   border: 0;
+  border-radius: 3px;
   background: transparent;
   color: var(--wb-accent-strong);
-  font: inherit;
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--wb-accent-strong) 40%, transparent);
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.wb-wallpaper-pair:hover:not(:disabled) {
-  text-decoration-color: currentColor;
-}
-
-/* ── Pictures ──────────────────────────────────────────────────────────── */
-.wb-wallpaper-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 12px 10px;
-  padding-top: 18px;
-  border-top: 1px solid var(--wb-line);
-}
-
-.wb-wallpaper-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--wb-text);
-  font: inherit;
-  cursor: pointer;
-  border-radius: 8px;
-}
-
-.wb-wallpaper-thumbnail {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  aspect-ratio: 1.6;
-  border: 1px solid var(--wb-border);
-  border-radius: 8px;
-  background: var(--wb-toolbar-surface);
-  color: var(--wb-secondary-text);
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.wb-wallpaper-thumbnail img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.wb-wallpaper-tile-label {
-  width: 100%;
   font-size: var(--wb-fs-caption);
-  line-height: 1.4;
-  text-align: center;
-  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: nowrap;
 }
 
-.wb-wallpaper-tile:hover .wb-wallpaper-thumbnail {
-  border-color: var(--wb-accent);
+.wb-wallpaper-link:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-.wb-wallpaper-tile.is-selected .wb-wallpaper-thumbnail {
-  border-color: var(--wb-accent);
-  box-shadow: 0 0 0 2px var(--wb-accent);
-}
+.wb-wallpaper-link:active:not(:disabled) { background: transparent; }
 
-.wb-wallpaper-tile.is-selected .wb-wallpaper-tile-label {
-  color: var(--wb-accent-strong);
-}
+.wb-wallpaper-stage .wb-wallpaper-link { white-space: normal; }
 
-.wb-wallpaper-selected {
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  display: flex;
-  padding: 3px;
-  border-radius: 5px;
-  background: var(--wb-surface);
-  color: var(--wb-accent-strong);
-}
-
-.wb-wallpaper-recommended {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--wb-surface);
-  color: var(--wb-text);
-  font-size: var(--wb-fs-micro);
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.wb-wallpaper-upload-tile .wb-wallpaper-thumbnail {
-  border-style: dashed;
-}
-
-.wb-wallpaper-upload-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-}
-
-.wb-wallpaper-upload-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.wb-wallpaper-action {
-  padding: 6px 12px;
-  border: 1px solid var(--wb-border);
-  border-radius: 6px;
-  background: var(--wb-toolbar-surface);
-  color: var(--wb-text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.wb-wallpaper-action:hover:not(:disabled) {
-  background: var(--wb-control-hover);
-}
-
-.wb-wallpaper-dialog button:disabled {
-  color: var(--wb-disabled);
-  cursor: default;
-}
-
-.wb-wallpaper-dialog :is(button, input):focus-visible {
+.wb-wallpaper-panel :is(button, input):focus-visible {
   outline: 2px solid var(--wb-accent);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 .wb-wallpaper-error {
   margin: 0;
   color: var(--wb-danger);
-  font-size: var(--wb-fs-body);
 }
 
 .wb-wallpaper-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 14px 20px;
+  padding: 10px 16px;
   border-top: 1px solid var(--wb-line);
 }
 
-.wb-wallpaper-footer .wb-wallpaper-hint {
-  flex: 1;
-  text-align: center;
+.wb-wallpaper-dropzone {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--wb-accent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--wb-dialog-surface) 92%, transparent);
+  color: var(--wb-accent-strong);
+  font-weight: 600;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wb-wallpaper-preview-art { transition: none; }
-}
-
-@media (max-width: 640px) {
-  .wb-wallpaper-stage { grid-template-columns: minmax(0, 1fr); }
-  .wb-wallpaper-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .wb-wallpaper-footer { flex-wrap: wrap; }
-  .wb-wallpaper-footer .wb-wallpaper-hint { order: 1; flex-basis: 100%; }
+  .wb-wallpaper-panel { animation: none; }
+  .wb-wallpaper-preview-art,
+  .wb-wallpaper-mini-sheet { transition: none; }
 }

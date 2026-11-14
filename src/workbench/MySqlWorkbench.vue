@@ -2,7 +2,10 @@
 import { t } from "./i18n/index.js";
 import WallpaperCanvas from "./components/WallpaperCanvas.vue";
 import { useWallpaper } from "./composables/useWallpaper.js";
-const { source: wallpaperSource, setAppearance: setWallpaperAppearance } = useWallpaper();
+const {
+  source: wallpaperSource, settings: wallpaperSettings, contentVeil: wallpaperVeil,
+  setAppearance: setWallpaperAppearance,
+} = useWallpaper();
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
 import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, Upload, X } from "lucide-vue-next";
 
@@ -5578,7 +5581,8 @@ onBeforeUnmount(() => {
       'has-wallpaper': Boolean(wallpaperSource),
     }"
     :data-theme="effectiveTheme"
-    :style="sidebarLayoutVars"
+    :data-wallpaper-scope="wallpaperSource ? wallpaperSettings.scope : undefined"
+    :style="[sidebarLayoutVars, wallpaperSource ? { '--wb-wallpaper-veil': `${wallpaperVeil * 100}%` } : null]"
     @transitionend="onSidebarLayoutTransitionEnd"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"

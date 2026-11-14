@@ -9,6 +9,7 @@ import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
 import WallpaperSettingsDialog from "./WallpaperSettingsDialog.vue";
+import { useWallpaper, WALLPAPERS } from "../composables/useWallpaper.js";
 import { useCellHighlight } from "../composables/useCellHighlight.js";
 import { useFieldCommentColor } from "../composables/useFieldCommentColor.js";
 import { GLOW_COLOR_PRESETS, resolveGlowColorCss, useGlowColor } from "../composables/useDatabaseSwitchGlow.js";
@@ -127,6 +128,14 @@ const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
 const fontSettingsOpen = ref(false);
 const wallpaperSettingsOpen = ref(false);
+const { active: activeWallpaper } = useWallpaper();
+// The settings row names the picture on screen, as the font row names the font.
+const wallpaperName = computed(() => {
+  const { id } = activeWallpaper.value;
+  if (id === "none") return t("wallpaper.none");
+  if (id === "custom") return t("wallpaper.custom");
+  return t(WALLPAPERS.find((wallpaper) => wallpaper.id === id)?.labelKey || "wallpaper.none");
+});
 // 设计调试面板仅 dev 模式可见（npm run dev / tauri dev），正式打包不出现
 const isDev = import.meta.env.DEV;
 const designDebugOpen = ref(false);
@@ -1027,7 +1036,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
               <circle cx="8" cy="9" r="1.5" />
               <path d="m3 17 5-5 4 4 3-3 6 6" />
             </svg> {{ t('wallpaper.title') }} </span>
-          <button type="button" class="wb-sidebar-settings-action" aria-haspopup="dialog" @click.stop="openWallpaperSettings">{{ t('wallpaper.open') }}</button>
+          <button type="button" class="wb-sidebar-settings-action" aria-haspopup="dialog" :title="t('wallpaper.open')" :aria-label="`${t('wallpaper.open')} ${wallpaperName}`" @click.stop="openWallpaperSettings">{{ wallpaperName }}</button>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">

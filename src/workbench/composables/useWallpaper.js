@@ -1,7 +1,7 @@
 import { createWallpaperState } from "../wallpaperState.js";
 
 export {
-  WALLPAPERS, WALLPAPER_APPEARANCES, WALLPAPER_DEFAULTS, WALLPAPER_LIMITS, WALLPAPER_ERROR_KEYS,
+  WALLPAPERS, WALLPAPER_APPEARANCES, WALLPAPER_DEFAULTS, WALLPAPER_SCOPES, wallpaperContentVeil, WALLPAPER_LIMITS, WALLPAPER_ERROR_KEYS,
 } from "../wallpaperState.js";
 
 // One store per window, shared by the shell and settings panel. Component

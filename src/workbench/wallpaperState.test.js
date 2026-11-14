@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import {
-  createWallpaperState, decodeWallpaperFile, normalizeWallpaperSettings, validateWallpaperFile,
-  WALLPAPERS, WALLPAPER_APPEARANCES, WALLPAPER_DEFAULTS, WALLPAPER_LIMITS, WALLPAPER_STORAGE_KEY,
+  createWallpaperState, decodeWallpaperFile, normalizeWallpaperSettings, validateWallpaperFile, wallpaperContentVeil,
+  WALLPAPERS, WALLPAPER_FRAME_VEIL, WALLPAPER_MIN_VEIL, WALLPAPER_APPEARANCES, WALLPAPER_DEFAULTS, WALLPAPER_LIMITS, WALLPAPER_STORAGE_KEY,
 } from "./wallpaperState.js";
 import { createWallpaperStorage } from "./wallpaperStorage.js";
 
@@ -14,6 +14,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const SHARED_DEFAULTS = { motion: false, scope: "window", contentReveal: 0.5 };
 function memoryStorage() {
   let snapshot = { metadata: null, custom: null };
   let queue = Promise.resolve();
@@ -79,11 +80,52 @@ test("registry, defaults and bounded settings contract", () => {
   assert.notEqual(normalizeWallpaperSettings(null).light, WALLPAPER_DEFAULTS.light);
   assert.deepEqual(normalizeWallpaperSettings({
     light: { id: "unknown", visibility: 12, blur: -1 }, dark: { id: "dune-night", visibility: "0.2", blur: 25 }, motion: "yes",
+    scope: "everywhere", contentReveal: 3,
   }), {
-    light: { id: "none", visibility: 1, blur: 0 }, dark: { id: "dune-night", visibility: 0.6, blur: 24 }, motion: false,
+    light: { id: "none", visibility: 1, blur: 0 }, dark: { id: "dune-night", visibility: WALLPAPER_DEFAULTS.dark.visibility, blur: 24 },
+    motion: false, scope: "window", contentReveal: 1,
   });
   assert.equal(normalizeWallpaperSettings({ blur: Infinity }).light.blur, 0);
   assert.equal(normalizeWallpaperSettings({ blur: 25 }).dark.blur, 24);
+  assert.equal(normalizeWallpaperSettings({ scope: "frame" }).scope, "frame");
+  assert.equal(normalizeWallpaperSettings({ contentReveal: "0.3" }).contentReveal, 0.5);
+});
+
+test("the content veil follows the scope and the content reveal", () => {
+  assert.equal(wallpaperContentVeil({ scope: "frame", contentReveal: 1 }), WALLPAPER_FRAME_VEIL);
+  assert.equal(wallpaperContentVeil({ scope: "window", contentReveal: 0 }), WALLPAPER_FRAME_VEIL);
+  assert.equal(wallpaperContentVeil({ scope: "window", contentReveal: 1 }), WALLPAPER_MIN_VEIL);
+  const half = wallpaperContentVeil({ scope: "window", contentReveal: 0.5 });
+  assert.ok(half < WALLPAPER_FRAME_VEIL && half > WALLPAPER_MIN_VEIL);
+  // Saved settings from before the scope existed reach the whole window.
+  assert.equal(normalizeWallpaperSettings({ light: { id: "mist-ridges" } }).scope, "window");
+});
+
+test("slider and picture changes show at once; a failed write puts the saved settings back", async () => {
+  const { state, storage } = fixture();
+  await state.ready;
+  const pending = state.updateSettings({ visibility: 0.3, scope: "frame", contentReveal: 0.9 });
+  assert.equal(state.settings.value.light.visibility, 0.3);
+  assert.equal(state.settings.value.scope, "frame");
+  assert.equal(state.contentVeil.value, WALLPAPER_FRAME_VEIL);
+  assert.equal(await pending, true);
+  assert.equal(storage.snapshot.metadata.settings.contentReveal, 0.9);
+  const picked = state.select("dune-dawn");
+  assert.equal(state.source.value, "/wallpapers/dune-dawn.webp");
+  assert.equal(await picked, true);
+  // A drag: every step shows, only the last is kept, nothing jumps back.
+  const steps = [0.31, 0.32, 0.33].map((visibility) => state.updateSettings({ visibility }));
+  assert.equal(state.settings.value.light.visibility, 0.33);
+  await Promise.all(steps);
+  assert.equal(state.settings.value.light.visibility, 0.33);
+  assert.equal(storage.snapshot.metadata.settings.light.visibility, 0.33);
+  storage.fail = true;
+  assert.equal(await state.updateSettings({ blur: 7 }), false);
+  assert.equal(state.settings.value.light.blur, 0);
+  assert.equal(await state.select("night-launch"), false);
+  assert.equal(state.source.value, "/wallpapers/dune-dawn.webp");
+  assert.equal(state.error.value, "wallpaper.error.storage");
+  state.dispose();
 });
 
 test("reportError accepts localized media errors only and never changes selection", async () => {
@@ -318,7 +360,8 @@ test("each appearance keeps its own wallpaper; the shell picks which one shows",
   await state.removeCustom();
   assert.deepEqual([state.settings.value.light.id, state.settings.value.dark.id], ["none", "none"]);
   assert.deepEqual(storage.snapshot.metadata.settings, {
-    light: { id: "none", visibility: 0.6, blur: 0 }, dark: { id: "none", visibility: 0.3, blur: 9 }, motion: true,
+    light: { id: "none", visibility: WALLPAPER_DEFAULTS.light.visibility, blur: 0 }, dark: { id: "none", visibility: 0.3, blur: 9 },
+    ...SHARED_DEFAULTS, motion: true,
   });
   state.dispose();
 });
@@ -342,14 +385,15 @@ test("saved settings show from the first frame; single-wallpaper settings carry 
   storage.snapshot = { metadata: { settings: { id: "indigo-folds", visibility: 0.4, blur: 3, motion: true } }, custom: null };
   const { state } = fixture({ storage, schedule() {} });
   const carried = { id: "indigo-folds", visibility: 0.4, blur: 3 };
-  assert.deepEqual(state.settings.value, { light: carried, dark: carried, motion: true });
+  assert.deepEqual(state.settings.value, { light: carried, dark: carried, ...SHARED_DEFAULTS, motion: true });
   assert.equal(state.source.value, "/wallpapers/indigo-folds.webp");
   state.dispose();
   assert.deepEqual(normalizeWallpaperSettings({}), {
-    light: { id: "none", visibility: 0.25, blur: 0 }, dark: { id: "none", visibility: 0.25, blur: 0 }, motion: false,
+    light: { id: "none", visibility: 0.25, blur: 0 }, dark: { id: "none", visibility: 0.25, blur: 0 }, ...SHARED_DEFAULTS,
   });
+  const visibility = WALLPAPER_DEFAULTS.light.visibility;
   assert.deepEqual(normalizeWallpaperSettings({ light: { id: "frost-folds" } }), {
-    light: { id: "frost-folds", visibility: 0.6, blur: 0 }, dark: { id: "none", visibility: 0.6, blur: 0 }, motion: false,
+    light: { id: "frost-folds", visibility, blur: 0 }, dark: { id: "none", visibility, blur: 0 }, ...SHARED_DEFAULTS,
   });
 });
 for (const id of ["none", "night-launch"]) {
@@ -358,7 +402,7 @@ for (const id of ["none", "night-launch"]) {
     const blob = new Blob([new Uint8Array([0, 0, 0, 20]), "ftypisom", new Uint8Array(4), "mp42"], { type: "video/mp4" });
     const custom = { blob, kind: "video", revision: "unsupported-codec" };
     const saved = {
-      light: { id, visibility: 0.7, blur: 12 }, dark: { id: "none", visibility: 0.5, blur: 0 }, motion: true,
+      light: { id, visibility: 0.7, blur: 12 }, dark: { id: "none", visibility: 0.5, blur: 0 }, ...SHARED_DEFAULTS, motion: true,
     };
     storage.snapshot = { metadata: { settings: saved }, custom };
     let decodeCalls = 0;
