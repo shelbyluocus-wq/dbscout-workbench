@@ -13742,15 +13742,13 @@ label:has(input[type="checkbox"]:disabled) {
   outline-offset: 1px;
 }
 
+/* The action group sits in the row, never over it: the toolbar's measured fit
+   level (below) makes room, so it can't cover the search field. */
 .wb-table-toolbar-actions {
-  position: sticky;
-  right: 0;
-  z-index: 3;
   display: inline-flex;
   flex: 0 0 auto;
   align-items: stretch;
   margin-left: auto;
-  background: var(--wb-workspace-mist-raised);
 }
 
 @container (max-width: 132px) {
@@ -14050,8 +14048,11 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: var(--wb-fs-body);
 }
 
-/* 表工具栏按优先级让位：先把低频的冻结、分屏收进「更多」，
-   替换/导出/导入尽量保留文字；再窄才只留图标，最后整组收进溢出菜单。 */
+/* The table toolbar yields by priority, at the level measured to fit
+   (`data-fit`, see utils/toolbarFit.js) rather than at fixed widths, so long
+   labels, chips or a translated search mode never make it overflow:
+   1 folds the rarer Freeze and Split into More, 2 keeps icons only,
+   3 gathers every action into one overflow menu. */
 .wb-table-toolbar-actions > .wb-table-toolbar-more {
   display: none;
 }
@@ -14063,65 +14064,48 @@ label:has(input[type="checkbox"]:disabled) {
   font-size: var(--wb-fs-body);
 }
 
-@container (max-width: 780px) {
-  .wb-table-toolbar-actions > .wb-table-toolbar-secondary {
-    display: none;
-  }
-
-  .wb-table-toolbar-actions > .wb-table-toolbar-more {
-    display: inline-flex;
-    border-left: 1px solid var(--wb-border);
-  }
+.wb-table-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-table-toolbar-actions > .wb-table-toolbar-secondary {
+  display: none;
 }
 
-@container (max-width: 560px) {
-  .wb-table-toolbar-actions {
-    position: static;
-  }
-
-  .wb-table-toolbar-actions .wb-toolbar-action-label {
-    display: none;
-  }
-
-  .wb-table-toolbar-actions .wb-toolbar-split-button-main {
-    width: 32px;
-    min-width: 32px;
-    padding: 0;
-    gap: 0;
-  }
+.wb-table-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-table-toolbar-actions > .wb-table-toolbar-more {
+  display: inline-flex;
+  border-left: 1px solid var(--wb-border);
 }
 
-@container (max-width: 520px) {
-  .wb-table-search-field {
-    flex-basis: 136px;
-    min-width: 136px;
-  }
-
-  .wb-table-toolbar-actions .wb-toolbar-split-button-main {
-    width: 30px;
-    min-width: 30px;
-  }
-
-  .wb-table-toolbar-actions .wb-toolbar-split-button-caret {
-    width: 22px;
-    min-width: 22px;
-  }
+.wb-table-toolbar[data-fit="2"] .wb-table-search-field {
+  flex-basis: 136px;
+  min-width: 136px;
 }
 
-@container (max-width: 420px) {
-  .wb-table-search-field {
-    flex-basis: 122px;
-    min-width: 122px;
-  }
+.wb-table-toolbar[data-fit="2"] .wb-table-toolbar-actions .wb-toolbar-action-label {
+  display: none;
+}
 
-  .wb-table-toolbar-actions {
-    display: none;
-  }
+.wb-table-toolbar[data-fit="2"] .wb-table-toolbar-actions .wb-toolbar-split-button-main {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  gap: 0;
+}
 
-  .wb-table-toolbar-overflow {
-    display: inline-flex;
-    margin-left: auto;
-  }
+.wb-table-toolbar[data-fit="2"] .wb-table-toolbar-actions .wb-toolbar-split-button-caret {
+  width: 22px;
+  min-width: 22px;
+}
+
+.wb-table-toolbar[data-fit="3"] .wb-table-search-field {
+  flex-basis: 122px;
+  min-width: 122px;
+}
+
+.wb-table-toolbar[data-fit="3"] .wb-table-toolbar-actions {
+  display: none;
+}
+
+.wb-table-toolbar[data-fit="3"] .wb-table-toolbar-overflow {
+  display: inline-flex;
+  margin-left: auto;
 }
 
 .wb-toolbar-action-menu {
@@ -16143,35 +16127,41 @@ label:has(input[type="checkbox"]:disabled) {
   max-width: 3em;
 }
 
-@container (max-width: 560px) {
-  .wb-dbhome-action-button {
-    min-width: 32px;
-    padding-inline: 8px;
-    gap: 0;
-  }
-
-  .wb-dbhome-action-button > .wb-toolbar-action-label,
-  .wb-dbhome-action-group .wb-toolbar-split-button-main > span:last-child {
-    max-width: 0;
-    opacity: 0;
-    transform: translateX(-3px);
-  }
-
-  .wb-dbhome-action-group .wb-toolbar-split-button-main {
-    min-width: 34px;
-    padding-inline: 8px;
-    gap: 0;
-  }
+/* Like the table toolbar, the home toolbar collapses at the level measured
+   to fit (`data-fit`), so English labels or a split pane's Close pane button
+   never push the actions past the edge: 1 icons only, 2 the close-pane button
+   as an icon too, 3 every action in one overflow menu. */
+.wb-dbhome-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-dbhome-action-button {
+  min-width: 32px;
+  padding-inline: 8px;
+  gap: 0;
 }
 
-@container (max-width: 340px) {
-  .wb-dbhome-action-group {
-    display: none;
-  }
+.wb-dbhome-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-dbhome-action-button > .wb-toolbar-action-label,
+.wb-dbhome-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-dbhome-action-group .wb-toolbar-split-button-main > span:last-child {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-3px);
+}
 
-  .wb-dbhome-overflow {
-    display: inline-flex;
-  }
+.wb-dbhome-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-dbhome-action-group .wb-toolbar-split-button-main {
+  min-width: 34px;
+  padding-inline: 8px;
+  gap: 0;
+}
+
+.wb-dbhome-toolbar[data-fit="3"] .wb-dbhome-action-group {
+  display: none;
+}
+
+.wb-dbhome-toolbar[data-fit="3"] .wb-dbhome-overflow {
+  display: inline-flex;
+}
+
+/* Each fit level is measured at its final size, not mid-animation. */
+[data-fit-measuring],
+[data-fit-measuring] * {
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -23030,17 +23020,15 @@ label:has(input[type="checkbox"]:disabled) {
   stroke-linejoin: round;
 }
 
-@container (max-width: 460px) {
-  .wb-dbhome-actions .wb-dbhome-close-pane {
-    width: 32px;
-    min-width: 32px;
-    padding: 0;
-    gap: 0;
-  }
+.wb-dbhome-toolbar:is([data-fit="2"], [data-fit="3"]) .wb-dbhome-actions .wb-dbhome-close-pane {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  gap: 0;
+}
 
-  .wb-dbhome-close-pane span {
-    display: none;
-  }
+.wb-dbhome-toolbar:is([data-fit="2"], [data-fit="3"]) .wb-dbhome-close-pane span {
+  display: none;
 }
 
 /* Remarks keep their own text color; only metadata uses the quiet treatment. */

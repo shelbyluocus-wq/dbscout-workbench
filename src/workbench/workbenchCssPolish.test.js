@@ -717,8 +717,8 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(inputRule, /min-width\s*:\s*168px/);
   assert.match(actionsRule, /display\s*:\s*inline-flex/);
   assert.match(actionsRule, /flex\s*:\s*0 0 auto/);
-  assert.match(actionsRule, /position\s*:\s*sticky/);
-  assert.match(actionsRule, /right\s*:\s*0/);
+  assert.doesNotMatch(actionsRule, /position\s*:\s*sticky/, "actions never float over the search field");
+  assert.match(actionsRule, /margin-left\s*:\s*auto/);
   assert.match(splitButtonRule, /height\s*:\s*28px/);
   assert.match(splitButtonRule, /flex\s*:\s*0 0 auto/);
   assert.match(splitButtonMainRule, /min-width\s*:\s*42px/);
@@ -728,9 +728,11 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(navIconRule, /display\s*:\s*inline-flex/);
   assert.match(navIconRule, /width\s*:\s*24px/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-label"/);
-  assert.match(css, /@container \(max-width: 780px\)[\s\S]*?\.wb-table-toolbar-actions > \.wb-table-toolbar-secondary\s*\{[^}]*display:\s*none[\s\S]*?\.wb-table-toolbar-actions > \.wb-table-toolbar-more\s*\{[^}]*display:\s*inline-flex/s);
-  assert.match(css, /@container \(max-width: 560px\)[\s\S]*?\.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/s);
-  assert.match(css, /@container \(max-width: 520px\)[\s\S]*?\.wb-table-search-field\s*\{[^}]*min-width:\s*136px/s);
+  assert.match(css, /\.wb-table-toolbar:is\(\[data-fit="1"\], \[data-fit="2"\]\) \.wb-table-toolbar-actions > \.wb-table-toolbar-secondary\s*\{[^}]*display:\s*none/);
+  assert.match(css, /\.wb-table-toolbar:is\(\[data-fit="1"\], \[data-fit="2"\]\) \.wb-table-toolbar-actions > \.wb-table-toolbar-more\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(css, /\.wb-table-toolbar\[data-fit="2"\] \.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/);
+  assert.match(css, /\.wb-table-toolbar\[data-fit="2"\] \.wb-table-search-field\s*\{[^}]*min-width:\s*136px/);
+  assert.doesNotMatch(css, /@container \(max-width: 780px\)[^{]*\{\s*\.wb-table-toolbar-actions/, "table toolbar collapses by measured fit, not fixed widths");
   assert.match(navIconRule, /height\s*:\s*24px/);
 });
 

@@ -42,6 +42,7 @@ import DatabaseTableList from "./DatabaseTableList.vue";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
+import { useToolbarFit } from "../composables/useToolbarFit.js";
 
 const props = defineProps({
   tab: { type: Object, required: true },
@@ -172,6 +173,12 @@ const tableSourceContext = computed(() => ({
 }));
 const homeRootRef = ref(null);
 const searchInputRef = ref(null);
+const homeToolbarRef = ref(null);
+// Fit levels: 0 full, 1 action icons only, 2 close-pane icon too, 3 one overflow menu.
+useToolbarFit(homeToolbarRef, {
+  maxLevel: 3,
+  contentSignature: () => [props.canClosePane, t("m_d2fcdde81f06"), t("m_1e9b6e9d9fbe")].join("\u001f"),
+});
 const searchNavigationName = ref("");
 const tableListRef = ref(null);
 const contextMenuRef = ref(null);
@@ -862,7 +869,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
       </div>
     </header>
 
-    <div class="wb-dbhome-toolbar" :aria-label="t('m_b0c35c00cb3d')">
+    <div ref="homeToolbarRef" class="wb-dbhome-toolbar" :aria-label="t('m_b0c35c00cb3d')">
       <div class="wb-dbhome-search">
         <span aria-hidden="true"></span>
         <input

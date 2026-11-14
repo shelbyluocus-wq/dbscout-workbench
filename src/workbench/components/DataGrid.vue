@@ -32,6 +32,7 @@ import { createCellEditorHandlers, vImeValue } from "../utils/imeInput.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
 import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
+import { useToolbarFit } from "../composables/useToolbarFit.js";
 
 const workbenchFontSignature = inject("workbenchFontSignature", ref(""));
 const configRelationContext = useConfigRelationContext();
@@ -165,6 +166,22 @@ const hasActiveCellSearch = computed(() => Boolean(
   String(props.tab?.searchQuery ?? props.tab?.filter ?? "").trim(),
 ));
 const relationChip = computed(() => relationChipLabel(props.tab, t));
+const tableToolbarRef = ref(null);
+// Fit levels: 0 full, 1 freeze/split move into More, 2 icons only, 3 one overflow menu.
+useToolbarFit(tableToolbarRef, {
+  maxLevel: 3,
+  contentSignature: () => [
+    relationChip.value,
+    props.tab?.sort?.columnName,
+    props.tab?.sort?.descending,
+    props.schemaSearchMatches.length ? props.schemaSearchSummary : "",
+    props.searchHitSummary?.label,
+    activeFilterModeLabel.value,
+    importActions.value.primary.label,
+    t("m_131b13aa2659"),
+    workbenchFontSignature.value,
+  ].join("\u001f"),
+});
 
 function clearRelationChip() {
   if (props.tab) configRelationContext?.clearRelationFilter?.(props.tab);
@@ -1216,7 +1233,7 @@ function handleTableContextMenu(event) {
 
 <template>
   <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu="handleTableContextMenu">
-    <header class="wb-table-toolbar">
+    <header ref="tableToolbarRef" class="wb-table-toolbar">
       <div
         class="wb-table-search-field"
         :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter' }"
