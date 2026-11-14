@@ -59,3 +59,15 @@ test("fitToolbar counts a row that only runs into the end padding", (t) => {
   t.after(() => { globalThis.getComputedStyle = original; });
   assert.equal(fitToolbar(toolbar, 1), 1);
 });
+
+test("fitToolbar ignores the 1px that page-zoom rounding adds to a full row", () => {
+  // WebKit at 120%: the row fits, but scrollWidth reads one pixel over.
+  const toolbar = fakeToolbar(1158, [1158, 900, 700, 300]);
+  Object.defineProperty(toolbar, "scrollWidth", { get: () => 1159 });
+  assert.equal(fitToolbar(toolbar, 3), 0);
+});
+
+test("fitToolbar still collapses for a real overflow of two pixels", () => {
+  const toolbar = fakeToolbar(1000, [1002, 900, 700, 300]);
+  assert.equal(fitToolbar(toolbar, 3), 1);
+});
