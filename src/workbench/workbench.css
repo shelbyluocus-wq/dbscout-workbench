@@ -9946,7 +9946,9 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-sidebar-theme-segment {
   display: inline-grid;
-  grid-template-columns: 1fr 1fr;
+  /* One equal column per option: the appearance switch has three. */
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
   padding: 2px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-text) 8%, transparent);
@@ -9956,6 +9958,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 26px;
   min-height: 26px;
   padding: 0 10px;
+  white-space: nowrap;
   border: none;
   border-radius: 999px;
   background: transparent;
@@ -9971,19 +9974,23 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
 
-/* Keep complete language names readable inside the narrow settings sheet. */
-.wb-language-settings-row {
+/* Three-way switches (language, appearance) sit under their label so every
+   option keeps its full name inside the narrow settings sheet. */
+.wb-language-settings-row,
+.wb-sidebar-settings-row.is-stacked {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.wb-language-segment {
+.wb-language-segment,
+.wb-sidebar-theme-segment.is-full {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   border-radius: 8px;
 }
 
-.wb-language-segment button {
+.wb-language-segment button,
+.wb-sidebar-theme-segment.is-full button {
   min-width: 0;
   padding: 0 4px;
   border-radius: 6px;

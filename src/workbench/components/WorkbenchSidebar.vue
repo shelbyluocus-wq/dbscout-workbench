@@ -985,13 +985,13 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
       >
         <div class="wb-sidebar-settings-group">
         <LanguageSettings />
-        <div class="wb-sidebar-settings-row">
+        <div class="wb-sidebar-settings-row is-stacked">
           <span class="wb-sidebar-settings-label">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="3.6" />
               <path d="M12 2.7v2.4M12 18.9v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.7 12h2.4M18.9 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7" />
             </svg> {{ t('m_86a63f23a076') }} </span>
-          <div class="wb-sidebar-theme-segment" role="group" :aria-label="t('m_d32fff09b9ab')">
+          <div class="wb-sidebar-theme-segment is-full" role="group" :aria-label="t('m_d32fff09b9ab')">
             <button type="button" :class="{ active: themePreference === 'light' }" @click.stop="setTheme('light')">{{ t('m_aa0819dfc4d8') }}</button>
             <button type="button" :class="{ active: themePreference === 'dark' }" @click.stop="setTheme('dark')">{{ t('m_a6b75d068032') }}</button>
             <button type="button" :class="{ active: themePreference === 'system' }" @click.stop="setTheme('system')">{{ t('m_c9a1f2b3d4e5') }}</button>
