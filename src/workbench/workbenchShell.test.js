@@ -3177,7 +3177,7 @@ test("tauri main window uses custom web chrome by default", () => {
 
 test("home pill stays vertically centered with the arrows and window controls", () => {
   const styles = read("./workbench.css");
-  assert.match(cssRuleBody(styles, '.wb-tab[data-kind="home"]'), /margin-bottom:\s*calc\(\(var\(--wb-titlebar-height\) - 30px\) \/ 2\)/);
+  assert.match(cssRuleBody(styles, '.wb-tab[data-kind="home"]'), /height:\s*28px[\s\S]*margin-bottom:\s*calc\(\(var\(--wb-titlebar-height\) - 28px\) \/ 2\)/);
   assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /place-items:\s*center/);
   assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /height:\s*var\(--wb-titlebar-height\)/);
 });

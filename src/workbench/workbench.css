@@ -137,7 +137,6 @@
   --wb-tab-hover-border: rgba(45, 55, 72, 0.18);
   --wb-tab-active: rgba(255, 255, 255, 0.94);
   --wb-tab-active-border: rgba(45, 55, 72, 0.2);
-  --wb-home-tab-surface: rgba(45, 55, 72, 0.045);
   --wb-glass-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(250, 251, 252, 0.88) 100%);
   --wb-glass-haze-strength: 20%;
   --wb-glass-highlight: rgba(255, 255, 255, 0.95);
@@ -339,7 +338,6 @@ html[data-wb-theme="dark"] {
   --wb-tab-hover-border: rgba(148, 163, 184, 0.18);
   --wb-tab-active: rgba(32, 32, 34, 0.98);
   --wb-tab-active-border: rgba(148, 163, 184, 0.28);
-  --wb-home-tab-surface: rgba(255, 255, 255, 0.045);
   --wb-glass-surface: linear-gradient(180deg, rgba(38, 39, 44, 0.92) 0%, rgba(27, 28, 32, 0.88) 100%);
   --wb-glass-haze-strength: 12%;
   --wb-glass-highlight: rgba(255, 255, 255, 0.07);
@@ -616,8 +614,10 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-titlebar-inspector-toggle-right: 142px;
   --wb-titlebar-collapsed-controls-clearance: 182px;
   --wb-titlebar-tab-right-clearance: 0px;
+  /* Exactly the window: folder windows and page zoom can make it shorter than
+     the main window's minimum, and a taller shell would push the rail's
+     bottom (settings) out of view and let focus scroll the whole window. */
   height: 100vh;
-  min-height: 720px;
   overflow: hidden;
   background: var(--wb-chrome-surface);
   color: var(--wb-text);
@@ -10455,7 +10455,7 @@ label:has(input[type="checkbox"]:disabled) {
   padding-inline-start: var(--wb-tree-child-chevron-inline, 25px);
   grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
   min-height: var(--wb-tree-connection-h, 30px);
-  font-weight: 620;
+  font-weight: 500;
   background: var(--wb-chrome-surface);
 }
 
@@ -11079,7 +11079,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-tree-text);
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11223,6 +11223,10 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: inset 2px 0 0 var(--wb-accent);
 }
 
+.wb-table-item.active .wb-table-name {
+  font-weight: 600;
+}
+
 .wb-table-item.keyboard-selected {
   box-shadow: inset 2px 0 0 var(--wb-accent);
   background: var(--wb-accent-soft);
@@ -11245,7 +11249,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-name {
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .wb-table-comment {
@@ -11860,20 +11864,24 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 /* The home tab is a floating pill, not a document tab: it never joins the
-   active-tab curve into the pane below. */
+   active-tab curve into the pane below. At rest it is outlined with the tabs'
+   own hairline rather than filled, so it reads the same over a wallpaper.
+   It stays centred on the title bar, level with the arrows and window
+   controls. */
 .wb-tab[data-kind="home"] {
   --wb-active-tab-surface: var(--wb-chrome-surface);
   flex: 0 0 88px;
   min-width: 88px;
   max-width: 88px;
-  height: 30px;
-  min-height: 30px;
-  margin-bottom: calc((var(--wb-titlebar-height) - 30px) / 2);
+  height: 28px;
+  min-height: 28px;
+  margin-right: 4px;
+  margin-bottom: calc((var(--wb-titlebar-height) - 28px) / 2);
   padding: 0 5px;
   justify-content: center;
-  border-color: transparent;
+  border-color: var(--wb-tab-border);
   border-radius: 999px;
-  background: var(--wb-home-tab-surface);
+  background: transparent;
   box-shadow: none;
 }
 
@@ -11977,7 +11985,7 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--wb-fs-body);
-  font-weight: 550;
+  font-weight: 500;
   line-height: 1.2;
 }
 
@@ -12042,7 +12050,10 @@ label:has(input[type="checkbox"]:disabled) {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  gap: 1px;
+  gap: 0;
+  /* Optical centring: the rounded top edge and the descenders below make the
+     geometric centre read high. */
+  margin-top: 2px;
 }
 
 .wb-tab-line {
@@ -12053,20 +12064,22 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
+/* Both lines together stay well inside the 36px tab, so neither touches its
+   rounded top edge. */
 .wb-tab-line-primary {
   font-size: var(--wb-fs-body);
-  font-weight: 600;
-  line-height: 1.25;
+  font-weight: 500;
+  line-height: 1.15;
 }
 
 .wb-tab.active .wb-tab-line-primary {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .wb-tab-line-secondary {
   color: var(--wb-type-text);
-  font-size: var(--wb-fs-caption);
-  font-weight: 450;
+  font-size: var(--wb-fs-micro);
+  font-weight: 400;
   line-height: 1.2;
   letter-spacing: 0.01em;
 }
@@ -12155,21 +12168,22 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tabs .wb-tab[data-kind="home"]:hover,
 .wb-tabs .wb-tab[data-kind="home"]:focus-visible {
-  border-color: transparent;
+  border-color: var(--wb-tab-active-border);
   background: var(--wb-control-hover);
 }
 
 .wb-tabs .wb-tab[data-kind="home"].active,
 .wb-pane-tabbar .wb-tab[data-kind="home"].active,
 .wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--wb-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--wb-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 12%, transparent);
   box-shadow: none;
   overflow: hidden;
 }
 
 .wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
-  background: color-mix(in srgb, var(--wb-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--wb-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 6%, transparent);
 }
 
 .wb-tabs .wb-tab[data-kind="home"].active .wb-tab-title {
@@ -13708,7 +13722,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-secondary-text);
   font-size: var(--wb-fs-body);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -13734,6 +13748,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-inspector-view-toggle button.is-active {
   background: var(--wb-control-hover);
   color: var(--wb-text);
+  font-weight: 600;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
 
@@ -13802,7 +13817,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 42px;
   padding: 0 8px;
   font-size: var(--wb-fs-caption);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .wb-toolbar-action-icon {
@@ -13884,7 +13899,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: inherit;
   font-size: var(--wb-fs-caption);
-  font-weight: 600;
+  font-weight: 500;
   box-shadow: none;
 }
 
@@ -13934,7 +13949,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 60px;
   padding: 0 8px;
   font-size: var(--wb-fs-body);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
@@ -14348,7 +14363,7 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14), 0 1px 3px rgba(15, 23, 42, 0.08);
   color: var(--wb-secondary-text);
   font-size: var(--wb-fs-body);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -16360,7 +16375,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-dbhome-object-name {
   gap: 4px;
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .wb-dbhome-table-icon {
@@ -16423,7 +16438,7 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-dbhome-name-color, var(--wb-text));
   font: inherit;
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.2;
   overflow: hidden;
   text-align: left;
@@ -18211,7 +18226,7 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   color: var(--wb-identifier-text);
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 500;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -18230,7 +18245,7 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-type-text);
   font-size: var(--wb-fs-caption);
   font-style: normal;
-  font-weight: 550;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -18243,7 +18258,7 @@ label:has(input[type="checkbox"]:disabled) {
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
   font-size: var(--wb-fs-caption);
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -23757,7 +23772,7 @@ button.wb-table-mention:active {
   overflow: hidden;
   color: var(--wb-tree-text);
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
