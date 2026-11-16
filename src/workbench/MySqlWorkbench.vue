@@ -5636,7 +5636,7 @@ onBeforeUnmount(() => {
         :aria-label="t('m_79aaded7fe4f')"
         data-tauri-drag-region
       >
-        <WorkbenchTitleSource :tab="activeTab" :connections="connections" @open-home="openDatabaseHomeTarget" />
+        <WorkbenchTitleSource :tab="activeTab" :connections="connections" />
       </div>
 
 

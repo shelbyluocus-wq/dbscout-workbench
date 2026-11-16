@@ -177,18 +177,18 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(tabs, /tab\.database/);
   assert.match(tabs, /formatTableTabTitle\(tab, databaseLabel\(tab\.connectionId, tab\.database\)\)/);
   // Pills name the table; the title bar names its database (alias and
-  // decoration aware) and opens that database's home on click. The overflow
-  // menu still lists each tab's database.
+  // decoration aware) as selectable text. The overflow menu still lists each
+  // tab's database.
   const titleSource = read("./components/WorkbenchTitleSource.vue");
   assert.doesNotMatch(tabs, /hasTabSubtitle|wb-tab-title-stack|wb-tab-line-secondary/);
   assert.match(tabs, /wb-tab-db/);
   assert.match(tabs, /tabDatabaseIcon\(tab\)/);
   assert.match(tabs, /tabDatabaseDecorationStyle\(tab\)/);
-  assert.match(orchestrator, /<WorkbenchTitleSource :tab="activeTab" :connections="connections" @open-home="openDatabaseHomeTarget" \/>/);
+  assert.match(orchestrator, /<WorkbenchTitleSource :tab="activeTab" :connections="connections" \/>/);
   assert.match(titleSource, /databaseLabel\(connectionId, database\)/);
   assert.match(titleSource, /getDatabaseDecoration\(connectionId, database\)/);
-  assert.match(titleSource, /emit\("open-home"/);
-  assert.match(styles, /\.wb-title-source\s*\{/);
+  assert.doesNotMatch(titleSource, /emit\(|<button/);
+  assert.match(styles, /\.wb-title-source\s*\{[^}]*user-select:\s*text[^}]*-webkit-app-region:\s*no-drag/s);
   assert.match(styles, /\.wb-tab-db\s*\{/);
   assert.match(tabs, /tab\.kind/);
   assert.match(tabs, /data-kind/);
