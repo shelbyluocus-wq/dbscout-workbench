@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, ImagePlus, Minus, Trash2, Video, X } from "lucide-vue-next";
+import { Ban, Check, ImagePlus, RotateCcw, Trash2, Video, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import {
@@ -71,10 +71,12 @@ const previewStyle = computed(() => ({
   "--wb-wallpaper-preview-veil": `${hasPicture.value ? wallpaperContentVeil(settings.value) * 100 : 100}%`,
 }));
 // Offer the counterpart picture for the other appearance while it uses
-// something else.
+// something else. A picture made for the other appearance (a dark picture
+// chosen for light) has its counterpart made for this one, so no offer.
 const pairOffer = computed(() => {
-  const pair = WALLPAPERS.find(({ id }) => id === edited.value.id)?.pair;
+  const picture = WALLPAPERS.find(({ id }) => id === edited.value.id);
   const other = editing.value === "light" ? "dark" : "light";
+  const pair = picture?.suits === other ? "" : picture?.pair;
   if (!pair || settings.value[other].id === pair) return null;
   return {
     id: pair,
@@ -89,9 +91,9 @@ const close = () => emit("close");
 // The settings row disappears on opening; the sidebar restores the gear instead.
 useEscClose(() => props.open, close, null, { dialogRef, restoreFocus: false });
 
-function focusChoice(id) {
+function focusChoice(id, options) {
   focusedId.value = id;
-  gridRef.value?.querySelector(`[data-wallpaper-id="${id}"]`)?.focus();
+  gridRef.value?.querySelector(`[data-wallpaper-id="${id}"]`)?.focus(options);
 }
 
 function chooseFile() {
@@ -189,7 +191,8 @@ watch(() => props.open, async (open) => {
   editing.value = appearance.value;
   focusedId.value = edited.value.id;
   await nextTick();
-  focusChoice(edited.value.id);
+  // Opening keeps the panel at its top so the miniature stays in view.
+  focusChoice(edited.value.id, { preventScroll: true });
 }, { immediate: true });
 watch(() => edited.value.id, (id) => { focusedId.value = id; });
 watch(previewSource, () => { previewCeilings.value = null; });
@@ -223,30 +226,33 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
           </div>
 
           <figure class="wb-wallpaper-stage">
-            <div
-              class="wb-wallpaper-preview wb-floating-themed" :class="{ 'is-window': settings.scope === 'window' }"
-              :data-theme="editing" :style="previewStyle" role="img"
-              :aria-label="t('wallpaper.preview', { appearance: t(`wallpaper.appearance.${editing}`) })"
-            >
-              <template v-if="previewSource">
-                <video v-if="isVideo" :key="previewSource" class="wb-wallpaper-preview-art" :src="previewSource" muted playsinline preload="auto" @loadeddata="measurePreview" />
-                <img v-else :key="`image:${previewSource}`" class="wb-wallpaper-preview-art" :src="previewSource" alt="" @load="measurePreview" />
-              </template>
-              <span class="wb-wallpaper-mini-rail"><i></i><i></i><i></i></span>
-              <span class="wb-wallpaper-mini-sidebar"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="wb-wallpaper-mini-sheet">
-                <span class="wb-wallpaper-mini-tab"></span>
-                <span class="wb-wallpaper-mini-toolbar"></span>
-                <span class="wb-wallpaper-mini-header"></span>
-                <span class="wb-wallpaper-mini-rows"><i></i><i></i><i></i><i></i><i></i><i></i></span>
-              </span>
+            <div class="wb-wallpaper-preview-frame">
+              <div
+                class="wb-wallpaper-preview wb-floating-themed" :class="{ 'is-window': settings.scope === 'window' }"
+                :data-theme="editing" :style="previewStyle" role="img"
+                :aria-label="t('wallpaper.preview', { appearance: t(`wallpaper.appearance.${editing}`) })"
+              >
+                <template v-if="previewSource">
+                  <video v-if="isVideo" :key="previewSource" class="wb-wallpaper-preview-art" :src="previewSource" muted playsinline preload="auto" @loadeddata="measurePreview" />
+                  <img v-else :key="`image:${previewSource}`" class="wb-wallpaper-preview-art" :src="previewSource" alt="" @load="measurePreview" />
+                </template>
+                <span class="wb-wallpaper-mini-rail"><i></i><i></i><i></i></span>
+                <span class="wb-wallpaper-mini-sidebar"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="wb-wallpaper-mini-sheet">
+                  <span class="wb-wallpaper-mini-tab"></span>
+                  <span class="wb-wallpaper-mini-toolbar"></span>
+                  <span class="wb-wallpaper-mini-header"></span>
+                  <span class="wb-wallpaper-mini-rows"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <!-- Over the miniature rather than in the flow, so choosing a picture never moves the grid. -->
+              <p v-if="dimmed" class="wb-wallpaper-dimmed" role="status">{{ t('wallpaper.dimmed', { appearance: t(`wallpaper.appearance.${editing}`) }) }}</p>
             </div>
             <figcaption>
               <span class="wb-wallpaper-current">{{ selectedName }}</span>
               <button v-if="pairOffer" type="button" class="wb-wallpaper-link" :disabled="fileBusy" @click="select(pairOffer.id, pairOffer.appearance)">{{ pairOffer.label }}</button>
             </figcaption>
           </figure>
-          <p v-if="dimmed" class="wb-wallpaper-note" role="status">{{ t('wallpaper.dimmed', { appearance: t(`wallpaper.appearance.${editing}`) }) }}</p>
 
           <section class="wb-wallpaper-section" aria-labelledby="wb-wallpaper-display">
             <h3 id="wb-wallpaper-display" class="wb-wallpaper-section-title">{{ t('wallpaper.display') }}</h3>
@@ -294,7 +300,7 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
                 :aria-label="choice.label || choice.name" :title="choice.name" :tabindex="focusedId === choice.id ? 0 : -1"
                 @focus="focusedId = choice.id" @click="activateChoice(choice.id)" @keydown="onChoiceKeydown($event, choice.id)"
               >
-                <template v-if="choice.id === 'none'"><Minus :size="16" aria-hidden="true" /><span>{{ choice.name }}</span></template>
+                <template v-if="choice.id === 'none'"><Ban :size="15" :stroke-width="1.75" aria-hidden="true" /><span>{{ choice.name }}</span></template>
                 <template v-else-if="choice.kind === 'video'"><Video :size="16" aria-hidden="true" /><span class="wb-wallpaper-video-name">{{ choice.name }}</span></template>
                 <img v-else :src="choice.url || choice.thumbnail" alt="" decoding="async" loading="lazy" />
                 <span v-if="choice.recommended" class="wb-wallpaper-recommended" aria-hidden="true">{{ t('wallpaper.recommended') }}</span>
@@ -312,7 +318,7 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
           <p v-if="error" class="wb-wallpaper-error" role="alert">{{ t(error) }}</p>
         </div>
         <footer class="wb-wallpaper-footer">
-          <button type="button" class="wb-wallpaper-link" :disabled="fileBusy" @click="reset">{{ t('wallpaper.reset') }}</button>
+          <button type="button" class="wb-wallpaper-link wb-wallpaper-add" :disabled="fileBusy" @click="reset"><RotateCcw :size="13" aria-hidden="true" />{{ t('wallpaper.reset') }}</button>
           <span v-if="saving" class="wb-wallpaper-note" role="status">{{ t('wallpaper.saving') }}</span>
         </footer>
         <div v-if="dragging" class="wb-wallpaper-dropzone" aria-hidden="true"><ImagePlus :size="22" /><span>{{ t('wallpaper.drop') }}</span></div>

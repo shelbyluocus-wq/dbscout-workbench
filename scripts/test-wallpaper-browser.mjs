@@ -140,8 +140,12 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     await pick("night-launch");
     await setSlider("wb-wallpaper-visibility", 100);
     await waitForArt("/wallpapers/night-launch.webp", 0.14);
-    await page.getByText("与浅色模式反差较大，已自动减淡以保证文字清晰。", { exact: true }).waitFor();
+    await page.getByText("与浅色模式反差较大，已自动减淡以保证文字清晰", { exact: true }).waitFor();
+    // A dark picture chosen for light never offers its light counterpart to dark.
+    await pick("night-ridges");
+    assert.equal(await page.getByRole("button", { name: /改用配套的/ }).count(), 0);
     await pick("mist-ridges");
+    await page.getByRole("button", { name: "深色模式改用配套的「夜雾山脊」", exact: true }).waitFor();
     await waitForArt("/wallpapers/mist-ridges.webp", 1);
     assert.equal(await page.getByText("已自动减淡", { exact: false }).count(), 0);
     await setSlider("wb-wallpaper-visibility", 60);

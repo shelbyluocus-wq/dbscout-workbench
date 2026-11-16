@@ -42,6 +42,8 @@ const renameInputRef = ref(null);
 const historyOpen = ref(false);
 const historyRef = ref(null);
 const recentFiles = ref([]);
+// Over a wallpaper the section headings stay clear until rows scroll beneath them.
+const listScrolled = ref(false);
 
 const openTabsByDocument = computed(() => {
   const entries = props.tabs
@@ -201,7 +203,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <div class="wb-sql-library-scroll">
+    <div class="wb-sql-library-scroll" :class="{ 'is-scrolled': listScrolled }" @scroll.passive="listScrolled = $event.target.scrollTop > 0">
       <section class="wb-sql-library-section" aria-labelledby="sql-document-heading">
         <div class="wb-sql-library-section-heading">
           <h3 id="sql-document-heading">{{ t('m_815a013f4853') }}</h3>

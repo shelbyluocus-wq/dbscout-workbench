@@ -51,8 +51,8 @@ apply to both appearances, so an existing choice, including None, is kept.
   database home, SQL library/editor/results, table design, table folders) step
   aside for it, and so do the database home's search row and the cell detail
   panel under the grid (its glass card and time-of-day haze give way to the
-  picture). The home list header is clear at rest and turns near-solid sheet
-  colour once rows scroll beneath it. Table headers, row numbers, frozen cells, code gutters,
+  picture). The home list header and the SQL library's section headings are clear at
+  rest and turn near-solid sheet colour once rows scroll beneath them. Table headers, row numbers, frozen cells, code gutters,
   selections, inputs, menus and dialogs stay opaque so scrolled content never
   shows through them.
 - Frame labels are drawn straight on the picture, so `wallpaperTone.js` measures

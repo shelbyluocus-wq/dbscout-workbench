@@ -87,6 +87,13 @@
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
+/* The SQL library's section headings follow the same rule. */
+.mysql-workbench.has-wallpaper .wb-sql-library-scroll:not(.is-scrolled) .wb-sql-library-section-heading { background: transparent; }
+.mysql-workbench.has-wallpaper .wb-sql-library-scroll.is-scrolled .wb-sql-library-section-heading {
+  background: color-mix(in srgb, var(--wb-workspace-mist) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
 /* The cell detail panel is a strip of the same sheet below the grid, divided
    by its hairline: the picture is the ambience, so its own glass card and
    time-of-day haze step aside. */

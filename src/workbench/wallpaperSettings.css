@@ -159,6 +159,26 @@
   font-weight: 600;
 }
 
+.wb-wallpaper-preview-frame { position: relative; }
+
+/* Says why a picture shows faintly, on the miniature that shows it. */
+.wb-wallpaper-dimmed {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  max-width: calc(100% - 12px);
+  margin: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--wb-border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--wb-dialog-surface) 90%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.5;
+}
+
 /* The picture shows in the frame at the strength the window will use; the
    sheet veils it as the chosen scope does. */
 .wb-wallpaper-preview {
@@ -410,15 +430,17 @@
 
 .wb-wallpaper-recommended {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  top: 3px;
+  left: 3px;
   padding: 0 4px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--wb-surface) 88%, transparent);
-  color: var(--wb-text);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--wb-surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  color: var(--wb-secondary-text);
   font-size: var(--wb-fs-micro);
-  font-weight: 600;
-  line-height: 1.6;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .wb-wallpaper-file {
@@ -500,7 +522,15 @@
 
 .wb-wallpaper-link:active:not(:disabled) { background: transparent; }
 
-.wb-wallpaper-stage .wb-wallpaper-link { white-space: normal; }
+/* An inline link among captions: underlined at rest, since the accent of a
+   neutral theme alone does not set it apart from text. */
+.wb-wallpaper-stage .wb-wallpaper-link {
+  white-space: normal;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+.wb-wallpaper-stage .wb-wallpaper-link:hover:not(:disabled) { text-decoration-color: currentColor; }
 
 .wb-wallpaper-panel :is(button, input):focus-visible {
   outline: 2px solid var(--wb-accent);
