@@ -12,7 +12,7 @@ const failed = ref(false);
 // Measured from the picture on screen; null until it has loaded, which keeps
 // the artwork invisible and lets it fade in at its readable strength.
 const ceilings = ref(null);
-const isVideo = computed(() => active.value.id === "custom" && customKind.value === "video");
+const isVideo = computed(() => customKind.value === "video");
 const visible = computed(() => Boolean(source.value) && active.value.visibility > 0);
 const wantsPlayback = () => settings.value.motion && !reducedMotion.value && !hidden.value && visible.value;
 const strength = computed(() => {

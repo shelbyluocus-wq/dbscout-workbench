@@ -1,9 +1,10 @@
 # Local wallpapers
 
 Settings → Wallpaper opens a side panel with None, twelve bundled stills and a
-custom-media slot. The backdrop stays clear, so the window beside the panel
+local custom-media library with no application-imposed count limit. The backdrop stays clear, so the window beside the panel
 shows every change as it happens; the miniature at the top shows the edited
-appearance (which may be the one not on screen) and the chosen scope. No
+appearance and the chosen scope. Switching Light/Dark in the panel immediately
+switches the app's saved appearance preference as well. No
 database data, account preference or remote service is used.
 
 Light and dark appearance each keep their own choice, visibility and blur; the
@@ -11,8 +12,12 @@ workbench shows the one that matches the current appearance (including Follow
 system). A new installation starts with the recommended pair: `frost-folds` in
 light at 100% visibility and `indigo-folds` in dark at 48%, both with no blur,
 shown on the whole window with 56% behind content. Restore recommended pair returns to
-that and static playback, but retains the custom file until Remove is used. The picker edits either appearance without switching
-the app, lists pictures made for the edited appearance first (marked
+that and static playback, but retains custom files until individually deleted.
+Add accepts multiple files, as does dropping files onto the panel. Each custom
+tile has an accessible delete button; deleting a selected picture clears only
+appearances using that picture to None, preserving their visibility and blur.
+Original source files are never deleted. Available local storage still limits
+the total library size. The picker lists pictures made for the current appearance first (marked
 Recommended), and offers the matching counterpart for the other appearance
 (`mist-ridges` ↔ `night-ridges`, `frost-folds` ↔ `indigo-folds`,
 `dune-dawn` ↔ `dune-night`).
@@ -65,9 +70,11 @@ apply to both appearances, so an existing choice, including None, is kept.
   checks, cancellable actions, local errors and cross-window refresh.
 - `wallpaperStorage.js`: small metadata in `dbscout.wallpaper.v1` (read
   synchronously at start through `peek()` so the first frame already has the
-  picture); one custom file, shared by both appearances, in IndexedDB
+  picture); individually identified custom files, shared by both appearances, in IndexedDB
   `dbscout-wallpaper-v1`. Store ArrayBuffer + MIME metadata, not Blob records
-  (WebKit compatibility), and expose Blob URLs to the renderer.
+  (WebKit compatibility), and expose Blob URLs to the renderer. Legacy `custom`
+  records remain available without replacing their bytes; new imports have
+  independent IDs and never replace an earlier import.
 - `wallpaperTone.js`: readable-opacity ceilings per appearance from sampled
   pixels. Its reference colours must stay at least as demanding as every
   bundled colour theme; the unit test enforces it.

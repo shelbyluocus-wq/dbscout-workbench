@@ -119,7 +119,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     await page.waitForFunction(() => /0\.12\)$/.test(getComputedStyle(document.querySelector(".wb-main"), "::before").backgroundColor));
     await setSlider("wb-wallpaper-content", 50);
     assert.match(await sheetVeil(), /0\.51\)$/);
-    assert.equal(await page.locator(".wb-wallpaper-grid [role=radio]").count(), BUILTIN.length + 2);
+    assert.equal(await page.locator(".wb-wallpaper-grid [role=radio]").count(), BUILTIN.length + 1);
     assert.equal(await page.getByRole("radio", { name: "霜白层叠（推荐）", exact: true }).getAttribute("aria-checked"), "true");
     for (const id of BUILTIN) {
       await pick(id);
@@ -146,15 +146,19 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     assert.equal(await page.getByText("已自动减淡", { exact: false }).count(), 0);
     await setSlider("wb-wallpaper-visibility", 60);
 
-    // The other appearance is set up without leaving this one.
+    // Switching the edited appearance switches the entire app immediately.
     await edit("dark");
     await pick("dune-night");
     await setSlider("wb-wallpaper-blur", 6);
-    assert.equal(await artSource(), "/wallpapers/mist-ridges.webp");
-    assert.equal(await art.evaluate((element) => getComputedStyle(element).filter), "blur(0px)");
+    assert.equal(await page.locator('.mysql-workbench').getAttribute('data-theme'), 'dark');
+    assert.equal(await page.evaluate(() => localStorage.getItem('dbscout_theme')), 'dark');
+    assert.equal(await artSource(), "/wallpapers/dune-night.webp");
+    assert.equal(await art.evaluate((element) => getComputedStyle(element).filter), "blur(6px)");
     await page.getByRole("button", { name: "浅色模式改用配套的「沙海晨光」", exact: true }).click();
-    await waitForArt("/wallpapers/dune-dawn.webp", 0.6 * 0.23);
+    assert.equal(await artSource(), "/wallpapers/dune-night.webp");
     await edit("light");
+    await waitForArt("/wallpapers/dune-dawn.webp", 0.6 * 0.23);
+    assert.equal(await page.locator('.mysql-workbench').getAttribute('data-theme'), 'light');
     await pick("mist-ridges");
     for (const theme of ["light", "dark"]) {
       await start(theme);
@@ -203,10 +207,11 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
       if (!document.querySelector(".wb-wallpaper-dropzone")) throw new Error("no drop target shown");
       target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
     }, png);
-    await page.waitForFunction(() => document.querySelector('[data-wallpaper-id="custom"]').getAttribute("aria-checked") === "true");
+    await page.locator('[data-wallpaper-id^="custom-"][aria-checked="true"]').waitFor();
+    const firstCustom = await page.locator('[data-wallpaper-id^="custom-"]').getAttribute('data-wallpaper-id');
     await setSlider("wb-wallpaper-blur", 0);
     await edit("light");
-    await pick("custom");
+    await pick(firstCustom);
     await close();
     for (const theme of ["dark", "light"]) {
       await start(theme);
@@ -249,14 +254,52 @@ for (const [name, engine] of Object.entries({ chromium, webkit }).filter(([key])
     await page.getByRole("button", { name: "恢复推荐搭配", exact: true }).click();
     await waitForArt("/wallpapers/frost-folds.webp", 1);
     assert.match(await sheetVeil(), /0\.463\)$/);
-    assert.equal(await page.locator('[data-wallpaper-id="custom"] img').count(), 1, "reset retains custom media");
+    assert.equal(await page.locator(`[data-wallpaper-id="${firstCustom}"] img`).count(), 1, "reset retains custom media");
+
+    // Add several files without replacing the retained one; names and delete
+    // controls remain usable even when a different picture is selected.
+    const fileInput = page.locator('.wb-wallpaper-panel input[type="file"]');
+    await fileInput.setInputFiles([
+      { name: 'second.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') },
+      { name: 'third.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') },
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-wallpaper-delete]').length === 3);
+    await page.getByRole('radio', { name: 'third.png', exact: true }).waitFor();
+    const secondCustom = await page.getByRole('radio', { name: 'second.png', exact: true }).getAttribute('data-wallpaper-id');
+    const thirdCustom = await page.getByRole('radio', { name: 'third.png', exact: true }).getAttribute('data-wallpaper-id');
+    await pick(firstCustom);
+    await page.locator(`[data-wallpaper-id="${thirdCustom}"]`).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${output}/${name}-custom-library.png` });
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.locator(`[data-wallpaper-id="${thirdCustom}"]`).scrollIntoViewIfNeeded();
+    assert.equal(await page.locator('.wb-wallpaper-body').evaluate((element) => element.scrollWidth <= element.clientWidth), true, 'narrow panel has no horizontal overflow');
+    await page.screenshot({ path: `${output}/${name}-custom-library-narrow.png` });
+    await page.setViewportSize({ width: 1280, height: 820 });
+    await page.locator(`[data-wallpaper-delete="${secondCustom}"]`).click();
+    await page.waitForFunction((id) => !document.querySelector(`[data-wallpaper-id="${id}"]`), secondCustom);
+    assert.equal(await page.locator(`[data-wallpaper-id="${firstCustom}"]`).getAttribute('aria-checked'), 'true');
+    await close();
+    await start('light');
+    await open();
+    assert.equal(await page.locator('[data-wallpaper-delete]').count(), 2, 'library survives reload');
+    await edit('dark');
+    await pick(firstCustom);
+    await page.locator(`[data-wallpaper-delete="${firstCustom}"]`).click();
+    await page.waitForFunction(() => !document.querySelector('.wb-wallpaper-canvas'));
+    assert.equal(await page.locator('[data-wallpaper-id="none"]').getAttribute('aria-checked'), 'true');
+    await edit('light');
+    assert.equal(await page.locator('[data-wallpaper-id="none"]').getAttribute('aria-checked'), 'true', 'deleting a shared selection clears both appearances');
+    await page.locator(`[data-wallpaper-delete="${thirdCustom}"]`).click();
+    await page.waitForFunction(() => document.querySelectorAll('[data-wallpaper-delete]').length === 0);
+    await page.getByRole('button', { name: '添加…', exact: true }).waitFor();
+    await page.screenshot({ path: `${output}/${name}-library-deleted.png` });
     await pick("none");
     await page.waitForFunction(() => !document.querySelector(".wb-wallpaper-canvas"));
     assert.equal(await page.locator(".mysql-workbench.has-wallpaper").count(), 0);
     await close();
     await start("dark");
-    await waitForArt("/wallpapers/indigo-folds.webp", 0.48);
+    await page.waitForFunction(() => !document.querySelector('.wb-wallpaper-canvas'));
     assert.deepEqual(errors, []);
-    console.log(`${name}: recommended pair, side panel, scope and content veil, twelve pictures, keyboard, dimming, per-mode settings, drop, one continuous frame, reload and reset passed`);
+    console.log(`${name}: recommended pair, side panel, scope and content veil, twelve pictures, keyboard, dimming, live appearance switching, multi-file library, individual deletion, narrow panel, drop, one continuous frame, reload and reset passed`);
   } finally { await browser.close(); }
 }

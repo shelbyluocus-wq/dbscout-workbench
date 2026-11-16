@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, ImagePlus, Minus, Video, X } from "lucide-vue-next";
+import { Check, ImagePlus, Minus, Trash2, Video, X } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import {
@@ -15,22 +15,23 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   theme: { type: String, default: "light" },
 });
-const emit = defineEmits(["close"]);
+const emit = defineEmits(["close", "set-theme"]);
 const {
-  settings, appearance, customUrl, customKind, busy, error,
+  settings, appearance, customWallpapers, busy, error,
   select, updateSettings, reset, importFile, removeCustom,
 } = useWallpaper();
 const GRID_COLUMNS = 4;
 const dialogRef = ref(null);
 const gridRef = ref(null);
 const fileRef = ref(null);
-// The appearance being edited; it starts on the one on screen and can be the
-// other one, which only the miniature can show.
+// The edited appearance follows the window, including external theme changes.
 const editing = ref(appearance.value);
 const edited = computed(() => settings.value[editing.value]);
 const focusedId = ref(edited.value.id);
 const previewCeilings = ref(null);
 const dragging = ref(false);
+const importing = ref(false);
+const fileBusy = computed(() => busy.value || importing.value);
 // Slider drags save on every step; only a slow save is worth a status line.
 const saving = ref(false);
 let savingTimer;
@@ -48,7 +49,7 @@ const choices = computed(() => [
       label: recommended ? t("wallpaper.recommendedName", { name }) : name,
     };
   }),
-  { id: "custom", name: t("wallpaper.custom") },
+  ...customWallpapers.value.map((item) => ({ ...item, custom: true, name: item.name || t("wallpaper.custom") })),
 ]);
 const choiceIds = computed(() => choices.value.map(({ id }) => id));
 const selectedName = computed(() => choices.value.find(({ id }) => id === edited.value.id)?.name || "");
@@ -59,10 +60,10 @@ const dimmed = computed(() => hasPicture.value && Boolean(previewCeilings.value)
 const percent = (value) => Math.round(value * 100);
 const visibility = computed(() => percent(edited.value.visibility));
 const contentReveal = computed(() => percent(settings.value.contentReveal));
-const customIsVideo = computed(() => customKind.value === "video");
-const isVideo = computed(() => edited.value.id === "custom" && customIsVideo.value);
-const previewSource = computed(() => edited.value.id === "custom" ? customUrl.value
-  : WALLPAPERS.find(({ id }) => id === edited.value.id)?.src || "");
+const editedCustom = computed(() => customWallpapers.value.find(({ id }) => id === edited.value.id));
+const isVideo = computed(() => editedCustom.value?.kind === "video");
+const previewSource = computed(() => editedCustom.value?.url
+  || WALLPAPERS.find(({ id }) => id === edited.value.id)?.src || "");
 const previewStyle = computed(() => ({
   "--wb-wallpaper-preview-strength": previewCeilings.value
     ? edited.value.visibility * previewCeilings.value[editing.value] : 0,
@@ -94,15 +95,11 @@ function focusChoice(id) {
 }
 
 function chooseFile() {
-  if (!busy.value) fileRef.value?.click();
+  if (!fileBusy.value) fileRef.value?.click();
 }
 
 function activateChoice(id) {
-  if (id === "custom" && !customUrl.value) {
-    chooseFile();
-    return;
-  }
-  void select(id, editing.value);
+  if (!importing.value) void select(id, editing.value);
 }
 
 // Arrows move through the grid as laid out: left/right by one, up/down by a row.
@@ -124,27 +121,35 @@ function onChoiceKeydown(event, id) {
   event.stopPropagation();
   if (target === id) return;
   focusChoice(target);
-  if (target !== "custom" || customUrl.value) void select(target, editing.value);
+  activateChoice(target);
 }
 
-async function useFile(file) {
-  if (file && await importFile(file, editing.value)) {
+async function useFiles(files) {
+  if (fileBusy.value || !files.length) return;
+  const targetAppearance = editing.value;
+  importing.value = true;
+  try {
+    for (const file of files) {
+      if (!await importFile(file, targetAppearance)) break;
+    }
     await nextTick();
-    if (props.open) focusChoice("custom");
+    if (props.open) focusChoice(edited.value.id);
+  } finally {
+    importing.value = false;
   }
 }
 
 function onFileChange(event) {
-  const file = event.target.files?.[0];
+  const files = [...(event.target.files || [])];
   event.target.value = "";
-  void useFile(file);
+  void useFiles(files);
 }
 
 const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
 function onDragOver(event) {
   if (!carriesFiles(event)) return;
   event.preventDefault();
-  event.dataTransfer.dropEffect = busy.value ? "none" : "copy";
+  event.dataTransfer.dropEffect = fileBusy.value ? "none" : "copy";
   dragging.value = true;
 }
 function onDragLeave(event) {
@@ -154,11 +159,11 @@ function onDrop(event) {
   if (!carriesFiles(event)) return;
   event.preventDefault();
   dragging.value = false;
-  if (!busy.value) void useFile(event.dataTransfer.files?.[0]);
+  void useFiles([...(event.dataTransfer.files || [])]);
 }
 
-async function remove() {
-  if (await removeCustom()) {
+async function remove(id) {
+  if (await removeCustom(id)) {
     await nextTick();
     if (props.open) focusChoice(edited.value.id);
   }
@@ -167,6 +172,12 @@ async function remove() {
 function measurePreview(event) {
   previewCeilings.value = measureWallpaperCeilings(event.target);
 }
+
+function switchAppearance(value) {
+  editing.value = value;
+  emit("set-theme", value);
+}
+watch(appearance, (value) => { editing.value = value; });
 
 const setVisibility = (event) => updateSettings({ visibility: Number(event.target.value) / 100 }, editing.value);
 const setBlur = (event) => updateSettings({ blur: Number(event.target.value) }, editing.value);
@@ -207,7 +218,7 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
             <button
               v-for="option in WALLPAPER_APPEARANCES" :key="option" type="button"
               :class="{ active: editing === option }" :aria-pressed="editing === option" :data-wallpaper-appearance="option"
-              @click="editing = option"
+              @click="switchAppearance(option)"
             >{{ t(`wallpaper.appearance.${option}`) }}<small v-if="appearance === option">{{ t('wallpaper.appearance.inUse') }}</small></button>
           </div>
 
@@ -232,7 +243,7 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
             </div>
             <figcaption>
               <span class="wb-wallpaper-current">{{ selectedName }}</span>
-              <button v-if="pairOffer" type="button" class="wb-wallpaper-link" :disabled="busy" @click="select(pairOffer.id, pairOffer.appearance)">{{ pairOffer.label }}</button>
+              <button v-if="pairOffer" type="button" class="wb-wallpaper-link" :disabled="fileBusy" @click="select(pairOffer.id, pairOffer.appearance)">{{ pairOffer.label }}</button>
             </figcaption>
           </figure>
           <p v-if="dimmed" class="wb-wallpaper-note" role="status">{{ t('wallpaper.dimmed', { appearance: t(`wallpaper.appearance.${editing}`) }) }}</p>
@@ -243,7 +254,7 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
               <span id="wb-wallpaper-scope-label">{{ t('wallpaper.scope') }}</span>
               <div class="wb-wallpaper-segment is-compact" role="radiogroup" aria-labelledby="wb-wallpaper-scope-label">
                 <button
-                  v-for="scope in WALLPAPER_SCOPES" :key="scope" type="button" role="radio"
+                  v-for="scope in WALLPAPER_SCOPES" :key="scope" type="button" role="radio" :disabled="importing"
                   :class="{ active: settings.scope === scope }" :aria-checked="settings.scope === scope" :data-wallpaper-scope="scope"
                   @click="setScope(scope)"
                 >{{ t(`wallpaper.scope.${scope}`) }}</button>
@@ -251,59 +262,57 @@ onBeforeUnmount(() => clearTimeout(savingTimer));
             </div>
             <div class="wb-wallpaper-row">
               <label for="wb-wallpaper-visibility">{{ t('wallpaper.visibility') }}</label>
-              <input id="wb-wallpaper-visibility" type="range" min="0" max="100" step="1" :disabled="!hasPicture" :value="visibility" :aria-valuetext="`${visibility}%`" @input="setVisibility" />
+              <input id="wb-wallpaper-visibility" type="range" min="0" max="100" step="1" :disabled="!hasPicture || importing" :value="visibility" :aria-valuetext="`${visibility}%`" @input="setVisibility" />
               <output for="wb-wallpaper-visibility">{{ visibility }}%</output>
             </div>
             <div v-if="settings.scope === 'window'" class="wb-wallpaper-row">
               <label for="wb-wallpaper-content" :title="t('wallpaper.contentRevealHint')">{{ t('wallpaper.contentReveal') }}</label>
-              <input id="wb-wallpaper-content" type="range" min="0" max="100" step="1" :disabled="!hasPicture" :value="contentReveal" :aria-valuetext="`${contentReveal}%`" :aria-description="t('wallpaper.contentRevealHint')" @input="setContentReveal" />
+              <input id="wb-wallpaper-content" type="range" min="0" max="100" step="1" :disabled="!hasPicture || importing" :value="contentReveal" :aria-valuetext="`${contentReveal}%`" :aria-description="t('wallpaper.contentRevealHint')" @input="setContentReveal" />
               <output for="wb-wallpaper-content">{{ contentReveal }}%</output>
             </div>
             <div class="wb-wallpaper-row">
               <label for="wb-wallpaper-blur">{{ t('wallpaper.blur') }}</label>
-              <input id="wb-wallpaper-blur" type="range" min="0" max="24" step="1" :disabled="!hasPicture || edited.visibility === 0" :value="edited.blur" :aria-valuetext="t('wallpaper.pixels', { value: edited.blur })" @input="setBlur" />
+              <input id="wb-wallpaper-blur" type="range" min="0" max="24" step="1" :disabled="!hasPicture || edited.visibility === 0 || importing" :value="edited.blur" :aria-valuetext="t('wallpaper.pixels', { value: edited.blur })" @input="setBlur" />
               <output for="wb-wallpaper-blur">{{ t('wallpaper.pixels', { value: edited.blur }) }}</output>
             </div>
             <label v-if="isVideo" class="wb-wallpaper-motion">
-              <input type="checkbox" role="switch" :checked="settings.motion" :aria-checked="settings.motion" @change="updateSettings({ motion: $event.target.checked }, editing)" />
+              <input type="checkbox" role="switch" :disabled="importing" :checked="settings.motion" :aria-checked="settings.motion" @change="updateSettings({ motion: $event.target.checked }, editing)" />
               <span>{{ t('wallpaper.motion') }}<small>{{ t('wallpaper.motionHint') }}</small></span>
             </label>
           </section>
           <section class="wb-wallpaper-section" aria-labelledby="wb-wallpaper-pictures">
-            <h3 id="wb-wallpaper-pictures" class="wb-wallpaper-section-title">{{ t('wallpaper.pictures') }}</h3>
+            <div class="wb-wallpaper-pictures-heading">
+              <h3 id="wb-wallpaper-pictures" class="wb-wallpaper-section-title">{{ t('wallpaper.pictures') }}</h3>
+              <button type="button" class="wb-wallpaper-link wb-wallpaper-add" :disabled="fileBusy" @click="chooseFile"><ImagePlus :size="14" aria-hidden="true" />{{ t('wallpaper.add') }}</button>
+            </div>
             <div ref="gridRef" class="wb-wallpaper-grid" role="radiogroup" :aria-label="t('wallpaper.choose')">
+              <div v-for="choice in choices" :key="choice.id" class="wb-wallpaper-choice" :class="{ 'is-custom': choice.custom }">
               <button
-                v-for="choice in choices" :key="choice.id" type="button" role="radio"
-                class="wb-wallpaper-tile" :class="{ 'is-selected': edited.id === choice.id, 'is-upload': choice.id === 'custom' && !customUrl, 'is-word': choice.id === 'none' || (choice.id === 'custom' && (!customUrl || customIsVideo)) }"
+                type="button" role="radio" :disabled="importing"
+                class="wb-wallpaper-tile" :class="{ 'is-selected': edited.id === choice.id, 'is-word': choice.id === 'none' || choice.kind === 'video' }"
                 :data-wallpaper-id="choice.id" :aria-checked="edited.id === choice.id"
                 :aria-label="choice.label || choice.name" :title="choice.name" :tabindex="focusedId === choice.id ? 0 : -1"
                 @focus="focusedId = choice.id" @click="activateChoice(choice.id)" @keydown="onChoiceKeydown($event, choice.id)"
               >
                 <template v-if="choice.id === 'none'"><Minus :size="16" aria-hidden="true" /><span>{{ choice.name }}</span></template>
-                <template v-else-if="choice.id === 'custom'">
-                  <template v-if="!customUrl"><ImagePlus :size="16" aria-hidden="true" /><span>{{ choice.name }}</span></template>
-                  <template v-else-if="customIsVideo"><Video :size="16" aria-hidden="true" /><span>{{ choice.name }}</span></template>
-                  <img v-else :src="customUrl" alt="" />
-                </template>
-                <img v-else :src="choice.thumbnail" alt="" decoding="async" />
+                <template v-else-if="choice.kind === 'video'"><Video :size="16" aria-hidden="true" /><span class="wb-wallpaper-video-name">{{ choice.name }}</span></template>
+                <img v-else :src="choice.url || choice.thumbnail" alt="" decoding="async" loading="lazy" />
                 <span v-if="choice.recommended" class="wb-wallpaper-recommended" aria-hidden="true">{{ t('wallpaper.recommended') }}</span>
                 <span v-if="edited.id === choice.id" class="wb-wallpaper-selected" aria-hidden="true"><Check :size="11" :stroke-width="3" /></span>
               </button>
+              <button v-if="choice.custom" type="button" class="wb-wallpaper-delete" :disabled="fileBusy" :data-wallpaper-delete="choice.id" :aria-label="t('wallpaper.removeNamed', { name: choice.name })" :title="t('wallpaper.removeNamed', { name: choice.name })" @click="remove(choice.id)"><Trash2 :size="12" aria-hidden="true" /></button>
+              </div>
             </div>
             <div class="wb-wallpaper-file">
               <p id="wb-wallpaper-file-hint" class="wb-wallpaper-note">{{ t('wallpaper.fileHint') }}</p>
-              <span v-if="customUrl" class="wb-wallpaper-file-actions">
-                <button type="button" class="wb-wallpaper-link" :disabled="busy" @click="chooseFile">{{ t('wallpaper.replace') }}</button>
-                <button type="button" class="wb-wallpaper-link" :disabled="busy" @click="remove">{{ t('wallpaper.remove') }}</button>
-              </span>
             </div>
-            <input ref="fileRef" type="file" hidden accept="image/png,image/jpeg,image/webp,video/mp4" :aria-label="t('wallpaper.upload')" aria-describedby="wb-wallpaper-file-hint" @change="onFileChange" />
+            <input ref="fileRef" type="file" hidden multiple accept="image/png,image/jpeg,image/webp,video/mp4" :aria-label="t('wallpaper.upload')" aria-describedby="wb-wallpaper-file-hint" @change="onFileChange" />
           </section>
 
           <p v-if="error" class="wb-wallpaper-error" role="alert">{{ t(error) }}</p>
         </div>
         <footer class="wb-wallpaper-footer">
-          <button type="button" class="wb-wallpaper-link" :disabled="busy" @click="reset">{{ t('wallpaper.reset') }}</button>
+          <button type="button" class="wb-wallpaper-link" :disabled="fileBusy" @click="reset">{{ t('wallpaper.reset') }}</button>
           <span v-if="saving" class="wb-wallpaper-note" role="status">{{ t('wallpaper.saving') }}</span>
         </footer>
         <div v-if="dragging" class="wb-wallpaper-dropzone" aria-hidden="true"><ImagePlus :size="22" /><span>{{ t('wallpaper.drop') }}</span></div>

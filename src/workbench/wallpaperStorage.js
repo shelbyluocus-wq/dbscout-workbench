@@ -1,11 +1,13 @@
 // Only small settings/revision metadata goes in localStorage. IndexedDB owns
-// one custom ArrayBuffer plus MIME metadata (WebKit cannot reliably persist
-// Blob/File records). The public API still uses Blobs. Its transaction serializes writers
+// custom ArrayBuffers plus a small library index (WebKit cannot reliably persist
+// Blob/File records). The public API uses { metadata, customs: [{ id, name,
+// blob, kind, revision }] }. Its transaction serializes writers
 // across windows (including engines without Web Locks).
 export const WALLPAPER_STORAGE_KEY = "dbscout.wallpaper.v1";
 export const WALLPAPER_DATABASE = "dbscout-wallpaper-v1";
 const STORE = "wallpaper";
 const CUSTOM = "custom";
+const LIBRARY = "library";
 
 export function wallpaperError(code) {
   return new Error(`wallpaper.error.${code}`);
@@ -17,6 +19,7 @@ export function createWallpaperStorage({
 } = {}) {
   let databasePromise;
   let closed = false;
+  const cache = new Map();
 
   function open() {
     if (closed) return Promise.reject(wallpaperError("storage"));
@@ -67,7 +70,8 @@ export function createWallpaperStorage({
     if (!(record.bytes instanceof ArrayBuffer) || typeof record.mime !== "string") {
       throw wallpaperError("storage");
     }
-    return { blob: new Blob([record.bytes], { type: record.mime }), kind: record.kind, revision: record.revision };
+    const { bytes, mime, ...metadata } = record;
+    return { ...metadata, blob: new Blob([bytes], { type: mime }) };
   }
 
   async function transaction(change, candidate) {
@@ -78,7 +82,7 @@ export function createWallpaperStorage({
       try {
         encoded = {
           bytes: await candidate.blob.arrayBuffer(), mime: candidate.blob.type,
-          kind: candidate.kind, revision: candidate.revision,
+          id: candidate.id, name: candidate.name, kind: candidate.kind, revision: candidate.revision,
         };
       } catch { throw wallpaperError("storage"); }
     }
@@ -94,7 +98,13 @@ export function createWallpaperStorage({
         local = getLocalStorage();
         tx = db.transaction(STORE, change ? "readwrite" : "readonly");
         const store = tx.objectStore(STORE);
-        tx.oncomplete = () => resolve(result);
+        tx.oncomplete = () => {
+          if (result && !closed) {
+            cache.clear();
+            for (const custom of result.customs) cache.set(custom.id, custom);
+          }
+          resolve(result);
+        };
         tx.onabort = () => {
           // setItem failure is atomic. If a later IDB failure follows a
           // successful setItem, restore only our own publication.
@@ -109,8 +119,53 @@ export function createWallpaperStorage({
           reject(failure || wallpaperError("storage"));
         };
         tx.onerror = () => { failure ||= wallpaperError("storage"); };
-        const request = store.get(CUSTOM);
+        const request = store.get(LIBRARY);
         request.onsuccess = () => {
+          // Missing index means the original single-file format. Read it under
+          // its existing key; the first library edit writes an index, not a copy
+          // of the legacy media. Cache hits avoid reading large bytes on sliders.
+          if (request.result === undefined) {
+            const legacy = store.get(CUSTOM);
+            legacy.onsuccess = () => {
+              try {
+                const record = restoreCustom(legacy.result);
+                finish(record ? [{ ...record, id: CUSTOM, name: record.name || record.blob.name || "" }] : []);
+              } catch (error) { abort(error); }
+            };
+            return;
+          }
+          const entries = request.result;
+          if (!Array.isArray(entries) || entries.some((entry) => !entry
+            || !/^custom(?:-[a-zA-Z0-9-]+)?$/.test(entry.id) || typeof entry.revision !== "string")
+            || new Set(entries.map(({ id }) => id)).size !== entries.length) {
+            abort(wallpaperError("storage")); return;
+          }
+          const customs = new Array(entries.length);
+          let remaining = entries.length;
+          if (!remaining) finish(customs);
+          entries.forEach((entry, index) => {
+            const cached = cache.get(entry.id);
+            if (cached && cached.revision === entry.revision) {
+              customs[index] = { ...cached, ...entry };
+              if (!--remaining) finish(customs);
+              return;
+            }
+            const read = store.get(entry.id);
+            read.onsuccess = () => {
+              try {
+                const record = restoreCustom(read.result);
+                if (!record) throw wallpaperError("customMissing");
+                customs[index] = { ...record, ...entry };
+                if (!--remaining) finish(customs);
+              } catch (error) { abort(error); }
+            };
+          });
+        };
+        const abort = (error) => {
+          failure = error?.message?.startsWith("wallpaper.error.") ? error : wallpaperError("storage");
+          tx.abort();
+        };
+        const finish = (customs) => {
           try {
             oldRaw = local.getItem(WALLPAPER_STORAGE_KEY);
             let metadata = null;
@@ -118,7 +173,7 @@ export function createWallpaperStorage({
               try { metadata = JSON.parse(oldRaw); }
               catch { throw wallpaperError("settings"); }
             }
-            const current = { metadata, custom: restoreCustom(request.result) };
+            const current = { metadata, customs };
             if (!change) {
               result = current;
               return;
@@ -136,17 +191,29 @@ export function createWallpaperStorage({
                 tx.abort();
               }
             };
-            if (result.custom !== current.custom) {
-              // New custom media must be supplied as mutate's second argument
-              // so its bytes can be prepared outside this synchronous callback.
-              if (result.custom && result.custom !== candidate) throw wallpaperError("storage");
-              const write = result.custom ? store.put(encoded, CUSTOM) : store.delete(CUSTOM);
-              write.onsuccess = publish;
+            const previous = new Map(customs.map((entry) => [entry.id, entry]));
+            const retained = new Set();
+            let changed = request.result === undefined; // Migrate the index without rewriting legacy bytes.
+            for (const entry of result.customs) {
+              if (retained.has(entry.id) || !/^custom(?:-[a-zA-Z0-9-]+)?$/.test(entry.id)) {
+                throw wallpaperError("storage");
+              }
+              retained.add(entry.id);
+              const old = previous.get(entry.id);
+              if (old?.revision === entry.revision) continue;
+              // Only the supplied candidate has bytes prepared outside IDB.
+              if (entry !== candidate) throw wallpaperError("storage");
+              store.put(encoded, entry.id);
+              changed = true;
+            }
+            for (const entry of customs) {
+              if (!retained.has(entry.id)) { store.delete(entry.id); changed = true; }
+            }
+            if (changed) {
+              const index = result.customs.map(({ id, name, kind, revision }) => ({ id, name, kind, revision }));
+              store.put(index, LIBRARY).onsuccess = publish;
             } else publish();
-          } catch (error) {
-            failure = error?.message?.startsWith("wallpaper.error.") ? error : wallpaperError("storage");
-            tx.abort();
-          }
+          } catch (error) { abort(error); }
         };
       } catch {
         if (tx) tx.abort();
@@ -172,6 +239,7 @@ export function createWallpaperStorage({
     mutate: (change, candidate) => transaction(change, candidate),
     close() {
       closed = true;
+      cache.clear();
       databasePromise?.then((db) => db.close()).catch(() => {});
     },
   };

@@ -153,6 +153,8 @@
 }
 
 .wb-wallpaper-current {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--wb-secondary-text);
   font-weight: 600;
 }
@@ -297,7 +299,48 @@
   gap: 8px;
 }
 
+.wb-wallpaper-pictures-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-wallpaper-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wb-wallpaper-choice { position: relative; min-width: 0; }
+
+.wb-wallpaper-delete {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--wb-border);
+  border-radius: 5px;
+  background: var(--wb-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-wallpaper-delete:hover:not(:disabled) { color: var(--wb-danger); }
+.wb-wallpaper-delete:disabled { color: var(--wb-disabled); }
+
+.wb-wallpaper-video-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-wallpaper-tile {
+  width: 100%;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -363,6 +406,7 @@
 }
 
 .wb-wallpaper-tile.is-word .wb-wallpaper-selected { box-shadow: none; }
+.wb-wallpaper-choice.is-custom .wb-wallpaper-selected { right: auto; left: 4px; }
 
 .wb-wallpaper-recommended {
   position: absolute;

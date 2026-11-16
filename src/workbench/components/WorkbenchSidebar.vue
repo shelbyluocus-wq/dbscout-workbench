@@ -128,12 +128,12 @@ const searchPanelRef = ref(null);
 const shortcutsOpen = ref(false);
 const fontSettingsOpen = ref(false);
 const wallpaperSettingsOpen = ref(false);
-const { active: activeWallpaper } = useWallpaper();
+const { active: activeWallpaper, customWallpapers } = useWallpaper();
 // The settings row names the picture on screen, as the font row names the font.
 const wallpaperName = computed(() => {
   const { id } = activeWallpaper.value;
   if (id === "none") return t("wallpaper.none");
-  if (id === "custom") return t("wallpaper.custom");
+  if (id === "custom" || id.startsWith("custom-")) return customWallpapers.value.find((item) => item.id === id)?.name || t("wallpaper.custom");
   return t(WALLPAPERS.find((wallpaper) => wallpaper.id === id)?.labelKey || "wallpaper.none");
 });
 // 设计调试面板仅 dev 模式可见（npm run dev / tauri dev），正式打包不出现
@@ -1174,6 +1174,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
       :open="wallpaperSettingsOpen"
       :theme="currentTheme"
       @close="closeWallpaperSettings"
+      @set-theme="emit('set-theme', $event)"
     />
     <DesignDebugDialog
       v-if="isDev"

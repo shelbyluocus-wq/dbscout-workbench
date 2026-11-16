@@ -3,7 +3,11 @@
 ## Local wallpaper appearance
 
 Settings → Wallpaper provides twelve bundled stills and local PNG/JPEG/WebP/MP4
-selection. Light and dark appearance each keep their own picture, visibility and
+selection. Custom media forms a shared library with no application-imposed count
+limit: multi-file add/drop preserves earlier files, each tile can be deleted,
+and deleting a selected file clears only appearances using it to None. Legacy
+single-file selections migrate intact. The panel's Light/Dark switch changes the
+app's saved appearance immediately. Light and dark appearance each keep their own picture, visibility and
 blur; new installations start with the recommended pair (frost-folds at 100% /
 indigo-folds at 48%, no blur, whole window with 56% behind content) and older single-wallpaper settings apply to both. The frame
 (title bar, rail, sidebar, tab strips) is transparent over one canvas and must

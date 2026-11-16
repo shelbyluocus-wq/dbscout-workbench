@@ -198,24 +198,26 @@ test("selection, settings, import, retained reset, removal and URL cleanup", asy
   const firstUrl = state.source.value;
   await state.importFile(png());
   assert.notEqual(state.source.value, firstUrl);
-  assert.ok(revoked.includes(firstUrl));
-  assert.equal(active.size, 1);
-  assert.ok(storage.snapshot.custom.blob instanceof Blob);
+  assert.ok(!revoked.includes(firstUrl));
+  assert.equal(active.size, 2);
+  assert.ok(storage.snapshot.customs[0].blob instanceof Blob);
+  const [firstId, secondId] = state.customWallpapers.value.map(({ id }) => id);
   assert.ok(JSON.stringify(storage.snapshot.metadata).length < 300);
   await state.reset();
   assert.deepEqual(state.settings.value, WALLPAPER_DEFAULTS);
-  assert.ok(state.customUrl.value);
+  assert.equal(state.customUrl.value, "");
+  assert.equal(state.customKind.value, "");
   assert.equal(state.source.value, "/wallpapers/frost-folds.webp");
-  await state.select("custom");
-  await state.removeCustom();
+  await state.select(firstId);
+  await state.removeCustom(firstId);
   assert.equal(state.active.value.id, "none");
   assert.equal(state.customKind.value, "");
-  assert.equal(storage.snapshot.custom, null);
-  assert.equal(active.size, 0);
-  assert.equal(await state.select("custom"), false);
+  assert.equal(storage.snapshot.customs.length, 1);
+  assert.equal(active.size, 1);
+  assert.equal(await state.select(firstId), false);
   assert.equal(state.error.value, "wallpaper.error.customMissing");
   await state.select("ocean-clouds");
-  await state.removeCustom();
+  await state.removeCustom(secondId);
   assert.equal(state.active.value.id, "ocean-clouds");
   state.dispose();
 });
@@ -275,7 +277,7 @@ test("two imports completing out of order only keep the latest", async () => {
   assert.equal(await state.importFile(latest), true);
   gate.resolve();
   assert.equal(await first, false);
-  assert.equal(storage.snapshot.custom.blob, latest);
+  assert.equal(storage.snapshot.customs[0].blob, latest);
   assert.equal(active.size, 1);
   state.dispose();
 });
@@ -291,7 +293,7 @@ test("initialization is deferred and cannot overwrite an immediate selection", a
   state.dispose();
 });
 
-test("cross-window sync reloads same-ID custom replacements and revokes old URLs", async () => {
+test("cross-window sync merges additions/settings and revokes only deleted URLs", async () => {
   const storage = memoryStorage();
   const first = fixture({ storage });
   const second = fixture({ storage });
@@ -305,7 +307,8 @@ test("cross-window sync reloads same-ID custom replacements and revokes old URLs
   storageEvent(second.events);
   await tick();
   assert.notEqual(second.state.source.value, oldUrl);
-  assert.ok(second.revoked.includes(oldUrl));
+  assert.ok(!second.revoked.includes(oldUrl));
+  assert.equal(second.state.customWallpapers.value.length, 2);
   await first.state.updateSettings({ visibility: 0.9 });
   await second.state.updateSettings({ blur: 7 });
   assert.equal(storage.snapshot.metadata.settings.light.visibility, 0.9);
@@ -316,7 +319,8 @@ test("cross-window sync reloads same-ID custom replacements and revokes old URLs
   storageEvent(second.events);
   await tick();
   assert.equal(second.state.source.value, "");
-  assert.equal(second.active.size, 0);
+  assert.equal(second.active.size, 1);
+  assert.equal(second.state.customWallpapers.value[0].url, oldUrl);
   first.state.dispose();
   second.state.dispose();
 });
@@ -374,9 +378,10 @@ test("each appearance keeps its own wallpaper; the shell picks which one shows",
   assert.equal(state.source.value, "");
   assert.equal(state.settings.value.light.id, "frost-folds");
   await state.importFile(png(), "light");
-  assert.equal(state.settings.value.light.id, "custom");
+  const importedId = state.settings.value.light.id;
+  assert.match(importedId, /^custom-/);
   assert.equal(state.source.value, "");
-  await state.select("custom");
+  await state.select(importedId);
   assert.ok(state.source.value.startsWith("blob:"));
   await state.removeCustom();
   assert.deepEqual([state.settings.value.light.id, state.settings.value.dark.id], ["none", "none"]);
@@ -396,7 +401,7 @@ test("a theme switch during a slow import keeps the change on the appearance it 
   state.setAppearance("dark");
   gate.resolve();
   assert.equal(await pending, true);
-  assert.equal(state.settings.value.light.id, "custom");
+  assert.match(state.settings.value.light.id, /^custom-/);
   assert.equal(state.settings.value.dark.id, "indigo-folds");
   state.dispose();
 });
@@ -435,8 +440,9 @@ for (const id of ["none", "night-launch"]) {
     assert.equal(await state.ready, true);
     assert.deepEqual(state.settings.value, saved);
     assert.equal(state.source.value, id === "none" ? "" : "/wallpapers/night-launch.webp");
-    assert.equal(state.customKind.value, "video");
+    assert.equal(state.customKind.value, "");
     assert.equal(state.customUrl.value, "");
+    assert.equal(state.customWallpapers.value[0].kind, "video");
     assert.equal(state.error.value, "");
     assert.equal(decodeCalls, 0);
     assert.equal(storage.snapshot.custom, custom);
@@ -459,13 +465,13 @@ for (const id of ["none", "night-launch"]) {
     assert.deepEqual(state.settings.value, saved);
     assert.equal(state.source.value, id === "none" ? "" : "/wallpapers/night-launch.webp");
     assert.equal(state.error.value, "");
-    assert.equal(state.customKind.value, "video");
+    assert.equal(state.customKind.value, "");
     assert.equal(decodeCalls, callsBeforeSync);
     assert.equal(storage.snapshot.custom, custom);
     assert.ok(revoked.includes(oldUrl));
-    assert.equal(active.size, 0);
-    assert.equal(await state.removeCustom(), true);
-    assert.equal(storage.snapshot.custom, null);
+    assert.equal(active.size, 1);
+    assert.equal(await state.removeCustom("custom"), true);
+    assert.deepEqual(storage.snapshot.customs, []);
     assert.deepEqual(state.settings.value, saved);
     state.dispose();
   });
@@ -482,9 +488,9 @@ test("reset and builtin selection can escape a retained undecodable custom Blob"
   assert.equal(state.error.value, "wallpaper.error.decode");
   assert.equal(await state.reset(), true);
   assert.deepEqual(state.settings.value, WALLPAPER_DEFAULTS);
-  assert.ok(storage.snapshot.custom);
+  assert.equal(storage.snapshot.customs.length, 1);
   assert.equal(await state.select("planet-dawn"), true);
-  assert.equal(await state.removeCustom(), true);
+  assert.equal(await state.removeCustom("custom"), true);
   assert.equal(state.active.value.id, "planet-dawn");
   state.dispose();
 });
@@ -510,6 +516,105 @@ test("dispose cancels an in-flight decode and storage events are detached", asyn
   storageEvent(events);
   await tick();
   assert.equal(active.size, 0);
+});
+
+test("large libraries retain names, use unique IDs and never re-decode on settings edits", async () => {
+  let decodes = 0;
+  const { state, storage, active, revoked } = fixture({ decode: async () => { ++decodes; } });
+  await state.ready;
+  for (let index = 0; index < 40; ++index) {
+    const file = png();
+    Object.defineProperty(file, "name", { value: `picture-${index}.png` });
+    assert.equal(await state.importFile(file), true);
+  }
+  const entries = state.customWallpapers.value;
+  assert.equal(entries.length, 40);
+  assert.equal(new Set(entries.map(({ id }) => id)).size, 40);
+  assert.equal(entries[0].name, "picture-0.png");
+  for (const entry of entries) {
+    assert.match(entry.id, /^custom-[0-9a-f-]{36}$/);
+    assert.deepEqual(Object.keys(entry), ["id", "name", "kind", "url"]);
+  }
+  const { isReadonly } = await import("vue");
+  assert.ok(isReadonly(entries));
+  assert.ok(isReadonly(entries[0]));
+  const originalUrls = entries.map(({ url }) => url);
+  for (let blur = 1; blur < 10; ++blur) await state.updateSettings({ blur });
+  await state.reset();
+  await state.select(entries[0].id);
+  await state.refresh();
+  assert.equal(decodes, 40);
+  assert.deepEqual(state.customWallpapers.value.map(({ url }) => url), originalUrls);
+  assert.equal(storage.snapshot.customs.length, 40);
+  assert.equal(active.size, 40);
+  assert.equal(revoked.length, 0);
+  state.dispose();
+  assert.equal(active.size, 0);
+  assert.equal(new Set(revoked).size, 40);
+});
+
+test("legacy custom migrates intact, imports add, and deletion clears only matching appearances", async () => {
+  const storage = memoryStorage();
+  const legacy = { blob: png(), kind: "image", name: "original.png", revision: "old" };
+  storage.snapshot = { metadata: { settings: { id: "custom", visibility: 0.7, blur: 6, motion: true, scope: "frame", contentReveal: 0.2 } }, custom: legacy };
+  const { state, active, revoked } = fixture({ storage });
+  assert.equal(await state.ready, true);
+  assert.equal(state.customWallpapers.value[0].id, "custom");
+  const oldUrl = state.source.value;
+  assert.equal(await state.importFile(png()), true);
+  const added = state.active.value.id;
+  assert.equal(storage.snapshot.customs[0].blob, legacy.blob);
+  assert.equal(state.settings.value.dark.id, "custom");
+  state.setAppearance("dark");
+  assert.equal(state.source.value, oldUrl);
+  assert.equal(await state.removeCustom(added), true);
+  assert.equal(state.source.value, oldUrl);
+  assert.equal(state.settings.value.light.id, "none");
+  assert.ok(!revoked.includes(oldUrl));
+  await state.select("custom", "light");
+  const before = state.settings.value;
+  assert.equal(await state.removeCustom("custom"), true);
+  assert.deepEqual(state.settings.value, {
+    ...before, light: { ...before.light, id: "none" }, dark: { ...before.dark, id: "none" },
+  });
+  assert.equal(active.size, 0);
+  assert.ok(revoked.includes(oldUrl));
+  assert.equal(await state.removeCustom("custom"), true);
+  state.dispose();
+});
+
+test("cross-window import during preparation merges unrelated files without lost additions", async () => {
+  const storage = memoryStorage();
+  const first = fixture({ storage });
+  const second = fixture({ storage });
+  await Promise.all([first.state.ready, second.state.ready]);
+  const results = await Promise.all([first.state.importFile(png(), "light"), second.state.importFile(png(), "light")]);
+  assert.deepEqual(results, [true, true]);
+  assert.equal(storage.snapshot.customs.length, 2);
+  await Promise.all([first.state.refresh(), second.state.refresh()]);
+  assert.equal(first.state.customWallpapers.value.length, 2);
+  assert.equal(second.state.customWallpapers.value.length, 2);
+  assert.equal(first.state.active.value.id, second.state.active.value.id);
+  first.state.dispose();
+  second.state.dispose();
+});
+
+test("ID fallback remains selectable without crypto.randomUUID", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  try {
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+    const { state } = fixture();
+    await state.ready;
+    assert.equal(await state.importFile(png()), true);
+    const id = state.active.value.id;
+    assert.match(id, /^custom-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await state.reset();
+    assert.equal(await state.select(id), true);
+    state.dispose();
+  } finally {
+    if (original) Object.defineProperty(globalThis, "crypto", original);
+    else delete globalThis.crypto;
+  }
 });
 
 function decoderFixture(kind, outcome) {

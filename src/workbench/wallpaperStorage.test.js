@@ -6,14 +6,14 @@ import { createWallpaperStorage, WALLPAPER_STORAGE_KEY } from "./wallpaperStorag
 // abort rolls them back. Exercising the adapter (not just the state store)
 // catches localStorage-before-IDB failure and publication ordering regressions.
 function fixture() {
-  let blob = { revision: "old", blob: new Blob(["old"]) };
+  let records = new Map([["custom", { revision: "old", kind: "image", blob: new Blob(["old"]) }]]);
   let raw = JSON.stringify({ settings: { id: "custom" }, revision: "old" });
   const controls = { failLocal: false, failWrite: false, failCommit: false };
   const log = [];
   const db = {
     close() {},
     transaction(_name, mode) {
-      let staged = blob;
+      const staged = new Map(records);
       let aborted = false;
       let finishScheduled = false;
       const tx = {
@@ -24,22 +24,22 @@ function fixture() {
           queueMicrotask(() => tx.onabort?.());
         },
         objectStore() {
-          const request = (action) => {
+          const request = (action, key) => {
             const req = {};
             queueMicrotask(() => {
               if (aborted) return;
               if (action !== "get" && controls.failWrite) {
                 tx.onerror?.(); tx.abort(); return;
               }
-              if (action === "get") req.result = blob;
-              else log.push("blob-written");
+              if (action === "get") { req.result = records.get(key); log.push(`read:${key}`); }
+              else log.push(`${action}:${key}`);
               req.onsuccess?.();
               if (!finishScheduled) {
                 finishScheduled = true;
                 setTimeout(() => {
                   if (aborted) return;
                   if (controls.failCommit && mode === "readwrite") { tx.abort(); return; }
-                  blob = staged;
+                  records = staged;
                   tx.oncomplete?.();
                 }, 0);
               }
@@ -47,9 +47,9 @@ function fixture() {
             return req;
           };
           return {
-            get: () => request("get"),
-            put(value) { staged = value; return request("put"); },
-            delete() { staged = null; return request("delete"); },
+            get: (key) => request("get", key),
+            put(value, key) { staged.set(key, value); return request("put", key); },
+            delete(key) { staged.delete(key); return request("delete", key); },
           };
         },
       };
@@ -71,32 +71,89 @@ function fixture() {
       return req;
     },
   }) });
-  return { storage, controls, log, get blob() { return blob; }, get raw() { return raw; } };
+  return { storage, controls, log, get records() { return records; }, get blob() { return records.get("custom"); }, get raw() { return raw; } };
 }
 const replacement = () => ({
   metadata: { settings: { id: "custom" }, revision: "new" },
-  custom: { blob: new Blob(["new"], { type: "image/png" }), kind: "image", revision: "new" },
+  customs: [{ id: "custom", name: "new.png", blob: new Blob(["new"], { type: "image/png" }), kind: "image", revision: "new" }],
 });
 
 test("storage writes ArrayBuffer/MIME and restores the Blob-facing API", async () => {
   const f = fixture();
   const next = replacement();
-  assert.equal(await f.storage.mutate(() => next, next.custom), next);
-  assert.deepEqual(f.log, ["blob-written", "settings-written"]);
+  assert.equal(await f.storage.mutate(() => next, next.customs[0]), next);
+  assert.deepEqual(f.log, ["read:library", "read:custom", "put:custom", "put:library", "settings-written"]);
   assert.ok(f.blob.bytes instanceof ArrayBuffer);
   assert.equal(f.blob.blob, undefined);
   assert.equal(f.blob.mime, "image/png");
   assert.deepEqual(JSON.parse(f.raw), next.metadata);
   const stored = await f.storage.read();
-  assert.ok(stored.custom.blob instanceof Blob);
-  assert.equal(stored.custom.blob.type, "image/png");
-  assert.equal(await stored.custom.blob.text(), "new");
-  assert.equal(stored.custom.kind, next.custom.kind);
-  assert.equal(stored.custom.revision, next.custom.revision);
+  assert.ok(stored.customs[0].blob instanceof Blob);
+  assert.equal(stored.customs[0].blob.type, "image/png");
+  assert.equal(await stored.customs[0].blob.text(), "new");
+  assert.equal(stored.customs[0].kind, next.customs[0].kind);
+  assert.equal(stored.customs[0].revision, next.customs[0].revision);
+  assert.equal(stored.customs[0].name, "new.png");
   const record = f.blob;
   await f.storage.mutate((current) => ({ ...current, metadata: { revision: "settings-only" } }));
   assert.equal(f.blob, record);
   f.storage.close();
+});
+
+test("library migration retains legacy bytes; sliders only read the index and publish settings", async () => {
+  const f = fixture();
+  const legacy = f.blob;
+  const candidate = { id: "custom-added", name: "added.png", blob: new Blob(["added"], { type: "image/png" }), kind: "image", revision: "added" };
+  await f.storage.mutate((current) => ({ ...current, customs: [...current.customs, candidate] }), candidate);
+  assert.equal(f.blob, legacy);
+  assert.deepEqual(f.records.get("library").map(({ id }) => id), ["custom", "custom-added"]);
+  assert.deepEqual(f.log.filter((entry) => entry.startsWith("put:")), ["put:custom-added", "put:library"]);
+  f.log.length = 0;
+  for (let index = 0; index < 10; ++index) {
+    await f.storage.mutate((current) => ({ ...current, metadata: { settings: { blur: index } } }));
+  }
+  assert.deepEqual(f.log, Array.from({ length: 10 }, () => ["read:library", "settings-written"]).flat());
+  assert.equal(f.blob, legacy);
+  f.log.length = 0;
+  await f.storage.mutate((current) => ({ ...current, customs: current.customs.filter(({ id }) => id !== "custom-added") }));
+  assert.equal(f.blob, legacy);
+  assert.equal(f.records.has("custom-added"), false);
+  assert.deepEqual(f.log, ["read:library", "delete:custom-added", "put:library", "settings-written"]);
+  assert.equal((await f.storage.read()).customs[0].id, "custom");
+  f.storage.close();
+});
+
+for (const failure of ["failLocal", "failWrite", "failCommit"]) {
+  test(`${failure}: failed library deletion preserves all media and the index`, async () => {
+    const f = fixture();
+    const next = replacement();
+    await f.storage.mutate(() => next, next.customs[0]);
+    const before = { records: f.records, raw: f.raw };
+    f.controls[failure] = true;
+    await assert.rejects(f.storage.mutate((current) => ({ ...current, customs: [] })), /wallpaper.error.storage/);
+    assert.equal(f.records, before.records);
+    assert.equal(f.raw, before.raw);
+    f.storage.close();
+  });
+}
+
+test("legacy ArrayBuffer media restores with its original ID and no retained byte copy", async () => {
+  const f = fixture();
+  f.records.set("custom", { bytes: await new Blob(["legacy"]).arrayBuffer(), mime: "image/png", kind: "image", revision: "old" });
+  const snapshot = await f.storage.read();
+  assert.equal(snapshot.customs[0].id, "custom");
+  assert.equal(await snapshot.customs[0].blob.text(), "legacy");
+  assert.equal(snapshot.customs[0].bytes, undefined);
+  f.storage.close();
+});
+
+test("malformed library and missing indexed media fail with localized errors", async () => {
+  for (const index of [null, [{}], [{ id: "custom-absent", revision: "absent" }]]) {
+    const f = fixture();
+    f.records.set("library", index);
+    await assert.rejects(f.storage.read(), /wallpaper.error.(storage|customMissing)/);
+    f.storage.close();
+  }
 });
 
 test("peek returns saved settings without IndexedDB and never throws", () => {
@@ -118,8 +175,8 @@ test("Blob conversion failures happen before any storage write", async () => {
   const f = fixture();
   const before = f.blob;
   const next = replacement();
-  next.custom.blob.arrayBuffer = async () => { throw new Error("read failed"); };
-  await assert.rejects(f.storage.mutate(() => next, next.custom), /wallpaper.error.storage/);
+  next.customs[0].blob.arrayBuffer = async () => { throw new Error("read failed"); };
+  await assert.rejects(f.storage.mutate(() => next, next.customs[0]), /wallpaper.error.storage/);
   assert.equal(f.blob, before);
   assert.deepEqual(f.log, []);
   f.storage.close();
@@ -127,7 +184,7 @@ test("Blob conversion failures happen before any storage write", async () => {
 
 // Opt-in real browser regression: WALLPAPER_BROWSER_TEST=1 node --test
 // src/workbench/wallpaperStorage.test.js (requires installed Playwright engines).
-test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize replacement", {
+test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize the library", {
   skip: process.env.WALLPAPER_BROWSER_TEST !== "1", timeout: 120000,
 }, async () => {
   const { createServer } = await import("vite");
@@ -160,13 +217,13 @@ test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize re
         }
         const [first, second] = pages;
         assert.equal(await first.evaluate(async () => wallpaper.importFile(await makePng("red"))), true, engine.name());
-        await second.waitForFunction(() => wallpaper.active.value.id === "custom" && wallpaper.customUrl.value);
+        await second.waitForFunction(() => wallpaper.active.value.id.startsWith("custom-") && wallpaper.customUrl.value);
         const previousUrl = await second.evaluate(() => wallpaper.customUrl.value);
         assert.equal(await first.evaluate(async () => wallpaper.importFile(await makePng("blue"))), true);
         await second.waitForFunction((old) => wallpaper.customUrl.value !== old, previousUrl);
         await second.reload();
         await initialize(second);
-        assert.deepEqual(await second.evaluate(() => [wallpaper.active.value.id, wallpaper.customKind.value, wallpaper.error.value]), ["custom", "image", ""]);
+        assert.deepEqual(await second.evaluate(() => [wallpaper.customWallpapers.value.length, wallpaper.customKind.value, wallpaper.error.value]), [2, "image", ""]);
         assert.equal(await second.evaluate(async () => {
           const { createWallpaperStorage, WALLPAPER_DATABASE } = await import("/src/workbench/wallpaperStorage.js");
           const record = await new Promise((resolve, reject) => {
@@ -175,7 +232,7 @@ test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize re
             open.onsuccess = () => {
               const db = open.result;
               const tx = db.transaction("wallpaper", "readonly");
-              const get = tx.objectStore("wallpaper").get("custom");
+              const get = tx.objectStore("wallpaper").get(wallpaper.active.value.id);
               get.onsuccess = () => resolve(get.result);
               tx.oncomplete = () => db.close();
             };
@@ -184,7 +241,7 @@ test("Chromium and WebKit persist custom bytes, restore Blobs and synchronize re
           const snapshot = await storage.read();
           storage.close();
           return record.bytes instanceof ArrayBuffer && !record.blob && record.mime === "image/png"
-            && snapshot.custom.blob instanceof Blob && snapshot.custom.blob.type === "image/png";
+            && snapshot.customs.every(({ blob }) => blob instanceof Blob && blob.type === "image/png");
         }), true);
         assert.equal(await first.evaluate(async () => {
           const { createWallpaperState } = await import("/src/workbench/wallpaperState.js");
@@ -214,7 +271,7 @@ for (const failure of ["failLocal", "failWrite", "failCommit"]) {
     const before = { blob: f.blob, raw: f.raw };
     f.controls[failure] = true;
     const next = replacement();
-    await assert.rejects(f.storage.mutate(() => next, next.custom), /wallpaper.error.storage/);
+    await assert.rejects(f.storage.mutate(() => next, next.customs[0]), /wallpaper.error.storage/);
     assert.equal(f.blob, before.blob);
     assert.equal(f.raw, before.raw);
     f.storage.close();
@@ -224,13 +281,14 @@ for (const failure of ["failLocal", "failWrite", "failCommit"]) {
 test("null mutation does not publish; legacy Blob records remain readable", async () => {
   const f = fixture();
   assert.equal(await f.storage.mutate(() => null), null);
-  assert.deepEqual(f.log, []);
+  assert.deepEqual(f.log, ["read:library", "read:custom"]);
   const before = f.blob;
-  assert.equal((await f.storage.read()).custom, before);
+  assert.equal((await f.storage.read()).customs[0].blob, before.blob);
   await f.storage.mutate((current) => ({ ...current, metadata: { settings: { id: "none" }, revision: "reset" } }));
   assert.equal(f.blob, before);
-  assert.deepEqual(f.log, ["settings-written"]);
-  await f.storage.mutate(() => ({ metadata: { settings: { id: "none" }, revision: "delete" }, custom: null }));
-  assert.equal(f.blob, null);
+  assert.deepEqual(f.log.filter((entry) => !entry.startsWith("read:")), ["put:library", "settings-written"]);
+  await f.storage.mutate(() => ({ metadata: { settings: { id: "none" }, revision: "delete" }, customs: [] }));
+  assert.equal(f.blob, undefined);
+  assert.deepEqual((await f.storage.read()).customs, []);
   f.storage.close();
 });
