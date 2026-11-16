@@ -99,13 +99,14 @@
   --wb-sidebar-content-width: 292;
   --wb-sidebar-tab-clearance: var(--wb-activity-rail-width);
   --wb-titlebar-height: 40px;
+  /* Each pane opens with a strip of pill tabs on the content sheet. */
+  --wb-tab-strip-height: 38px;
   --wb-main-min-width: 400px;
   --wb-workspace-corner-radius: 12px;
   --wb-main-sheet-shadow: 0 1px 2px rgba(45, 55, 72, 0.04), 0 12px 32px rgba(45, 55, 72, 0.07);
   /* 外框（页签条）投向画布的"虚影"：默认无，设计调试面板可实时调强度 */
   --wb-frame-shadow: none;
   --wb-row-index-width: 38px;
-  --wb-tab-curve-size: 14px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-busy: #2d3748;
@@ -663,6 +664,71 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-titlebar-sidebar,
 .wb-titlebar-tabs,
+
+/* The database of the page on screen, named in the title bar above the pill
+   tabs. A button that opens that database's home, quiet until hovered. */
+.wb-title-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+  white-space: nowrap;
+}
+
+button.wb-title-source:hover,
+button.wb-title-source:focus-visible {
+  background: var(--wb-control-hover);
+  color: var(--wb-text);
+}
+
+button.wb-title-source:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-title-source.is-home {
+  cursor: default;
+}
+
+.wb-title-source-icon {
+  flex: 0 0 auto;
+  color: var(--wb-title-source-icon-color, var(--wb-quiet-text));
+}
+
+.wb-title-source-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-title-source-name-color, var(--wb-text));
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.wb-title-source-service {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  text-overflow: ellipsis;
+}
+
+.wb-title-source-service::before {
+  content: "·";
+  margin-right: 7px;
+}
+
+/* A folded sidebar's toggle floats over the rail, out of the flow. */
+.wb-titlebar-sidebar.is-collapsed ~ .wb-titlebar-tabs {
+  padding-left: calc(var(--wb-activity-rail-width) + var(--wb-sidebar-tab-offset) + 22px);
+}
+
 .wb-titlebar-inspector-controls {
   min-width: 0;
   height: var(--wb-titlebar-height);
@@ -789,13 +855,18 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-titlebar-tabs {
   display: flex;
   flex: 1 1 0;
-  align-items: stretch;
+  align-items: center;
   /* Mirror the main pane's floor (plus its two 1px divider tracks): when the
      workspace can no longer fit it, the inspector below is pushed past the
      window's right edge — the inspector's titlebar strip must be pushed out
      the same way or it would paint over the pane's tab area. */
   min-width: calc(var(--wb-main-min-width) + 2px);
   overflow: hidden;
+  /* Starts where the main area does; clears the macOS traffic lights while
+     the sidebar is folded away. */
+  /* 22px puts the database glyph over the home pill's glyph below. */
+  padding-left: calc(var(--wb-sidebar-tab-offset) + 22px);
+  padding-right: var(--wb-titlebar-tab-right-clearance);
   background: var(--wb-chrome-surface);
   box-shadow: none;
   -webkit-app-region: drag;
@@ -8142,8 +8213,7 @@ label:has(input[type="checkbox"]:disabled) {
   position: relative;
   flex: 1 1 0;
   min-width: var(--wb-main-min-width);
-  min-height: calc(100% + var(--wb-titlebar-height));
-  margin-top: calc(-1 * var(--wb-titlebar-height));
+  min-height: 0;
   margin-bottom: 6px;
   overflow: hidden;
   /* wb-main 自身即外框（与侧栏/页签条同一 chrome 中间调）；
@@ -8217,7 +8287,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-split-layout.is-horizontal > .wb-split-divider::before {
-  inset: var(--wb-titlebar-height) auto 0 50%;
+  inset: 0 auto 0 50%;
   width: 1px;
   transform: translateX(-0.5px);
 }
@@ -8257,7 +8327,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-main::before {
   content: "";
   position: absolute;
-  top: calc(var(--wb-titlebar-height) - 1px);
+  top: 0;
   left: 0;
   z-index: 30;
   width: var(--wb-workspace-corner-radius);
@@ -8278,7 +8348,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-main::after {
   content: "";
   position: absolute;
-  inset: calc(var(--wb-titlebar-height) - 1px) 0 0;
+  inset: 0;
   z-index: 31;
   border-top: 1px solid var(--wb-workspace-mist-border);
   border-left: 1px solid var(--wb-workspace-mist-border);
@@ -8299,14 +8369,14 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   align-items: center;
   min-width: 0;
-  min-height: var(--wb-titlebar-height);
-  height: var(--wb-titlebar-height);
+  min-height: var(--wb-tab-strip-height);
+  height: var(--wb-tab-strip-height);
   overflow: visible;
+  /* A strip of the content sheet: pills on the page colour, divided from the
+     page below by its hairline. */
   border-bottom: 1px solid var(--wb-line);
-  /* 页签条属外框（与侧栏同一 chrome 调、贯通整宽）；border-bottom 即画布顶缘发丝线。
-     --wb-frame-shadow 默认无投影，可由设计调试面板开启"虚影" */
-  background: var(--wb-chrome-surface);
-  box-shadow: var(--wb-frame-shadow);
+  background: transparent;
+  box-shadow: none;
   -webkit-app-region: drag;
 }
 
@@ -8314,46 +8384,16 @@ label:has(input[type="checkbox"]:disabled) {
   order: 0;
 }
 
-.wb-pane-tabbar.is-focused-pane {
-  background: var(--wb-chrome-surface);
-}
-
-.wb-pane-tabbar.is-top-edge-pane {
-  z-index: 32;
-  border-bottom-color: transparent;
-  /* Leave the transparent border row to the single canvas outline underneath.
-     Its radius and straight edge are therefore one continuous stroke. */
-  background: var(--wb-chrome-surface);
-  background-clip: padding-box;
-}
-
-.wb-pane-tabbar.is-top-edge-pane .wb-object-tabs {
-  /* Keep the inner track from drawing a competing hairline. */
-  background: transparent;
-}
-
 .wb-pane-tabbar .wb-object-tabs {
   flex: 1 1 auto;
   align-self: stretch;
   align-items: center;
-  min-height: var(--wb-titlebar-height);
+  min-height: 0;
   height: 100%;
   margin-right: 0;
-  padding: 4px 0 0;
+  padding: 0 6px 0 8px;
   overflow-y: hidden;
-  transform: none;
-}
-
-.wb-pane-tabbar.is-left-edge-pane .wb-object-tabs {
-  transform: translateX(var(--wb-sidebar-tab-offset));
-}
-
-.wb-pane-tabbar.is-right-edge-pane .wb-object-tabs {
-  margin-right: var(--wb-titlebar-tab-right-clearance);
-}
-
-.wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs {
-  margin-right: calc(var(--wb-sidebar-tab-offset) + var(--wb-titlebar-tab-right-clearance));
+  background: transparent;
 }
 
 .wb-workbench-pane > .wb-table-panel,
@@ -11381,8 +11421,8 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-db-glow-layer {
   --wb-db-glow-duration: 1900ms;
   position: absolute;
-  /* 与 .wb-main::after 同一 inset：顶边正好贴在标签栏下沿 */
-  inset: calc(var(--wb-titlebar-height) - 1px) 0 0;
+  /* 与 .wb-main::after 同一 inset：沿内容区外框 */
+  inset: 0;
   z-index: 33;
   overflow: hidden;
   pointer-events: none;
@@ -11640,12 +11680,11 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 auto;
   align-items: center;
   min-width: 0;
-  min-height: var(--wb-titlebar-height);
-  padding: 4px 0 0 8px;
+  min-height: var(--wb-tab-strip-height);
+  padding: 0 8px;
   overflow-x: hidden;
   overflow-y: hidden;
-  /* The tab track is outer chrome, so it must stay continuous with both side titlebar areas. */
-  background: var(--wb-chrome-surface);
+  background: transparent;
 }
 
 .wb-tab,
@@ -11657,10 +11696,9 @@ label:has(input[type="checkbox"]:disabled) {
   display: flex;
   flex: 1 1 auto;
   align-self: stretch;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-  padding-inline: var(--wb-tab-curve-size);
 }
 
 .wb-tab-overflow-button {
@@ -11832,27 +11870,27 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab {
-  --wb-active-tab-surface: var(--wb-workspace-mist-raised);
   position: relative;
   display: inline-flex;
-  flex: 1 1 112px;
+  flex: 0 1 auto;
   align-items: center;
-  min-width: 32px;
-  max-width: 176px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0 28px 0 10px;
+  min-width: 0;
+  max-width: 200px;
+  height: 26px;
+  min-height: 26px;
+  /* Even sides; the right one holds the close mark, shown on hover and on
+     the active pill, so the label never shifts when it appears. */
+  padding: 0 20px;
   border: 1px solid transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: 999px;
   background: transparent;
-  color: var(--wb-text);
+  color: var(--wb-secondary-text);
   box-shadow: none;
-  container-type: inline-size;
   overflow: hidden;
   transition:
     background-color 0.14s ease,
     border-color 0.14s ease,
-    box-shadow 0.14s ease;
+    color 0.14s ease;
 }
 
 .wb-tab.wb-tab-reorder-move {
@@ -11863,26 +11901,11 @@ label:has(input[type="checkbox"]:disabled) {
     box-shadow 0.14s ease;
 }
 
-/* The home tab is a floating pill, not a document tab: it never joins the
-   active-tab curve into the pane below. At rest it is outlined with the tabs'
-   own hairline rather than filled, so it reads the same over a wallpaper.
-   It stays centred on the title bar, level with the arrows and window
-   controls. */
+/* The home pill is a pill like the others; it only has no close mark. */
 .wb-tab[data-kind="home"] {
   --wb-active-tab-surface: var(--wb-chrome-surface);
-  flex: 0 0 88px;
-  min-width: 88px;
-  max-width: 88px;
-  height: 28px;
-  min-height: 28px;
-  margin-right: 4px;
-  margin-bottom: calc((var(--wb-titlebar-height) - 28px) / 2);
-  padding: 0 5px;
-  justify-content: center;
-  border-color: var(--wb-tab-border);
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: none;
+  flex: 0 0 auto;
+  max-width: none;
 }
 
 .wb-tab[data-kind="home"],
@@ -11894,12 +11917,6 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tab[data-kind="home"] .wb-tab-title {
   flex: 0 0 auto;
   align-items: center;
-  color: var(--wb-secondary-text);
-}
-
-.wb-tab[data-kind="home"]:hover .wb-tab-title,
-.wb-tab[data-kind="home"].active .wb-tab-title {
-  color: var(--wb-text);
 }
 
 .wb-tab-home-icon {
@@ -11912,8 +11929,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab:hover,
 .wb-tab:focus-visible {
-  border-color: var(--wb-tab-hover-border);
-  background: var(--wb-control-hover);
+  background: color-mix(in srgb, var(--wb-text) 6%, transparent);
+  color: var(--wb-text);
 }
 
 .wb-tab:focus-visible {
@@ -12044,49 +12061,7 @@ label:has(input[type="checkbox"]:disabled) {
   opacity: 0;
 }
 
-/* Table tabs with a database subtitle stack two lines: table name on top,
-   database name (with a small cylinder glyph) below. */
-.wb-tab-title-stack {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0;
-  /* Optical centring: the rounded top edge and the descenders below make the
-     geometric centre read high. */
-  margin-top: 2px;
-}
 
-.wb-tab-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-/* Both lines together stay well inside the 36px tab, so neither touches its
-   rounded top edge. */
-.wb-tab-line-primary {
-  font-size: var(--wb-fs-body);
-  font-weight: 500;
-  line-height: 1.15;
-}
-
-.wb-tab.active .wb-tab-line-primary {
-  font-weight: 600;
-}
-
-.wb-tab-line-secondary {
-  color: var(--wb-type-text);
-  font-size: var(--wb-fs-micro);
-  font-weight: 400;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
-}
-
-.wb-tab.active .wb-tab-line-secondary {
-  color: var(--wb-secondary-text);
-}
 
 .wb-tab-db-icon {
   flex: 0 0 auto;
@@ -12105,148 +12080,66 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
 }
 
+/* The active pill of the focused pane carries the accent; the other panes'
+   active pills stay neutral. */
 .wb-tab.active {
   z-index: 2;
   border-color: var(--wb-tab-active-border);
-  border-bottom-color: var(--wb-active-tab-surface);
-  background: var(--wb-active-tab-surface);
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
   color: var(--wb-text);
   font-weight: 600;
-  box-shadow:
-    inset 0 2px 0 var(--wb-accent),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
-  overflow: visible;
-}
-
-.wb-tab.active::before,
-.wb-tab.active::after {
-  content: "";
-  position: absolute;
-  bottom: -1px;
-  width: var(--wb-tab-curve-size);
-  height: var(--wb-tab-curve-size);
-  background: transparent;
-  pointer-events: none;
-}
-
-.wb-tab.active::before {
-  left: calc(-1 * var(--wb-tab-curve-size));
-  border-bottom-right-radius: var(--wb-tab-curve-size);
-  box-shadow: 6px 6px 0 6px var(--wb-active-tab-surface);
-}
-
-.wb-tab.active::after {
-  right: calc(-1 * var(--wb-tab-curve-size));
-  border-bottom-left-radius: var(--wb-tab-curve-size);
-  box-shadow: -6px 6px 0 6px var(--wb-active-tab-surface);
 }
 
 .wb-pane-tabbar .wb-tab-list {
-  align-items: flex-end;
   padding-left: 0;
 }
 
-.wb-pane-tabbar .wb-tab.active {
-  z-index: 3;
-}
-
 .wb-pane-tabbar.is-focused-pane .wb-tab.active {
-  box-shadow:
-    inset 0 2px 0 var(--wb-accent),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active {
-  box-shadow:
-    inset 0 1px 0 var(--wb-tab-active-border),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.wb-tab.active:hover {
-  background: var(--wb-active-tab-surface);
-}
-
-.wb-tabs .wb-tab[data-kind="home"]:hover,
-.wb-tabs .wb-tab[data-kind="home"]:focus-visible {
-  border-color: var(--wb-tab-active-border);
-  background: var(--wb-control-hover);
-}
-
-.wb-tabs .wb-tab[data-kind="home"].active,
-.wb-pane-tabbar .wb-tab[data-kind="home"].active,
-.wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
   border-color: color-mix(in srgb, var(--wb-accent) 32%, transparent);
   background: color-mix(in srgb, var(--wb-accent) 12%, transparent);
-  box-shadow: none;
-  overflow: hidden;
-}
-
-.wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
-  border-color: color-mix(in srgb, var(--wb-accent) 18%, transparent);
-  background: color-mix(in srgb, var(--wb-accent) 6%, transparent);
-}
-
-.wb-tabs .wb-tab[data-kind="home"].active .wb-tab-title {
   color: var(--wb-accent-strong);
 }
 
-.wb-tab[data-kind="home"].active::before,
-.wb-tab[data-kind="home"].active::after {
-  content: none;
-}
 
 .wb-tab[data-kind="home"].is-tab-drag-over {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent) 34%, transparent);
 }
 
-@container (max-width: 88px) {
-  .wb-tab > .wb-object-icon,
-  .wb-tab-title small:not(.wb-tab-kind) {
-    display: none;
-  }
-
-  .wb-tab-close {
-    margin-left: 0;
-  }
-}
-
-/* Container queries resolve against the tab's *content* box, which is the
-   border-box width minus 38px of horizontal padding (10px left + 28px for the
-   close button). Keep the database subtitle visible down to a ~58px-wide tab
-   (≈20px of text); below that, fall back to the table name alone. */
-@container (max-width: 20px) {
-  .wb-tab-line-secondary {
-    display: none;
-  }
-}
-
 .wb-tab-close {
   position: absolute;
   top: 50%;
-  right: 0;
+  right: 2px;
   transform: translateY(-50%);
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
   box-shadow: none;
   cursor: pointer;
+  opacity: 0;
   z-index: 1;
+  transition: opacity 0.12s ease;
+}
+
+.wb-tab:hover .wb-tab-close,
+.wb-tab.active .wb-tab-close,
+.wb-tab-close:focus-visible {
+  opacity: 1;
 }
 
 .wb-tab-close-mark {
   position: relative;
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
   color: var(--wb-tab-close-text);
   transition:
     background-color 0.12s ease,
@@ -12261,7 +12154,7 @@ label:has(input[type="checkbox"]:disabled) {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 10px;
+  width: 8px;
   height: 1.5px;
   border-radius: 999px;
   background: currentColor;
@@ -23003,17 +22896,9 @@ label:has(input[type="checkbox"]:disabled) {
   padding: max(12px, 7vh) 12px 12px;
 }
 
-.wb-tab[data-kind="home"].can-close-pane {
-  flex-basis: 112px;
-  min-width: 112px;
-  max-width: 112px;
-  justify-content: flex-start;
-  padding: 0 29px 0 9px;
-}
+
 
 .wb-tab[data-kind="home"] .wb-pane-close-button {
-  right: 1px;
-  width: 27px;
   cursor: pointer;
 }
 

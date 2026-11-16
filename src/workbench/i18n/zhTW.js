@@ -20,6 +20,7 @@ export default Object.freeze({
   "createTable.keep": "繼續編輯",
   "m_a49b9e3cc423": "展開全部連線",
   "tabs.overflow": "更多分頁（{count}）",
+  "titleSource.openHome": "開啟「{name}」首頁",
   "m_809ec93960dd": "收合全部連線",
   "m_695704a261cb": "展開全部",
   "m_2fabdc5d8190": "收合全部",

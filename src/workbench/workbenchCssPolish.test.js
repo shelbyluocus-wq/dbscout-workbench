@@ -52,8 +52,8 @@ test("workspace frame is chrome while panes and inspector form the canvas", () =
   assert.match(mainRule, /border-radius:\s*0/);
   assert.match(mainRule, /box-shadow:\s*none/);
   assert.match(ruleBody(".wb-titlebar-inspector-controls"), /background:\s*var\(--wb-chrome-surface\)/);
-  // 页签条属外框：chrome 底，活动页签以画布色向下流入内容区
-  assert.match(ruleBody(".wb-pane-tabbar"), /background:\s*var\(--wb-chrome-surface\)/);
+  // The pill strip belongs to the content sheet: no colour of its own.
+  assert.match(ruleBody(".wb-pane-tabbar"), /background:\s*transparent/);
   // 检查器属区域 2（画布）
   const inspectorRule = ruleBody(".wb-inspector");
   assert.match(inspectorRule, /background:\s*var\(--wb-workspace-mist\)/);
@@ -91,23 +91,23 @@ test("canvas outline masks darker pane content outside its smooth top-left corne
   const mainRule = ruleBody(".wb-main");
   const cornerMaskRule = ruleBody(".wb-main::before");
   const outlineRule = ruleBody(".wb-main::after");
-  const topEdgeTabbarRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane");
 
   assert.match(rootRule, /--wb-workspace-corner-radius\s*:\s*12px/);
   assert.match(titlebarTabsRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   assert.match(mainRule, /position:\s*relative/);
-  assert.match(cornerMaskRule, /top:\s*calc\(var\(--wb-titlebar-height\) - 1px\)/);
+  // The main area starts below the title bar, so the outline starts at its top.
+  assert.doesNotMatch(mainRule, /margin-top:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
+  assert.match(cornerMaskRule, /top:\s*0;/);
   assert.match(cornerMaskRule, /width:\s*var\(--wb-workspace-corner-radius\)/);
   assert.match(cornerMaskRule, /height:\s*var\(--wb-workspace-corner-radius\)/);
   assert.match(cornerMaskRule, /radial-gradient\(/);
   assert.match(cornerMaskRule, /var\(--wb-chrome-surface\)/);
   assert.match(cornerMaskRule, /pointer-events:\s*none/);
-  assert.match(outlineRule, /inset:\s*calc\(var\(--wb-titlebar-height\) - 1px\) 0 0/);
+  assert.match(outlineRule, /inset:\s*0;/);
   assert.match(outlineRule, /border-top:\s*1px solid var\(--wb-workspace-mist-border\)/);
   assert.match(outlineRule, /border-left:\s*1px solid var\(--wb-workspace-mist-border\)/);
   assert.match(outlineRule, /border-top-left-radius:\s*var\(--wb-workspace-corner-radius\)/);
   assert.match(outlineRule, /pointer-events:\s*none/);
-  assert.match(topEdgeTabbarRule, /border-bottom-color:\s*transparent/);
   assert.doesNotMatch(css, /\.wb-workbench-pane:has\([^}]*radial-gradient\(/s);
   // Top-edge metadata keeps split-pane borders from adding another line beneath
   // the single main canvas outline.
@@ -119,14 +119,15 @@ test("canvas outline masks darker pane content outside its smooth top-left corne
 
 test("focused split pane uses its active tab instead of a full pane outline", () => {
   const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
-  const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");
+  const activeTabRule = ruleBody(".wb-tab.active");
   const focusedActiveTabRule = ruleBody(".wb-pane-tabbar.is-focused-pane .wb-tab.active");
-  const unfocusedActiveTabRule = ruleBody(".wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active");
 
   assert.match(focusedPaneRule, /box-shadow\s*:\s*none/);
-  assert.match(focusedPaneTabbarRule, /background\s*:/);
-  assert.match(focusedActiveTabRule, /inset 0 2px 0 var\(--wb-accent\)/);
-  assert.match(unfocusedActiveTabRule, /inset 0 1px 0 var\(--wb-tab-active-border\)/);
+  // Every pane's active pill is outlined; only the focused pane's carries the accent.
+  assert.match(activeTabRule, /border-color:\s*var\(--wb-tab-active-border\)/);
+  assert.doesNotMatch(activeTabRule, /--wb-accent\)/);
+  assert.match(focusedActiveTabRule, /border-color:\s*color-mix\(in srgb, var\(--wb-accent\)/);
+  assert.match(focusedActiveTabRule, /background:\s*color-mix\(in srgb, var\(--wb-accent\)/);
 });
 
 test("batch comparison split handles match the workbench divider hit target", () => {
@@ -158,7 +159,8 @@ test("split resize handles keep a quiet persistent divider with a wider invisibl
   assert.match(splitDividerMarkerRule, /background\s*:\s*var\(--wb-split-line\)/);
   assert.match(splitDividerMarkerRule, /opacity\s*:\s*1/);
   const horizontalDividerMarkerRule = ruleBody(".wb-split-layout.is-horizontal > .wb-split-divider::before");
-  assert.match(horizontalDividerMarkerRule, /inset\s*:\s*var\(--wb-titlebar-height\) auto 0 50%/);
+  // Panes start below the title bar, so the divider runs their full height.
+  assert.match(horizontalDividerMarkerRule, /inset\s*:\s*0 auto 0 50%/);
   assert.match(horizontalDividerMarkerRule, /width\s*:\s*1px/);
   assert.match(ruleBody(".wb-split-layout.is-vertical > .wb-split-divider::before"), /height\s*:\s*1px/);
   assert.match(ruleBody(".wb-split-layout.is-horizontal > .wb-split-child"), /min-width\s*:\s*min\(280px, 45%\)/);
@@ -249,18 +251,17 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
   assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
-  assert.match(tabListRule, /padding-inline\s*:\s*var\(--wb-tab-curve-size\)/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*1\s+1\s+112px/);
-  assert.match(tabRule, /min-width\s*:\s*32px/);
-  assert.match(tabRule, /max-width\s*:\s*176px/);
+  // Pills size to their names and shrink (with an ellipsis) when the strip is full.
+  assert.match(tabRule, /flex\s*:\s*0\s+1\s+auto/);
+  assert.match(tabRule, /min-width\s*:\s*0/);
+  assert.match(tabRule, /max-width\s*:\s*200px/);
   assert.match(tabRule, /position\s*:\s*relative/);
-  assert.match(tabRule, /padding\s*:\s*0 28px 0 10px/);
+  assert.match(tabRule, /padding\s*:\s*0 20px/);
   assert.doesNotMatch(ruleBody(".wb-tab-title"), /text-align\s*:\s*center/);
   assert.match(tabRule, /overflow\s*:\s*hidden/);
-  assert.match(tabRule, /container-type\s*:\s*inline-size/);
-  assert.match(css, /@container\s*\(max-width:\s*132px\)/);
-  assert.match(css, /@container\s*\(max-width:\s*88px\)/);
+  // Size containment would collapse a content-sized pill to its padding.
+  assert.doesNotMatch(tabRule, /container-type/);
   assert.match(ruleBody(".wb-tab-title"), /flex\s*:\s*1\s+1\s+auto/);
 });
 
@@ -272,11 +273,12 @@ test("homepage tab shows its icon and label with room for the pane close button"
   const rowIndexRule = ruleBody(".wb-row-index");
 
   assert.match(rootRule, /--wb-row-index-width\s*:\s*38px/);
-  assert.match(paneTabStripRule, /padding\s*:\s*4px 0 0\s*;/);
+  assert.match(paneTabStripRule, /padding\s*:\s*0 6px 0 8px\s*;/);
   assert.match(paneTabListRule, /padding-left\s*:\s*0/);
-  assert.match(homeTabRule, /flex\s*:\s*0 0 88px/);
-  assert.match(homeTabRule, /min-width\s*:\s*88px/);
-  assert.match(ruleBody('.wb-tab[data-kind="home"].can-close-pane'), /min-width\s*:\s*112px/);
+  // The home pill is a pill like the others, sized to its icon and label;
+  // its even side padding already holds the pane close button.
+  assert.match(homeTabRule, /flex\s*:\s*0 0 auto/);
+  assert.doesNotMatch(homeTabRule, /min-width\s*:\s*88px/);
   const homeTemplate = tabsVue.match(/<template v-else-if="tabKind\(tab\) === 'home'">([\s\S]*?)<\/template>/)?.[1] || "";
   assert.match(homeTemplate, /<House\b/);
   assert.match(homeTemplate, /<span class="wb-tab-name">\{\{ tabTitle\(tab\) \}\}<\/span>/);
@@ -321,26 +323,23 @@ test("database homepage batch actions use a clear quiet grouped treatment", () =
   );
 });
 
-test("open table tabs connect the active document to its pane", () => {
+test("open table tabs are pills on each pane's strip, named by table only", () => {
   const rootRule = ruleBody(":root");
   const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
   const mainOutlineRule = ruleBody(".wb-main::after");
   const objectTabsRule = ruleBody(".wb-object-tabs");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
-  const topEdgeTabbarRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane");
-  const topEdgeObjectTabsRule = ruleBody(".wb-pane-tabbar.is-top-edge-pane .wb-object-tabs");
-  const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
-  const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
+  const paneTabbarRule = ruleBody(".wb-pane-tabbar");
+  const tabListRule = ruleBody(".wb-tab-list");
   const tabRule = ruleBody(".wb-tab");
   const activeRule = ruleBody(".wb-tab.active");
   const homeRule = ruleBody('.wb-tab[data-kind="home"]');
-  const activeBeforeRule = ruleBody(".wb-tab.active::before");
-  const activeAfterRule = ruleBody(".wb-tab.active::after");
   const titleRule = ruleBody(".wb-tab-title");
 
   assert.match(rootRule, /--wb-tab-border\s*:/);
   assert.match(rootRule, /--wb-tab-active-border\s*:/);
-  assert.match(rootRule, /--wb-tab-curve-size\s*:\s*14px/);
+  assert.match(rootRule, /--wb-tab-strip-height\s*:\s*38px/);
+  assert.doesNotMatch(css, /--wb-tab-curve-size/);
   assert.match(darkRule, /--wb-tab-border\s*:/);
   assert.match(darkRule, /--wb-tab-active-border\s*:/);
   assert.match(mainOutlineRule, /z-index\s*:\s*31/);
@@ -348,30 +347,26 @@ test("open table tabs connect the active document to its pane", () => {
   assert.match(mainOutlineRule, /border-top-left-radius\s*:\s*var\(--wb-workspace-corner-radius\)/);
   assert.match(objectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
-  assert.match(topEdgeTabbarRule, /z-index\s*:\s*32/);
-  assert.match(topEdgeTabbarRule, /border-bottom-color\s*:\s*transparent/);
-  assert.match(topEdgeTabbarRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
-  assert.match(topEdgeTabbarRule, /background-clip\s*:\s*padding-box/);
-  assert.doesNotMatch(topEdgeTabbarRule, /linear-gradient/);
-  assert.match(topEdgeObjectTabsRule, /background\s*:\s*transparent/);
-  assert.doesNotMatch(topEdgeObjectTabsRule, /linear-gradient/);
-  assert.match(paneTabListRule, /align-items\s*:\s*flex-end/);
-  assert.match(tabRule, /height\s*:\s*36px/);
-  assert.match(tabRule, /min-height\s*:\s*36px/);
+  // The strip sits on the sheet below the title bar, divided from the page by a hairline.
+  assert.match(paneTabbarRule, /height\s*:\s*var\(--wb-tab-strip-height\)/);
+  assert.match(paneTabbarRule, /border-bottom\s*:\s*1px solid var\(--wb-line\)/);
+  assert.doesNotMatch(css, /\.wb-pane-tabbar\.is-top-edge-pane\s*\{/);
+  assert.match(tabListRule, /align-items\s*:\s*center/);
+  assert.match(tabListRule, /gap\s*:\s*4px/);
+  assert.match(tabRule, /height\s*:\s*26px/);
+  assert.match(tabRule, /min-height\s*:\s*26px/);
   assert.match(tabRule, /border\s*:\s*1px solid transparent/);
-  assert.match(tabRule, /--wb-active-tab-surface\s*:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(tabRule, /border-radius\s*:\s*999px/);
   assert.match(homeRule, /--wb-active-tab-surface\s*:\s*var\(--wb-chrome-surface\)/);
-  assert.match(tabRule, /border-radius\s*:\s*8px 8px 0 0/);
   assert.match(titleRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
   assert.match(activeRule, /border-color\s*:\s*var\(--wb-tab-active-border\)/);
-  assert.match(activeRule, /border-bottom-color\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeRule, /background\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeRule, /inset 0 2px 0 var\(--wb-accent\)/);
-  assert.match(activeRule, /overflow\s*:\s*visible/);
-  assert.match(activeBeforeRule, /border-bottom-right-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeBeforeRule, /box-shadow\s*:\s*6px 6px 0 6px var\(--wb-active-tab-surface\)/);
-  assert.match(activeAfterRule, /border-bottom-left-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeAfterRule, /box-shadow\s*:\s*-6px 6px 0 6px var\(--wb-active-tab-surface\)/);
+  assert.match(activeRule, /font-weight\s*:\s*600/);
+  // No curves joining the active tab to the page any more.
+  assert.doesNotMatch(css, /\.wb-tab\.active::before/);
+  assert.doesNotMatch(css, /\.wb-tab\.active::after/);
+  // Pills name the table only; the title bar names the database.
+  assert.doesNotMatch(tabsVue, /wb-tab-line-secondary|wb-tab-title-stack/);
+  assert.match(orchestratorVue, /<WorkbenchTitleSource :tab="activeTab"/);
 });
 
 test("open table tabs keep table names visible when the strip is crowded", () => {
@@ -385,13 +380,17 @@ test("open table close buttons have a comfortable pointer hit target", () => {
   assert.ok(closeRule, "Expected .wb-tab-close rule to exist");
   assert.match(closeRule, /position\s*:\s*absolute/);
   assert.match(closeRule, /top\s*:\s*50%/);
-  assert.match(closeRule, /right\s*:\s*0/);
+  assert.match(closeRule, /right\s*:\s*2px/);
   assert.match(closeRule, /transform\s*:\s*translateY\(-50%\)/);
-  assert.match(closeRule, /width\s*:\s*32px/);
-  assert.match(closeRule, /height\s*:\s*32px/);
-  assert.match(closeRule, /min-height\s*:\s*32px/);
+  // Fills the pill's 20px right padding, so it never covers the label.
+  assert.match(closeRule, /width\s*:\s*18px/);
+  assert.match(closeRule, /height\s*:\s*18px/);
+  assert.match(closeRule, /min-height\s*:\s*18px/);
   assert.match(closeRule, /padding\s*:\s*0/);
   assert.match(closeRule, /z-index\s*:\s*1/);
+  // Shown on hover, on the active pill and to keyboard focus.
+  assert.match(closeRule, /opacity\s*:\s*0/);
+  assert.match(css, /\.wb-tab:hover \.wb-tab-close,\s*\n\.wb-tab\.active \.wb-tab-close,\s*\n\.wb-tab-close:focus-visible\s*\{[^}]*opacity:\s*1/);
   assert.doesNotMatch(compactMediaRule, /\.wb-tab-close/);
 });
 
@@ -409,12 +408,12 @@ test("open table close hover feedback keeps the glyph visible", () => {
   assert.match(closeRule, /box-shadow\s*:\s*none/);
   assert.doesNotMatch(css, /\.wb-tab-close::before/);
   assert.match(markRule, /position\s*:\s*relative/);
-  assert.match(markRule, /width\s*:\s*20px/);
-  assert.match(markRule, /height\s*:\s*20px/);
+  assert.match(markRule, /width\s*:\s*16px/);
+  assert.match(markRule, /height\s*:\s*16px/);
   assert.match(markRule, /color\s*:\s*var\(--wb-tab-close-text\)/);
   assert.match(markBeforeRule, /top\s*:\s*50%/);
   assert.match(markBeforeRule, /left\s*:\s*50%/);
-  assert.match(markBeforeRule, /width\s*:\s*10px/);
+  assert.match(markBeforeRule, /width\s*:\s*8px/);
   assert.match(markBeforeRule, /height\s*:\s*1\.5px/);
   assert.match(markBeforeRule, /background\s*:\s*currentColor/);
   assert.match(markBeforeRule, /transform\s*:\s*translate\(-50%, -50%\) rotate\(45deg\)/);
@@ -433,16 +432,13 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   const toolbarRule = ruleBody(".wb-table-toolbar");
 
   assert.match(tabStripRule, /overflow-x\s*:\s*hidden/);
-  assert.match(tabStripRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  assert.match(tabStripRule, /background\s*:\s*transparent/);
   assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*1\s+1\s+112px/);
-  assert.match(tabRule, /min-width\s*:\s*32px/);
-  assert.match(tabRule, /max-width\s*:\s*176px/);
-  assert.match(tabRule, /border-radius\s*:\s*8px 8px 0 0/);
-  assert.match(activeTabRule, /border-bottom-color\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeTabRule, /inset 0 2px 0 var\(--wb-accent\)/);
+  assert.match(tabRule, /flex\s*:\s*0\s+1\s+auto/);
+  assert.match(tabRule, /border-radius\s*:\s*999px/);
+  assert.doesNotMatch(activeTabRule, /box-shadow/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
@@ -928,7 +924,6 @@ test("pane table tabs stay above each pane toolbar", () => {
   const paneTabbarRule = ruleBody(".wb-pane-tabbar");
   const paneChildTabbarRule = ruleBody(".wb-workbench-pane > .wb-pane-tabbar");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
-  const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
   const tableToolbarRule = ruleBody(".wb-table-toolbar");
 
   assert.match(rootRule, /grid-template-rows\s*:\s*minmax\(0,\s*1fr\)/);
@@ -947,7 +942,8 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(workspaceRule, /grid-row\s*:\s*1/);
   assert.match(workspaceRule, /padding-top\s*:\s*var\(--wb-titlebar-height\)/);
   assert.match(workspaceRule, /pointer-events\s*:\s*none/);
-  assert.match(mainRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
+  // The main area starts below the title bar; panes open with their own pill strip.
+  assert.doesNotMatch(mainRule, /margin-top\s*:\s*calc\(-1 \* var\(--wb-titlebar-height\)\)/);
   assert.match(mainRule, /margin-bottom\s*:\s*6px/);
   assert.doesNotMatch(mainRule, /margin-right\s*:\s*6px/);
   assert.match(mainRule, /pointer-events\s*:\s*auto/);
@@ -959,21 +955,22 @@ test("pane table tabs stay above each pane toolbar", () => {
   assert.match(paneTabbarRule, /flex\s*:\s*0 0 auto/);
   assert.match(paneTabbarRule, /position\s*:\s*relative/);
   assert.match(paneTabbarRule, /z-index\s*:\s*25/);
-  assert.match(paneTabbarRule, /min-height\s*:\s*var\(--wb-titlebar-height\)/);
-  assert.match(paneTabbarRule, /height\s*:\s*var\(--wb-titlebar-height\)/);
+  assert.match(paneTabbarRule, /min-height\s*:\s*var\(--wb-tab-strip-height\)/);
+  assert.match(paneTabbarRule, /height\s*:\s*var\(--wb-tab-strip-height\)/);
   assert.match(paneChildTabbarRule, /order\s*:\s*0/);
-  assert.match(paneObjectTabsRule, /min-height\s*:\s*var\(--wb-titlebar-height\)/);
+  assert.match(paneObjectTabsRule, /height\s*:\s*100%/);
   assert.match(paneTabbarRule, /align-items\s*:\s*center/);
   assert.match(paneTabbarRule, /overflow\s*:\s*visible/);
   assert.match(paneObjectTabsRule, /align-items\s*:\s*center/);
   assert.match(paneObjectTabsRule, /overflow-y\s*:\s*hidden/);
-  assert.match(paneObjectTabsRule, /padding\s*:\s*4px 0 0\s*;/);
+  assert.match(paneObjectTabsRule, /padding\s*:\s*0 6px 0 8px\s*;/);
   assert.match(paneObjectTabsRule, /margin-right:\s*0/);
-  assert.match(singlePaneObjectTabsRule, /margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
-  assert.match(css, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
+  // The title bar's database name, not the pill strip, keeps clear of the window controls.
+  assert.match(ruleBody(".wb-titlebar-tabs"), /padding-right:\s*var\(--wb-titlebar-tab-right-clearance\)/);
+  assert.doesNotMatch(css, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs/);
   assert.match(tableToolbarRule, /min-height\s*:\s*38px/);
   assert.match(css, /\.wb-workbench-pane\s*>\s*\.wb-table-panel,[\s\S]*?z-index\s*:\s*0/s);
-  assert.match(css, /\.wb-pane-tabbar \.wb-tab\.active\s*\{[^}]*z-index\s*:\s*3/s);
+  assert.match(ruleBody(".wb-tab.active"), /z-index\s*:\s*2/);
   assert.doesNotMatch(css, /\.wb-topbar-pane-tabs/);
 });
 
@@ -983,7 +980,6 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   const hiddenActionsRule = ruleBody(".wb-titlebar-sidebar.is-retracted .wb-sidebar-actions");
   const collapseButtonRule = ruleBody(".wb-titlebar-sidebar.is-collapsed .wb-topbar-collapse-btn");
   const sidebarRule = ruleBody(".wb-sidebar");
-  const leftEdgePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane .wb-object-tabs");
   const workbenchRule = ruleBody(".mysql-workbench");
   assert.match(titlebarSidebarRule, /width:\s*calc\(var\(--wb-sidebar-titlebar-width\) \* 1px\)/);
   assert.match(titlebarSidebarRule, /padding-inline:\s*calc\(\(var\(--wb-activity-rail-width\) - 30px\) \/ 2\) 8px/);
@@ -1006,7 +1002,9 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.doesNotMatch(css, /\.wb-sidebar\.is-expanding\s*\{[^}]*min-width:\s*(?:calc\()?var\(--wb-sidebar-titlebar-width\)/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating:not\(\.is-expanding\) \.wb-source-tree/s);
   assert.match(css, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
-  assert.match(leftEdgePaneObjectTabsRule, /transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/);
+  // The title bar's database name clears the folded sidebar's toggle and the traffic lights.
+  assert.match(ruleBody(".wb-titlebar-tabs"), /padding-left:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ 22px\)/);
+  assert.match(ruleBody(".wb-titlebar-sidebar.is-collapsed ~ .wb-titlebar-tabs"), /padding-left:\s*calc\(var\(--wb-activity-rail-width\) \+ var\(--wb-sidebar-tab-offset\) \+ 22px\)/);
   assert.match(css, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
   assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\) \* 1px\)\)/);
@@ -1520,10 +1518,11 @@ test("fill handle uses accent tokens and sits outside clipped cells", () => {
   assert.match(ruleBody(".wb-fill-options-item.active"), /background:\s*var\(--wb-accent-soft\)/);
 });
 
-test("top-edge pane tabbar still overlaps the titlebar below the chrome controls", () => {
-  // .wb-main 上探到标题栏下方，顶沿 pane 页签条 z-index 32 会盖住标题栏区域；
-  // 标题栏控件同档 40，否则被不透明背景遮罩而不可见、不可点。
-  assert.match(ruleBody(".wb-pane-tabbar.is-top-edge-pane"), /z-index:\s*32/);
+test("pane tab strips sit below the title bar instead of under its controls", () => {
+  // The main area no longer reaches up into the title bar, so no pane strip
+  // has to stack above (or below) the title bar's controls.
+  assert.doesNotMatch(css, /\.wb-pane-tabbar\.is-top-edge-pane\s*\{/);
+  assert.match(ruleBody(".wb-pane-tabbar"), /z-index:\s*25/);
   assert.doesNotMatch(css, /wb-quick-open-entry/);
 });
 

@@ -176,14 +176,19 @@ test("navigation and tabs expose each table database source", () => {
   assert.match(identity, /:title="identity\.title"/);
   assert.match(tabs, /tab\.database/);
   assert.match(tabs, /formatTableTabTitle\(tab, databaseLabel\(tab\.connectionId, tab\.database\)\)/);
-  assert.match(tabs, /hasTabSubtitle/);
-  assert.match(tabs, /wb-tab-title-stack/);
-  assert.match(tabs, /wb-tab-line-secondary/);
+  // Pills name the table; the title bar names its database (alias and
+  // decoration aware) and opens that database's home on click. The overflow
+  // menu still lists each tab's database.
+  const titleSource = read("./components/WorkbenchTitleSource.vue");
+  assert.doesNotMatch(tabs, /hasTabSubtitle|wb-tab-title-stack|wb-tab-line-secondary/);
   assert.match(tabs, /wb-tab-db/);
   assert.match(tabs, /tabDatabaseIcon\(tab\)/);
   assert.match(tabs, /tabDatabaseDecorationStyle\(tab\)/);
-  assert.match(styles, /\.wb-tab-title-stack\s*\{/);
-  assert.match(styles, /\.wb-tab-line-secondary\s*\{/);
+  assert.match(orchestrator, /<WorkbenchTitleSource :tab="activeTab" :connections="connections" @open-home="openDatabaseHomeTarget" \/>/);
+  assert.match(titleSource, /databaseLabel\(connectionId, database\)/);
+  assert.match(titleSource, /getDatabaseDecoration\(connectionId, database\)/);
+  assert.match(titleSource, /emit\("open-home"/);
+  assert.match(styles, /\.wb-title-source\s*\{/);
   assert.match(styles, /\.wb-tab-db\s*\{/);
   assert.match(tabs, /tab\.kind/);
   assert.match(tabs, /data-kind/);
@@ -325,7 +330,9 @@ test("workbench renders recursive split panes and keeps inspector scoped to the 
   assert.match(orchestrator, /discardPaneHomeTabs\(workspace, paneId\)[\s\S]*closePaneInLayout\(workspace, paneId\)/);
   assert.match(tabs, /v-else-if="canClosePane && tabKind\(tab\) === 'home'"/);
   assert.match(tabs, /aria-label="关闭当前分屏"/);
-  assert.match(styles, /\.wb-tab\[data-kind="home"\]\.can-close-pane\s*\{/);
+  // The home pill's even side padding holds the pane close button.
+  assert.match(tabs, /"can-close-pane": props\.canClosePane && tabKind\(tab\) === "home"/);
+  assert.match(styles, /\.wb-tab\[data-kind="home"\] \.wb-pane-close-button\s*\{/);
   assert.match(splitLayout, /function\s+nodeKey/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.first\)"/);
   assert.match(splitLayout, /:key="nodeKey\(layout\.second\)"/);
@@ -2057,9 +2064,12 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(styles, /\.wb-sidebar\.is-pane-animating\.is-expanding \.wb-source-tree/s);
   assert.match(orchestrator, /'is-collapsed': sidebarCollapsed && !sidebarPaneAnimating/);
   assert.match(styles, /\.wb-titlebar-sidebar\.is-collapsed\s*\{[^}]*position:\s*absolute/s);
-  assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane \.wb-object-tabs\s*\{[^}]*transform:\s*translateX\(var\(--wb-sidebar-tab-offset\)\)/s);
-  assert.match(styles, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
-  assert.match(styles, /\.wb-pane-tabbar\.is-left-edge-pane\.is-right-edge-pane \.wb-object-tabs\s*\{[^}]*margin-right:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/s);
+  // The database name in the title bar, not the pane strip below it, clears the traffic lights.
+  assert.match(styles, /\.wb-titlebar-tabs\s*\{[^}]*padding-left:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ 22px\)/s);
+  // The title bar's database name keeps clear of the collapsed inspector's
+  // controls; the pane strips below the title bar no longer need to.
+  assert.match(styles, /\.wb-titlebar-tabs\s*\{[^}]*padding-right:\s*var\(--wb-titlebar-tab-right-clearance\)/s);
+  assert.doesNotMatch(styles, /\.wb-pane-tabbar\.is-right-edge-pane \.wb-object-tabs/);
   assert.match(styles, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
   assert.match(styles, /\.mysql-workbench\s*\{[^}]*--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\) \* 1px\)\)/s);
   assert.doesNotMatch(styles, /wb-quick-open-entry/);
@@ -3175,9 +3185,11 @@ test("tauri main window uses custom web chrome by default", () => {
   assert.ok(main.minHeight >= 720);
 });
 
-test("home pill stays vertically centered with the arrows and window controls", () => {
+test("title bar database name stays vertically centered with the arrows and window controls", () => {
   const styles = read("./workbench.css");
-  assert.match(cssRuleBody(styles, '.wb-tab[data-kind="home"]'), /height:\s*28px[\s\S]*margin-bottom:\s*calc\(\(var\(--wb-titlebar-height\) - 28px\) \/ 2\)/);
+  // The home pill moved to the pane strip; the title bar now holds the database name.
+  assert.match(cssRuleBody(styles, ".wb-titlebar-tabs"), /align-items:\s*center/);
+  assert.match(cssRuleBody(styles, ".wb-titlebar-tabs"), /height:\s*var\(--wb-titlebar-height\)|display:\s*flex/);
   assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /place-items:\s*center/);
   assert.match(cssRuleBody(styles, ".wb-titlebar-button"), /height:\s*var\(--wb-titlebar-height\)/);
 });

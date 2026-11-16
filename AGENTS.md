@@ -10,7 +10,7 @@ single-file selections migrate intact. The panel's Light/Dark switch changes the
 app's saved appearance immediately. Light and dark appearance each keep their own picture, visibility and
 blur; new installations start with the recommended pair (frost-folds at 100% /
 indigo-folds at 48%, no blur, whole window with 56% behind content) and older single-wallpaper settings apply to both. The frame
-(title bar, rail, sidebar, tab strips) is transparent over one canvas and must
+(title bar, rail, sidebar) is transparent over one canvas and must
 never get a tint of its own; every page of the main area sits on one sheet
 veil. A shared scope chooses Whole window (default; the veil follows the
 "behind content" slider) or Frame only (near-solid sheet); sticky headers, row
@@ -81,6 +81,16 @@ low-level implementation details, code identifiers, framework jargon, and file
 paths unless the user explicitly asks for technical detail. If technical context
 is necessary, first state the product-facing meaning, then offer to expand on the
 technical details separately.
+
+## Tab strip and title bar
+
+The main area starts below the title bar. Each pane opens with a strip of
+pill tabs on the content sheet (`--wb-tab-strip-height`); pills name the table
+only (design / relation / SQL tags stay), the focused pane's active pill
+carries the accent and close marks show on hover and on the active pill. The
+title bar names the database of the page on screen (`WorkbenchTitleSource.vue`,
+alias and decoration aware); clicking it opens that database's home. The
+overflow menu still lists each tab's database.
 
 ## Typography
 

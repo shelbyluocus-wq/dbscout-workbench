@@ -19,6 +19,7 @@ export default Object.freeze({
   "createTable.discard": "放弃草稿",
   "createTable.keep": "继续编辑",
   "tabs.overflow": "更多标签（{count}）",
+  "titleSource.openHome": "打开「{name}」首页",
   "m_809ec93960dd": "折叠全部连接",
   "m_695704a261cb": "展开全部",
   "m_2fabdc5d8190": "折叠全部",
