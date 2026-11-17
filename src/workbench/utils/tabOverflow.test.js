@@ -36,11 +36,10 @@ test("wide panes show all tabs and empty panes have no overflow", () => {
   assert.deepEqual(partitionTabs([], "", 0), { visible: [], overflow: [] });
 });
 
-test("overflow reserves the shared pill width for every tab, home included", () => {
+test("overflow reserves space for the home icon and visible label", () => {
   const shortTabs = tabs.slice(0, 3);
-  // Three 100px pills with 4px gaps.
-  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 312), { visible: shortTabs, overflow: [] });
-  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 311), {
+  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 318), { visible: shortTabs, overflow: [] });
+  assert.deepEqual(partitionTabs(shortTabs, "tab-0", 317), {
     visible: shortTabs.slice(0, 2),
     overflow: shortTabs.slice(2),
   });

@@ -10,7 +10,7 @@ single-file selections migrate intact. The panel's Light/Dark switch changes the
 app's saved appearance immediately. Light and dark appearance each keep their own picture, visibility and
 blur; new installations start with the recommended pair (frost-folds at 100% /
 indigo-folds at 48%, no blur, whole window with 56% behind content) and older single-wallpaper settings apply to both. The frame
-(title bar, rail, sidebar, tab strips) is transparent over one canvas and must
+(title bar, rail, sidebar) is transparent over one canvas and must
 never get a tint of its own; every page of the main area sits on one sheet
 veil. A shared scope chooses Whole window (default; the veil follows the
 "behind content" slider) or Frame only (near-solid sheet); sticky headers, row
@@ -99,15 +99,12 @@ This repository uses a single-context domain documentation layout. See `docs/age
 ## Tab strip and title bar
 
 The main area starts below the title bar. Each pane opens with a strip of
-pill tabs on the frame (`--wb-tab-strip-height`); the content sheet and its
-outline start below the strip, so pills never sit on the table. Pills share
-one width (152px, shrinking together to 100px before the overflow menu takes
-the rest), name the table only (design / relation / SQL tags stay) from the
-left and keep a fixed right slot for the close mark, shown on hover and on the
-active pill. The active pill is lifted onto the page colour; the focused
-pane's also carries the accent outline. The title bar names the database of
-the page on screen (`WorkbenchTitleSource.vue`, alias and decoration aware) as
-selectable, copyable text. The overflow menu still lists each tab's database.
+pill tabs on the content sheet (`--wb-tab-strip-height`); pills name the table
+only (design / relation / SQL tags stay), the focused pane's active pill
+carries the accent and close marks show on hover and on the active pill. The
+title bar names the database of the page on screen (`WorkbenchTitleSource.vue`,
+alias and decoration aware); clicking it opens that database's home. The
+overflow menu still lists each tab's database.
 
 ## Typography
 
