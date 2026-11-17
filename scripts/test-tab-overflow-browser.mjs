@@ -41,6 +41,31 @@ for (const [name, engine] of [["chromium", chromium], ["webkit", webkit]]) {
     const menu = page.locator(".wb-tab-overflow-menu");
     await trigger.waitFor();
     assert.match(await page.locator(".wb-tab.active").innerText(), /config_table_29/);
+    assert.equal(await page.locator(".wb-tab.active").evaluate((node) => getComputedStyle(node).boxShadow), "none");
+    const tones = [];
+    for (const index of [0, 1, 2, 3]) {
+      const target = page.locator(`[data-tab-id="tab-${index}"]`);
+      await target.click();
+      await page.waitForTimeout(180);
+      tones.push(await target.evaluate((node) => getComputedStyle(node).borderTopColor));
+      assert.equal(await target.evaluate((node) => getComputedStyle(node).borderBottomColor), tones.at(-1));
+      assert.equal(await target.evaluate((node) => getComputedStyle(node, "::after").content), "none");
+    }
+    assert.equal(new Set(tones.slice(0, 3)).size, 3);
+    assert.equal(tones[0], tones[3]);
+    await trigger.click();
+    await menu.getByRole("menuitem").filter({ hasText: "config_table_29" }).click();
+    const inactiveTab = page.locator('.wb-tab:not(.active)[data-kind="data"]').first();
+    assert.equal(await inactiveTab.locator(".wb-tab-close-mark").evaluate((node) => getComputedStyle(node).visibility), "hidden");
+    const restingBackground = await inactiveTab.evaluate((node) => getComputedStyle(node).backgroundColor);
+    await inactiveTab.hover();
+    await page.waitForTimeout(180);
+    assert.notEqual(await inactiveTab.evaluate((node) => getComputedStyle(node).backgroundColor), restingBackground);
+    assert.notEqual(await inactiveTab.evaluate((node) => getComputedStyle(node).borderTopColor), "rgba(0, 0, 0, 0)");
+    assert.equal(await inactiveTab.locator(".wb-tab-close-mark").evaluate((node) => getComputedStyle(node).visibility), "visible");
+    await inactiveTab.locator(".wb-tab-close").focus();
+    await page.mouse.move(0, 0);
+    assert.equal(await inactiveTab.locator(".wb-tab-close-mark").evaluate((node) => getComputedStyle(node).visibility), "visible");
     await trigger.click();
     const hidden = await menu.getByRole("menuitem").count();
     assert.equal(await page.locator(".wb-tab").count() + hidden, 31);

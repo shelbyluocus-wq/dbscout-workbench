@@ -266,6 +266,15 @@ const shortcutHintsByTabId = computed(() => {
   return map;
 });
 
+const tabTones = computed(() => {
+  const tones = new Map();
+  let index = 0;
+  for (const tab of previewTabs.value) {
+    if (tabKind(tab) !== "home") tones.set(tab.id, ["gold", "coral", "blue"][index++ % 3]);
+  }
+  return tones;
+});
+
 function tabShortcutHint(tab) {
   return shortcutHintsByTabId.value.get(tab?.id) || null;
 }
@@ -412,6 +421,7 @@ onBeforeUnmount(() => {
         class="wb-tab"
         :class="tabClass(tab)"
         :data-kind="tabKind(tab)"
+        :data-tab-tone="tabTones.get(tab.id)"
         :data-tab-id="tab.id"
         role="button"
         :tabindex="tab.opening ? -1 : 0"

@@ -105,7 +105,7 @@
   /* 外框（页签条）投向画布的"虚影"：默认无，设计调试面板可实时调强度 */
   --wb-frame-shadow: none;
   --wb-row-index-width: 38px;
-  --wb-tab-curve-size: 14px;
+  --wb-tab-curve-size: 8px;
   --wb-accent-control: #3d4856;
   --wb-accent-control-hover: #2d3748;
   --wb-accent-control-busy: #2d3748;
@@ -11843,7 +11843,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 36px;
   padding: 0 28px 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--wb-text);
   box-shadow: none;
@@ -11853,6 +11853,55 @@ label:has(input[type="checkbox"]:disabled) {
     background-color 0.14s ease,
     border-color 0.14s ease,
     box-shadow 0.14s ease;
+}
+
+.wb-tab[data-tab-tone] {
+  margin-bottom: 4px;
+  color: var(--wb-secondary-text);
+}
+
+.wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #875b08; }
+.wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #b83e36; }
+.wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #236b91; }
+[data-theme="dark"] .wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #e5b451; }
+[data-theme="dark"] .wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #f27c72; }
+[data-theme="dark"] .wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #6eb9df; }
+
+.wb-tab[data-tab-tone].active {
+  --wb-tab-close-text: var(--wb-tab-tone);
+  --wb-tab-close-text-hover: var(--wb-tab-tone);
+  border-color: var(--wb-tab-tone);
+  background: transparent;
+  color: var(--wb-tab-tone);
+}
+
+.wb-tab[data-tab-tone].active:hover {
+  background: color-mix(in srgb, var(--wb-tab-tone) 10%, transparent);
+}
+
+.wb-tab[data-tab-tone]:not(.active):not(.is-opening):is(:hover, :focus-within) {
+  --wb-tab-close-text: var(--wb-tab-tone);
+  border-color: color-mix(in srgb, var(--wb-tab-tone) 38%, transparent);
+  background: color-mix(in srgb, var(--wb-tab-tone) 6%, transparent);
+  color: var(--wb-text);
+}
+
+.wb-tab[data-tab-tone] .wb-tab-close:is(:hover, :focus-visible) .wb-tab-close-mark {
+  background: color-mix(in srgb, var(--wb-tab-tone) 18%, transparent);
+  box-shadow: none;
+  color: var(--wb-tab-tone);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-tab[data-tab-tone],
+  .wb-tab[data-tab-tone] .wb-tab-close-mark {
+    transition: none;
+  }
+}
+
+.wb-tab[data-tab-tone].active::before,
+.wb-tab[data-tab-tone].active::after {
+  content: none;
 }
 
 .wb-tab.wb-tab-reorder-move {
@@ -11912,8 +11961,24 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab:hover,
 .wb-tab:focus-visible {
-  border-color: var(--wb-tab-hover-border);
+  border-color: transparent;
   background: var(--wb-control-hover);
+}
+
+.wb-tab:not(.active):not([data-kind="home"])::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--wb-tab-border);
+  pointer-events: none;
+}
+
+.wb-tab:not(.active):is(:hover, :focus-within)::after,
+.wb-tab:has(+ .wb-tab.active)::after {
+  display: none;
 }
 
 .wb-tab:focus-visible {
@@ -12107,14 +12172,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab.active {
   z-index: 2;
-  border-color: var(--wb-tab-active-border);
+  border-color: transparent;
   border-bottom-color: var(--wb-active-tab-surface);
   background: var(--wb-active-tab-surface);
   color: var(--wb-text);
   font-weight: 600;
-  box-shadow:
-    inset 0 2px 0 var(--wb-accent),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
   overflow: visible;
 }
 
@@ -12131,14 +12194,12 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab.active::before {
   left: calc(-1 * var(--wb-tab-curve-size));
-  border-bottom-right-radius: var(--wb-tab-curve-size);
-  box-shadow: 6px 6px 0 6px var(--wb-active-tab-surface);
+  background: radial-gradient(circle at 0 0, transparent calc(var(--wb-tab-curve-size) - 0.5px), var(--wb-active-tab-surface) calc(var(--wb-tab-curve-size) + 0.5px));
 }
 
 .wb-tab.active::after {
   right: calc(-1 * var(--wb-tab-curve-size));
-  border-bottom-left-radius: var(--wb-tab-curve-size);
-  box-shadow: -6px 6px 0 6px var(--wb-active-tab-surface);
+  background: radial-gradient(circle at 100% 0, transparent calc(var(--wb-tab-curve-size) - 0.5px), var(--wb-active-tab-surface) calc(var(--wb-tab-curve-size) + 0.5px));
 }
 
 .wb-pane-tabbar .wb-tab-list {
@@ -12151,15 +12212,11 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-pane-tabbar.is-focused-pane .wb-tab.active {
-  box-shadow:
-    inset 0 2px 0 var(--wb-accent),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
 }
 
 .wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active {
-  box-shadow:
-    inset 0 1px 0 var(--wb-tab-active-border),
-    0 -1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
 }
 
 .wb-tab.active:hover {
@@ -12253,6 +12310,16 @@ label:has(input[type="checkbox"]:disabled) {
     box-shadow 0.12s ease,
     color 0.12s ease;
   pointer-events: none;
+}
+
+.wb-tab:not(.active):not(:hover):not(:focus-within) .wb-tab-close-mark {
+  visibility: hidden;
+}
+
+@media (hover: none) {
+  .wb-tab:not(.active):not(:hover):not(:focus-within) .wb-tab-close-mark {
+    visibility: visible;
+  }
 }
 
 .wb-tab-close-mark::before,

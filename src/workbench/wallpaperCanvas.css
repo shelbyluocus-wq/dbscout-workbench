@@ -122,7 +122,7 @@
 /* The active tab is a piece of the sheet reaching into the frame: same veil,
    and its curves are drawn without overlapping it (overlaps would double up). */
 .mysql-workbench.has-wallpaper .wb-tab { --wb-active-tab-surface: var(--wb-wallpaper-sheet); }
-.mysql-workbench.has-wallpaper .wb-tab.active { border-bottom-color: transparent; }
+.mysql-workbench.has-wallpaper .wb-tab[data-tab-tone].active { border-color: var(--wb-tab-tone); }
 .mysql-workbench.has-wallpaper .wb-tab.active::before,
 .mysql-workbench.has-wallpaper .wb-tab.active::after {
   border-radius: 0;
