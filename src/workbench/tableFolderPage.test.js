@@ -173,9 +173,9 @@ test("folder database switch appears above favorites and its tab has no database
   const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
   const tabs = readFileSync(new URL("./components/WorkbenchTabs.vue", import.meta.url), "utf8");
   assert.ok(source.indexOf('class="wb-folder-database"') < source.indexOf('class="wb-folder-list"'));
-  // No tab carries a database subtitle any more: pills name the page and the
-  // title bar names the database.
-  assert.doesNotMatch(tabs, /hasTabSubtitle|wb-tab-line-secondary/);
+  const hasSubtitle = new Function("isTableLikeTab", "tabDatabaseLabel", "tab", tabs.match(/function hasTabSubtitle\(tab\) \{([\s\S]*?)\n\}/)[1]);
+  assert.equal(hasSubtitle(() => false, () => "game", { kind: "folders" }), false);
+  assert.equal(hasSubtitle(() => true, () => "game", { kind: "data" }), true);
 });
 
 test("a slow folder list cannot overwrite a newer database's list or loading state", async () => {

@@ -47,15 +47,15 @@ for (const [name, engine] of [["chromium", chromium], ["webkit", webkit]]) {
     const firstItem = menu.getByRole("menuitem").first();
     assert.equal(await firstItem.locator(".wb-tab-overflow-connection").textContent(), "决胜2");
     assert.equal(await firstItem.locator(".wb-tab-db").textContent(), "game_db");
-    // Pills name tables only; the menu still shows each tab's database in its
-    // decoration colours (icon colour, and a text colour per appearance).
-    assert.equal(await page.locator(".wb-tab .wb-tab-db").count(), 0);
     const sourceColors = async () => ({
+      tab: await page.locator(".wb-tab .wb-tab-db").first().evaluate((node) => getComputedStyle(node).color),
       menu: await firstItem.locator(".wb-tab-db").evaluate((node) => getComputedStyle(node).color),
+      tabIcon: await page.locator(".wb-tab .wb-tab-db-icon").first().evaluate((node) => getComputedStyle(node).color),
       menuIcon: await firstItem.locator(".wb-tab-db-icon.is-decorated").evaluate((node) => getComputedStyle(node).color),
     });
     const lightColors = await sourceColors();
-    assert.equal(lightColors.menuIcon, "rgb(234, 88, 12)");
+    assert.equal(lightColors.menu, lightColors.tab);
+    assert.equal(lightColors.menuIcon, lightColors.tabIcon);
     await firstItem.hover();
     const designItems = menu.getByRole("menuitem").filter({ has: page.locator(".wb-tab-overflow-tag") });
     assert.ok(await designItems.count() > 0);
@@ -70,7 +70,7 @@ for (const [name, engine] of [["chromium", chromium], ["webkit", webkit]]) {
     assert.equal(await page.locator(".wb-tab-overflow-layer").getAttribute("data-theme"), "dark");
     const darkSurface = await menu.evaluate((node) => getComputedStyle(node).backgroundColor);
     const darkColors = await sourceColors();
-    assert.equal(darkColors.menuIcon, lightColors.menuIcon);
+    assert.equal(darkColors.menu, darkColors.tab);
     assert.notEqual(darkColors.menu, lightColors.menu);
     await firstItem.hover();
     assert.notEqual(darkSurface, lightSurface);

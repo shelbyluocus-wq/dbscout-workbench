@@ -44,7 +44,7 @@
 /* ── Frame ─────────────────────────────────────────────────────────────── */
 /* Frame panes paint with the chrome token, so clearing the token inside them
    keeps every state (hover, current database, drag) that layers on top of it. */
-.mysql-workbench.has-wallpaper :is(.wb-titlebar, .wb-activity-rail, .wb-sidebar-slot) {
+.mysql-workbench.has-wallpaper :is(.wb-titlebar, .wb-activity-rail, .wb-sidebar-slot, .wb-pane-tabbar) {
   --wb-chrome-surface: transparent;
 }
 /* Pieces that float over their neighbours still need the solid colour. */
@@ -63,7 +63,7 @@
 /* The corner mask becomes the sheet itself: one veil under every pane of the
    main area, rounded where the outline is. */
 .mysql-workbench.has-wallpaper .wb-main::before {
-  inset: 0 0 0 1px;
+  inset: var(--wb-titlebar-height) 0 0 1px;
   z-index: -1;
   width: auto;
   height: auto;
@@ -114,6 +114,27 @@
   .wb-folder-page, .wb-inspector-table-status
 ) { background: transparent; }
 .mysql-workbench.has-wallpaper .wb-design-grid tbody tr:not(:hover, .is-selected) td { background: transparent; }
+/* Pages with opaque headers follow the sheet's rounded corner themselves. */
+.mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane ~ *,
+.mysql-workbench.has-wallpaper .wb-pane-tabbar.is-left-edge-pane.is-top-edge-pane + * > header:first-child {
+  border-top-left-radius: var(--wb-workspace-corner-radius);
+}
+/* The active tab is a piece of the sheet reaching into the frame: same veil,
+   and its curves are drawn without overlapping it (overlaps would double up). */
+.mysql-workbench.has-wallpaper .wb-tab { --wb-active-tab-surface: var(--wb-wallpaper-sheet); }
+.mysql-workbench.has-wallpaper .wb-tab.active { border-bottom-color: transparent; }
+.mysql-workbench.has-wallpaper .wb-tab.active::before,
+.mysql-workbench.has-wallpaper .wb-tab.active::after {
+  border-radius: 0;
+  box-shadow: none;
+  background: radial-gradient(
+    circle at var(--wb-tab-curve-origin) 0,
+    transparent calc(var(--wb-tab-curve-size) - 0.5px),
+    var(--wb-active-tab-surface) calc(var(--wb-tab-curve-size) + 0.5px)
+  );
+}
+.mysql-workbench.has-wallpaper .wb-tab.active::before { --wb-tab-curve-origin: 0; }
+.mysql-workbench.has-wallpaper .wb-tab.active::after { --wb-tab-curve-origin: 100%; }
 /* Plain rows show the sheet; alternate rows keep their stripe as a tint.
    Highlight, pending, selection, active and frozen states win. */
 .mysql-workbench.has-wallpaper .wb-grid-row:not(.row-selected, .row-active, .row-range-active, :hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {

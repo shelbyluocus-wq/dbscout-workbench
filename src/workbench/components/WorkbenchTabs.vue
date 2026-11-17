@@ -211,6 +211,12 @@ function tabDatabaseDecorationStyle(tab) {
   };
 }
 
+// Table tabs render as two stacked lines (table name over database name)
+// whenever there is a database to show; everything else stays single-line.
+function hasTabSubtitle(tab) {
+  return isTableLikeTab(tab) && !tab.opening && Boolean(tabDatabaseLabel(tab));
+}
+
 function tabSourceTitle(tab) {
   if (tabKind(tab) === "home") return t('m_203c08e0d44a');
   if (tabKind(tab) === "sql-library") return t('m_7eb481889026');
@@ -423,12 +429,29 @@ onBeforeUnmount(() => {
         @keydown.enter.prevent="activateTab(tab)"
         @keydown.space.prevent="activateTab(tab)"
       >
-        <span class="wb-tab-title" :title="tabSourceTitle(tab)">
-          <!-- Pills name the table only; the title bar names its database. -->
-          <template v-if="isTableLikeTab(tab) && !tab.opening">
-            <span class="wb-tab-name">{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}</span>
-            <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
-            <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
+        <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
+          <template v-if="hasTabSubtitle(tab)">
+            <span class="wb-tab-line wb-tab-line-primary">
+              <span class="wb-tab-name">{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}</span>
+              <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
+              <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
+            </span>
+            <span class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
+              <component
+                :is="tabDatabaseIcon(tab)"
+                v-if="tabDatabaseDecoration(tab)"
+                :size="10"
+                :stroke-width="1.5"
+                class="wb-tab-db-icon is-decorated"
+                aria-hidden="true"
+              />
+              <svg v-else class="wb-tab-db-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+                <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
+                <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
+                <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
+              </svg>
+              <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+            </span>
           </template>
           <template v-else-if="tabKind(tab) === 'home'">
             <House class="wb-tab-home-icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
@@ -441,6 +464,7 @@ onBeforeUnmount(() => {
             <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
             <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
             <small v-if="tabKind(tab) === 'sql'" class="wb-tab-kind">SQL{{ tab.dirty ? ' •' : '' }}</small>
+            <small v-if="tabKind(tab) === 'sql' && tab.database">{{ databaseLabel(tab.connectionId, tab.database) }}</small>
           </template>
         </span>
         <span

@@ -42,13 +42,12 @@ apply to both appearances, so an existing choice, including None, is kept.
 
 ## Presentation rules
 
-- The frame (title bar, activity rail, sidebar) is transparent over
+- The frame (title bar, activity rail, sidebar, tab strips) is transparent over
   one canvas, so it reads as a single continuous surface. Never give a frame
   pane a tint of its own: a second layer is what makes neighbouring strips differ.
 - The main area sits on one rounded sheet (`--wb-wallpaper-sheet`, the
   workspace colour at `--wb-wallpaper-veil`, a percentage set on the shell);
-  the inspector uses the same veil, and the pill tab strip at the top of each
-  pane is part of the sheet. Page backgrounds (grid,
+  the inspector and the active tab use the same veil. Page backgrounds (grid,
   database home, SQL library/editor/results, table design, table folders) step
   aside for it, and so do the database home's search row and the cell detail
   panel under the grid (its glass card and time-of-day haze give way to the

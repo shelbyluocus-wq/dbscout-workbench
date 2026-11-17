@@ -176,7 +176,6 @@ import { connectionHasCapability } from "./utils/connectionKinds.js";
 import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
 import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
-import WorkbenchTitleSource from "./components/WorkbenchTitleSource.vue";
 import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
@@ -5635,9 +5634,7 @@ onBeforeUnmount(() => {
         id="wb-topbar-tabs"
         :aria-label="t('m_79aaded7fe4f')"
         data-tauri-drag-region
-      >
-        <WorkbenchTitleSource :tab="activeTab" :connections="connections" @open-home="openDatabaseHomeTarget" />
-      </div>
+      ></div>
 
 
       <div
