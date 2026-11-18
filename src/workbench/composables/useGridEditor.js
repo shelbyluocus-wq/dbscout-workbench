@@ -2526,6 +2526,7 @@ export function useGridEditor(
   }
 
   function cancelEditing(options = {}) {
+    if (editingCell.value) syncSelectedTextDraft(activeTab.value);
     editingCell.value = null;
     editDraftDirty.value = false;
     if (!options.skipRefocus) nextTick(() => focusPrimedEditorNow({ force: true }));
@@ -4270,6 +4271,11 @@ export function useGridEditor(
     const tab = activeTab.value;
     if (!tab) return;
 
+    if (isImeKeyEvent(event)) {
+      openEditorForIncomingKey(tab, event);
+      return;
+    }
+
     // Clipboard shortcuts
     const key = String(event.key || "").toLowerCase();
     const isCopy = (event.ctrlKey || event.metaKey) && key === "c";
@@ -4447,14 +4453,6 @@ export function useGridEditor(
       return;
     }
 
-    // A composition key (including the Windows IME keyCode 229 Enter that
-    // confirms a candidate) must not be turned into cell navigation. If this
-    // is the key that starts composition, open the editor without swallowing it.
-    if (isImeKeyEvent(event)) {
-      openEditorForIncomingKey(tab, event);
-      return;
-    }
-
     // Arrow key navigation. Ctrl/⌘ = 跳到数据区边缘；Shift = 扩选。
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
       // While inline-editing, Left/Right must move the text caret inside the
@@ -4614,6 +4612,17 @@ export function useGridEditor(
     return target.closest("input[data-ime-editor]");
   }
 
+  function activateCellInput(event) {
+    const input = event.target;
+    const tab = activeTab.value;
+    const cell = selectedCell.value;
+    if (editingCell.value || !tab || !cell || cell.tabId !== tab.id || isReadOnlyTab(tab)) return;
+    const td = input.closest?.("td[data-row-key]");
+    if (input.matches?.("input[data-ime-editor]") && td?.dataset.rowKey === cell.rowKey && td.dataset.columnName === cell.column) {
+      rememberDirectEdit(tab, cell, input);
+    }
+  }
+
   function openEditorForIncomingKey(tab, event) {
     if (!tab || editingCell.value || !selectedCell.value || isReadOnlyTab(tab)) return;
     const primed = editorFromEvent(event);
@@ -4659,8 +4668,10 @@ export function useGridEditor(
     // If this keydown could not move the character onto the input (and it is
     // not the start of a composition), put that one character in ourselves.
     if (key.length === 1) {
-      queueMicrotask(() => {
-        if (input._composing || input.value || input.isConnected === false) return;
+      // Chromium runs microtasks before the key's native text insertion.
+      const session = editingCell.value;
+      setTimeout(() => {
+        if (editingCell.value !== session || !input._imeLive || input._composing || input.value || input.isConnected === false) return;
         input._imeLive = false;
         input.value = key;
         input.setSelectionRange?.(key.length, key.length);
@@ -4794,5 +4805,6 @@ export function useGridEditor(
     pasteGridText,
     // keyboard
     handleGridKeydown,
+    activateCellInput,
   };
 }

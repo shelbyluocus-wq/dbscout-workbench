@@ -167,6 +167,60 @@ async function waitForInputValue(input, expected, timeoutMs = 2_000) {
   assert.equal(actual, expected);
 }
 
+async function checkDirectCellInput(page, grid) {
+  const header = grid.locator('tr[data-row-selection-index="0"] > .wb-row-header');
+  await header.click();
+  await page.keyboard.press(shortcut("C"));
+  await header.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "粘贴整行到当前行上方", exact: true }).click();
+  const copy = grid.locator("tr.wb-insert-row").first();
+  const number = copy.locator('td[data-column-index="3"]');
+  const original = (await number.textContent()).trim();
+  assert.match(original, /^[0-9]+$/);
+  const detail = page.locator(".wb-detail-input");
+  for (const [value, focusGrid] of [["87", false], ["26", true]]) {
+    await number.click();
+    if (focusGrid) await grid.focus();
+    await page.keyboard.type(value);
+    await waitForInputValue(number.locator("input"), value);
+    await waitForInputValue(detail, value);
+    await page.keyboard.press("Tab");
+    await waitForValues(copy, [3], [value]);
+  }
+  await waitForValues(grid.locator("tr.wb-grid-row").first(), [3], [original]);
+
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    for (const row of [copy, grid.locator("tr.wb-grid-row").first()]) {
+      const cell = row.locator('td[data-column-index="2"]');
+      await cell.click();
+      await cdp.send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+      const input = cell.locator("input");
+      assert.equal(await input.evaluate(el => el === document.activeElement && !el.classList.contains("wb-cell-ime-hold")), true);
+      await waitForInputValue(input, "ni");
+      await cdp.send("Input.insertText", { text: "你好" });
+      await waitForInputValue(input, "你好");
+      await waitForInputValue(detail, "你好");
+      await page.keyboard.press("Tab");
+      await waitForValues(row, [2], ["你好"]);
+      await cell.click();
+      await cdp.send("Input.insertText", { text: "替换" });
+      await waitForInputValue(input, "替换");
+      await waitForInputValue(detail, "替换");
+      await page.keyboard.press("Escape");
+      await waitForValues(row, [2], ["你好"]);
+      await waitForInputValue(detail, "你好");
+
+      await cdp.send("Input.imeSetComposition", { text: "qu", selectionStart: 2, selectionEnd: 2 });
+      await cdp.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+      await page.keyboard.press("Tab");
+      await waitForValues(row, [2], ["你好"]);
+    }
+  } finally {
+    await cdp.detach();
+  }
+}
+
 async function assertInputContextMenu(page, input) {
   await page.evaluate(() => {
     window.__wbContextMenuPrevented = null;
@@ -260,6 +314,9 @@ try {
   page.on("pageerror", (error) => consoleErrors.push(String(error)));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   let grid = await openPlayerGrid(page);
+  await checkDirectCellInput(page, grid);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  grid = await openPlayerGrid(page);
 
   const fillRows = Array.from({ length: 5 }, (_, index) => page.locator(`tr[data-row-selection-index="${index}"]`));
   const fillBefore = await Promise.all(fillRows.map((row) => cellValues(row, [3])));

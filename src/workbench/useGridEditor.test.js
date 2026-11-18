@@ -758,6 +758,7 @@ test("direct typing still inserts a plain letter when no composition starts", as
     altKey: false,
   });
 
+  await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(imeInput.value, "x");
   assert.equal(editor.editDraft.value, "x");
 });

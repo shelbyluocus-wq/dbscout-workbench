@@ -321,6 +321,7 @@ const {
   applyInsertDraftHistoryEntry,
   syncSelectionAfterHistory,
   handleGridKeydown,
+  activateCellInput,
   pasteGridText,
   getInsertDraft,
   updateInsertDraft,
@@ -1884,6 +1885,7 @@ onMounted(() => emitPaneState());
       @fill-option="applyFillOption"
       @cell-dblclick="startEditing"
       @cell-blur="finishEditing"
+      @cell-input-start="activateCellInput"
       @edit-input="updateEditDraft"
       @finish-edit="finishEditing(); navigateCell(1, 0)"
       @cancel-edit="cancelEditing"

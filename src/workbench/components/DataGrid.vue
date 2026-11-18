@@ -228,6 +228,7 @@ const emit = defineEmits([
   'cell-dblclick',
   'cell-blur',
   'edit-input',
+  'cell-input-start',
   'finish-edit',
   'cancel-edit',
   'tab-edit',
@@ -1442,6 +1443,8 @@ function handleTableContextMenu(event) {
         tabindex="0"
         @scroll.passive="onGridWrapScroll"
         @keydown="emit('keydown', $event)"
+        @compositionstart.capture="emit('cell-input-start', $event)"
+        @input.capture="emit('cell-input-start', $event)"
         @paste="emit('paste', $event)"
       >
         <div v-if="tab.loading" class="wb-grid-loading">
