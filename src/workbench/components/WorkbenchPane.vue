@@ -1289,46 +1289,12 @@ function triggerImport() {
   emit("import", activeDataTab.value);
 }
 
-function isEditableShortcutTarget(target) {
-  if (!target) return false;
-  return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
-}
-
 function isTableSearchTarget(target) {
   return Boolean(activeDataTab.value && target && target === searchInputRef.value);
 }
 
-function handleOpenDesignKeydown(event) {
-  if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
-  // Opening a data tab focuses its search box, so keep table design available there.
-  if (!isTableSearchTarget(event.target) && isEditableShortcutTarget(event.target)) return false;
-  if (activeDataTab.value) {
-    if (activeDataReadOnly.value || !connectionHasCapability(activeEngineKind.value, "tableDesign")) {
-      statusText.value = activeDataReadOnly.value ? "只读连接不能打开表设计" : "当前连接不支持表设计";
-      return false;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    emit("open-design", activeDataTab.value, props.pane.id);
-    return true;
-  }
-  // Home tab: open the design for every selected table (multi-select).
-  if (activeHomeTab.value) {
-    if (!connectionHasCapability(homeEngineKind.value, "tableDesign")) {
-      statusText.value = "当前连接不支持表设计";
-      return false;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    emit("open-design", activeHomeTab.value, props.pane.id);
-    return true;
-  }
-  return false;
-}
-
 function handlePaneKeydown(event) {
   if (handleTableFindKeydown(event)) return;
-  if (handleOpenDesignKeydown(event)) return;
   if (handleUndoKeydown(event)) return;
   handleRedoKeydown(event);
 }
@@ -1648,7 +1614,6 @@ function emitPaneState() {
     prepareInsertDraftsForRefresh,
     clearInsertDraftsAfterRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
-    handleOpenDesignKeydown,
     isTableSearchTarget,
     copyHomeSelection,
     pasteHomeTables,

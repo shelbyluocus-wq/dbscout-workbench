@@ -91,6 +91,7 @@ import { MAX_FROZEN_COLS } from "./constants.js";
 import { resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import {
   SHORTCUT_LABELS,
+  isSafeInAppShortcut,
   matchesShortcutCombo,
   sameShortcutCombo,
   useShortcuts,
@@ -442,7 +443,6 @@ const focusedPaneState = reactive({
   pasteCopiedRowsAbove: null,
   deleteRow: null,
   handleWorkbenchKeydown: null,
-  handleOpenDesignKeydown: null,
   isTableSearchTarget: null,
   clearSelection: null,
   resetGridScroll: null,
@@ -4615,27 +4615,12 @@ function isEditableShortcutTarget(target) {
 
 function handleOpenDesignShortcut(event) {
   if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
-  if (typeof focusedPaneState.handleOpenDesignKeydown === "function") {
-    return focusedPaneState.handleOpenDesignKeydown(event) === true;
-  }
-  return handleOpenDesignKeydown(event);
-}
-
-function handleOpenDesignKeydown(event) {
-  if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
-  if (activeDataTab.value) {
-    event.preventDefault();
-    event.stopPropagation();
-    openTableDesign(activeDataTab.value);
-    return true;
-  }
-  // On a home tab, open the design for every selected table (multi-select).
-  const homeTab = focusedPaneState.activeHomeTab || (activeTab.value?.kind === "home" ? activeTab.value : null);
-  if (!homeTab || !resolveHomeDesignTargets(homeTab).length) return false;
+  // A custom bare letter is still text in an editor, not a navigation command.
+  if (event.isComposing || (isEditableShortcutTarget(event.target) && !isSafeInAppShortcut(shortcutHelper.get("openDesign")))) return false;
+  if (!focusedDesignTarget.value || designShortcutBlocked(event.target)) return false;
   event.preventDefault();
   event.stopPropagation();
-  openTableDesign(homeTab, workspace.focusedPaneId);
+  openFocusedDesign();
   return true;
 }
 
@@ -4955,7 +4940,6 @@ function handleWorkbenchKeydown(event) {
     return;
   }
   if (handleTableFindKeydown(event)) return;
-  if (handleOpenDesignKeydown(event)) return;
   if (handleUndoKeydown(event)) return;
   handleRedoKeydown(event);
 }
@@ -5358,15 +5342,26 @@ function cycleFocusedTab(direction) {
   if (nextTabId) void activateTab(pane.id, nextTabId);
 }
 
-function homeTabForMenu() {
-  return focusedPaneState.activeHomeTab || (activeTab.value?.kind === "home" ? activeTab.value : null);
+const focusedDesignTarget = computed(() => {
+  if (activeDataTab.value) return activeDataTab.value;
+  const tab = activeTab.value;
+  return tab?.kind === "home" && resolveHomeDesignTargets(tab).length ? tab : null;
+});
+
+function designShortcutBlocked(element) {
+  return dialogLayerManager.hasActiveModalLayer()
+    || Boolean(element?.closest?.('[role="dialog"], [data-wb-shortcut-capture="true"]'));
 }
 
-function openDesignFromMenu() {
-  if (activeDataTab.value) return openTableDesign(activeDataTab.value);
-  const homeTab = homeTabForMenu();
-  if (!homeTab || !resolveHomeDesignTargets(homeTab).length) return null;
-  return openTableDesign(homeTab, workspace.focusedPaneId);
+function openFocusedDesign() {
+  const target = focusedDesignTarget.value;
+  if (!target || designShortcutBlocked(document.activeElement)) return;
+  if (target === activeDataTab.value && !isReadOnlySource(target) && sourceHasCapability("tableDesign", target)) {
+    // Finish against the original table before the design tab replaces its editors.
+    if (focusedPaneState.isEditing?.()) focusedPaneState.commitEditingWithoutRefocus?.();
+    if (document.activeElement?.matches?.(".wb-detail-input")) document.activeElement.blur();
+  }
+  return openTableDesign(target, workspace.focusedPaneId);
 }
 
 // Mirrors the F3 handler's gate: a home tab with a focused/selected table on
@@ -5418,7 +5413,7 @@ useNativeAppMenu({
   appVersion: APP_VERSION,
   state: () => ({
     hasDataTab: Boolean(activeDataTab.value),
-    canOpenDesign: Boolean(activeDataTab.value) || Boolean(homeTabForMenu() && resolveHomeDesignTargets(homeTabForMenu()).length),
+    canOpenDesign: Boolean(focusedDesignTarget.value),
     canEditTableComment: homeCommentTargetCanEdit(),
     canRefresh: Boolean(activeTab.value),
     hasNextTab: adjacentTabAvailable("next"),
@@ -5439,7 +5434,7 @@ useNativeAppMenu({
     closeTabOrHide: closeTabOrHideWindow,
     findInTable: () => openFindReplaceDialog("find"),
     replaceInTable: () => openReplaceDialog(),
-    openDesign: openDesignFromMenu,
+    openDesign: openFocusedDesign,
     editTableComment: editTableCommentFromMenu,
     refresh: refreshFromMenu,
     tableFolders: openTableFolderPage,

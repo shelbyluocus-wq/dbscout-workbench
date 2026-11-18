@@ -8,6 +8,40 @@ const server = await createServer({
   server: { host: "127.0.0.1", port: 0, open: false },
 });
 
+async function verifyDesignWithoutDefocusing(page, key) {
+  const hero = page.locator('.wb-dbhome-object-row[data-table-name="hero"] .wb-dbhome-object-name-button');
+  const cell = page.locator('td[data-column-name="name"]').first();
+  async function openAndReturn() {
+    await page.keyboard.press(`${key}+d`);
+    const tab = page.locator('.wb-tab.active.is-design-tab').filter({ hasText: 'hero' });
+    await tab.waitFor({ timeout: 5000 });
+    await tab.locator('.wb-tab-close').click();
+  }
+  await hero.click();
+  await page.locator('.wb-dbhome-search input').focus();
+  await openAndReturn();
+  if (await page.locator('.wb-sidebar.is-collapsed').count()) {
+    await page.locator('.wb-titlebar-sidebar .wb-topbar-collapse-btn').click();
+  }
+  const database = page.locator('.wb-database-item[aria-current="true"]');
+  if (await database.getAttribute('aria-expanded') !== 'true') await database.click();
+  await page.locator('.wb-table-item[data-table-name="hero"]').click();
+  await openAndReturn();
+  await cell.click();
+  await openAndReturn();
+  await cell.dblclick();
+  await cell.locator('input[data-ime-editor]:not(.wb-cell-ime-hold)').fill('Design from inline edit');
+  await openAndReturn();
+  await cell.getByText('Design from inline edit', { exact: true }).waitFor();
+  const detail = page.locator('.wb-cell-detail .wb-detail-input');
+  await cell.click();
+  if (!(await detail.isVisible())) await page.locator('.wb-cell-detail-toggle').click();
+  await detail.fill('Design from detail edit');
+  await openAndReturn();
+  await cell.getByText('Design from detail edit', { exact: true }).waitFor();
+  await page.locator('.wb-tab.active .wb-tab-close').click();
+}
+
 async function verifyConsecutiveClose(page, key) {
   const tabs = page.locator('.wb-tab');
   const home = tabs.filter({ hasText: 'Home' });
@@ -171,7 +205,7 @@ try {
       await page.keyboard.press(`${key}+d`);
       assert.equal(await find.isVisible(), true);
       assert.equal(await page.locator(".wb-tab.active").filter({ hasText: tableName }).count(), 1);
-      assert.equal(await page.locator(".wb-tab.is-design-tab").count(), 0);
+      await page.locator(".wb-tab.is-design-tab").waitFor({ state: "detached", timeout: 5000 });
       await find.locator(".wb-dialog-close").click();
 
       await search.focus();
@@ -179,6 +213,7 @@ try {
       await search.waitFor({ state: "detached", timeout: 5000 });
       assert.equal(await page.locator(".wb-tab").count(), 1);
       await verifyConsecutiveClose(page, key);
+      await verifyDesignWithoutDefocusing(page, key);
       await verifyCustomEditingShortcuts(page, key);
       assert.deepEqual(errors, []);
       console.log(`${engine.name()} (${platform}): table search focus, tab shortcuts, modal isolation, and custom save and undo after reload passed`);

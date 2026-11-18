@@ -3067,7 +3067,7 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
     orchestrator,
     /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCloseTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleOpenDesignShortcut\(event\)\)\s*return;/,
   );
-  assert.match(orchestrator, /focusedPaneState\.handleOpenDesignKeydown\(event\) === true/);
+  assert.match(orchestrator, /openDesign: openFocusedDesign/);
   assert.match(read("./components/WorkbenchPane.vue"), /function\s+reclaimDataGridFocus\(tabId\)/);
   assert.match(read("./components/WorkbenchPane.vue"), /isStrandedKeyboardFocus\(globalThis\.document\?\.activeElement\)/);
   assert.match(read("./components/WorkbenchPane.vue"), /gridWrapRef\.value\?\.focus\(\{ preventScroll: true \}\)/);
