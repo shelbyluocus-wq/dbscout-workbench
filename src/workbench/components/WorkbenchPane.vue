@@ -962,12 +962,13 @@ function selectGridInsertRow(tab, rowId, event) {
 
 async function handleGridKeydownWithRows(event) {
   focusPane();
+  if (handleUndoKeydown(event)) return;
   const tab = activeDataTab.value;
   const key = String(event.key || "").toLowerCase();
   const pasteShortcut = (event.metaKey || event.ctrlKey) && key === "v";
   // Let the browser dispatch a real ClipboardEvent for grid paste. Reading
   // navigator.clipboard from keydown opens an extra macOS WebKit Paste menu.
-  if (pasteShortcut && !editingCell.value) return;
+  if (pasteShortcut && !editingCell.value && !shortcutHelper.matchesBinding("save", event)) return;
   if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && tab?.selectedRowKeys?.size > 0) {
     if (exitRowSelectionToCell(tab)) {
       event.preventDefault();
@@ -1293,9 +1294,14 @@ function isEditableShortcutTarget(target) {
   return Boolean(target.isContentEditable || target.closest?.("input, textarea, select"));
 }
 
+function isTableSearchTarget(target) {
+  return Boolean(activeDataTab.value && target && target === searchInputRef.value);
+}
+
 function handleOpenDesignKeydown(event) {
   if (!shortcutHelper.matchesBinding("openDesign", event)) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
+  // Opening a data tab focuses its search box, so keep table design available there.
+  if (!isTableSearchTarget(event.target) && isEditableShortcutTarget(event.target)) return false;
   if (activeDataTab.value) {
     if (activeDataReadOnly.value || !connectionHasCapability(activeEngineKind.value, "tableDesign")) {
       statusText.value = activeDataReadOnly.value ? "只读连接不能打开表设计" : "当前连接不支持表设计";
@@ -1323,8 +1329,8 @@ function handleOpenDesignKeydown(event) {
 function handlePaneKeydown(event) {
   if (handleTableFindKeydown(event)) return;
   if (handleOpenDesignKeydown(event)) return;
-  if (handleRedoKeydown(event)) return;
-  handleUndoKeydown(event);
+  if (handleUndoKeydown(event)) return;
+  handleRedoKeydown(event);
 }
 
 function setTextDraft(value) {
@@ -1643,6 +1649,7 @@ function emitPaneState() {
     clearInsertDraftsAfterRefresh,
     handleWorkbenchKeydown: handlePaneKeydown,
     handleOpenDesignKeydown,
+    isTableSearchTarget,
     copyHomeSelection,
     pasteHomeTables,
     refreshHomeView,

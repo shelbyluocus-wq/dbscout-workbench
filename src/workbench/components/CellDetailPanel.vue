@@ -5,6 +5,8 @@ import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
+import { useShortcuts } from "../composables/useShortcuts.js";
+import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 
 const props = defineProps({
   selectedCell: { type: Object, default: null },
@@ -44,17 +46,19 @@ const isResizing = ref(false);
 // 组件只消费 state 与 toggle/notify 方法。
 const visibility = createCellDetailVisibility();
 const { ambientStyle } = useCellDetailAmbient();
+const { get: getShortcut, matchesBinding } = useShortcuts();
 let removeDragListeners = null;
 
 const selectedCellKey = computed(() =>
   props.selectedCell ? [props.selectedCell.tabId, props.selectedCell.rowKey, props.selectedCell.column, props.selectedCell.kind || "data"].join("") : "",
 );
 const isFieldComment = computed(() => props.selectedCell?.kind === "fieldComment");
-const detailPlaceholder = computed(() => (
-  isFieldComment.value
-    ? "字段备注（只读）"
-    : "选中单元格后在这里查看或编辑长文本（失焦或 Ctrl+S 保存）"
-));
+const detailPlaceholder = computed(() => {
+  if (isFieldComment.value) return "字段备注（只读）";
+  const saveShortcut = formatShortcutForPlatform(getShortcut("save"));
+  const saveHint = saveShortcut ? `失焦或 ${saveShortcut} 保存` : "失焦保存";
+  return `选中单元格后在这里查看或编辑长文本（${saveHint}）`;
+});
 const isJsonDetail = computed(() => isDetailJson(sourceDraft.value));
 const jsonPretty = computed(() => visibility.state.jsonPretty);
 const detailFormatting = computed(() => highlightDetailValue(viewDraft.value));
@@ -192,9 +196,7 @@ function onDetailBlur() {
 }
 
 function onDetailKeydown(event) {
-  // Ctrl/Cmd+S saves the detail panel even while the textarea is focused (#3).
-  const key = String(event.key || "").toLowerCase();
-  if ((event.ctrlKey || event.metaKey) && key === "s") {
+  if (matchesBinding("save", event)) {
     event.preventDefault();
     saveDetail();
     return;

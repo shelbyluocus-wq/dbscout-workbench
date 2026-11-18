@@ -118,8 +118,8 @@ import { applyCommittedCellToTab } from "./utils/committedCellSync.js";
 import { isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { resolveHomeDesignTargets } from "./utils/homeDesignTargets.js";
-import { adjacentPublishedTabId, visibleTabsForPane } from "./utils/tabPublication.js";
-import { isReservedTabShortcutCombo, isTabShortcutEvent, resolveTabShortcutEvent } from "./utils/tabShortcutHints.js";
+import { adjacentPublishedTabId } from "./utils/tabPublication.js";
+import { isReservedTabShortcutCombo, isTabShortcutEvent } from "./utils/tabShortcutHints.js";
 import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import {
   closableRelativeTabsInPane,
@@ -283,17 +283,13 @@ function withShortcutLabel(action, shortcut) {
 }
 const windowPin = useWindowPin();
 
-// On startup, push the persisted global "open window" binding to the Rust
-// backend so a user-rebound shortcut overrides the hardcoded Alt+Shift+F this
-// session (analysis point #2). Best-effort: in mock/browser dev there is no
-// backend command, and registration errors must not block the UI.
+// Reapply the saved global binding on startup, including a cleared binding.
 async function syncGlobalShortcutBinding() {
-  const binding = shortcutHelper.get("openWindow");
-  if (!binding) return;
+  if (!isTauriRuntime()) return;
   try {
-    await invokeWorkbench("register_global_shortcut", { binding });
+    await shortcutHelper.restoreGlobalBinding();
   } catch {
-    // Non-fatal: the Rust default (Alt+Shift+F) remains active.
+    // Native registration errors must not block the UI.
   }
 }
 
@@ -446,6 +442,7 @@ const focusedPaneState = reactive({
   deleteRow: null,
   handleWorkbenchKeydown: null,
   handleOpenDesignKeydown: null,
+  isTableSearchTarget: null,
   clearSelection: null,
   resetGridScroll: null,
   selectCellAt: null,
@@ -4752,9 +4749,14 @@ function handleRefreshKeydown(event) {
   return true;
 }
 
+function isTabShortcutEditingTarget(target) {
+  // The workbench focuses table search when opening a table.
+  return isEditableShortcutTarget(target) && !focusedPaneState.isTableSearchTarget?.(target);
+}
+
 function handleCloseTabKeydown(event) {
   if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
+  if (isTabShortcutEditingTarget(event.target)) return false;
   const tab = activeTab.value;
   if (!tab) {
     // On macOS ⌘W is also the app's close-window key: with no tab to close,
@@ -4788,7 +4790,7 @@ function handleCycleTabKeydown(event) {
     isPrev = event.shiftKey;
   }
   if (!isNext && !isPrev) return false;
-  if (isEditableShortcutTarget(event.target)) return false;
+  if (isTabShortcutEditingTarget(event.target)) return false;
   const direction = isPrev ? "previous" : "next";
   const nextTabId = adjacentPublishedTabId(workspace.tabs, pane, direction);
   if (!nextTabId) return false;
@@ -4803,13 +4805,7 @@ function handleTabShortcutKeydown(event) {
   event.preventDefault();
   event.stopPropagation();
   const pane = getFocusedPane(workspace);
-  if (!pane) return true;
-  if (event.code === "Backquote") {
-    openCurrentDatabaseHome({ paneId: pane.id, activate: true });
-    return true;
-  }
-  const target = resolveTabShortcutEvent(event, visibleTabsForPane(workspace.tabs, pane));
-  if (target?.tabId) void activateTab(pane.id, target.tabId);
+  if (pane) openCurrentDatabaseHome({ paneId: pane.id, activate: true });
   return true;
 }
 
@@ -4967,8 +4963,8 @@ function handleWorkbenchKeydown(event) {
   }
   if (handleTableFindKeydown(event)) return;
   if (handleOpenDesignKeydown(event)) return;
-  if (handleRedoKeydown(event)) return;
-  handleUndoKeydown(event);
+  if (handleUndoKeydown(event)) return;
+  handleRedoKeydown(event);
 }
 
 async function handleGridKeydownWithRows(event) {

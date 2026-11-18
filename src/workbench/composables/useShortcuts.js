@@ -212,12 +212,11 @@ function loadStoredBindings() {
   }
 }
 
-function persistBindings(values) {
-  try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(values));
-  } catch {
-    // best-effort persistence
-  }
+function persistBindings(changes) {
+  // Other open windows may have changed bindings since this page loaded.
+  const saved = { ...loadStoredBindings(), ...changes };
+  globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(saved));
+  return saved;
 }
 
 /**
@@ -274,8 +273,12 @@ function ensureSharedBindings() {
     const merged = { ...defaultBindingsFor(), ...(stored || {}) };
     if (isMacOSPlatform() && !readMigrationFlag()) {
       const migrated = migrateMacosDefaultBindings(merged);
-      if (migrated.changed) persistBindings(migrated.bindings);
-      writeMigrationFlag();
+      try {
+        if (migrated.changed) persistBindings(migrated.bindings);
+        writeMigrationFlag();
+      } catch {
+        // Still use the migrated shortcuts for this session if storage is unavailable.
+      }
       sharedBindings = reactive(migrated.bindings);
     } else {
       sharedBindings = reactive(merged);
@@ -289,11 +292,9 @@ function ensureSharedBindings() {
  * state (singleton). Pass `invokeWorkbench` so global actions can be
  * re-registered through the Rust backend; the last non-null invoke is kept.
  *
- * `rebind(action, combo)` updates the shared binding, persists it, and — for
- * global actions — re-registers the OS-level shortcut. On backend failure it
- * reverts the in-memory + persisted value and **throws** so the caller (the
- * settings dialog) can surface the error instead of silently showing success
- * (analysis point #3). Pass an empty combo to clear (unregister) a binding.
+ * `rebind(action, combo)` persists the changed binding and updates the shared
+ * state. Global bindings must also register successfully with the OS. Pass an
+ * empty combo to clear a binding.
  *
  * @param {Function} [invokeWorkbench] - The Tauri invoke bridge.
  */
@@ -331,42 +332,40 @@ export function useShortcuts(invokeWorkbench) {
     }
   }
 
-  async function rebind(action, combo) {
-    const next = normalizeCombo(combo);
-    const previous = bindings[action] ?? "";
-    if (previous === next) return;
-    bindings[action] = next;
-    persistBindings(bindings);
-    if (GLOBAL_ACTIONS.has(action)) {
-      try {
-        await registerGlobal(next);
-      } catch (error) {
-        // Revert both state and storage so the UI reflects reality and the
-        // user isn't left with a binding that doesn't actually work (#3).
-        bindings[action] = previous;
-        persistBindings(bindings);
-        throw error;
-      }
+  async function applyBindings(changes) {
+    const changesGlobal = Object.hasOwn(changes, "openWindow");
+    const previousGlobal = changesGlobal ? savedGlobalBinding() : "";
+    try {
+      if (changesGlobal) await registerGlobal(changes.openWindow);
+      Object.assign(bindings, persistBindings(changes));
+    } catch (error) {
+      // Registering a global shortcut can clear the previous OS registration.
+      if (changesGlobal) await registerGlobal(previousGlobal).catch(() => {});
+      throw error;
     }
   }
 
+  async function rebind(action, combo) {
+    await applyBindings({ [action]: normalizeCombo(combo) });
+  }
+
   async function reset() {
-    // Restore every default binding for this platform (the settings dialog's
-    // reset must bring back macOS defaults on a Mac), then re-register the
-    // global shortcut so the backend matches the UI (analysis point #2).
-    const defaults = defaultBindingsFor();
-    for (const action of Object.keys(defaults)) {
-      bindings[action] = defaults[action];
-    }
-    persistBindings(bindings);
     try {
-      await registerGlobal(defaults.openWindow);
+      await applyBindings(defaultBindingsFor());
     } catch (error) {
       throw new Error(`恢复默认快捷键失败：${String(error?.message || error)}`);
     }
   }
 
-  return { bindings: readonly(bindings), all, get, matchesBinding, rebind, reset };
+  function savedGlobalBinding() {
+    return normalizeCombo(loadStoredBindings()?.openWindow ?? bindings.openWindow);
+  }
+
+  function restoreGlobalBinding() {
+    return registerGlobal(savedGlobalBinding());
+  }
+
+  return { bindings: readonly(bindings), all, get, matchesBinding, rebind, reset, restoreGlobalBinding };
 }
 
 // Test-only helper: drops the shared singleton so each test starts clean.

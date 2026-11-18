@@ -73,6 +73,7 @@ import {
   planAutoFill,
 } from "../utils/gridAutoFill.js";
 import { useGridAutoFill } from "./useGridAutoFill.js";
+import { useShortcuts } from "./useShortcuts.js";
 
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
@@ -133,6 +134,8 @@ export function useGridEditor(
   { scrollRowIntoView, scrollCellIntoView = scrollRowIntoView, scrollInsertCellIntoView = () => {}, columnWindow = null },
   { busy, statusText, onSaveFeedback = () => {}, onCellCommitted = () => {} },
 ) {
+  const { matchesBinding } = useShortcuts();
+
   // ── Selection & editing state ─────────────────────────────────────────
   const selectedCell = ref(null);
   const selectedRange = ref(null);
@@ -4281,12 +4284,33 @@ export function useGridEditor(
       return;
     }
 
+    if (matchesBinding("save", event)) {
+      event.preventDefault();
+      if (isReadOnlyTab(tab)) {
+        setReadOnlyStatus(tab);
+        return;
+      }
+      if (editingCell.value) {
+        const editing = editingCell.value;
+        const save = finishEditing();
+        if (isInsertRowKey(editing.rowKey)) return await commitInsertRows(tab);
+        return await save;
+      }
+      if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
+        return await commitInsertRows(tab);
+      }
+      // Grid edits and pastes persist as part of their own operation. The
+      // detail textarea owns a separate dirty-gated Ctrl+S handler; treating a
+      // plain grid selection as an unsaved detail draft can overwrite a
+      // pending multi-cell paste with stale textDraft data.
+      return;
+    }
+
     // Clipboard shortcuts
     const key = String(event.key || "").toLowerCase();
     const isCopy = (event.ctrlKey || event.metaKey) && key === "c";
     const isPaste = (event.ctrlKey || event.metaKey) && key === "v";
     const isCut = (event.ctrlKey || event.metaKey) && key === "x";
-    const isSave = (event.ctrlKey || event.metaKey) && key === "s";
     const isSelectAll = (event.ctrlKey || event.metaKey) && key === "a";
 
     if (editingCell.value && (isCopy || isCut || isPaste)) {
@@ -4345,28 +4369,6 @@ export function useGridEditor(
           if (copied && !isReadOnlyTab(tab)) await clearCellValue(tab, row, selectedCell.value.column);
         }
       }
-      return;
-    }
-
-    if (isSave) {
-      event.preventDefault();
-      if (isReadOnlyTab(tab)) {
-        setReadOnlyStatus(tab);
-        return;
-      }
-      if (editingCell.value) {
-        const editing = editingCell.value;
-        const save = finishEditing();
-        if (isInsertRowKey(editing.rowKey)) return await commitInsertRows(tab);
-        return await save;
-      }
-      if (isInsertRowVisible(tab) && hasInsertDrafts(tab)) {
-        return await commitInsertRows(tab);
-      }
-      // Grid edits and pastes persist as part of their own operation. The
-      // detail textarea owns a separate dirty-gated Ctrl+S handler; treating a
-      // plain grid selection as an unsaved detail draft can overwrite a
-      // pending multi-cell paste with stale textDraft data.
       return;
     }
 

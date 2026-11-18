@@ -254,7 +254,7 @@ test("homepage tab keeps the normal arrow cursor", () => {
   assert.match(homeCursorRule, /user-select:\s*none/);
 });
 
-test("favorite database shortcuts cannot reuse Ctrl+digit or Ctrl+Backquote tab switching", () => {
+test("favorite database shortcuts cannot reuse the database home shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   assert.match(orchestrator, /function favoriteShortcutConflict\(target, shortcut\)/);
   assert.match(

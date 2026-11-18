@@ -3055,10 +3055,9 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
     /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCloseTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleCycleTabKeydown\(event\)\)\s*return;/
   );
 
-  // Ctrl+W closes the active tab in the focused pane, but only when focus is
-  // not inside an editable element (consistent with other workspace shortcuts).
+  // Closing and cycling tabs work from table search and respect editing fields.
   assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
-  assert.match(orchestrator, /if\s*\(isEditableShortcutTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
+  assert.match(orchestrator, /if\s*\(isTabShortcutEditingTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
 
   // Ctrl+D must stay available after Ctrl+W closes table design. That close
   // drops keyboard focus onto the document, outside the workbench bubble listener.
@@ -3079,7 +3078,7 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
 });
 
-test("Ctrl+digit and Ctrl+Backquote switch published tabs in the focused pane", () => {
+test("Ctrl+Backquote opens the database home in the focused pane", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const pane = read("./components/WorkbenchPane.vue");
@@ -3093,7 +3092,6 @@ test("Ctrl+digit and Ctrl+Backquote switch published tabs in the focused pane", 
   );
   assert.match(orchestrator, /function\s+handleTabShortcutKeydown\s*\(/);
   assert.match(orchestrator, /openCurrentDatabaseHome\(\{\s*paneId:\s*pane\.id,\s*activate:\s*true\s*\}\)/);
-  assert.match(orchestrator, /resolveTabShortcutEvent\(event,\s*visibleTabsForPane\(workspace\.tabs,\s*pane\)\)/);
   assert.match(orchestrator, /preventDialogShortcutDefault[\s\S]*isTabShortcutEvent\(event\)/);
   assert.match(orchestrator, /dialogLayerManager\.hasActiveModalLayer\(\)[\s\S]*?hideTabShortcutHints\(\)/);
   assert.match(orchestrator, /:show-shortcut-hints="tabShortcutHintsVisible"/);

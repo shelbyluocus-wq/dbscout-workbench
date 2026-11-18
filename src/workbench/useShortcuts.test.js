@@ -175,6 +175,40 @@ test("stored bindings override defaults on load", () => {
   assert.equal(get("openWindow"), DEFAULT_BINDINGS.openWindow);
 });
 
+test("refresh keeps edits from different windows and restores cleared bindings", async () => {
+  const key = "dbscout-shortcut-bindings";
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (name) => store.get(name) ?? null,
+    setItem: (name, value) => store.set(name, value),
+  };
+  const firstWindow = useShortcuts(fakeInvoke());
+  await firstWindow.rebind("save", "Ctrl+Shift+K");
+
+  // Another window updates its own binding after this window has loaded.
+  store.set(key, JSON.stringify({ ...JSON.parse(store.get(key)), searchDatabase: "" }));
+  await firstWindow.rebind("undo", "Ctrl+Shift+J");
+
+  await firstWindow.rebind("openWindow", "");
+  _resetSingletonForTests();
+  const invoke = fakeInvoke();
+  const refreshed = useShortcuts(invoke);
+  assert.equal(refreshed.get("save"), "Ctrl+Shift+K");
+  assert.equal(refreshed.get("undo"), "Ctrl+Shift+J");
+  assert.equal(refreshed.get("searchDatabase"), "");
+  assert.equal(refreshed.get("openWindow"), "");
+  await refreshed.restoreGlobalBinding();
+  assert.deepEqual(invoke.calls, [{ command: "unregister_global_shortcut", payload: undefined }]);
+});
+
+test("a storage write failure leaves the current binding in place and reports the error", async () => {
+  const shortcuts = useShortcuts(fakeInvoke());
+  globalThis.localStorage.setItem = () => { throw new Error("Storage is full"); };
+
+  await assert.rejects(() => shortcuts.rebind("save", "Ctrl+Shift+K"), /Storage is full/);
+  assert.equal(shortcuts.get("save"), DEFAULT_BINDINGS.save);
+});
+
 test("all useShortcuts callers share one reactive bindings instance (#1)", async () => {
   // The orchestrator and the settings dialog must observe the same state, so
   // rebinding in one is immediately visible to the other's keydown handler.

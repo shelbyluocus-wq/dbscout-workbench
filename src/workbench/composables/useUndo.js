@@ -14,6 +14,7 @@ import {
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { ensureTabRowStore, mutateTabRow, tabRows } from "../rowStore.js";
 import { createRowIndex } from "../utils/rowIndex.js";
+import { useShortcuts } from "./useShortcuts.js";
 
 export function useUndo(
   editState,
@@ -27,6 +28,8 @@ export function useUndo(
     onHistoryApplied = null,
   },
 ) {
+  const { matchesBinding } = useShortcuts();
+
   function ensureSaved(result) {
     if (result?.conflict) throw new Error("数据已被别人修改，请刷新后再试");
     if (result?.updated === false) throw new Error("保存未影响任何数据，请刷新后再试");
@@ -656,8 +659,7 @@ export function useUndo(
   }
 
   function handleUndoKeydown(event) {
-    const key = String(event?.key || "").toLowerCase();
-    if (!(event?.ctrlKey || event?.metaKey) || key !== "z" || event?.shiftKey) return false;
+    if (!event || !activeTab.value || event.defaultPrevented || !matchesBinding("undo", event)) return false;
     if (isNativeUndoTarget(event)) return false;
     event.preventDefault();
     queueHistoryAction("undo");
@@ -668,7 +670,7 @@ export function useUndo(
     const key = String(event?.key || "").toLowerCase();
     const isRedo = ((event?.ctrlKey || event?.metaKey) && key === "y")
       || ((event?.ctrlKey || event?.metaKey) && event?.shiftKey && key === "z");
-    if (!isRedo) return false;
+    if (!isRedo || !activeTab.value || event.defaultPrevented) return false;
     if (isNativeUndoTarget(event)) return false;
     event.preventDefault();
     queueHistoryAction("redo");
