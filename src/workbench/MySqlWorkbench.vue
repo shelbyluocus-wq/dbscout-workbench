@@ -5999,6 +5999,7 @@ onBeforeUnmount(() => {
       :open="commentEdit.open"
       :kind="commentEdit.kind"
       :name="commentEdit.kind === 'table' ? commentEdit.tableName : commentEdit.columnName"
+      :table-name="commentEdit.tableName"
       :value="commentEdit.value"
       :saving="commentEdit.saving"
       :error="commentEdit.error"

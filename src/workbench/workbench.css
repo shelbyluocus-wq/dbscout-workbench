@@ -1768,58 +1768,159 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-comment-edit-dialog {
+  --wb-comment-gutter: clamp(14px, 3vw, 22px);
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100vw - 32px));
-  max-height: min(640px, calc(100vh - 32px));
-  box-sizing: border-box;
+  width: min(540px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  padding: 0;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--wb-chrome-surface);
+  color: var(--wb-text);
+  backdrop-filter: none;
+}
+
+.wb-comment-edit-dialog .wb-dialog-header {
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  padding: 17px var(--wb-comment-gutter) 12px;
 }
 
 .wb-comment-edit-heading {
   display: grid;
-  gap: 2px;
+  gap: 4px;
+  align-self: center;
   min-width: 0;
 }
 
-.wb-comment-edit-heading small {
+.wb-comment-edit-heading h2 {
+  margin: 0;
+  font-size: var(--wb-fs-heading);
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.wb-comment-edit-heading p {
+  margin: 0;
   overflow: hidden;
-  color: var(--wb-secondary-text);
-  font-size: var(--wb-fs-body);
-  font-weight: 400;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wb-comment-edit-dialog textarea {
-  width: 100%;
-  min-height: 168px;
-  max-height: min(360px, 46vh);
-  box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid var(--wb-border);
+.wb-comment-edit-dialog .wb-dialog-close {
+  flex: 0 0 28px;
   border-radius: 6px;
-  background: var(--wb-field-surface);
-  color: var(--wb-text);
-  font: inherit;
-  line-height: 1.5;
-  resize: vertical;
+  color: var(--wb-quiet-text);
 }
 
-.wb-comment-edit-dialog textarea:focus {
-  border-color: var(--wb-accent);
-  outline: 2px solid var(--wb-accent);
+.wb-comment-edit-dialog button:focus {
+  outline: 2px solid var(--wb-accent-strong);
   outline-offset: 1px;
 }
 
+.wb-comment-edit-dialog .wb-dialog-close:disabled {
+  color: var(--wb-disabled);
+}
+
+.wb-comment-edit-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 var(--wb-comment-gutter) 14px;
+}
+
+.wb-comment-edit-dialog textarea {
+  display: block;
+  width: 100%;
+  min-height: clamp(104px, 36vh, 184px);
+  max-height: max(110px, min(420px, calc(100dvh - 172px)));
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid var(--wb-workspace-mist-border);
+  border-radius: 7px;
+  background: var(--wb-grid-row);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: var(--wb-fs-body);
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.wb-comment-edit-dialog textarea::placeholder {
+  color: var(--wb-quiet-text);
+  opacity: 1;
+}
+
+.wb-comment-edit-dialog textarea:focus {
+  border-color: var(--wb-accent-strong);
+  outline: 1px solid var(--wb-accent-strong);
+  outline-offset: -1px;
+}
+
 .wb-comment-edit-dialog textarea:disabled {
-  opacity: 0.7;
+  color: var(--wb-disabled);
 }
 
 .wb-comment-edit-error {
-  margin: 8px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--wb-danger-surface);
   color: var(--wb-danger-text);
   font-size: var(--wb-fs-body);
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wb-comment-edit-error svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.wb-comment-edit-dialog .wb-dialog-actions {
+  align-items: center;
+  margin: 0;
+  padding: 10px var(--wb-comment-gutter) 12px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.wb-comment-edit-shortcut {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  row-gap: 2px;
+  margin-inline-end: auto;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-comment-edit-shortcut kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 4px;
+  background: var(--wb-grid-row);
+  color: var(--wb-text);
+  font-family: inherit;
+  font-size: var(--wb-fs-body);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.wb-comment-edit-dialog .wb-dialog-actions button {
+  min-height: 32px;
+  padding-inline: 12px;
+}
+
+.wb-comment-edit-dialog .wb-dialog-actions .wb-dialog-primary {
+  min-width: 92px;
 }
 
 /* ── 查找替换对话框（Ctrl+H）── */

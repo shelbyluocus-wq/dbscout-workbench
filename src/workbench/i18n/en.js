@@ -945,6 +945,8 @@ export default Object.freeze({
   "m_0656d19dd4a5": "Incompatible data; cannot execute",
   "m_881f5971987d": "Execute ALTER TABLE",
   "m_2d22af42a79f": "Edit comment",
+  "commentEdit.placeholder": "Enter a comment…",
+  "commentEdit.quickSave": "Quick save",
   "m_ea9008f9e495": "Edit (Markdown supported)",
   "m_5d8a2f9fc808": "Enter a comment in Markdown…",
   "m_a76fdaad7519": "Live preview",

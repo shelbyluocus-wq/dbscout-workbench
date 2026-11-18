@@ -945,6 +945,8 @@ export default Object.freeze({
   "m_0656d19dd4a5": "数据不兼容，无法执行",
   "m_881f5971987d": "执行 ALTER TABLE",
   "m_2d22af42a79f": "编辑备注",
+  "commentEdit.placeholder": "输入备注…",
+  "commentEdit.quickSave": "快捷保存",
   "m_ea9008f9e495": "编辑 (支持 Markdown)",
   "m_5d8a2f9fc808": "输入备注内容，支持 Markdown 格式…",
   "m_a76fdaad7519": "实时预览",
