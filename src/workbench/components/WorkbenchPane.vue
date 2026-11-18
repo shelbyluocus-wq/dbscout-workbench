@@ -322,6 +322,7 @@ const {
   syncSelectionAfterHistory,
   handleGridKeydown,
   activateCellInput,
+  finishEditingAndMoveDown,
   pasteGridText,
   getInsertDraft,
   updateInsertDraft,
@@ -1887,7 +1888,7 @@ onMounted(() => emitPaneState());
       @cell-blur="finishEditing"
       @cell-input-start="activateCellInput"
       @edit-input="updateEditDraft"
-      @finish-edit="finishEditing(); navigateCell(1, 0)"
+      @finish-edit="finishEditingAndMoveDown"
       @cancel-edit="cancelEditing"
       @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
       @toggle-sort="sortPage"

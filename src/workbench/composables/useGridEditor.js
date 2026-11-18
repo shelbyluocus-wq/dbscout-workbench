@@ -2691,13 +2691,18 @@ export function useGridEditor(
     if (!isReadOnlyTab(tab) && !options.extendRange && deltaRow > 0 && deltaCol === 0 && current?.rowIndex === lastDataRowIndex) {
       const firstTrailingRow = getVisibleInsertRows(tab).find((row) => insertRowAnchorIndex(tab, row) == null);
       if (firstTrailingRow) selectInsertCell(tab, firstTrailingRow.id, current.columnIndex);
-      else selectInsertCell(tab, current.columnIndex);
+      else if (options.createInsertRow !== false) selectInsertCell(tab, current.columnIndex);
       return;
     }
     const position = nextCellPosition(tab, deltaRow, deltaCol, options);
     if (!position) return;
     if (!isInsertRowKey(position.rowKey)) hideInsertRow(tab);
     applySelectedPosition(tab, position, options);
+  }
+
+  function finishEditingAndMoveDown() {
+    finishEditing();
+    navigateCell(1, 0, { createInsertRow: false });
   }
 
   // 一屏可见的数据行数（PageUp/PageDown 用），按视口高度动态计算。
@@ -4511,8 +4516,7 @@ export function useGridEditor(
     if (event.key === "Enter") {
       event.preventDefault();
       if (editingCell.value) {
-        finishEditing();
-        navigateCell(1, 0);
+        finishEditingAndMoveDown();
       } else if (selectedCell.value) {
         const row = rowForSelectedCell(tab, selectedCell.value);
         const { rowIndex, columnIndex } = selectedCellPositionIndexes(tab, selectedCell.value);
@@ -4640,7 +4644,6 @@ export function useGridEditor(
     const current = isInsertRowKey(cell.rowKey)
       ? insertDraftValue(tab, cell.rowKey, cell.column)
       : editableCellValue(row, cell.column);
-    input._composing = false;
     input._imeLive = true;
     editingCell.value = { ...cell };
     editDraft.value = current;
@@ -4789,6 +4792,7 @@ export function useGridEditor(
     removeInsertDraftRows,
     applyInsertDraftHistoryEntry,
     syncSelectionAfterHistory,
+    finishEditingAndMoveDown,
     handleInsertKeydown,
     // commits
     commitCellValue,

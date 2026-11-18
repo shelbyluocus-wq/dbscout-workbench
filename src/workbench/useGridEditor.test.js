@@ -766,6 +766,7 @@ test("direct typing still inserts a plain letter when no composition starts", as
 test("a primed cell editor receives the key without clearing an in-progress composition", async () => {
   const imeInput = {
     value: "",
+    _composing: true,
     classList: { contains: (name) => name === "wb-cell-ime-hold" },
     closest() { return this; },
     focus() { this.focused = true; },
@@ -787,6 +788,7 @@ test("a primed cell editor receives the key without clearing an in-progress comp
 
   assert.equal(prevented, false);
   assert.equal(imeInput.value, "");
+  assert.equal(imeInput._composing, true);
   assert.equal(editor.editingCell.value.column, "name");
   assert.equal(editor.editDraft.value, "Alice");
 });
@@ -1936,6 +1938,21 @@ test("selecting the insert row clears cell and range selection", async () => {
   assert.equal(editor.selectedInsertRow.value.tabId, tab.id);
   assert.match(editor.selectedInsertRow.value.rowId, /^insert-/);
   assert.equal(focused.count > 0, true);
+});
+
+test("confirming an edit in the last data row does not create an insert draft", async () => {
+  const { editor, tab } = createEditor();
+  tab.primaryKeys = ["id"];
+  const row = tab.rows.at(-1);
+  editor.startEditing(tab, row, "name", tab.rows.length - 1, 0);
+  editor.updateEditDraft("测试");
+
+  await editor.handleGridKeydown({ key: "Enter", preventDefault() {} });
+
+  assert.equal(editor.editingCell.value, null);
+  assert.equal(editor.selectedCell.value.rowKey, buildRowKey(tab, row));
+  assert.equal(editor.getInsertRows(tab).length, 0);
+  assert.equal(row.name, "测试");
 });
 
 test("ArrowDown from the last data row reveals and focuses the insert row", async () => {

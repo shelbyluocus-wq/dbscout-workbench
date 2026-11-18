@@ -18,17 +18,22 @@ test("ime key detection covers composition, Process, and Windows keyCode 229", (
   assert.equal(isImeKeyEvent(null), false);
 });
 
-test("cell editor keys ignore an in-progress composition", () => {
-  let entered = false;
-  const event = {
-    key: "Enter",
-    keyCode: 229,
-    isComposing: true,
-    preventDefault() { entered = true; },
-    stopPropagation() { entered = true; },
-  };
-  assert.equal(cellEditorKeydown(event, { onEnter() { entered = true; } }), false);
-  assert.equal(entered, false);
+test("IME confirmation Enter stays in the cell and retains the native action", () => {
+  for (const flags of [
+    { keyCode: 229, isComposing: true },
+    { keyCode: 229, isComposing: false },
+    { keyCode: 13, isComposing: false, target: { _composing: true } },
+  ]) {
+    const calls = [];
+    const event = {
+      key: "Enter",
+      ...flags,
+      preventDefault() { calls.push("prevent"); },
+      stopPropagation() { calls.push("stop"); },
+    };
+    cellEditorKeydown(event, { onEnter() { calls.push("finish"); } });
+    assert.deepEqual(calls, ["stop"]);
+  }
 });
 
 test("cell editor Enter, Escape, and Tab commit only after composition", () => {

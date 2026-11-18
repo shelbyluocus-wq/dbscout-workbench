@@ -5,7 +5,8 @@
 export function isImeKeyEvent(event) {
   if (!event) return false;
   const keyCode = event.keyCode ?? event.which;
-  return event.isComposing === true
+  return event.target?._composing === true
+    || event.isComposing === true
     || event.key === "Process"
     || event.key === "Unidentified"
     || keyCode === 229;
@@ -30,7 +31,13 @@ export function shouldCommitEditorInput(event) {
 }
 
 export function cellEditorKeydown(event, handlers = {}) {
-  if (!event || isImeKeyEvent(event)) return false;
+  if (!event) return false;
+  if (isImeKeyEvent(event)) {
+    // Leave candidate confirmation to the IME, without forwarding its Enter
+    // to the grid. Other keys can bubble to prime the inline editor.
+    if (event.key === "Enter") event.stopPropagation();
+    return false;
+  }
   if (event.key === "Enter") {
     event.preventDefault();
     event.stopPropagation();
