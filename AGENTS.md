@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## Git branches
+
+Do not create a Git branch without the user's explicit permission. A request to
+edit, commit, or push is not permission to create a branch. If a workflow needs
+one, ask before proceeding.
+
 ## Local wallpaper appearance
 
 Settings → Wallpaper provides twelve bundled stills and local PNG/JPEG/WebP/MP4
