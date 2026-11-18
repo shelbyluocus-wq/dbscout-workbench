@@ -453,11 +453,13 @@ npm run quality:duplication  # Fail when maintainable source duplication reaches
 npm run release:agent-runtime -- --version 1  # Publish the independently versioned AI runtime
 ```
 
-The macOS `icon.icns` is not full-bleed: it follows the macOS icon grid
-(824px rounded tile with a drop shadow on a transparent 1024px canvas), while
-the Windows `.ico` fills the canvas. After changing the artwork
-(`src-tauri/icons/black-cat-icon.png`), regenerate it with
-`swift scripts/build-macos-icon.swift`; do not let `tauri icon` overwrite it.
+The macOS `icon.icns` follows the macOS icon grid (824px rounded tile with
+a drop shadow on a transparent 1024px canvas). The Windows `icon.ico` uses
+a full-size tile with transparent rounded corners. After changing the artwork
+(`src-tauri/icons/black-cat-icon.png`), regenerate the platform icons with
+`swift scripts/build-macos-icon.swift` and
+`python3 scripts/build-windows-icon.py` (requires Pillow). Do not let
+`tauri icon` overwrite them.
 
 Release with `npm run release:package`; it builds the desktop app, renames the
 Windows installer to `blackcat_<version>_x64-setup.exe`, and updates

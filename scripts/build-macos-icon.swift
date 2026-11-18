@@ -2,7 +2,7 @@
 //
 // macOS app icons are drawn on the Big Sur grid: an 824x824 rounded square
 // centred on a 1024x1024 transparent canvas, with a soft drop shadow. The
-// Windows .ico keeps the full-bleed artwork, so only the .icns is regenerated.
+// The Windows .ico is generated separately by build-windows-icon.py.
 //
 // Usage: swift scripts/build-macos-icon.swift [source.png] [output.icns]
 
