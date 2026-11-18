@@ -1,6 +1,7 @@
 import {
   AUTOFIT_LONG_VALUE_PREVIEW_WIDTH,
   AUTOFIT_MAX_COL_WIDTH,
+  COL_RESIZE_MIN_WIDTH,
   COL_PADDING,
   MIN_COL_WIDTH,
 } from "../constants.js";
@@ -15,6 +16,19 @@ const VALUE_CHROME_WIDTH = COL_PADDING + 16;
 const HEADER_CHROME_WIDTH = COL_PADDING + 24;
 const LONG_VALUE_MIN_WIDTH = 140;
 const MAX_MEASURE_CANDIDATES = 3;
+
+export function normalizeManualColumnWidths(widths) {
+  if (!widths || typeof widths !== "object" || Array.isArray(widths)) return {};
+  return Object.fromEntries(Object.entries(widths)
+    .filter(([name, width]) => name && Number.isSafeInteger(width) && width >= COL_RESIZE_MIN_WIDTH));
+}
+
+export function manualColumnWidthsOf(tab) {
+  const state = tab?.columnWidthState;
+  return Object.fromEntries(Object.keys(state?.manual || {})
+    .filter((name) => state.manual[name])
+    .map((name) => [name, state.widths?.[name]]));
+}
 
 function columnType(column) {
   return String(

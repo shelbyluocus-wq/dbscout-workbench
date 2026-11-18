@@ -109,6 +109,7 @@ import {
   columnName,
 } from "./utils/normalize.js";
 import { isCustomColumnOrder } from "./utils/columnOrder.js";
+import { manualColumnWidthsOf } from "./utils/columnWidth.js";
 import { highlightCellResult as _highlightCellResult } from "./utils/cellDisplay.js";
 import { buildRowKey } from "./utils/rowIdentity.js";
 import { primaryKeyFilter } from "./utils/controlNavigation.js";
@@ -5137,6 +5138,13 @@ watch(
   () => {
     workspacePersistence.schedule();
   },
+);
+
+// Coalesce live width changes like SQL text edits. Page hide flushes pending
+// changes even if the user reloads immediately after a resize or reset.
+watch(
+  () => JSON.stringify(workspace.tabs.map(manualColumnWidthsOf)),
+  () => workspacePersistence.schedule(),
 );
 
 watch(

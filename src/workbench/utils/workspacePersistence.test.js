@@ -6,6 +6,7 @@ import {
   saveWorkspaceSnapshot,
   loadWorkspaceSnapshot,
   clearWorkspaceSnapshot,
+  parseWorkspaceSnapshot,
 } from "./workspacePersistence.js";
 
 function installLocalStorage(initial = {}) {
@@ -27,6 +28,29 @@ function installLocalStorage(initial = {}) {
 function cleanupLocalStorage() {
   delete globalThis.localStorage;
 }
+
+test("workspace snapshots keep only valid manual column widths for each tab", () => {
+  const snapshot = buildWorkspaceSnapshot({
+    tabs: [{
+      id: "tab-1",
+      tableName: "items",
+      columnWidthState: {
+        widths: { id: 40, name: 1800, description: 220 },
+        manual: { id: true, name: true },
+      },
+    }, {
+      id: "tab-2",
+      tableName: "players",
+      columnWidthState: { widths: { id: 91 }, manual: { id: true } },
+    }],
+  });
+  assert.deepEqual(snapshot.tabs[0].manualColumnWidths, { id: 40, name: 1800 });
+  assert.deepEqual(snapshot.tabs[1].manualColumnWidths, { id: 91 });
+  snapshot.tabs[0].manualColumnWidths.invalid = 1;
+  const restored = parseWorkspaceSnapshot(JSON.parse(JSON.stringify(snapshot)));
+  assert.deepEqual(restored.tabs[0].manualColumnWidths, { id: 40, name: 1800 });
+  assert.deepEqual(restored.tabs[1].manualColumnWidths, { id: 91 });
+});
 
 test("buildWorkspaceSnapshot extracts serializable fields from workspace state", () => {
   const snapshot = buildWorkspaceSnapshot({

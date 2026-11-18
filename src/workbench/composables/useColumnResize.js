@@ -82,6 +82,7 @@ export function useColumnResize() {
   let dragJustEndedAt = 0;
   let debounceTimer = null;
   let autofitRafId = 0;
+  let finishColumnResize = null;
 
   function getColumnWidth(tab, colName) {
     return validWidth(ensureColumnWidthState(tab)?.widths?.[colName]);
@@ -113,59 +114,73 @@ export function useColumnResize() {
     return Date.now() - dragJustEndedAt < 200;
   }
 
-  function applyColumnWidth(table, colIndex, px) {
-    if (!table?.querySelectorAll) return;
-    for (const row of table.querySelectorAll("tr")) {
-      const cell = row.children[colIndex];
-      if (!cell) continue;
-      // Pin all three dimensions. With auto table layout and nowrap content,
-      // width/min-width alone cannot shrink past the min-content floor.
-      cell.style.width = px + "px";
-      cell.style.minWidth = px + "px";
-      cell.style.maxWidth = px + "px";
-    }
-  }
-
-  function commitManualWidth(tab, colName, table, colIndex, px) {
-    const width = Math.max(COL_RESIZE_MIN_WIDTH, Math.round(Number(px) || COL_RESIZE_MIN_WIDTH));
-    applyColumnWidth(table, colIndex, width);
+  function commitManualWidth(tab, colName, px) {
+    const width = Math.max(COL_RESIZE_MIN_WIDTH, Math.round(px));
     setColumnWidth(tab, colName, width);
     markManual(tab, colName);
-    return width;
   }
 
-  function onHandleMouseDown(event, tab, colName) {
-    const th = event.target?.closest?.("th");
-    if (!th) return;
-    const currentWidth = Math.round(th.getBoundingClientRect().width);
+  function onHandleMouseDown(event, tab, colName, onResizeEnd) {
+    const th = event.currentTarget?.closest?.("th");
+    if (!th || event.button !== 0) return;
+    finishColumnResize?.();
     event.preventDefault();
     event.stopPropagation();
 
-    const table = th.closest("table");
-    const colIndex = Array.from(th.parentNode.children).indexOf(th);
-    applyColumnWidth(table, colIndex, currentWidth);
-
     const startX = event.clientX;
-    const startWidth = currentWidth;
+    const startWidth = getColumnWidth(tab, colName) || Math.round(th.getBoundingClientRect().width);
+    let lastX = startX;
+    let resizeFrame = 0;
+    let moved = false;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
-    function onMove(moveEvent) {
-      const next = Math.max(COL_RESIZE_MIN_WIDTH, startWidth + moveEvent.clientX - startX);
-      applyColumnWidth(table, colIndex, next);
+    function updateWidth() {
+      resizeFrame = 0;
+      // Column names survive horizontal virtualization. Update the shared width
+      // so cells, spacers and frozen offsets all follow the same drag.
+      if (moved) commitManualWidth(tab, colName, startWidth + lastX - startX);
     }
 
-    function onUp() {
-      dragJustEndedAt = Date.now();
-      commitManualWidth(tab, colName, table, colIndex, parseInt(th.style.width, 10) || startWidth);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+    function onMove(moveEvent) {
+      if (moveEvent.clientX === lastX) return;
+      lastX = moveEvent.clientX;
+      moved = true;
+      if (!resizeFrame) resizeFrame = requestAnimationFrame(updateWidth);
+    }
+
+    function finish() {
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      updateWidth();
+      if (moved) {
+        dragJustEndedAt = Date.now();
+        onResizeEnd?.(getColumnWidth(tab, colName) - startWidth);
+      }
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("blur", finish);
+      finishColumnResize = null;
     }
 
+    function onUp(upEvent) {
+      if (upEvent.button !== 0) return;
+      moved ||= upEvent.clientX !== startX;
+      lastX = upEvent.clientX;
+      finish();
+    }
+
+    finishColumnResize = finish;
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("blur", finish);
+  }
+
+  function endColumnResize() {
+    finishColumnResize?.();
   }
 
   function onHandleKeyDown(event, tab, colName) {
@@ -174,12 +189,10 @@ export function useColumnResize() {
     if (!th) return false;
     event.preventDefault();
     event.stopPropagation();
-    const table = th.closest("table");
-    const colIndex = Array.from(th.parentNode.children).indexOf(th);
     const currentWidth = getColumnWidth(tab, colName) || Math.round(th.getBoundingClientRect().width) || MIN_COL_WIDTH;
     const step = event.shiftKey ? 32 : 8;
     const direction = event.key === "ArrowRight" ? 1 : -1;
-    commitManualWidth(tab, colName, table, colIndex, currentWidth + direction * step);
+    commitManualWidth(tab, colName, currentWidth + direction * step);
     return true;
   }
 
@@ -231,6 +244,7 @@ export function useColumnResize() {
   }
 
   function dispose() {
+    endColumnResize();
     if (debounceTimer) clearTimeout(debounceTimer);
     if (autofitRafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(autofitRafId);
     debounceTimer = null;
@@ -244,6 +258,7 @@ export function useColumnResize() {
     markManual,
     resetColumnWidth,
     onHandleMouseDown,
+    endColumnResize,
     onHandleKeyDown,
     wasDragJustEnded,
     autoFitColumns,

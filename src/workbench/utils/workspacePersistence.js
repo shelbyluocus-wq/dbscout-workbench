@@ -1,6 +1,7 @@
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
 import { normalizeTableFilterMode } from "./tableFilterMode.js";
 import { normalizeColumnOrder } from "./columnOrder.js";
+import { manualColumnWidthsOf, normalizeManualColumnWidths } from "./columnWidth.js";
 import { normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
 
 const STORAGE_KEY = "dbscout_workspace";
@@ -9,6 +10,11 @@ let snapshotOverride = null;
 
 function normalizeTabKind(kind) {
   return kind === "design" || kind === "home" || kind === "sql" || kind === "sql-library" || kind === "folders" ? kind : "data";
+}
+
+function savedManualColumnWidths(widths) {
+  const manualColumnWidths = normalizeManualColumnWidths(widths);
+  return Object.keys(manualColumnWidths).length ? { manualColumnWidths } : {};
 }
 
 function normalizeDirection(direction) {
@@ -127,6 +133,7 @@ export function buildWorkspaceSnapshot({
     frozenRowCount: Number(tab.frozenRowCount) || 0,
     frozenColumnCount: Number(tab.frozenColumnCount) || 0,
     columnOrder: normalizeColumnOrder(tab.columnOrder),
+    ...savedManualColumnWidths(manualColumnWidthsOf(tab)),
     fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
     rowHeight: resolveGridRowHeight(tab),
     fieldCommentHeight: resolveFieldCommentHeight(tab),
@@ -225,6 +232,7 @@ export function parseWorkspaceSnapshot(parsed) {
               frozenRowCount: Number(tab.frozenRowCount) || 0,
               frozenColumnCount: Number(tab.frozenColumnCount) || 0,
               columnOrder: normalizeColumnOrder(tab.columnOrder),
+              ...savedManualColumnWidths(tab.manualColumnWidths),
               fieldCommentsExpanded: tab.fieldCommentsExpanded !== false,
               rowHeight: resolveGridRowHeight(tab),
               fieldCommentHeight: resolveFieldCommentHeight(tab),

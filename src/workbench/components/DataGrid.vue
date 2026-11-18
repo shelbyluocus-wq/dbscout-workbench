@@ -8,7 +8,7 @@ import { columnName } from "../utils/normalize.js";
 import { isNumericColumnType } from "../utils/columnTypes.js";
 import { displayCellValue } from "../utils/cellDisplay.js";
 import { buildRowKey } from "../utils/rowIdentity.js";
-import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH } from "../constants.js";
+import { COL_RESIZE_MIN_WIDTH, GRID_HEADER_HEIGHT, MIN_COL_WIDTH, ROW_INDEX_WIDTH } from "../constants.js";
 import { useColumnResize, ensureColumnWidthState } from "../composables/useColumnResize.js";
 import { useColumnReorder } from "../composables/useColumnReorder.js";
 import { columnReorderSurfaceState } from "../utils/columnOrder.js";
@@ -92,6 +92,7 @@ const {
   getColumnWidth,
   resetColumnWidth,
   onHandleMouseDown,
+  endColumnResize,
   onHandleKeyDown,
   autoFitColumnsRaf,
   autoFitColumns,
@@ -1099,9 +1100,40 @@ function performAutoFit() {
   autoFitColumnsRaf(gridWrapRef.value, tab, props.activeColumns, tabRows(tab));
 }
 
-function restoreAutoColumnWidth(tab, colName) {
+function startColumnResize(event, tab, colName) {
+  const wrap = gridWrapRef.value;
+  const grip = event.currentTarget;
+  const header = grip.closest("th");
+  const scrollLeft = wrap?.scrollLeft || 0;
+  if (!scrollLeft || !header || header.classList.contains("frozen-col")) {
+    onHandleMouseDown(event, tab, colName);
+    return;
+  }
+
+  const right = header.getBoundingClientRect().right - wrap.getBoundingClientRect().left;
+  const gripWidth = grip.offsetWidth + 1; // Include the column's right border.
+  onHandleMouseDown(event, tab, colName, (widthDelta) => {
+    // Leave deliberate scrolling during a drag alone. On shrink, reveal just
+    // enough of the handle to let the user grab it again.
+    if (widthDelta >= 0 || wrap.scrollLeft !== scrollLeft || gridWrapRef.value !== wrap || props.tab !== tab) return;
+    const minimumRight = ROW_INDEX_WIDTH + frozenColumnsWidth.value + gripWidth;
+    const hidden = minimumRight - (right + widthDelta);
+    if (hidden > 0) wrap.scrollLeft = Math.floor(scrollLeft - hidden);
+  });
+}
+
+function restoreAutoColumnWidth(event, tab, colName) {
+  const wrap = gridWrapRef.value;
+  const header = event.currentTarget.closest("th");
   resetColumnWidth(tab, colName);
-  performAutoFit();
+  autoFitColumns(wrap, tab, props.activeColumns, tabRows(tab));
+
+  // A scrolled oversized column can disappear behind the frozen area as
+  // soon as it shrinks. Keep the restored column in view.
+  if (!wrap?.scrollLeft || !header || header.classList.contains("frozen-col")) return;
+  const visibleLeft = wrap.getBoundingClientRect().left + ROW_INDEX_WIDTH + frozenColumnsWidth.value;
+  const headerLeft = header.getBoundingClientRect().left;
+  if (headerLeft < visibleLeft) wrap.scrollLeft += headerLeft - visibleLeft;
 }
 
 function setupResizeObserver() {
@@ -1153,6 +1185,7 @@ watch(
 watch(
   () => props.tab?.id,
   () => {
+    endColumnResize();
     closeToolbarMenu();
     nextTick(() => {
       setupResizeObserver();
@@ -1502,20 +1535,22 @@ function handleTableContextMenu(event) {
                 :sort="tab.sort"
                 @apply-sort="emit('apply-sort', tab, columnMeta.name, $event)"
               />
-              <span
-                class="wb-col-resize"
-                role="separator"
-                aria-orientation="vertical"
-                tabindex="0"
-                :aria-label="t('grid.resizeColumnAria', { column: columnMeta.name })"
-                :aria-valuemin="COL_RESIZE_MIN_WIDTH"
-                :aria-valuenow="Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)"
-                :aria-valuetext="t('grid.pixels', { value: Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH) })"
-                :title="t('grid.resizeColumnTitle', { column: columnMeta.name })"
-                @mousedown.prevent.stop="onHandleMouseDown($event, tab, columnMeta.name)"
-                @keydown="onHandleKeyDown($event, tab, columnMeta.name)"
-                @dblclick.stop.prevent="restoreAutoColumnWidth(tab, columnMeta.name)"
-              ></span>
+              <span class="wb-col-resize-track">
+                <span
+                  class="wb-col-resize"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                  :aria-label="t('grid.resizeColumnAria', { column: columnMeta.name })"
+                  :aria-valuemin="COL_RESIZE_MIN_WIDTH"
+                  :aria-valuenow="Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH)"
+                  :aria-valuetext="t('grid.pixels', { value: Math.round(getColumnWidth(tab, columnMeta.name) || MIN_COL_WIDTH) })"
+                  :title="t('grid.resizeColumnTitle', { column: columnMeta.name })"
+                  @mousedown.left="startColumnResize($event, tab, columnMeta.name)"
+                  @keydown="onHandleKeyDown($event, tab, columnMeta.name)"
+                  @dblclick.stop.prevent="restoreAutoColumnWidth($event, tab, columnMeta.name)"
+                ></span>
+              </span>
             </th>
 </template>
           </tr>

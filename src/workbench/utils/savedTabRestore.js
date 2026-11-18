@@ -1,6 +1,7 @@
 import { MAX_FROZEN_COLS, MAX_FROZEN_ROWS } from "../constants.js";
 import { reapplyTabColumnOrder } from "../workspaceState.js";
 import { resolveFieldCommentHeight, resolveGridRowHeight } from "./gridRowHeight.js";
+import { normalizeManualColumnWidths } from "./columnWidth.js";
 import { normalizeRelationFilter, normalizeRelationOrigin } from "./relationFilter.js";
 
 /**
@@ -42,6 +43,14 @@ export function applySavedTableTabState(tab, savedTab) {
   if (Array.isArray(savedTab.columnOrder) && savedTab.columnOrder.length) {
     tab.columnOrder = savedTab.columnOrder;
     reapplyTabColumnOrder(tab);
+  }
+  const widths = normalizeManualColumnWidths(savedTab.manualColumnWidths);
+  if (Object.keys(widths).length) {
+    tab.columnWidthState = {
+      widths,
+      manual: Object.fromEntries(Object.keys(widths).map((name) => [name, true])),
+      availableWidth: 0,
+    };
   }
   tab.fieldCommentsExpanded = savedTab.fieldCommentsExpanded !== false;
   tab.rowHeight = resolveGridRowHeight(savedTab);
