@@ -44,10 +44,13 @@ export function contrastRatio(a, b) {
 
 // Walks hex toward `toward` in 2% steps until it reaches `min` contrast
 // against `bg`; falls back to `toward` when even that is not enough.
-export function ensureContrast(hex, bg, min, toward) {
+export function ensureContrast(hex, bg, min, toward, { sameSideAsTarget = false } = {}) {
+  const bgLuminance = relativeLuminance(bg);
+  const direction = Math.sign(relativeLuminance(toward) - bgLuminance);
   for (let i = 0; i <= 50; i++) {
     const candidate = mixHex(hex, toward, i / 50);
-    if (contrastRatio(candidate, bg) >= min) return candidate;
+    const onTargetSide = !sameSideAsTarget || Math.sign(relativeLuminance(candidate) - bgLuminance) === direction;
+    if (onTargetSide && contrastRatio(candidate, bg) >= min) return candidate;
   }
   return toward;
 }

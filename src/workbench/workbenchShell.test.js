@@ -3102,7 +3102,7 @@ test("Ctrl+digit and Ctrl+Backquote switch published tabs in the focused pane", 
   assert.match(splitLayout, /:show-shortcut-hints="showShortcutHints"/);
   assert.match(pane, /:show-shortcut-hints="isFocused && showShortcutHints"/);
   assert.match(tabs, /assignTabShortcutHints\(/);
-  assert.match(tabs, /formatShortcutForPlatform\(/);
+  assert.match(tabs, /hint\?\.combo\.at\(-1\)/);
   assert.match(tabs, /class="wb-tab-shortcut-badge"/);
 });
 

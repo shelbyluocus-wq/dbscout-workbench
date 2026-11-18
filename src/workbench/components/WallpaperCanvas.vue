@@ -4,6 +4,7 @@ import { useWallpaper } from "../composables/useWallpaper.js";
 import { measureWallpaperCeilings, WALLPAPER_FALLBACK_CEILINGS } from "../wallpaperTone.js";
 import "../wallpaperCanvas.css";
 
+const emit = defineEmits(["strength-change"]);
 const { settings, active, appearance, source, customKind, reportError } = useWallpaper();
 const video = ref(null);
 const hidden = ref(false);
@@ -54,6 +55,7 @@ async function syncPlayback() {
     reportError("wallpaper.error.playback");
   }
 }
+watch(strength, (value) => emit("strength-change", value));
 watch(source, () => { ceilings.value = null; });
 watch([source, () => settings.value.motion], () => { failed.value = false; });
 watch([video, () => settings.value.motion, visible, hidden, reducedMotion], syncPlayback);

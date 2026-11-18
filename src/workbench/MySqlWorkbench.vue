@@ -1416,6 +1416,9 @@ const {
   expandInspector,
 } = usePaneResize({ viewportWidth: windowWidth });
 
+const wallpaperStrength = ref(0);
+// Low-strength wallpaper already leaves enough contrast under resting tabs.
+const wallpaperTabOpacity = computed(() => `${Math.min(44, Math.max(0, (wallpaperStrength.value - 0.18) * 58))}%`);
 const { effectiveTheme, isDark, toggleTheme, preference: themePreference, setThemePreference, refresh: refreshTheme } = useTheme({
   applyNativeTheme: applyNativeThemeKeepingTrafficLights,
 });
@@ -5582,13 +5585,16 @@ onBeforeUnmount(() => {
     }"
     :data-theme="effectiveTheme"
     :data-wallpaper-scope="wallpaperSource ? wallpaperSettings.scope : undefined"
-    :style="[sidebarLayoutVars, wallpaperSource ? { '--wb-wallpaper-veil': `${wallpaperVeil * 100}%` } : null]"
+    :style="[sidebarLayoutVars, wallpaperSource ? {
+      '--wb-wallpaper-veil': `${wallpaperVeil * 100}%`,
+      '--wb-wallpaper-tab-opacity': wallpaperTabOpacity,
+    } : null]"
     @transitionend="onSidebarLayoutTransitionEnd"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
   >
-    <WallpaperCanvas />
+    <WallpaperCanvas @strength-change="wallpaperStrength = $event" />
     <div class="wb-save-reminder-layer" aria-hidden="true">
       <span
         v-for="reminder in saveReminders"

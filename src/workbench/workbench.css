@@ -11635,6 +11635,25 @@ label:has(input[type="checkbox"]:disabled) {
   border-right: 2px solid var(--wb-muted);
 }
 
+/* Let the top bar share the wallpaper. Only individual tab states gain a
+   surface, with extra support under dark wallpaper's bright details. */
+.wb-tabs,
+.wb-tab-overflow-layer {
+  --wb-tab-source-text: #404b5a;
+  --wb-tab-focus: var(--wb-text);
+  --wb-tab-state-surface: color-mix(in srgb, var(--wb-wallpaper-frame-solid, var(--wb-chrome-surface)) 88%, transparent);
+}
+
+[data-theme="dark"] .wb-tabs,
+.wb-tab-overflow-layer[data-theme="dark"] {
+  --wb-tab-source-text: #c3cbd8;
+}
+
+.mysql-workbench.has-wallpaper[data-theme="dark"] .wb-tabs {
+  /* Already-dimmed images can show straight through the resting tabs. */
+  --wb-tab-rest-surface: color-mix(in srgb, black var(--wb-wallpaper-tab-opacity, 0%), transparent);
+}
+
 .wb-object-tabs {
   display: flex;
   flex: 0 0 auto;
@@ -11668,26 +11687,27 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 0 0 48px;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   height: 32px;
   padding: 0;
   border: 0;
   border-radius: 6px;
-  background: transparent;
-  color: var(--wb-secondary-text);
+  background: var(--wb-tab-rest-surface, transparent);
+  color: var(--wb-tab-source-text);
   font-size: var(--wb-fs-caption);
+  font-variant-numeric: tabular-nums;
   -webkit-app-region: no-drag;
 }
 
 .wb-tab-overflow-button:hover:not(:disabled),
 .wb-tab-overflow-button[aria-expanded="true"] {
   border-color: transparent;
-  background: var(--wb-list-hover);
+  background: color-mix(in srgb, var(--wb-text) 9%, var(--wb-tab-state-surface));
   color: var(--wb-text);
 }
 
 .wb-tab-overflow-button:focus-visible {
-  outline: 2px solid var(--wb-accent);
+  outline: 2px solid var(--wb-tab-focus);
   outline-offset: -2px;
 }
 
@@ -11706,11 +11726,9 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   border: 1px solid var(--wb-floating-border);
   border-radius: 10px;
-  background: var(--wb-menu-surface);
+  background: var(--wb-workspace-mist-raised);
   color: var(--wb-text);
   box-shadow: var(--wb-floating-shadow-strong);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  backdrop-filter: blur(24px) saturate(1.6);
   transform-origin: top right;
   animation: wb-menu-in var(--wb-duration-fast) var(--wb-ease-out);
 }
@@ -11781,7 +11799,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab-overflow-source {
-  color: var(--wb-type-text);
+  color: var(--wb-tab-source-text);
   font-size: var(--wb-fs-caption);
   font-weight: 450;
   line-height: 1.2;
@@ -11812,9 +11830,9 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab-overflow-item:focus-visible {
-  border-color: color-mix(in srgb, var(--wb-accent) 45%, transparent);
   background: var(--wb-list-selected);
-  outline: none;
+  outline: 2px solid var(--wb-tab-focus);
+  outline-offset: -2px;
 }
 
 .wb-tab-overflow-item:active:not(:disabled) {
@@ -11823,6 +11841,10 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-overflow-item:disabled {
   color: var(--wb-disabled);
+}
+
+.wb-tab-overflow-item:disabled :is(.wb-tab-overflow-source, .wb-tab-overflow-connection, .wb-tab-db, .wb-tab-db-icon, .wb-tab-overflow-tag) {
+  color: inherit;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -11856,40 +11878,47 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab[data-tab-tone] {
+  --wb-tab-tint: 8%;
+  --wb-tab-hover-tint: 14%;
+  height: 32px;
+  min-height: 32px;
   margin-bottom: 4px;
-  color: var(--wb-secondary-text);
+  padding: 0 29px 0 8px;
+  background: var(--wb-tab-rest-surface, transparent);
 }
 
-.wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #875b08; }
-.wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #b83e36; }
-.wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #236b91; }
+[data-theme="dark"] .wb-tab[data-tab-tone] {
+  --wb-tab-tint: 15%;
+  --wb-tab-hover-tint: 21%;
+}
+
+.wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #704803; }
+.wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #9d312a; }
+.wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #175878; }
 [data-theme="dark"] .wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #e5b451; }
-[data-theme="dark"] .wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #f27c72; }
-[data-theme="dark"] .wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #6eb9df; }
+[data-theme="dark"] .wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #f5897f; }
+[data-theme="dark"] .wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #83c5e6; }
 
 .wb-tab[data-tab-tone].active {
   --wb-tab-close-text: var(--wb-tab-tone);
   --wb-tab-close-text-hover: var(--wb-tab-tone);
   border-color: var(--wb-tab-tone);
-  background: transparent;
+  background: color-mix(in srgb, var(--wb-tab-tone) var(--wb-tab-tint), var(--wb-tab-state-surface));
   color: var(--wb-tab-tone);
 }
 
 .wb-tab[data-tab-tone].active:hover {
-  background: color-mix(in srgb, var(--wb-tab-tone) 10%, transparent);
+  background: color-mix(in srgb, var(--wb-tab-tone) var(--wb-tab-hover-tint), var(--wb-tab-state-surface));
 }
 
 .wb-tab[data-tab-tone]:not(.active):not(.is-opening):is(:hover, :focus-within) {
-  --wb-tab-close-text: var(--wb-tab-tone);
-  border-color: color-mix(in srgb, var(--wb-tab-tone) 38%, transparent);
-  background: color-mix(in srgb, var(--wb-tab-tone) 6%, transparent);
-  color: var(--wb-text);
+  border-color: color-mix(in srgb, var(--wb-tab-tone) 52%, transparent);
+  background: color-mix(in srgb, var(--wb-tab-tone) var(--wb-tab-tint), var(--wb-tab-state-surface));
 }
 
 .wb-tab[data-tab-tone] .wb-tab-close:is(:hover, :focus-visible) .wb-tab-close-mark {
-  background: color-mix(in srgb, var(--wb-tab-tone) 18%, transparent);
+  background: color-mix(in srgb, currentColor 13%, transparent);
   box-shadow: none;
-  color: var(--wb-tab-tone);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -11930,7 +11959,7 @@ label:has(input[type="checkbox"]:disabled) {
   justify-content: center;
   border-color: var(--wb-tab-border);
   border-radius: 999px;
-  background: transparent;
+  background: var(--wb-tab-rest-surface, transparent);
   box-shadow: none;
 }
 
@@ -11943,7 +11972,7 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tab[data-kind="home"] .wb-tab-title {
   flex: 0 0 auto;
   align-items: center;
-  color: var(--wb-secondary-text);
+  color: var(--wb-tab-source-text);
 }
 
 .wb-tab[data-kind="home"]:hover .wb-tab-title,
@@ -11982,7 +12011,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab:focus-visible {
-  outline: 2px solid var(--wb-accent);
+  outline: 2px solid var(--wb-tab-focus);
   outline-offset: -2px;
 }
 
@@ -11994,10 +12023,13 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-tab.is-opening,
 .wb-tab.is-opening:hover {
   border-color: var(--wb-border);
-  background: color-mix(in srgb, var(--wb-control-hover) 58%, transparent);
-  color: var(--wb-secondary-text);
+  background: var(--wb-tab-rest-surface, transparent);
+  color: var(--wb-tab-source-text);
   cursor: progress;
-  opacity: 0.86;
+}
+
+.wb-tab[data-tab-tone].is-opening {
+  padding-right: 8px;
 }
 
 .wb-tab.is-opening * {
@@ -12006,18 +12038,18 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-opening-spinner {
   box-sizing: border-box;
-  flex: 0 0 12px;
-  width: 12px;
-  height: 12px;
-  border: 2px solid color-mix(in srgb, var(--wb-accent) 30%, transparent);
-  border-top-color: var(--wb-accent);
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
   border-radius: 50%;
   animation: wb-tab-opening-spin 0.8s linear infinite;
 }
 
 .wb-tab-title .wb-tab-opening-label {
-  color: var(--wb-accent-strong);
-  font-size: var(--wb-fs-caption);
+  color: inherit;
+  font-size: var(--wb-fs-micro);
   white-space: nowrap;
 }
 
@@ -12084,90 +12116,104 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-tab-shortcut-badge {
   position: absolute;
-  left: 50%;
   top: 50%;
-  z-index: 2;
-  transform: translate(-50%, -50%);
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: var(--wb-accent-soft);
-  color: var(--wb-accent-strong);
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 19px;
+  transform: translateY(-50%);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 5px;
+  background: var(--wb-workspace-mist-raised);
+  color: var(--wb-text);
   font-family: var(--wb-mono, ui-monospace, monospace);
-  font-size: var(--wb-fs-body);
+  font-size: var(--wb-fs-caption);
   font-weight: 650;
-  line-height: 1.2;
-  white-space: nowrap;
   pointer-events: none;
 }
 
-.wb-tab.is-showing-shortcut .wb-tab-title {
-  opacity: 0.28;
-}
-
-.wb-tab[data-kind="home"].is-showing-shortcut .wb-tab-title {
+.wb-tab.is-showing-shortcut .wb-tab-close:not(:focus-visible),
+.wb-tab.is-showing-shortcut:has(.wb-tab-close:focus-visible) .wb-tab-shortcut-badge,
+.wb-tab.is-showing-shortcut .wb-tab-home-icon {
   visibility: hidden;
-  opacity: 0;
 }
 
-/* Table tabs with a database subtitle stack two lines: table name on top,
-   database name (with a small cylinder glyph) below. */
+.wb-tab[data-kind="home"] .wb-tab-shortcut-badge {
+  right: auto;
+  left: 4px;
+}
+
+/* Two stable rows. The name has the full text column and source/status
+   share the second row, clear of the close target. */
 .wb-tab-title-stack {
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  gap: 0;
-  /* Optical centring: the rounded top edge and the descenders below make the
-     geometric centre read high. */
-  margin-top: 2px;
+  gap: 1px;
 }
 
 .wb-tab-line {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
   white-space: nowrap;
 }
 
-/* Both lines together stay well inside the 36px tab, so neither touches its
-   rounded top edge. */
 .wb-tab-line-primary {
   font-size: var(--wb-fs-body);
   font-weight: 500;
-  line-height: 1.15;
+  line-height: 1.08;
 }
 
 .wb-tab.active .wb-tab-line-primary {
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .wb-tab-line-secondary {
-  color: var(--wb-type-text);
+  color: var(--wb-tab-source-text);
   font-size: var(--wb-fs-micro);
-  font-weight: 400;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
+  font-weight: 450;
+  line-height: 1.1;
 }
 
-.wb-tab.active .wb-tab-line-secondary {
-  color: var(--wb-secondary-text);
+.wb-tab-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-inline-start: 4px;
+  border-inline-start: 1px solid color-mix(in srgb, currentColor 34%, transparent);
+  font-weight: 600;
+}
+
+.wb-tab-status > svg {
+  display: none;
+}
+
+@container (max-width: 100px) {
+  .wb-tab-status > svg { display: block; }
+  .wb-tab-status > span { display: none; }
 }
 
 .wb-tab-db-icon {
   flex: 0 0 auto;
-  color: var(--wb-tab-database-icon-color, currentColor);
-  opacity: 0.72;
-}
-
-.wb-tab-db-icon.is-decorated {
-  opacity: 1;
+  color: var(--wb-tab-database-icon-light, currentColor);
 }
 
 .wb-tab-db {
   min-width: 0;
   overflow: hidden;
-  color: var(--wb-tab-database-name-color, currentColor);
+  color: var(--wb-tab-database-name-light, currentColor);
   text-overflow: ellipsis;
+}
+
+[data-theme="dark"] .wb-tab-db-icon {
+  color: var(--wb-tab-database-icon-dark, currentColor);
+}
+
+[data-theme="dark"] .wb-tab-db {
+  color: var(--wb-tab-database-name-dark, currentColor);
 }
 
 .wb-tab.active {
@@ -12233,14 +12279,14 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-pane-tabbar .wb-tab[data-kind="home"].active,
 .wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
   border-color: color-mix(in srgb, var(--wb-accent) 32%, transparent);
-  background: color-mix(in srgb, var(--wb-accent) 12%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 12%, var(--wb-tab-state-surface));
   box-shadow: none;
   overflow: hidden;
 }
 
 .wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-kind="home"].active {
   border-color: color-mix(in srgb, var(--wb-accent) 18%, transparent);
-  background: color-mix(in srgb, var(--wb-accent) 6%, transparent);
+  background: color-mix(in srgb, var(--wb-accent) 6%, var(--wb-tab-state-surface));
 }
 
 .wb-tabs .wb-tab[data-kind="home"].active .wb-tab-title {
@@ -12258,7 +12304,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 @container (max-width: 88px) {
   .wb-tab > .wb-object-icon,
-  .wb-tab-title small:not(.wb-tab-kind) {
+  .wb-tab-title > small:not(.wb-tab-kind) {
     display: none;
   }
 
@@ -12267,12 +12313,9 @@ label:has(input[type="checkbox"]:disabled) {
   }
 }
 
-/* Container queries resolve against the tab's *content* box, which is the
-   border-box width minus 38px of horizontal padding (10px left + 28px for the
-   close button). Keep the database subtitle visible down to a ~58px-wide tab
-   (≈20px of text); below that, fall back to the table name alone. */
+/* On severely compressed split panes the table name gets the full height. */
 @container (max-width: 20px) {
-  .wb-tab-line-secondary {
+  .wb-tab-line-secondary:not(:has(.wb-tab-opening-spinner)) {
     display: none;
   }
 }
@@ -12295,6 +12338,11 @@ label:has(input[type="checkbox"]:disabled) {
   box-shadow: none;
   cursor: pointer;
   z-index: 1;
+}
+
+.wb-tab[data-tab-tone] .wb-tab-close {
+  right: 1px;
+  width: 27px;
 }
 
 .wb-tab-close-mark {
@@ -12348,8 +12396,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab-close:focus-visible {
-  outline: 2px solid var(--wb-accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--wb-tab-focus);
+  outline-offset: -4px;
 }
 
 /* ── Homepage database favorites ─────────────────────────────────────── */
@@ -13834,7 +13882,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 @container (max-width: 132px) {
-  .wb-tab-title small:not(.wb-tab-kind) {
+  .wb-tab-title > small:not(.wb-tab-kind) {
     display: none;
   }
 }

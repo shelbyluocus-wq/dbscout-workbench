@@ -65,6 +65,10 @@ try {
       await third.locator(".wb-tab-close").click();
       await page.waitForFunction(() => document.querySelector("#tab-focus-test .wb-tab.active")?.textContent.includes("act25duolun2prop"));
       assert.equal(await second.evaluate((node) => node === document.activeElement), true, "closing a focused tab restores focus to its successor");
+      await second.locator(".wb-tab-close").focus();
+      await page.keyboard.press("Space");
+      await second.waitFor({ state: "detached" });
+      assert.equal(await tabs.first().getAttribute("aria-pressed"), "true", "keyboard close selects the surviving tab");
       assert.deepEqual(errors, []);
       console.log(`${engine.name()}: tab switch, keyboard activation, search focus and focused close passed`);
     } finally {

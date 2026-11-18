@@ -42,6 +42,14 @@ for (const [name, engine] of [["chromium", chromium], ["webkit", webkit]]) {
     await trigger.waitFor();
     assert.match(await page.locator(".wb-tab.active").innerText(), /config_table_29/);
     assert.equal(await page.locator(".wb-tab.active").evaluate((node) => getComputedStyle(node).boxShadow), "none");
+    await page.locator(".wb-object-tabs").evaluate((node) => { node.style.height = "40px"; node.style.flex = "0 0 40px"; });
+    const tabInsets = await page.locator(".wb-tab.active").evaluate((node) => {
+      const tab = node.getBoundingClientRect();
+      const track = node.closest(".wb-object-tabs").getBoundingClientRect();
+      return { top: tab.top - track.top, bottom: track.bottom - tab.bottom };
+    });
+    assert.ok(tabInsets.top >= 3, `top border clearance: ${tabInsets.top}`);
+    assert.ok(tabInsets.bottom >= 3, `bottom border clearance: ${tabInsets.bottom}`);
     const tones = [];
     for (const index of [0, 1, 2, 3]) {
       const target = page.locator(`[data-tab-id="tab-${index}"]`);

@@ -117,16 +117,16 @@ test("canvas outline masks darker pane content outside its smooth top-left corne
   assert.match(splitLayoutVue, /:top-edge="layout\.direction === 'vertical' \? false : topEdge"/);
 });
 
-test("focused split pane uses its active tab instead of a full pane outline", () => {
+test("split panes keep the active tab outline visible without adding shadows", () => {
   const focusedPaneRule = ruleBody(".wb-workbench-pane.is-focused");
   const focusedPaneTabbarRule = ruleBody(".wb-pane-tabbar.is-focused-pane");
   const focusedActiveTabRule = ruleBody(".wb-pane-tabbar.is-focused-pane .wb-tab.active");
   const unfocusedActiveTabRule = ruleBody(".wb-pane-tabbar:not(.is-focused-pane) .wb-tab.active");
 
   assert.match(focusedPaneRule, /box-shadow\s*:\s*none/);
-  assert.match(focusedPaneTabbarRule, /background\s*:/);
-  assert.match(focusedActiveTabRule, /inset 0 2px 0 var\(--wb-accent\)/);
-  assert.match(unfocusedActiveTabRule, /inset 0 1px 0 var\(--wb-tab-active-border\)/);
+  assert.match(focusedPaneTabbarRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
+  assert.match(focusedActiveTabRule, /box-shadow\s*:\s*none/);
+  assert.match(unfocusedActiveTabRule, /box-shadow\s*:\s*none/);
 });
 
 test("batch comparison split handles match the workbench divider hit target", () => {
@@ -284,18 +284,16 @@ test("homepage tab shows its icon and label with room for the pane close button"
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
-test("tab shortcut badges use shared accent tokens and stay inside the tab", () => {
+test("tab shortcut badges stay readable over the wallpaper and inside the tab", () => {
   const badgeRule = ruleBody(".wb-tab-shortcut-badge");
-  const showingTitleRule = ruleBody(".wb-tab.is-showing-shortcut .wb-tab-title");
-  const homeShowingTitleRule = ruleBody('.wb-tab[data-kind="home"].is-showing-shortcut .wb-tab-title');
 
   assert.match(tabsVue, /class="wb-tab-shortcut-badge"/);
-  assert.match(badgeRule, /background:\s*var\(--wb-accent-soft\)/);
-  assert.match(badgeRule, /color:\s*var\(--wb-accent-strong\)/);
+  assert.match(badgeRule, /background:\s*var\(--wb-workspace-mist-raised\)/);
+  assert.match(badgeRule, /color:\s*var\(--wb-text\)/);
   assert.match(badgeRule, /font-family:\s*var\(--wb-mono/);
-  assert.match(badgeRule, /font-size:\s*var\(--wb-fs-body\)/);
-  assert.match(showingTitleRule, /opacity:/);
-  assert.match(homeShowingTitleRule, /visibility:\s*hidden/);
+  assert.match(badgeRule, /font-size:\s*var\(--wb-fs-caption\)/);
+  assert.match(badgeRule, /right:\s*4px/);
+  assert.doesNotMatch(css, /\.wb-tab\.is-showing-shortcut \.wb-tab-title\s*\{/);
 });
 
 test("database homepage batch actions use a clear quiet grouped treatment", () => {
@@ -321,9 +319,7 @@ test("database homepage batch actions use a clear quiet grouped treatment", () =
   );
 });
 
-test("open table tabs connect the active document to its pane", () => {
-  const rootRule = ruleBody(":root");
-  const darkRule = ruleBody('.mysql-workbench[data-theme="dark"]');
+test("open table tabs use a colored outline in the top tab strip", () => {
   const mainOutlineRule = ruleBody(".wb-main::after");
   const objectTabsRule = ruleBody(".wb-object-tabs");
   const paneObjectTabsRule = ruleBody(".wb-pane-tabbar .wb-object-tabs");
@@ -332,17 +328,13 @@ test("open table tabs connect the active document to its pane", () => {
   const singlePaneObjectTabsRule = ruleBody(".wb-pane-tabbar.is-left-edge-pane.is-right-edge-pane .wb-object-tabs");
   const paneTabListRule = ruleBody(".wb-pane-tabbar .wb-tab-list");
   const tabRule = ruleBody(".wb-tab");
-  const activeRule = ruleBody(".wb-tab.active");
+  const tonedTabRule = ruleBody(".wb-tab[data-tab-tone]");
+  const tonedActiveRule = ruleBody(".wb-tab[data-tab-tone].active");
   const homeRule = ruleBody('.wb-tab[data-kind="home"]');
-  const activeBeforeRule = ruleBody(".wb-tab.active::before");
-  const activeAfterRule = ruleBody(".wb-tab.active::after");
+  const activeBeforeRule = ruleBody(".wb-tab[data-tab-tone].active::before");
+  const activeAfterRule = ruleBody(".wb-tab[data-tab-tone].active::after");
   const titleRule = ruleBody(".wb-tab-title");
 
-  assert.match(rootRule, /--wb-tab-border\s*:/);
-  assert.match(rootRule, /--wb-tab-active-border\s*:/);
-  assert.match(rootRule, /--wb-tab-curve-size\s*:\s*14px/);
-  assert.match(darkRule, /--wb-tab-border\s*:/);
-  assert.match(darkRule, /--wb-tab-active-border\s*:/);
   assert.match(mainOutlineRule, /z-index\s*:\s*31/);
   assert.match(mainOutlineRule, /border-top\s*:\s*1px solid var\(--wb-workspace-mist-border\)/);
   assert.match(mainOutlineRule, /border-top-left-radius\s*:\s*var\(--wb-workspace-corner-radius\)/);
@@ -356,22 +348,16 @@ test("open table tabs connect the active document to its pane", () => {
   assert.match(topEdgeObjectTabsRule, /background\s*:\s*transparent/);
   assert.doesNotMatch(topEdgeObjectTabsRule, /linear-gradient/);
   assert.match(paneTabListRule, /align-items\s*:\s*flex-end/);
-  assert.match(tabRule, /height\s*:\s*36px/);
-  assert.match(tabRule, /min-height\s*:\s*36px/);
+  assert.match(singlePaneObjectTabsRule, /margin-right\s*:\s*calc\(var\(--wb-sidebar-tab-offset\) \+ var\(--wb-titlebar-tab-right-clearance\)\)/);
   assert.match(tabRule, /border\s*:\s*1px solid transparent/);
-  assert.match(tabRule, /--wb-active-tab-surface\s*:\s*var\(--wb-workspace-mist-raised\)/);
   assert.match(homeRule, /--wb-active-tab-surface\s*:\s*var\(--wb-chrome-surface\)/);
-  assert.match(tabRule, /border-radius\s*:\s*8px 8px 0 0/);
+  assert.match(tonedTabRule, /height\s*:\s*32px/);
+  assert.match(tonedTabRule, /margin-bottom\s*:\s*4px/);
   assert.match(titleRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
-  assert.match(activeRule, /border-color\s*:\s*var\(--wb-tab-active-border\)/);
-  assert.match(activeRule, /border-bottom-color\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeRule, /background\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeRule, /inset 0 2px 0 var\(--wb-accent\)/);
-  assert.match(activeRule, /overflow\s*:\s*visible/);
-  assert.match(activeBeforeRule, /border-bottom-right-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeBeforeRule, /box-shadow\s*:\s*6px 6px 0 6px var\(--wb-active-tab-surface\)/);
-  assert.match(activeAfterRule, /border-bottom-left-radius\s*:\s*var\(--wb-tab-curve-size\)/);
-  assert.match(activeAfterRule, /box-shadow\s*:\s*-6px 6px 0 6px var\(--wb-active-tab-surface\)/);
+  assert.match(tonedActiveRule, /border-color\s*:\s*var\(--wb-tab-tone\)/);
+  assert.match(tonedActiveRule, /background\s*:\s*color-mix\(in srgb, var\(--wb-tab-tone\) var\(--wb-tab-tint\), var\(--wb-tab-state-surface\)\)/);
+  assert.match(activeBeforeRule, /content\s*:\s*none/);
+  assert.match(activeAfterRule, /content\s*:\s*none/);
 });
 
 test("open table tabs keep table names visible when the strip is crowded", () => {
@@ -440,9 +426,7 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.match(tabRule, /flex\s*:\s*1\s+1\s+112px/);
   assert.match(tabRule, /min-width\s*:\s*32px/);
   assert.match(tabRule, /max-width\s*:\s*176px/);
-  assert.match(tabRule, /border-radius\s*:\s*8px 8px 0 0/);
-  assert.match(activeTabRule, /border-bottom-color\s*:\s*var\(--wb-active-tab-surface\)/);
-  assert.match(activeTabRule, /inset 0 2px 0 var\(--wb-accent\)/);
+  assert.match(activeTabRule, /box-shadow\s*:\s*none/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
   assert.doesNotMatch(toolbarRule, /border-bottom\s*:/);
@@ -1401,9 +1385,9 @@ test("database display separates icon and name colors with theme-following defau
   assert.match(ruleBody(".wb-dbhome-object-row.is-selected .wb-dbhome-object-name-button"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
   assert.match(ruleBody(".wb-dbhome-object-row.is-box-selected .wb-dbhome-object-name-button"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
   assert.match(ruleBody(".wb-dbhome-rename-input"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
-  assert.match(ruleBody(".wb-tab-db-icon"), /color:\s*var\(--wb-tab-database-icon-color, currentColor\)/);
-  assert.match(ruleBody(".wb-tab-db-icon.is-decorated"), /opacity:\s*1/);
-  assert.match(ruleBody(".wb-tab-db"), /color:\s*var\(--wb-tab-database-name-color, currentColor\)/);
+  assert.match(ruleBody(".wb-tab-db-icon"), /color:\s*var\(--wb-tab-database-icon-light, currentColor\)/);
+  assert.doesNotMatch(ruleBody(".wb-tab-db-icon"), /opacity\s*:/);
+  assert.match(ruleBody(".wb-tab-db"), /color:\s*var\(--wb-tab-database-name-light, currentColor\)/);
   assert.match(ruleBody(".wb-database-color-setting"), /grid-template-columns:\s*86px minmax\(0, 1fr\)/);
   for (const [name, light, dark] of [
     ["slate", "#475569", "#cbd5e1"],

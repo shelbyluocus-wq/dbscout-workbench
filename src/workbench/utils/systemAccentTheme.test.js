@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   accentControlText,
   contrastRatio,
+  ensureContrast,
   mixHex,
   relativeLuminance,
   systemAccentTokens,
@@ -22,6 +23,13 @@ test("mixHex blends toward white and black", () => {
   assert.equal(mixHex("#000000", "#FFFFFF", 1), "#FFFFFF");
   assert.equal(mixHex("#000000", "#FFFFFF", 0.5), "#808080");
   assert.equal(mixHex("#FF0000", "#000000", 0.2), "#CC0000");
+});
+
+test("contrast adjustment can require the ink to stay on the intended side of the backdrop", () => {
+  const backdrop = "#b8b8b8";
+  const ink = ensureContrast("#ffffff", backdrop, 1.8, "#000000", { sameSideAsTarget: true });
+  assert.ok(relativeLuminance(ink) < relativeLuminance(backdrop));
+  assert.ok(contrastRatio(ink, backdrop) >= 1.8);
 });
 
 test("systemAccentTokens light mode keeps the accent but guarantees control contrast", () => {

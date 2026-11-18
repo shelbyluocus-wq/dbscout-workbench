@@ -2,15 +2,15 @@
 import { t } from "../i18n/index.js";
 import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { ChevronDown, House } from "lucide-vue-next";
+import { ChevronDown, House, Link2, PencilRuler } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
-import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
-import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
+import { DATABASE_TEXT_COLOR_PRESETS, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
+import { ensureContrast } from "../utils/systemAccentTheme.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import { partitionTabs } from "../utils/tabOverflow.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
@@ -189,6 +189,7 @@ function tabMenuName(tab) {
 }
 
 function tabMenuTag(tab) {
+  if (tab.opening) return t('m_48de9f48a703');
   if (tabKind(tab) === "design") return t('m_56c255e19858');
   if (tabKind(tab) === "sql") return `SQL${tab.dirty ? " •" : ""}`;
   return tab.relationFilter ? t('relations.tabTag') : "";
@@ -202,19 +203,47 @@ function tabDatabaseIcon(tab) {
   return databaseDecorationIconComponent(tabDatabaseDecoration(tab)?.icon);
 }
 
-function tabDatabaseDecorationStyle(tab) {
-  const decoration = tabDatabaseDecoration(tab);
-  const textColor = databaseTextColorCss(decoration?.textColor);
+// Keep saved hues and correct their contrast against the light and dark
+// backdrop extremes. The same colours appear in the overflow list.
+function tabDecorationColors(lightColor, darkColor, minimum) {
+  const options = { sameSideAsTarget: true };
   return {
-    ...(decoration?.color ? { "--wb-tab-database-icon-color": decoration.color } : {}),
-    ...(textColor ? { "--wb-tab-database-name-color": textColor } : {}),
+    light: ensureContrast(lightColor, "#b8b8b8", minimum, "#000000", options),
+    dark: ensureContrast(darkColor, "#575757", minimum, "#ffffff", options),
   };
 }
 
-// Table tabs render as two stacked lines (table name over database name)
-// whenever there is a database to show; everything else stays single-line.
+const databaseDecorationStyles = computed(() => {
+  const styles = new Map();
+  const byDecoration = new Map();
+  for (const tab of props.tabs) {
+    const decoration = tabDatabaseDecoration(tab);
+    if (!decoration) continue;
+    const { color, textColor } = decoration;
+    const key = `${color}/${textColor}`;
+    if (!byDecoration.has(key)) {
+      const preset = DATABASE_TEXT_COLOR_PRESETS.find(({ value }) => value === textColor);
+      const icon = color ? tabDecorationColors(color, color, 3.5) : null;
+      const name = textColor ? tabDecorationColors(preset?.light || textColor, preset?.dark || textColor, 4.8) : null;
+      byDecoration.set(key, {
+        "--wb-tab-database-icon-light": icon?.light,
+        "--wb-tab-database-icon-dark": icon?.dark,
+        "--wb-tab-database-name-light": name?.light,
+        "--wb-tab-database-name-dark": name?.dark,
+      });
+    }
+    styles.set(tab.id, byDecoration.get(key));
+  }
+  return styles;
+});
+
+function tabDatabaseDecorationStyle(tab) {
+  return databaseDecorationStyles.value.get(tab.id);
+}
+
+// Table tabs keep the name on its own line, with the source or progress below.
 function hasTabSubtitle(tab) {
-  return isTableLikeTab(tab) && !tab.opening && Boolean(tabDatabaseLabel(tab));
+  return isTableLikeTab(tab) && (tab.opening || Boolean(tabDatabaseLabel(tab)));
 }
 
 function tabSourceTitle(tab) {
@@ -281,7 +310,8 @@ function tabShortcutHint(tab) {
 
 function tabShortcutLabel(tab) {
   const hint = tabShortcutHint(tab);
-  return hint ? formatShortcutForPlatform(hint.combo) : "";
+  // The modifier is already held, so show just the remaining key.
+  return hint?.combo.at(-1) || "";
 }
 
 const macosTitlebar = useMacosTitlebarDoubleClick();
@@ -425,6 +455,7 @@ onBeforeUnmount(() => {
         :data-tab-id="tab.id"
         role="button"
         :tabindex="tab.opening ? -1 : 0"
+        :aria-pressed="tab.id === activeTabId"
         :aria-disabled="tab.opening ? 'true' : 'false'"
         :draggable="!tab.opening && tabKind(tab) !== 'home'"
         @dragstart.stop="startTabDrag(tab.id, $event)"
@@ -436,31 +467,43 @@ onBeforeUnmount(() => {
         @auxclick="closeTabFromMiddleClick(tab, $event)"
         @contextmenu.prevent.stop="openTabContextMenu($event, tab)"
         @dblclick.stop="copyTabName(tab, $event)"
-        @keydown.enter.prevent="activateTab(tab)"
-        @keydown.space.prevent="activateTab(tab)"
+        @keydown.enter.self.prevent="activateTab(tab)"
+        @keydown.space.self.prevent="activateTab(tab)"
       >
         <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
           <template v-if="hasTabSubtitle(tab)">
             <span class="wb-tab-line wb-tab-line-primary">
-              <span class="wb-tab-name">{{ tab.createMode ? (tab.draft?.tableName || t('createTable.title')) : (tab.tableName || tabTitle(tab)) }}</span>
-              <small v-if="tabKind(tab) === 'design'" class="wb-tab-kind">{{ t('m_56c255e19858') }}</small>
-              <small v-else-if="tab.relationFilter" class="wb-tab-kind">{{ t('relations.tabTag') }}</small>
+              <span class="wb-tab-name">{{ tabMenuName(tab) }}</span>
             </span>
-            <span class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
+            <span v-if="tab.opening" class="wb-tab-line wb-tab-line-secondary">
+              <span class="wb-tab-opening-spinner" aria-hidden="true"></span>
+              <small class="wb-tab-opening-label" aria-live="polite">{{ t('m_48de9f48a703') }}</small>
+            </span>
+            <span v-else class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
               <component
                 :is="tabDatabaseIcon(tab)"
                 v-if="tabDatabaseDecoration(tab)"
-                :size="10"
-                :stroke-width="1.5"
+                :size="11"
+                :stroke-width="1.65"
                 class="wb-tab-db-icon is-decorated"
                 aria-hidden="true"
               />
-              <svg v-else class="wb-tab-db-icon" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+              <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
                 <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
                 <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
                 <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
               </svg>
               <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+              <span
+                v-if="tabMenuTag(tab)"
+                class="wb-tab-status"
+                role="img"
+                :aria-label="tabMenuTag(tab)"
+                :title="tabMenuTag(tab)"
+              >
+                <component :is="tabKind(tab) === 'design' ? PencilRuler : Link2" :size="12" :stroke-width="1.7" aria-hidden="true" />
+                <span aria-hidden="true">{{ tabMenuTag(tab) }}</span>
+              </span>
             </span>
           </template>
           <template v-else-if="tabKind(tab) === 'home'">
