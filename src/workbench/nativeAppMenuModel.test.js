@@ -7,6 +7,8 @@ import {
   nativeAppMenuSignature,
 } from "./utils/nativeAppMenuModel.js";
 import { translateIn } from "./i18n/index.js";
+import { useNativeAppMenu } from "./composables/useNativeAppMenu.js";
+import { noteShortcutKeydownMatch } from "./utils/menuShortcutDedup.js";
 
 const zhCN = (key, params) => translateIn("zh-CN", key, params);
 const en = (key, params) => translateIn("en", key, params);
@@ -78,6 +80,55 @@ test("menu accelerators come from the live bindings", () => {
   const sqlItem = findItem(unbound, "file.openSqlQuery");
   assert.equal(sqlItem.accelerator, "");
   assert.equal(sqlItem.enabled, false);
+});
+
+test("Close shows the live binding without registering a competing native accelerator", () => {
+  const modelFor = (closeTab) => buildNativeAppMenuModel({ t: en, bindings: { closeTab } });
+  const original = modelFor("Ctrl+W");
+  const rebound = modelFor("Cmd+Shift+K");
+  for (const [model, hint] of [[original, "⌘W"], [rebound, "⇧⌘K"], [modelFor(""), ""]]) {
+    const close = findItem(model, "file.closeTab");
+    assert.equal(close.shortcutHint, hint);
+    assert.equal(close.enabled, Boolean(hint));
+    assert.equal(close.accelerator, undefined);
+    assert.equal(close.shortcutAction, undefined);
+  }
+  assert.notEqual(nativeAppMenuSignature(original), nativeAppMenuSignature(rebound));
+});
+
+test("explicit Close clicks ignore recent key matches and only act in the focused native window", async (ctx) => {
+  let close;
+  let onForwarded;
+  let mainFocused = true;
+  let forward = () => false;
+  const calls = [];
+  const item = { new: async (options) => {
+    if (options?.text === "menu.closeTab  ⌘W") close = options;
+    return {};
+  } };
+  const menuApi = { MenuItem: item, PredefinedMenuItem: item, CheckMenuItem: item, Submenu: item,
+    Menu: { new: async () => ({ setAsAppMenu: async () => {} }) } };
+  useNativeAppMenu({ enabled: () => true, secondaryWindow: true,
+    listenForwarded: (fn) => { onForwarded = fn; }, actions: { closeTabOrHide: () => calls.push("folder") } });
+  const menu = useNativeAppMenu({ enabled: () => true, menuApi, translate: (key) => key, bindings: MAC_BINDINGS,
+    hasFocus: () => !mainFocused, nativeWindowHasFocus: async () => mainFocused,
+    forwardAction: (entry) => forward(entry), actions: { closeTabOrHide: () => calls.push("main") } });
+  ctx.after(menu.stop);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(close);
+  assert.equal(close.accelerator, undefined);
+  noteShortcutKeydownMatch("closeTab");
+  await close.action();
+  await close.action();
+  mainFocused = false;
+  forward = (entry) => { onForwarded(entry); return true; };
+  await close.action();
+  await close.action();
+  forward = () => false;
+  await close.action();
+  forward = () => { throw new Error("window closed"); };
+  await close.action();
+  assert.deepEqual(calls, ["main", "main", "folder", "folder"]);
 });
 
 test("enabled gates mirror the handlers", () => {

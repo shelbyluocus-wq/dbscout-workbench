@@ -1,4 +1,5 @@
 import { shortcutParts } from "../composables/useShortcuts.js";
+import { formatShortcutForPlatform } from "./desktopPlatform.js";
 
 // Pure model for the native macOS app menu. `buildNativeAppMenuModel` maps the
 // workbench's orchestrator-facing state to a plain tree; the adapter in
@@ -107,9 +108,9 @@ export function buildNativeAppMenuModel({ t, bindings = {}, state = {}, options 
         item("file.openSqlQuery", { label: t("shortcut.openSqlQuery"), accelerator: accel("openSqlQuery"), action: "openSqlQuery", shortcutAction: "openSqlQuery", enabled: bound("openSqlQuery") }),
         item("file.quickOpen", { label: t("menu.quickOpen"), accelerator: accel("searchDatabase"), action: "quickOpen", shortcutAction: "searchDatabase", enabled: bound("searchDatabase") }),
         separator("file.sep.1"),
-        // With no tab to close the item falls back to hiding the window, the
-        // same behaviour the default menu's Close Window gives on ⌘W.
-        item("file.closeTab", { label: t("menu.closeTab"), accelerator: accel("closeTab"), action: "closeTabOrHide", shortcutAction: "closeTab", enabled: bound("closeTab") }),
+        // The focused webview owns the Close keystroke, including editable and
+        // modal guards. Show the binding without registering a second handler.
+        item("file.closeTab", { label: t("menu.closeTab"), shortcutHint: formatShortcutForPlatform(bindings.closeTab, { platform: "macOS" }), action: "closeTabOrHide", enabled: bound("closeTab") }),
       ],
     },
     {
@@ -210,6 +211,7 @@ export function nativeAppMenuSignature(model = []) {
         entry.kind,
         entry.dynamicLabel ? "" : entry.label || "",
         entry.accelerator || "",
+        entry.shortcutHint || "",
         entry.predefined || "",
         entry.about ? JSON.stringify(entry.about) : "",
       ]),

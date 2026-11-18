@@ -24,6 +24,7 @@ export function useNativeAppMenu({
   // the app-wide menu bar and hands items over while this window has focus.
   secondaryWindow = false,
   hasFocus = () => globalThis.document?.hasFocus?.() !== false,
+  nativeWindowHasFocus = defaultNativeWindowHasFocus,
   forwardAction = defaultForwardAction,
   listenForwarded = defaultListenForwarded,
 } = {}) {
@@ -58,8 +59,16 @@ export function useNativeAppMenu({
   }
 
   async function dispatch(entry) {
-    // ⌘W chosen while a folder window has focus must close that window's
-    // tab, not one of the main window's.
+    // Close is window-specific. Menu tracking can blur the document; check
+    // the native window instead, and never close a background main tab if
+    // forwarding fails or no workbench window has focus.
+    if (entry.action === "closeTabOrHide") {
+      try {
+        if (await nativeWindowHasFocus()) run(entry);
+        else await forwardAction(entry);
+      } catch { /* No confirmed target. */ }
+      return;
+    }
     if (!hasFocus()) {
       try {
         if (await forwardAction(entry)) return;
@@ -102,7 +111,7 @@ export function useNativeAppMenu({
       });
     }
     return api.MenuItem.new({
-      text: entry.label,
+      text: entry.shortcutHint ? `${entry.label}  ${entry.shortcutHint}` : entry.label,
       enabled: entry.enabled !== false,
       accelerator: entry.accelerator || undefined,
       action: () => dispatch(entry),
@@ -231,6 +240,11 @@ export function useNativeAppMenu({
 }
 
 export const APP_MENU_FORWARD_EVENT = "app-menu-forward";
+
+async function defaultNativeWindowHasFocus() {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  return getCurrentWindow().isFocused();
+}
 
 async function defaultForwardAction(entry) {
   const { invoke } = await import("@tauri-apps/api/core");

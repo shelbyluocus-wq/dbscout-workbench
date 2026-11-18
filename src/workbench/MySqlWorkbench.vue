@@ -4751,26 +4751,18 @@ function handleRefreshKeydown(event) {
 }
 
 function isTabShortcutEditingTarget(target) {
-  // The workbench focuses table search when opening a table.
-  return isEditableShortcutTarget(target) && !focusedPaneState.isTableSearchTarget?.(target);
+  // Neither the auto-focused table search nor a selected cell's IME holder
+  // is an active cell edit. Opening and restoring a tab can focus either.
+  return isEditableShortcutTarget(target)
+    && !target.matches?.("input.wb-cell-ime-hold")
+    && !focusedPaneState.isTableSearchTarget?.(target);
 }
 
 function handleCloseTabKeydown(event) {
   if (!shortcutHelper.matchesBinding("closeTab", event)) return false;
-  if (isTabShortcutEditingTarget(event.target)) return false;
-  const tab = activeTab.value;
-  if (!tab) {
-    // On macOS ⌘W is also the app's close-window key: with no tab to close,
-    // hide the window like the default menu's Close Window item did.
-    if (!usesNativeMacWindowControls) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    withCurrentWindow((win) => win.hide());
-    return true;
-  }
+  if (event.isComposing || !closeTabOrHideWindow(event.target)) return false;
   event.preventDefault();
   event.stopPropagation();
-  closeTab(tab.id);
   return true;
 }
 
@@ -5409,13 +5401,14 @@ function refreshFromMenu() {
 
 // ⌘W: close the active tab; hide the window when there is nothing to close
 // (the default menu's Close Window behaviour).
-function closeTabOrHideWindow() {
+function closeTabOrHideWindow(target = document.activeElement) {
+  if (dialogLayerManager.hasActiveModalLayer() || target?.closest?.('[data-wb-shortcut-capture="true"]')) return false;
+  if (isTabShortcutEditingTarget(target)) return false;
   const tab = activeTab.value;
-  if (tab) {
-    void closeTab(tab.id);
-    return;
-  }
-  withCurrentWindow((win) => (isFolderWindow ? win.close() : win.hide()));
+  if (tab) void closeTab(tab.id);
+  else if (usesNativeMacWindowControls) withCurrentWindow((win) => (isFolderWindow ? win.close() : win.hide()));
+  else return false;
+  return true;
 }
 
 useNativeAppMenu({

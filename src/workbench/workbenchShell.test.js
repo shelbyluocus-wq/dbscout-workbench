@@ -3057,7 +3057,8 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
 
   // Closing and cycling tabs work from table search and respect editing fields.
   assert.match(orchestrator, /matchesBinding\("closeTab",\s*event\)/);
-  assert.match(orchestrator, /if\s*\(isTabShortcutEditingTarget\(event\.target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
+  assert.match(orchestrator, /closeTabOrHideWindow\(event\.target\)/);
+  assert.match(orchestrator, /if\s*\(isTabShortcutEditingTarget\(target\)\)\s*return\s+false;[\s\S]*?closeTab\(tab\.id\)/);
 
   // Ctrl+D must stay available after Ctrl+W closes table design. That close
   // drops keyboard focus onto the document, outside the workbench bubble listener.

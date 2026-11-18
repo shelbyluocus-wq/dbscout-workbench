@@ -8,6 +8,51 @@ const server = await createServer({
   server: { host: "127.0.0.1", port: 0, open: false },
 });
 
+async function verifyConsecutiveClose(page, key) {
+  const tabs = page.locator('.wb-tab');
+  const home = tabs.filter({ hasText: 'Home' });
+  const rows = page.locator('.wb-dbhome-object-row');
+  const names = await rows.evaluateAll((nodes) => nodes.slice(0, 3).map((node) => node.dataset.tableName));
+  assert.equal(names.length, 3);
+  for (const name of names) {
+    await home.click();
+    await page.locator(`.wb-dbhome-object-row[data-table-name="${name}"]`).dblclick();
+    await page.locator('.wb-tab.active').filter({ hasText: name }).waitFor();
+    await page.locator('.wb-grid tbody td[data-column-name]').first().click();
+  }
+  const cell = page.locator('.wb-workbench-pane.is-focused .wb-grid tbody td[data-column-name]').first();
+  await cell.dblclick();
+  await page.keyboard.press(`${key}+w`);
+  assert.equal(await tabs.count(), 4, 'a real cell editor protects the tab');
+  await page.keyboard.press('Escape');
+  await cell.click();
+  await page.waitForFunction(() => document.activeElement?.matches('input.wb-cell-ime-hold'));
+  await page.keyboard.down(key);
+  try {
+    for (const name of names.toReversed()) {
+      await page.keyboard.press('w');
+      await tabs.filter({ hasText: name }).waitFor({ state: 'detached', timeout: 3000 });
+    }
+  } finally {
+    await page.keyboard.up(key);
+  }
+  assert.equal(await tabs.count(), 1);
+  assert.equal(await home.getAttribute('aria-pressed'), 'true');
+
+  // Closing the only table on the right should hand the next keystroke to the left.
+  await page.locator(`.wb-dbhome-object-row[data-table-name="${names[0]}"]`).dblclick();
+  await page.setViewportSize({ width: 2000, height: 900 });
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  const panes = page.locator('.wb-workbench-pane');
+  await panes.nth(1).locator('td[data-column-name]').first().click();
+  await page.keyboard.press(`${key}+w`);
+  await panes.nth(1).waitFor({ state: 'detached' });
+  await page.keyboard.press(`${key}+w`);
+  await tabs.filter({ hasText: names[0] }).waitFor({ state: 'detached' });
+  assert.equal(await home.getAttribute('aria-pressed'), 'true');
+  await page.setViewportSize({ width: 1264, height: 815 });
+}
+
 async function verifyCustomEditingShortcuts(page, key) {
   await page.locator('.wb-dbhome-object-row[data-table-name="hero"] .wb-dbhome-object-name-button').dblclick();
   const settings = page.locator('[data-wb-rail-id="settings"]');
@@ -133,6 +178,7 @@ try {
       await page.keyboard.press(`${key}+w`);
       await search.waitFor({ state: "detached", timeout: 5000 });
       assert.equal(await page.locator(".wb-tab").count(), 1);
+      await verifyConsecutiveClose(page, key);
       await verifyCustomEditingShortcuts(page, key);
       assert.deepEqual(errors, []);
       console.log(`${engine.name()} (${platform}): table search focus, tab shortcuts, modal isolation, and custom save and undo after reload passed`);
