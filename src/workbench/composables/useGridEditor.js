@@ -71,6 +71,7 @@ import {
   MAX_AUTOFILL_ROWS,
   mapFillTargets,
   planAutoFill,
+  resolveDoubleClickFillCount,
 } from "../utils/gridAutoFill.js";
 import { useGridAutoFill } from "./useGridAutoFill.js";
 import { useShortcuts } from "./useShortcuts.js";
@@ -160,9 +161,12 @@ export function useGridEditor(
     isFilling,
     fillPreview,
     fillSourceBounds,
+    fillModifierActive,
+    fillPreviewDetail,
     fillOptions,
     hasFillPreview,
     beginFillSession,
+    setFillModifier,
     updateFillPreview,
     takeFillRequest,
     cancelFillSession,
@@ -170,6 +174,14 @@ export function useGridEditor(
     clearFillOptions,
     canShowFillHandle,
   } = useGridAutoFill();
+  const isMacPlatform = typeof navigator !== "undefined"
+    && /mac/i.test(navigator.platform || navigator.userAgent || "");
+  function isFillToggleModifier(event) {
+    if (!event) return false;
+    return Boolean(event.ctrlKey || event.metaKey || (isMacPlatform && event.altKey));
+  }
+  let applyingFillSelection = false;
+  let fillReachedEndNotified = false;
   const renderedFillSelection = computed(() => {
     if (!hasFillPreview.value) return null;
     const range = selectedRange.value;
@@ -205,6 +217,20 @@ export function useGridEditor(
   let suppressNextCellClick = false;
   let suppressNextCellClickTimer = null;
   const primaryKeyBuilders = new Map();
+
+  watch(selectedRange, () => {
+    if (!applyingFillSelection && fillOptions.value) clearFillOptions();
+  }, { flush: "sync" });
+
+  watch(editingCell, (next) => {
+    if (next && fillOptions.value) clearFillOptions();
+  }, { flush: "sync" });
+
+  watch(() => editState.mutationVersion, (version) => {
+    if (!applyingFillSelection && fillOptions.value && fillOptions.value.mutationVersion !== version) {
+      clearFillOptions();
+    }
+  }, { flush: "sync" });
 
   function shiftSelectedRows(range, shift) {
     if (!range || !shift) return range;
@@ -1313,6 +1339,19 @@ export function useGridEditor(
       "range-right": !selectedAt(rowIndex, columnIndex + 1),
       "range-anchor": isAnchor,
     };
+    if (hasFillPreview.value && fillSourceBounds.value) {
+      const sourceBounds = fillSourceBounds.value;
+      const inSource = isCoordinateInBounds(sourceBounds, rowIndex, columnIndex);
+      if (inSource) {
+        classes["fill-source"] = true;
+        if (rowIndex === sourceBounds.top) classes["fill-source-top"] = true;
+        if (rowIndex === sourceBounds.bottom) classes["fill-source-bottom"] = true;
+        if (columnIndex === sourceBounds.left) classes["fill-source-left"] = true;
+        if (columnIndex === sourceBounds.right) classes["fill-source-right"] = true;
+      } else {
+        classes["fill-target"] = true;
+      }
+    }
     const baseBounds = state.bounds;
     const singletonBaseWithToggles = baseBounds
       && baseBounds.top === baseBounds.bottom
@@ -1480,9 +1519,11 @@ export function useGridEditor(
 
   function rangeAutoscrollTarget(wrap, event) {
     const rect = wrap.getBoundingClientRect();
+    const theadHeight = wrap.querySelector?.("thead")?.getBoundingClientRect?.().height || 0;
+    const topEdge = rect.top + theadHeight + RANGE_AUTOSCROLL_EDGE;
     let nextTop = wrap.scrollTop;
     let nextLeft = wrap.scrollLeft;
-    if (event.clientY < rect.top + RANGE_AUTOSCROLL_EDGE) nextTop -= autoscrollStep(rect.top + RANGE_AUTOSCROLL_EDGE - event.clientY);
+    if (event.clientY < topEdge) nextTop -= autoscrollStep(topEdge - event.clientY);
     else if (event.clientY > rect.bottom - RANGE_AUTOSCROLL_EDGE) nextTop += autoscrollStep(event.clientY - (rect.bottom - RANGE_AUTOSCROLL_EDGE));
     if (event.clientX < rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE) nextLeft -= autoscrollStep(rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE - event.clientX);
     else if (event.clientX > rect.right - RANGE_AUTOSCROLL_EDGE) nextLeft += autoscrollStep(event.clientX - (rect.right - RANGE_AUTOSCROLL_EDGE));
@@ -1566,6 +1607,7 @@ export function useGridEditor(
     clearColumnSelection();
     stopRangeAutoscroll();
     cancelFillSession();
+    clearFillOptions();
   }
 
   function focusTextCell(tab, row, column) {
@@ -1730,6 +1772,17 @@ export function useGridEditor(
     }, 0);
   }
 
+  function extractFillCellValue(entry, column) {
+    if (!entry || !column) return null;
+    if (entry.type === "insert") {
+      const draft = entry.insertRow?.draft || {};
+      if (!Object.prototype.hasOwnProperty.call(draft, column)) return "";
+      return draft[column] == null ? null : String(draft[column]);
+    }
+    const raw = entry.row?.[column];
+    return raw == null ? null : String(raw);
+  }
+
   function extractFillSourceMatrix(tab, bounds) {
     const colNames = activeColumnNames();
     const model = visualRowEntries(tab);
@@ -1741,9 +1794,7 @@ export function useGridEditor(
       for (let columnIndex = bounds.left; columnIndex <= bounds.right; columnIndex += 1) {
         const column = colNames[columnIndex];
         if (!column) return null;
-        row.push(entry.type === "insert"
-          ? String(entry.insertRow?.draft?.[column] ?? "")
-          : editableCellValue(entry.row, column));
+        row.push(extractFillCellValue(entry, column));
       }
       matrix.push(row);
     }
@@ -1759,11 +1810,17 @@ export function useGridEditor(
     if (!bounds || !sourceMatrix) return false;
     event?.preventDefault?.();
     lastRangePointerEvent = event || null;
+    fillReachedEndNotified = false;
     return beginFillSession({
       sourceBounds: bounds,
       sourceMatrix,
-      copyKey: Boolean(event?.ctrlKey || event?.metaKey),
+      toggleKey: isFillToggleModifier(event),
     });
+  }
+
+  function updateFillModifier(event) {
+    if (!isFilling.value) return;
+    setFillModifier(isFillToggleModifier(event));
   }
 
   function updateFillFocusFromPointer(event) {
@@ -1781,11 +1838,15 @@ export function useGridEditor(
     const preview = updateFillPreview(rowIndex, columnIndex, limits);
     const wrapRect = wrap.getBoundingClientRect?.();
     if (wrapRect && preview) {
-      const pastLoaded = (event.clientY > wrapRect.bottom && rowIndex >= limits.maxRow)
-        || (event.clientY < wrapRect.top && rowIndex <= 0)
-        || (event.clientX > wrapRect.right && columnIndex >= limits.maxColumn)
-        || (event.clientX < wrapRect.left && columnIndex <= 0);
-      if (pastLoaded) statusText.value = "已到达已加载范围的末尾";
+      const pastUnloadedBottom = !tab.fullyLoaded
+        && event.clientY > wrapRect.bottom
+        && rowIndex >= limits.maxRow;
+      if (pastUnloadedBottom && !fillReachedEndNotified) {
+        fillReachedEndNotified = true;
+        statusText.value = "已到达已加载范围的末尾";
+      } else if (!pastUnloadedBottom) {
+        fillReachedEndNotified = false;
+      }
     }
   }
 
@@ -1802,6 +1863,7 @@ export function useGridEditor(
   function extendFillDragFromPointer(event) {
     if (!isFilling.value) return;
     lastRangePointerEvent = event;
+    setFillModifier(isFillToggleModifier(event));
     updateFillFocusFromPointer(event);
     startRangeAutoscroll(event);
   }
@@ -1821,7 +1883,30 @@ export function useGridEditor(
     setActiveSelectionPosition(tab, end);
   }
 
-  async function commitAutoFill(tab, request) {
+  function coalesceFillUndoEntry(tab, previousEntry, nextEntry) {
+    if (!previousEntry || !nextEntry || previousEntry === nextEntry) return nextEntry || previousEntry || null;
+    const stack = editState.undoStack;
+    if (!Array.isArray(stack) || stack.length < 2) return nextEntry;
+    if (stack[stack.length - 2] !== previousEntry || stack[stack.length - 1] !== nextEntry) {
+      return nextEntry;
+    }
+    const flatten = (entry) => (
+      entry?.kind === "history-composite" && Array.isArray(entry.entries)
+        ? entry.entries
+        : [entry]
+    );
+    const merged = {
+      kind: "history-composite",
+      tableName: tabScopeKey(tab),
+      tabId: tab.id,
+      label: "批量填充",
+      entries: [...flatten(previousEntry), ...flatten(nextEntry)],
+    };
+    stack.splice(stack.length - 2, 2, merged);
+    return merged;
+  }
+
+  async function commitAutoFill(tab, request, options = {}) {
     if (!tab || !request) return { ok: false, message: "没有可填充的单元格" };
     if (isReadOnlyTab(tab)) {
       setReadOnlyStatus(tab);
@@ -1857,57 +1942,114 @@ export function useGridEditor(
         value: planned.matrix[target.matrixRow]?.[target.matrixCol],
       });
     }
-    const result = await applyGridPastePlan(tab, { ok: true, targets: pasteTargets }, {
-      label: "批量填充",
-      draftLabel: "填充到新增行",
-      successMessage: (count) => `已填充 ${count} 个单元格`,
-      failureLabel: "批量填充",
-      invalidMessage: "无法填充",
-      noStartMessage: "无法填充：目标选区无效",
-      outOfRangeMessage: "无法填充：目标范围超出已加载的可编辑区域",
-      noWritableMessage: "无法填充：目标只包含数据库生成字段",
-      emptyMessage: "无法填充：目标选区没有可写入的单元格",
-    });
-    if (result?.ok) {
-      const previewBounds = request.previewBounds || {
-        top: Math.min(sourceBounds.top, ...targets.map((target) => target.rowIndex)),
-        bottom: Math.max(sourceBounds.bottom, ...targets.map((target) => target.rowIndex)),
-        left: Math.min(sourceBounds.left, ...targets.map((target) => target.columnIndex)),
-        right: Math.max(sourceBounds.right, ...targets.map((target) => target.columnIndex)),
-      };
-      expandSelectionToBounds(tab, previewBounds);
-      rememberFillOptions({
-        sourceBounds,
-        sourceMatrix,
-        direction,
-        fillCount,
-        previewBounds,
-        appliedMode: planned.mode,
+    const undoLengthBefore = editState.undoStack.length;
+    const prevTopUndo = undoLengthBefore > 0 ? editState.undoStack[undoLengthBefore - 1] : null;
+    applyingFillSelection = true;
+    let result;
+    try {
+      result = await applyGridPastePlan(tab, { ok: true, targets: pasteTargets }, {
+        label: "批量填充",
+        draftLabel: "填充到新增行",
+        successMessage: (count) => `已填充 ${count} 个单元格`,
+        failureLabel: "批量填充",
+        invalidMessage: "无法填充",
+        noStartMessage: "无法填充：目标选区无效",
+        outOfRangeMessage: "无法填充：目标范围超出已加载的可编辑区域",
+        noWritableMessage: "无法填充：目标只包含数据库生成字段",
+        emptyMessage: "无法填充：目标选区没有可写入的单元格",
       });
+      if (result?.ok) {
+        const pushedUndo = editState.undoStack.length > undoLengthBefore
+          ? editState.undoStack[editState.undoStack.length - 1]
+          : (editState.undoStack.at(-1) !== prevTopUndo ? editState.undoStack.at(-1) : null);
+        const historyEntry = options.coalesceFromEntry
+          ? coalesceFillUndoEntry(tab, options.coalesceFromEntry, pushedUndo)
+          : (pushedUndo || null);
+        const previewBounds = request.previewBounds || {
+          top: Math.min(sourceBounds.top, ...targets.map((target) => target.rowIndex)),
+          bottom: Math.max(sourceBounds.bottom, ...targets.map((target) => target.rowIndex)),
+          left: Math.min(sourceBounds.left, ...targets.map((target) => target.columnIndex)),
+          right: Math.max(sourceBounds.right, ...targets.map((target) => target.columnIndex)),
+        };
+        expandSelectionToBounds(tab, previewBounds);
+        rememberFillOptions({
+          sourceBounds,
+          sourceMatrix,
+          direction,
+          fillCount,
+          previewBounds,
+          appliedMode: planned.mode,
+          canToggleMode: planned.canToggleMode,
+          historyEntry,
+          mutationVersion: editState.mutationVersion,
+        });
+      }
+    } finally {
+      applyingFillSelection = false;
     }
     return result;
   }
 
   async function finishFillDrag(event) {
     lastRangePointerEvent = null;
+    fillReachedEndNotified = false;
     stopRangeAutoscroll();
-    const request = takeFillRequest(Boolean(event?.ctrlKey || event?.metaKey));
+    const modifierOverride = event ? isFillToggleModifier(event) : undefined;
+    const request = takeFillRequest(modifierOverride);
     if (!request) return { ok: false, cancelled: true };
     return commitAutoFill(activeTab.value, request);
   }
 
   function cancelFillDrag() {
     lastRangePointerEvent = null;
+    fillReachedEndNotified = false;
     stopRangeAutoscroll();
     cancelFillSession();
     return { ok: false, cancelled: true };
   }
 
+  async function autoFillDoubleClick(event) {
+    const tab = activeTab.value;
+    const range = selectedRange.value;
+    if (!tab || !showFillHandle.value || !range || range.tabId !== tab.id) {
+      return { ok: false, cancelled: true };
+    }
+    const bounds = gridSelectionActualBounds(range);
+    const sourceMatrix = bounds ? extractFillSourceMatrix(tab, bounds) : null;
+    if (!bounds || !sourceMatrix) return { ok: false, cancelled: true };
+    const model = visualRowEntries(tab);
+    const colNames = activeColumnNames();
+    const fillCount = resolveDoubleClickFillCount({
+      sourceBounds: bounds,
+      totalRows: model.length,
+      columnCount: colNames.length,
+      getCellValue: (rowIndex, columnIndex) => extractFillCellValue(model.at(rowIndex), colNames[columnIndex]),
+    });
+    if (fillCount <= 0) return { ok: false, cancelled: true };
+    return commitAutoFill(tab, {
+      sourceBounds: bounds,
+      sourceMatrix,
+      direction: "down",
+      fillCount,
+      previewBounds: {
+        ...bounds,
+        bottom: bounds.bottom + fillCount,
+      },
+      mode: isFillToggleModifier(event) ? "toggle" : "auto",
+    });
+  }
+
   async function applyFillOption(mode) {
     const context = fillOptions.value;
     const tab = activeTab.value;
-    if (!context || !tab || context.appliedMode === mode) return { ok: true, unchanged: true };
-    return commitAutoFill(tab, { ...context, mode });
+    if (!context || !tab || !context.canToggleMode || context.appliedMode === mode) {
+      return { ok: true, unchanged: true };
+    }
+    return commitAutoFill(
+      tab,
+      { ...context, mode },
+      { coalesceFromEntry: context.historyEntry },
+    );
   }
 
   function isMultiCellRange(range) {
@@ -4757,12 +4899,17 @@ export function useGridEditor(
     startFillDrag,
     extendFillTo,
     extendFillDragFromPointer,
+    updateFillModifier,
     finishFillDrag,
     cancelFillDrag,
+    autoFillDoubleClick,
     commitAutoFill,
     applyFillOption,
     showFillHandle,
     isFilling,
+    fillPreview,
+    fillPreviewDetail,
+    fillModifierActive,
     fillOptions,
     isCellInSelectedRange,
     selectedGridCells,

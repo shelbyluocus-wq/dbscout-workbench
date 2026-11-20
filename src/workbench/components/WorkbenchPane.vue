@@ -292,10 +292,16 @@ const {
   finishRangeSelection,
   startFillDrag,
   extendFillDragFromPointer,
+  updateFillModifier,
   finishFillDrag,
+  cancelFillDrag,
+  autoFillDoubleClick,
   applyFillOption,
   showFillHandle,
   isFilling,
+  fillPreview,
+  fillPreviewDetail,
+  fillModifierActive,
   fillOptions,
   startEditing,
   updateEditDraft,
@@ -337,10 +343,11 @@ const {
 watch(() => {
   const names = activeColumnMeta.value.map((meta) => meta.name);
   const picked = [selectedCell.value?.column, editingCell.value?.column, selectedInsertCell.value?.column];
-  // Keep selection endpoints mounted so the fill handle retains exact geometry.
+  // Keep selection and fill preview endpoints mounted so the fill handle retains exact geometry.
   const bounds = gridSelectionActualBounds(selectedRange.value);
+  const previewBounds = fillPreview.value?.previewBounds;
   const indexes = picked.map((name) => names.indexOf(name)).filter((index) => index >= 0);
-  for (const value of [bounds?.left, bounds?.right]) {
+  for (const value of [bounds?.left, bounds?.right, previewBounds?.left, previewBounds?.right]) {
     if (Number.isInteger(value)) indexes.push(value);
   }
   return [...new Set(indexes)].sort((a, b) => a - b);
@@ -1814,6 +1821,9 @@ onMounted(() => emitPaneState());
       :is-selecting-range="isSelectingRange"
       :show-fill-handle="showFillHandle"
       :is-filling="isFilling"
+      :fill-preview="fillPreview"
+      :fill-preview-detail="fillPreviewDetail"
+      :fill-modifier-active="fillModifierActive"
       :fill-options="fillOptions"
       :is-cell-in-selected-range="isCellInSelectedRange"
       :get-cell-range-classes="getCellRangeClasses"
@@ -1854,7 +1864,10 @@ onMounted(() => emitPaneState());
       @range-end="finishRangeSelection"
       @fill-start="startFillDrag"
       @fill-pointer="extendFillDragFromPointer"
+      @fill-modifier="updateFillModifier"
       @fill-end="finishFillDrag"
+      @fill-cancel="cancelFillDrag"
+      @fill-dblclick="autoFillDoubleClick"
       @fill-option="applyFillOption"
       @cell-dblclick="startEditing"
       @cell-blur="finishEditing"

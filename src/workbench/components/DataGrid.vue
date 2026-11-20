@@ -1,5 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
+import { tPlatform } from "../utils/platformLabels.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ArrowDownToLine, ArrowUpToLine, Check, Link2, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
@@ -43,6 +44,8 @@ const isCellDragging = ref(false);
 const isRowDragging = ref(false);
 const isFillDragging = ref(false);
 const fillOverlayStyle = ref(null);
+const fillOverlayPlacement = ref({ flipLeft: false, flipUp: false });
+const fillPreviewTipStyle = ref(null);
 const fillOptionsOpen = ref(false);
 const openToolbarMenu = ref("");
 const gridShellRef = ref(null);
@@ -62,6 +65,9 @@ const props = defineProps({
   isSelectingRange: { type: Boolean, default: false },
   showFillHandle: { type: Boolean, default: false },
   isFilling: { type: Boolean, default: false },
+  fillPreview: { type: Object, default: null },
+  fillPreviewDetail: { type: Object, default: null },
+  fillModifierActive: { type: Boolean, default: false },
   fillOptions: { type: Object, default: null },
   isCellInSelectedRange: { type: Function, default: () => false },
   getCellRangeClasses: { type: Function, default: () => ({}) },
@@ -224,7 +230,10 @@ const emit = defineEmits([
   'range-end',
   'fill-start',
   'fill-pointer',
+  'fill-modifier',
   'fill-end',
+  'fill-cancel',
+  'fill-dblclick',
   'fill-option',
   'cell-dblclick',
   'cell-blur',
@@ -922,11 +931,103 @@ function endRowSelection() {
 function endPointerSelections() {
   endRangeSelection();
   endRowSelection();
-  endFillDrag();
+  cancelFillDragFromBlur();
+}
+
+function visibleGridDataRect(wrap) {
+  const wrapRect = wrap.getBoundingClientRect();
+  const theadRect = wrap.querySelector("thead")?.getBoundingClientRect();
+  const contentTop = theadRect ? Math.max(wrapRect.top, theadRect.bottom) : wrapRect.top;
+  const contentBottom = wrapRect.top + (wrap.clientHeight || wrapRect.height);
+  const contentLeft = wrapRect.left + ROW_INDEX_WIDTH;
+  const contentRight = wrapRect.left + (wrap.clientWidth || wrapRect.width);
+  const frozenRowsList = wrap.querySelectorAll("tr.wb-frozen-row");
+  const lastFrozenRowRect = frozenRowsList.length
+    ? frozenRowsList[frozenRowsList.length - 1].getBoundingClientRect()
+    : null;
+  const frozenColEdge = wrap.querySelector("td.frozen-col-edge, th.frozen-col-edge")?.getBoundingClientRect() || null;
+  return {
+    wrapRect,
+    contentTop,
+    contentBottom,
+    contentLeft,
+    contentRight,
+    frozenRowBottom: lastFrozenRowRect ? Math.max(contentTop, lastFrozenRowRect.bottom) : contentTop,
+    frozenColRight: frozenColEdge ? Math.max(contentLeft, frozenColEdge.right) : contentLeft,
+  };
+}
+
+function findVisibleCellCorner(wrap, rowIndex, columnIndex, viewport) {
+  const cells = wrap.querySelectorAll(
+    `td[data-visual-row-index="${rowIndex}"][data-column-index="${columnIndex}"]`,
+  );
+  let best = null;
+  let score = Number.NEGATIVE_INFINITY;
+  for (const cell of cells) {
+    const rect = cell.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    const isFrozenRowCell = Boolean(cell.closest("tr.wb-frozen-row"));
+    const isFrozenColCell = cell.classList.contains("frozen-col") || cell.classList.contains("frozen-corner");
+    const minTop = isFrozenRowCell ? viewport.contentTop : viewport.frozenRowBottom;
+    const minLeft = isFrozenColCell ? viewport.contentLeft : viewport.frozenColRight;
+    const cornerVisible = rect.right >= minLeft - 2
+      && rect.right <= viewport.contentRight + 2
+      && rect.bottom >= minTop - 2
+      && rect.bottom <= viewport.contentBottom + 2;
+    if (!cornerVisible) continue;
+    const priority = (isFrozenRowCell ? 100000 : 0) + rect.right + rect.bottom;
+    if (priority > score) {
+      score = priority;
+      best = rect;
+    }
+  }
+  return best;
 }
 
 function updateFillOverlayPosition() {
-  if ((!props.showFillHandle && !props.fillOptions) || !gridWrapRef.value || !gridShellRef.value) {
+  const wrap = gridWrapRef.value;
+  const shell = gridShellRef.value;
+  if (!wrap || !shell) {
+    fillOverlayStyle.value = null;
+    fillPreviewTipStyle.value = null;
+    return;
+  }
+  const viewport = visibleGridDataRect(wrap);
+  const shellRect = shell.getBoundingClientRect();
+
+  if (props.isFilling && props.fillPreview?.fillCount > 0 && props.fillPreviewDetail) {
+    fillOverlayStyle.value = null;
+    const previewBounds = props.fillPreview.previewBounds;
+    const direction = props.fillPreview.direction;
+    const anchorRow = direction === "up" ? previewBounds.top : previewBounds.bottom;
+    const anchorCol = direction === "left" ? previewBounds.left : previewBounds.right;
+    const anchorCell = wrap.querySelector(
+      `td[data-visual-row-index="${anchorRow}"][data-column-index="${anchorCol}"]`,
+    );
+    const cellRect = anchorCell?.getBoundingClientRect();
+    const rawX = cellRect
+      ? (direction === "left" ? cellRect.left : cellRect.right + 8)
+      : viewport.contentRight - 140;
+    const rawY = cellRect
+      ? (direction === "up" ? cellRect.top : cellRect.bottom + 4)
+      : viewport.contentBottom - 32;
+    const clampedX = Math.max(
+      viewport.contentLeft + 6,
+      Math.min(rawX, viewport.contentRight - 148),
+    );
+    const clampedY = Math.max(
+      viewport.contentTop + 4,
+      Math.min(rawY, viewport.contentBottom - 30),
+    );
+    fillPreviewTipStyle.value = {
+      left: `${clampedX - shellRect.left}px`,
+      top: `${clampedY - shellRect.top}px`,
+    };
+    return;
+  }
+
+  fillPreviewTipStyle.value = null;
+  if (!props.showFillHandle && !props.fillOptions?.canToggleMode) {
     fillOverlayStyle.value = null;
     return;
   }
@@ -935,30 +1036,15 @@ function updateFillOverlayPosition() {
     fillOverlayStyle.value = null;
     return;
   }
-  const cells = gridWrapRef.value.querySelectorAll(
-    `td[data-visual-row-index="${bounds.bottom}"][data-column-index="${bounds.right}"]`,
-  );
-  const wrapRect = gridWrapRef.value.getBoundingClientRect();
-  const shellRect = gridShellRef.value.getBoundingClientRect();
-  let best = null;
-  let score = Number.NEGATIVE_INFINITY;
-  for (const cell of cells) {
-    const rect = cell.getBoundingClientRect();
-    const visible = rect.right > wrapRect.left
-      && rect.left < wrapRect.right
-      && rect.bottom > wrapRect.top
-      && rect.top < wrapRect.bottom;
-    if (!visible) continue;
-    const next = rect.right + rect.bottom;
-    if (next > score) {
-      score = next;
-      best = rect;
-    }
-  }
+  const best = findVisibleCellCorner(wrap, bounds.bottom, bounds.right, viewport);
   if (!best) {
     fillOverlayStyle.value = null;
     return;
   }
+  fillOverlayPlacement.value = {
+    flipLeft: viewport.contentRight - best.right < 140,
+    flipUp: viewport.contentBottom - best.bottom < 104,
+  };
   fillOverlayStyle.value = {
     left: `${best.right - shellRect.left}px`,
     top: `${best.bottom - shellRect.top}px`,
@@ -971,10 +1057,16 @@ function onFillHandleMouseDown(event) {
   emit("fill-start", event);
 }
 
+function onFillHandleDoubleClick(event) {
+  isFillDragging.value = false;
+  fillOptionsOpen.value = false;
+  emit("fill-dblclick", event);
+}
+
 function continueFillDrag(event) {
   if (!isFillDragging.value) return;
   if ((event.buttons & 1) === 0) {
-    endFillDrag();
+    endFillDrag(event);
     return;
   }
   emit("fill-pointer", event);
@@ -984,6 +1076,35 @@ function endFillDrag(event) {
   if (!isFillDragging.value) return;
   isFillDragging.value = false;
   emit("fill-end", event);
+}
+
+function cancelFillDragFromBlur() {
+  if (!isFillDragging.value && !props.isFilling) return;
+  isFillDragging.value = false;
+  emit("fill-cancel");
+}
+
+function handleFillKeyEvent(event) {
+  if (isFillDragging.value || props.isFilling) {
+    if (event.key === "Escape") {
+      isFillDragging.value = false;
+      emit("fill-cancel");
+      return;
+    }
+    emit("fill-modifier", event);
+    return;
+  }
+  if (fillOptionsOpen.value && event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    fillOptionsOpen.value = false;
+  }
+}
+
+function handleWindowMouseDownForFillOptions(event) {
+  if (!fillOptionsOpen.value) return;
+  if (event.target?.closest?.(".wb-fill-options")) return;
+  fillOptionsOpen.value = false;
 }
 
 function toggleFillOptionsMenu() {
@@ -1197,6 +1318,9 @@ watch(
   () => [
     props.tab?.id,
     props.showFillHandle,
+    props.isFilling,
+    props.fillPreview,
+    props.fillPreviewDetail,
     props.fillOptions,
     props.selectedRange,
     props.virtualRange?.start,
@@ -1216,8 +1340,12 @@ watch(
   { flush: "post" },
 );
 
+watch(() => props.isFilling, (active) => {
+  if (!active) isFillDragging.value = false;
+});
+
 watch(() => props.fillOptions, (value) => {
-  if (!value) fillOptionsOpen.value = false;
+  if (!value?.canToggleMode) fillOptionsOpen.value = false;
 });
 
 onMounted(() => {
@@ -1229,6 +1357,9 @@ onMounted(() => {
   window.addEventListener('mouseup', endRangeSelection);
   window.addEventListener('mouseup', endRowSelection);
   window.addEventListener('mouseup', endFillDrag);
+  window.addEventListener('keydown', handleFillKeyEvent);
+  window.addEventListener('keyup', handleFillKeyEvent);
+  window.addEventListener('mousedown', handleWindowMouseDownForFillOptions);
   window.addEventListener('blur', endPointerSelections);
 
   // Initial auto-fit after mount
@@ -1245,6 +1376,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', endRangeSelection);
   window.removeEventListener('mouseup', endRowSelection);
   window.removeEventListener('mouseup', endFillDrag);
+  window.removeEventListener('keydown', handleFillKeyEvent);
+  window.removeEventListener('keyup', handleFillKeyEvent);
+  window.removeEventListener('mousedown', handleWindowMouseDownForFillOptions);
   window.removeEventListener('blur', endPointerSelections);
   if (resizeObserver) {
     resizeObserver.disconnect();
@@ -1465,7 +1599,7 @@ function handleTableContextMenu(event) {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-fill-toggle': (isFilling || isFillDragging) && fillModifierActive, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -2009,7 +2143,7 @@ function handleTableContextMenu(event) {
         aria-hidden="true"
       >{{ columnReorder.ghost.label }}</div>
       <div
-        v-if="fillOverlayStyle && (showFillHandle || fillOptions)"
+        v-if="fillOverlayStyle && (showFillHandle || fillOptions?.canToggleMode)"
         class="wb-fill-overlay"
         :style="fillOverlayStyle"
       >
@@ -2018,10 +2152,15 @@ function handleTableContextMenu(event) {
           type="button"
           class="wb-fill-handle"
           :aria-label="t('m_83dfa4b49abe')"
-          :title="t('m_83dfa4b49abe')"
+          :title="tPlatform('grid.fillHandleHint')"
           @mousedown.left.stop.prevent="onFillHandleMouseDown"
+          @dblclick.left.stop.prevent="onFillHandleDoubleClick"
         ></button>
-        <div v-if="fillOptions && !isFilling && !isFillDragging" class="wb-fill-options">
+        <div
+          v-if="fillOptions?.canToggleMode && !isFilling && !isFillDragging"
+          class="wb-fill-options"
+          :class="{ 'is-flip-left': fillOverlayPlacement.flipLeft, 'is-flip-up': fillOverlayPlacement.flipUp }"
+        >
           <button
             type="button"
             class="wb-fill-options-trigger"
@@ -2034,21 +2173,44 @@ function handleTableContextMenu(event) {
           >
             <span class="wb-fill-options-glyph" aria-hidden="true"></span>
           </button>
-          <menu v-if="fillOptionsOpen" class="wb-fill-options-menu" @mousedown.stop>
+          <menu v-if="fillOptionsOpen" class="wb-fill-options-menu" role="menu" @mousedown.stop>
             <button
               type="button"
-              class="wb-fill-options-item"
-              :class="{ active: fillOptions.appliedMode === 'series' }"
-              @click.stop="chooseFillOption('series')"
-            > {{ t('m_8d4a33b55299') }} </button>
-            <button
-              type="button"
+              role="menuitemradio"
+              :aria-checked="fillOptions.appliedMode === 'copy'"
               class="wb-fill-options-item"
               :class="{ active: fillOptions.appliedMode === 'copy' }"
               @click.stop="chooseFillOption('copy')"
-            > {{ t('m_59d8cc2898d8') }} </button>
+            >
+              <Check v-if="fillOptions.appliedMode === 'copy'" :size="12" class="wb-fill-options-check" aria-hidden="true" />
+              <span v-else class="wb-fill-options-check-spacer" aria-hidden="true"></span>
+              <span>{{ t('m_59d8cc2898d8') }}</span>
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              :aria-checked="fillOptions.appliedMode === 'series'"
+              class="wb-fill-options-item"
+              :class="{ active: fillOptions.appliedMode === 'series' }"
+              @click.stop="chooseFillOption('series')"
+            >
+              <Check v-if="fillOptions.appliedMode === 'series'" :size="12" class="wb-fill-options-check" aria-hidden="true" />
+              <span v-else class="wb-fill-options-check-spacer" aria-hidden="true"></span>
+              <span>{{ t('m_8d4a33b55299') }}</span>
+            </button>
           </menu>
         </div>
+      </div>
+      <div
+        v-if="isFilling && fillPreviewDetail && fillPreviewTipStyle"
+        class="wb-fill-preview-tip"
+        :style="fillPreviewTipStyle"
+        aria-live="polite"
+      >
+        <span class="wb-fill-preview-value">{{ fillPreviewDetail.displayValue }}</span>
+        <span class="wb-fill-preview-mode">
+          {{ fillPreviewDetail.mode === 'series' ? t('grid.fillModeSeries') : t('grid.fillModeCopy') }}
+        </span>
       </div>
     </div>
 

@@ -324,12 +324,16 @@ try {
   const fillCell = (row) => fillRows[row].locator('td[data-column-index="3"]');
   const waitForFillValues = (values) => Promise.all(fillRows.map((row, index) => waitForValues(row, [3], [values[index]])));
   const fillUpValues = [fillBefore[0][0], String(fillSource - 3), String(fillSource - 2), String(fillSource - 1), String(fillSource)];
+
+  // Single-number upward fill copies by default; holding Control toggles to series.
   await fillCell(4).click();
+  await page.keyboard.down("Control");
   await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(1));
+  await page.keyboard.up("Control");
   await waitForFillValues(fillUpValues);
   await waitForCellSelection(page, ["1:3", "2:3", "3:3", "4:3"]);
 
-  // A second upward drag must extend the entire first result.
+  // A second upward drag on the multi-cell arithmetic range extends the series by default.
   await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(0));
   await waitForFillValues([String(fillSource - 4), ...fillUpValues.slice(1)]);
   await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3", "4:3"]);
@@ -338,14 +342,50 @@ try {
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
 
+  // Single-number downward fill copies by default; switching via options menu turns it into series,
+  // and a single Ctrl/Cmd+Z reverts both the initial fill and the mode switch together.
   await fillCell(0).click();
-  await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(3));
   const fillDownSource = Number(fillBefore[0][0]);
+  await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(3));
+  await waitForFillValues([String(fillDownSource), String(fillDownSource), String(fillDownSource), String(fillDownSource), fillBefore[4][0]]);
+  await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3"]);
+  await page.locator(".wb-fill-options-trigger").click();
+  await page.getByRole("menuitemradio", { name: "填充序列", exact: true }).click();
   await waitForFillValues([String(fillDownSource), String(fillDownSource + 1), String(fillDownSource + 2), String(fillDownSource + 3), fillBefore[4][0]]);
   await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3"]);
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
-  console.log("Upward/downward fill, continued upward drag, selection and batch undo passed.");
+
+  // Two-number selection fills arithmetic series by default and shows the live preview tooltip during drag.
+  const step = Number(fillBefore[1][0]) - Number(fillBefore[0][0]);
+  await fillCell(0).click();
+  await fillCell(1).click({ modifiers: ["Shift"] });
+  const handleBox = await page.locator(".wb-fill-handle").boundingBox();
+  const row3Box = await fillCell(3).boundingBox();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(row3Box.x + row3Box.width / 2, row3Box.y + row3Box.height / 2, { steps: 6 });
+  const previewTip = page.locator(".wb-fill-preview-tip");
+  await previewTip.waitFor({ state: "visible", timeout: 2000 });
+  const tipSeriesText = (await previewTip.textContent()).trim();
+  assert.ok(tipSeriesText.includes(String(fillDownSource + step * 3)), `preview tip should show end series value: ${tipSeriesText}`);
+  await page.keyboard.down("Control");
+  await page.waitForFunction(
+    (expected) => document.querySelector(".wb-fill-preview-tip")?.textContent?.includes(expected),
+    String(fillBefore[1][0]),
+  );
+  await page.keyboard.up("Control");
+  await page.mouse.up();
+  await waitForFillValues([
+    String(fillDownSource),
+    String(fillDownSource + step),
+    String(fillDownSource + step * 2),
+    String(fillDownSource + step * 3),
+    fillBefore[4][0],
+  ]);
+  await page.keyboard.press(shortcut("Z"));
+  await waitForFillValues(fillBefore.map(([value]) => value));
+  console.log("WPS/Excel fill rules, live preview tooltip, option switch, selection and batch undo passed.");
 
   // Selecting a cell focuses its hidden IME input. Clipboard events from that
   // input must paste into the grid, not disappear into the empty input.
