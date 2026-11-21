@@ -740,9 +740,10 @@ test("sidebar uses a compact connection database table tree without an internal 
   assert.match(sidebar, /class="wb-source-tree"/);
   assert.match(sidebar, /class="wb-database-branch"/);
   assert.match(sidebar, /class="wb-table-branch"/);
-  assert.match(sidebar, /:ref="setTableScrollElement"/);
+  const searchPanel = read("./components/SidebarSearchPanel.vue");
+  assert.match(sidebar, /@scroll-element="setTableScrollElement"/);
   assert.match(sidebar, /:ref="setTableListElement"/);
-  assert.match(sidebar, /class="wb-branch-inner wb-table-scroll"/);
+  assert.match(searchPanel, /class="wb-branch-inner wb-table-scroll"/);
   assert.match(sidebar, /scrollContainerRef:\s*tableScrollRef/);
   assert.match(sidebar, /revealSelectedDatabase/);
   assert.match(sidebar, /SidebarSearchPanel/);
@@ -1110,10 +1111,10 @@ test("sidebar search panel shows schema and value result groups", () => {
   assert.match(styles, /\.wb-search-hit-label/);
 });
 
-test("sidebar search input is not constrained by the result panel height", () => {
+test("sidebar search input sits outside the table scrollport so rows never clip behind it", () => {
   const panel = read("./components/SidebarSearchPanel.vue");
 
-  assert.match(panel, /<div\s+class="wb-table-search-wrap"[\s\S]*?<label\s+class="wb-table-search"[\s\S]*?<\/label>[\s\S]*?<\/div>\s*<section\s+class="wb-sidebar-search-panel"/);
+  assert.match(panel, /<div\s+class="wb-table-search-wrap"[\s\S]*?<label\s+class="wb-table-search"[\s\S]*?<\/label>[\s\S]*?<\/div>\s*<div[\s\S]*?class="wb-branch-inner wb-table-scroll"[\s\S]*?<section\s+class="wb-sidebar-search-panel"/);
   assert.doesNotMatch(panel, /<section\s+class="wb-sidebar-search-panel">\s*<div\s+class="wb-table-search-wrap"/);
 });
 
@@ -1283,7 +1284,8 @@ test("context menu limits freeze and table actions to the surface that was right
 
   assert.match(menu, /surface:\s*\{\s*type:\s*String,\s*default:\s*["']general["']\s*\}/);
   assert.match(menu, /showFreezeActions[\s\S]*props\.surface\s*===\s*["']grid["'][\s\S]*props\.kind\s*===\s*["']grid-row["']/);
-  assert.match(menu, /showTableActions[\s\S]*props\.tableScoped[\s\S]*["']inspector["'][\s\S]*["']detail["'][\s\S]*includes\(props\.surface\)/);
+  assert.match(menu, /showTableActions[\s\S]*props\.tableScoped[\s\S]*["']inspector["'][\s\S]*["']detail["'][\s\S]*["']grid["'][\s\S]*includes\(props\.surface\)/);
+  assert.match(menu, /<template\s+v-if="canGridCellRowActions && !rowReadOnly">/);
   assert.match(menu, /<template\s+v-if="showFreezeActions">/);
   assert.match(menu, /v-if="showTableActions"[\s\S]*>表设计</);
 });

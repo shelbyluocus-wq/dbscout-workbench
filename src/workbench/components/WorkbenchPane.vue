@@ -8,6 +8,7 @@ import { applyTabColumnSearch, commitTabColumnOrder, resetTabColumnOrder } from 
 import { columnName } from "../utils/normalize.js";
 import { columnNamesOf, isCustomColumnOrder, moveColumn } from "../utils/columnOrder.js";
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
+import { formatTableRowSummary } from "../utils/tableRowSummary.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { createSelectionStatsScan, indexOptimisticValuesForTable } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
@@ -340,6 +341,7 @@ const {
   getCellRangeClasses,
   isColumnSelected,
   setCellToNull,
+  clearSelectedCells,
 } = editor;
 watch(() => {
   const names = activeColumnMeta.value.map((meta) => meta.name);
@@ -1379,6 +1381,42 @@ function selectionStatRowKey(tab, entry) {
 // Small selections resolve synchronously in the post-render flush; large ones
 // are scanned in time-sliced chunks so dragging or extending a big range never
 // blocks on summing every selected cell. A newer selection cancels the scan.
+const dataTabRowSummary = computed(() => {
+  const tab = activeDataTab.value;
+  void tab?.dataVersion;
+  void tab?.totalRows;
+  void tab?.totalRowsExact;
+  void tab?.hasMore;
+  void tab?.rowWindowOffset;
+  void tab?.loading;
+  void tab?.loadError;
+  return formatTableRowSummary(tab, t);
+});
+
+const selectedCellContext = computed(() => {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id) return null;
+  const colMeta = activeColumnMeta.value.find((meta) => meta.name === cell.column);
+  const comment = String(colMeta?.comment || "").trim();
+  if (cell.kind === "fieldComment") {
+    return { rowNumber: null, column: cell.column, comment, isFieldComment: true };
+  }
+  let rowNumber = null;
+  if (isInsertRowKey(cell.rowKey)) {
+    const visualIndex = insertAwareVisualRowIndex(tab, cell.rowKey);
+    if (Number.isInteger(visualIndex) && visualIndex >= 0) {
+      rowNumber = tableWindowOffset(tab) + visualIndex + 1;
+    }
+  } else {
+    const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
+    if (rowIndex >= 0) {
+      rowNumber = tableWindowOffset(tab) + rowIndex + 1;
+    }
+  }
+  return { rowNumber, column: cell.column, comment, isFieldComment: false };
+});
+
 const SELECTION_STATS_SYNC_CELL_LIMIT = 20_000;
 const SELECTION_STATS_CHUNK_ROWS = 64;
 const SELECTION_STATS_CHUNK_BUDGET_MS = 8;
@@ -1666,6 +1704,7 @@ function emitPaneState() {
     insertDraftsBelow,
     deleteRow: deleteGridRow,
     setCellToNull,
+    clearSelectedCells,
     applyColumnSearch,
     goToNextSchemaSearchMatch,
     goToPreviousSchemaSearchMatch,
@@ -1838,6 +1877,7 @@ onMounted(() => emitPaneState());
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
       :search-hit-summary="searchHitSummary"
+      :row-summary="dataTabRowSummary"
       :schema-search-matches="schemaSearchMatches"
       :schema-search-index="schemaSearchIndex"
       :schema-search-summary="schemaSearchSummary"
@@ -1913,6 +1953,8 @@ onMounted(() => emitPaneState());
     <CellDetailPanel
       v-if="activeDataTab"
       :selected-cell="selectedCell"
+      :cell-context="selectedCellContext"
+      :row-summary="dataTabRowSummary"
       :text-draft="textDraft"
       :identity-remap="detailIdentityRemap"
       :read-only="detailReadOnly"

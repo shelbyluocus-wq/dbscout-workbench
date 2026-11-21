@@ -52,11 +52,10 @@
   --wb-chrome-surface: var(--wb-wallpaper-frame-solid);
 }
 .mysql-workbench.has-wallpaper :is(.wb-workspace, .wb-main) { background: transparent; }
-/* Table rows scroll beneath the pinned sidebar search; soften them instead of
-   tinting the strip, which would show as a block at rest. */
+/* The sidebar search bar sits outside .wb-table-scroll, so rows clip cleanly
+   at the scrollport boundary and never bleed behind the input over wallpaper. */
 .mysql-workbench.has-wallpaper .wb-table-search-wrap {
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  background: transparent;
 }
 
 /* ── Content sheet ─────────────────────────────────────────────────────── */

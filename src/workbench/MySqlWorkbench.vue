@@ -7,7 +7,7 @@ const {
   setAppearance: setWallpaperAppearance,
 } = useWallpaper();
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, Upload, X } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pencil, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, TableProperties, Upload, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -117,7 +117,7 @@ import { primaryKeyFilter } from "./utils/controlNavigation.js";
 import { gridRowKey } from "./utils/gridRowIdentity.js";
 import { createRowIndex } from "./utils/rowIndex.js";
 import { applyCommittedCellToTab } from "./utils/committedCellSync.js";
-import { isGridCellSelected } from "./utils/gridCellSelection.js";
+import { gridSelectionCount, isGridCellSelected } from "./utils/gridCellSelection.js";
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { resolveHomeDesignTargets } from "./utils/homeDesignTargets.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
@@ -442,6 +442,8 @@ const focusedPaneState = reactive({
   insertDraftsBelow: null,
   pasteCopiedRowsAbove: null,
   deleteRow: null,
+  setCellToNull: null,
+  clearSelectedCells: null,
   handleWorkbenchKeydown: null,
   isTableSearchTarget: null,
   clearSelection: null,
@@ -625,6 +627,7 @@ const {
   clearInsertDraft,
   pasteIntoInsertInput,
   setCellToNull,
+  clearSelectedCells,
 } = editor;
 
 const focusedActiveColumns = computed(() =>
@@ -667,6 +670,46 @@ const canSetCellNull = computed(() => {
   const isNullable = column.is_nullable ?? column.isNullable ?? column.nullable;
   return !isPk && Boolean(isNullable);
 });
+
+const canClearCells = computed(() => {
+  if (contextMenu.surface !== "grid" || contextMenu.kind === "grid-row") return false;
+  if (contextMenu.rowReadOnly || contextMenu.fromColumnHeader) return false;
+  const anchor = Number(contextMenu.anchorIndex);
+  if (!Number.isFinite(anchor) || anchor < 0 || Number(contextMenu.targetColumnIndex) < 0) return false;
+  const range = focusedSelectedRange.value;
+  if (gridSelectionCount(range) > 1) return true;
+  const cell = focusedPaneState.selectedCell || selectedCell.value;
+  if (!cell?.column) return false;
+  const columns = columnsForCell(cell);
+  const column = columns.find((item) => (item.column_name || item.columnName) === cell.column);
+  if (!column) return false;
+  return !Boolean(column.is_primary_key || column.isPrimaryKey);
+});
+
+const clearCellsLabel = computed(() => (
+  gridSelectionCount(focusedSelectedRange.value) > 1
+    ? t("contextMenu.clearCells")
+    : t("contextMenu.clearCell")
+));
+
+const canGridCellRowActions = computed(() => (
+  contextMenu.surface === "grid" &&
+  contextMenu.kind !== "grid-row" &&
+  !contextMenu.rowReadOnly &&
+  !contextMenu.fromColumnHeader &&
+  Boolean(contextMenu.row) &&
+  Number.isFinite(Number(contextMenu.anchorIndex)) &&
+  Number(contextMenu.anchorIndex) >= 0
+));
+
+const canAppendRow = computed(() => (
+  contextMenu.surface === "grid" &&
+  contextMenu.kind !== "grid-row" &&
+  !contextMenu.rowReadOnly &&
+  !contextMenu.fromColumnHeader &&
+  !contextMenu.row &&
+  Boolean(contextMenu.rowTab || activeDataTab.value)
+));
 
 // ── Freeze panes context-menu state ───────────────────────────────────────
 // The freeze menu acts on the focused tab. 「冻结到此行」uses the right-clicked
@@ -824,10 +867,11 @@ function onResetColumnOrder() {
   closeContextMenu();
   focusedPaneState.resetGridColumnOrder?.(focusedFreezeTab.value);
 }
-// 右键行菜单的删除按钮文字：选中多行时显示「删除 X 行」。
+// 右键行/单元格菜单的删除按钮文字：选中多行时显示「删除 X 行」。
 const contextMenuDeleteLabel = computed(() => {
   const count = contextMenu.selectedRowCount || 0;
-  return count > 1 ? `删除 ${count} 行` : "删除行";
+  if (count > 1) return `删除 ${count} 行`;
+  return canGridCellRowActions.value ? t("contextMenu.deleteRow") : "删除行";
 });
 const focusedTextDraft = computed({
   get: () => focusedPaneState.textDraft ?? textDraft.value ?? "",
@@ -3171,8 +3215,39 @@ const tabContextTab = computed(() => {
 });
 const tabContextMenuShortcuts = computed(() => ({
   refresh: formatShortcutForPlatform(shortcutHelper.get("refresh")),
+  design: formatShortcutForPlatform(shortcutHelper.get("openDesign")),
   close: formatShortcutForPlatform(shortcutHelper.get("closeTab")),
 }));
+
+const tabContextIsDataTable = computed(() => {
+  const tab = tabContextTab.value;
+  return Boolean(tab && (tab.kind || "data") === "data" && tab.tableName);
+});
+
+const tabContextCanRename = computed(() => {
+  const tab = tabContextTab.value;
+  if (!tabContextIsDataTable.value || !tab) return false;
+  return !tab.readOnly && !tab.read_only && connectionCapability(tab.connectionId, "renameDrop");
+});
+
+function openDesignFromTabMenu() {
+  const paneId = tabContextMenu.paneId || workspace.focusedPaneId;
+  const tab = tabContextTab.value;
+  closeTabContextMenu();
+  if (!tab || !tab.tableName) return;
+  openTableDesign(tab, paneId);
+}
+
+function renameTableFromTabMenu() {
+  const tab = tabContextTab.value;
+  closeTabContextMenu();
+  if (!tab || !tab.tableName) return;
+  openTableRenameFromSource({
+    connectionId: tab.connectionId,
+    database: tab.database,
+    tableName: tab.tableName,
+  });
+}
 
 function handleTabContextMenuKeydown(event) {
   handleMenuKeydown(event, tabContextMenuRef.value, { close: closeTabContextMenu });
@@ -4216,7 +4291,7 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
   );
   openContextMenu(event, targetTab, {
     surface: "grid",
-    menuHeight: 252,
+    menuHeight: 332,
     clipboardActions: {
       canCopy: hasGridSelection && typeof focusedPaneState.copyGridSelection === "function",
       canPaste: Boolean(
@@ -4229,7 +4304,12 @@ function openActiveTableContextMenu(event, targetTab = activeDataTab.value) {
       paste: () => focusedPaneState.pasteGridSelection?.(),
     },
   });
-  if (rowIndex >= 0) contextMenu.anchorIndex = rowIndex;
+  contextMenu.rowTab = targetTab || null;
+  contextMenu.rowReadOnly = Boolean(targetTab?.readOnly || targetTab?.read_only);
+  if (rowIndex >= 0) {
+    contextMenu.anchorIndex = rowIndex;
+    contextMenu.row = tabRowAt(targetTab, rowIndex) || null;
+  }
   if (Number.isFinite(colIdx) && colIdx >= 0) contextMenu.targetColumnIndex = colIdx;
   const header = event.target?.closest?.(".wb-grid-column-header-row th[data-column-index]");
   if (header) {
@@ -4487,6 +4567,24 @@ function onSetCellToNull() {
     : setCellToNull;
   closeContextMenu();
   setNull?.();
+}
+
+function onClearSelectedCells() {
+  const clear = typeof focusedPaneState.clearSelectedCells === "function"
+    ? focusedPaneState.clearSelectedCells
+    : clearSelectedCells;
+  closeContextMenu();
+  clear?.();
+}
+
+function onGridCellAppendRow() {
+  const tab = contextMenu.rowTab || activeDataTab.value;
+  const insert = typeof focusedPaneState.insertDraftBelow === "function"
+    ? focusedPaneState.insertDraftBelow
+    : insertDraftBelow;
+  closeContextMenu();
+  if (!tab || typeof insert !== "function") return;
+  insert(tab);
 }
 
 function selectGridCell(...args) {
@@ -5942,6 +6040,10 @@ onBeforeUnmount(() => {
       :row-read-only="contextMenu.rowReadOnly"
       :can-insert-copied-rows="contextMenu.canInsertCopiedRows"
       :can-set-null="canSetCellNull"
+      :can-clear-cells="canClearCells"
+      :clear-cells-label="clearCellsLabel"
+      :can-grid-cell-row-actions="canGridCellRowActions"
+      :can-append-row="canAppendRow"
       :can-toggle-hit-result-pane="contextMenu.canToggleHitResultPane"
       :hit-result-pane-open="contextMenu.hitResultPaneOpen"
       :delete-label="contextMenuDeleteLabel"
@@ -5964,6 +6066,7 @@ onBeforeUnmount(() => {
       @refresh="refreshFromContextMenu"
       @copy="copyFromContextMenu"
       @paste="pasteFromContextMenu"
+      @clear-cells="onClearSelectedCells"
       @open-design="openDesignFromContextMenu"
       @sync-database="openDatabaseSync"
       @send-table="openTableCopyFromContext"
@@ -5973,6 +6076,7 @@ onBeforeUnmount(() => {
       @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-insert-below="onGridRowInsertBelow"
+      @grid-cell-append-row="onGridCellAppendRow"
       @grid-row-paste-above="onGridRowPasteAbove"
       @grid-row-delete="onGridRowDelete"
       @set-null="onSetCellToNull"
@@ -6012,6 +6116,10 @@ onBeforeUnmount(() => {
       @keydown="handleTabContextMenuKeydown"
     >
       <button type="button" role="menuitem" :disabled="!['home', 'data'].includes(tabContextTab?.kind || 'data')" @click="refreshTabsFromMenu"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="tabContextMenuShortcuts.refresh" class="wb-context-shortcut" aria-hidden="true">{{ tabContextMenuShortcuts.refresh }}</kbd></button>
+      <template v-if="tabContextIsDataTable">
+        <button type="button" role="menuitem" @click="openDesignFromTabMenu"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="tabContextMenuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ tabContextMenuShortcuts.design }}</kbd></button>
+        <button type="button" role="menuitem" :disabled="!tabContextCanRename" @click="renameTableFromTabMenu"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('contextMenu.renameTable') }}</button>
+      </template>
       <hr class="wb-context-separator" role="separator" />
       <button type="button" role="menuitem" :disabled="!tabContextTab || tabContextTab.kind === 'home' || tabContextTab.opening" @click="closeTabFromMenu"><X :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tabs.close') }}<kbd v-if="tabContextMenuShortcuts.close" class="wb-context-shortcut" aria-hidden="true">{{ tabContextMenuShortcuts.close }}</kbd></button>
       <button type="button" role="menuitem" :disabled="!tabContextNeighborAvailability.left && !tabContextNeighborAvailability.right" @click="closeOtherTabsFromMenu"><CopyX :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tabs.closeOthers') }}</button>

@@ -30,6 +30,7 @@ const props = defineProps({
   database: { type: String, default: "" },
   schemaResults: { type: Array, default: () => [] },
   searchState: { type: Object, required: true },
+  scrollAriaLabel: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -38,6 +39,7 @@ const emit = defineEmits([
   "cancel-search-values",
   "open-schema-result",
   "open-value-result",
+  "scroll-element",
 ]);
 
 const historyOpen = ref(false);
@@ -295,7 +297,13 @@ defineExpose({ focusSearch });
     </section>
   </div>
 
-  <section class="wb-sidebar-search-panel">
+  <div
+    :ref="(el) => emit('scroll-element', el)"
+    class="wb-branch-inner wb-table-scroll"
+    role="group"
+    :aria-label="scrollAriaLabel || undefined"
+  >
+    <section class="wb-sidebar-search-panel">
     <p v-if="hasQuery && !hasFreshValues && !searchState.valueLoading" class="wb-search-hint">{{ t('m_250f4c4e4955') }}</p>
     <p v-if="searchState.valueLoading" class="wb-search-hint">{{ t('m_afd25dcb5cb5') }}</p>
     <div v-if="searchState.valueLoading" class="wb-value-search-progress-wrap">
@@ -375,4 +383,6 @@ defineExpose({ focusSearch });
       <p v-if="hasFreshValues && !searchState.valueResults.length" class="wb-tree-empty">{{ t('m_a46b18ebb96f') }}</p>
     </section>
   </section>
+    <slot />
+  </div>
 </template>

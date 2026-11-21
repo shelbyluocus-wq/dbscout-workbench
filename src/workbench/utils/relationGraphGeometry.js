@@ -254,7 +254,7 @@ export function labelBox(node, direction, { gap, width, height }) {
  * frame     { x0, y0, x1, y1 } ranked names must stay inside, or null
  * returns   Map(id -> { direction, anchor, x, y0, x0, x1, y1 }), without left-out names
  */
-export function placeLabels(nodes, lines, { center = null, gap = 4, previous = null, obstacles = [], frame = null } = {}) {
+export function placeLabels(nodes, lines, { center = null, gap = 4, previous = null, obstacles = [], frame = null, framePad = null } = {}) {
   const byId = new Map([...obstacles, ...nodes].map((node) => [node.id, node]));
   const incident = new Map(nodes.map((node) => [node.id, []]));
   for (const line of lines) {
@@ -278,6 +278,7 @@ export function placeLabels(nodes, lines, { center = null, gap = 4, previous = n
     for (const piece of line.pieces || []) pieces.push({ piece, line, penalty: 3, bounds: segmentBounds(piece) });
     for (const arrow of line.arrows || []) pieces.push({ piece: arrow, line, penalty: 5, arrow: true, bounds: segmentBounds(arrow) });
   }
+  const constrainFrame = Boolean(frame && Number.isFinite(framePad));
   const placed = [];
   const result = new Map();
   for (const node of order) {
@@ -299,16 +300,103 @@ export function placeLabels(nodes, lines, { center = null, gap = 4, previous = n
     let best = null;
     for (const candidate of candidates) {
       if ((best && candidate.score <= best.score) || candidate.score < lowest) break;
-      const box = labelBox(node, candidate.direction, { gap, width: node.width, height: node.height });
+      const rawBox = labelBox(node, candidate.direction, { gap, width: node.width, height: node.height });
+      const box = !optional && constrainFrame
+        ? fitLabelInFrame({ direction: candidate.direction.index, ...rawBox }, node, frame, { gap, pad: framePad })
+        : { direction: candidate.direction.index, ...rawBox };
       if (optional && crowded(box, node, { circles, placed, pieces, frame, margin: gap / 2 })) continue;
-      const score = candidate.score - collisions(box, node, circles, placed, pieces);
-      if (!best || score > best.score) best = { score, direction: candidate.direction, box };
+      // Prefer sides that stay near the node without stealing another table's label room.
+      let crowdPenalty = 0;
+      if (!optional && constrainFrame) {
+        crowdPenalty += Math.hypot((box.x0 + box.x1) / 2 - (rawBox.x0 + rawBox.x1) / 2, box.y0 - rawBox.y0) * 0.015;
+        for (const other of nodes) {
+          if (other.id === node.id) continue;
+          const halfW = (Number(other.width) || 0) / 2;
+          const vertReach = (Number(other.radius) || 0) + gap + (Number(other.height) || 0);
+          const reserved = {
+            x0: other.x - halfW,
+            x1: other.x + halfW,
+            y0: other.y - vertReach,
+            y1: other.y + vertReach,
+          };
+          if (boxesOverlap(box, reserved)) crowdPenalty += 4;
+        }
+      }
+      const score = candidate.score - collisions(box, node, circles, placed, pieces) - crowdPenalty;
+      if (!best || score > best.score) best = { score, box };
     }
     if (!best) continue;
     placed.push(best.box);
-    result.set(node.id, { direction: best.direction.index, ...best.box });
+    result.set(node.id, best.box);
   }
   return result;
+}
+
+/**
+ * Keeps a placed label inside `frame` with `pad` graph-unit breathing room.
+ * If shifting horizontally would cover the node's own circle, falls back to
+ * placing the label cleanly below or above the node and clamping horizontally.
+ */
+export function fitLabelInFrame(side, node, frame, { gap = 4, pad = 6 } = {}) {
+  if (!side || !node || !frame) return side;
+  const width = Math.max(0, side.x1 - side.x0);
+  const height = Math.max(0, side.y1 - side.y0);
+  const minX = frame.x0 + pad;
+  const maxX = frame.x1 - pad;
+  const minY = frame.y0 + pad;
+  const maxY = frame.y1 - pad;
+  const clampHorizontal = (box) => {
+    let dx = 0;
+    if (width > maxX - minX) {
+      dx = minX - box.x0;
+    } else if (box.x0 < minX) {
+      dx = minX - box.x0;
+    } else if (box.x1 > maxX) {
+      dx = maxX - box.x1;
+    }
+    return { ...box, x: box.x + dx, x0: box.x0 + dx, x1: box.x1 + dx };
+  };
+  const clampVertical = (box) => {
+    let dy = 0;
+    if (height <= maxY - minY) {
+      if (box.y0 < minY) dy = minY - box.y0;
+      else if (box.y1 > maxY) dy = maxY - box.y1;
+    }
+    return { ...box, y0: box.y0 + dy, y1: box.y1 + dy };
+  };
+  const overflowOf = (box) =>
+    Math.max(0, minX - box.x0) +
+    Math.max(0, box.x1 - maxX) +
+    Math.max(0, minY - box.y0) +
+    Math.max(0, box.y1 - maxY);
+
+  if (overflowOf(side) <= 1e-6) return side;
+
+  const shifted = clampVertical(clampHorizontal(side));
+  if (!boxHitsCircle(shifted, node.x, node.y, (Number(node.radius) || 0) + 2)) {
+    return shifted;
+  }
+
+  // Horizontal shift ran into the node circle itself: try cleanly below or above,
+  // biased toward the side the label originally wanted while staying attached to the node.
+  const size = { gap, width, height };
+  const biasHorizontal = (box) => {
+    const radius = Number(node.radius) || 0;
+    let targetX0 = box.x0;
+    if (side.x0 < minX) {
+      targetX0 = Math.max(minX, Math.min(box.x0, node.x - width + radius));
+    } else if (side.x1 > maxX) {
+      targetX0 = Math.min(maxX - width, Math.max(box.x0, node.x - radius));
+    }
+    const dx = targetX0 - box.x0;
+    return clampHorizontal({ ...box, x: box.x + dx, x0: box.x0 + dx, x1: box.x1 + dx });
+  };
+  const candidates = [
+    { direction: 2, box: biasHorizontal(labelBox(node, { x: 0, y: 1 }, size)) },
+    { direction: 6, box: biasHorizontal(labelBox(node, { x: 0, y: -1 }, size)) },
+  ];
+  candidates.sort((left, right) => overflowOf(left.box) - overflowOf(right.box));
+  return { direction: candidates[0].direction, ...candidates[0].box };
 }
 
 // Whether a name box (with a margin around it) would cover a name already

@@ -9,6 +9,7 @@ import {
   Columns2,
   Copy,
   DatabaseZap,
+  Eraser,
   FolderOpen,
   ListRestart,
   Minus,
@@ -45,6 +46,10 @@ const props = defineProps({
   // True only when a data cell is selected on a nullable, non-PK column so the
   // "设为 NULL" action is meaningful (#5).
   canSetNull: { type: Boolean, default: false },
+  canClearCells: { type: Boolean, default: false },
+  clearCellsLabel: { type: String, default: "" },
+  canGridCellRowActions: { type: Boolean, default: false },
+  canAppendRow: { type: Boolean, default: false },
   canToggleHitResultPane: { type: Boolean, default: false },
   hitResultPaneOpen: { type: Boolean, default: false },
   // 「删除行」按钮文字：选中多行时由父组件传入「删除 X 行」。
@@ -70,10 +75,10 @@ const props = defineProps({
   databaseOnRail: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'toggle-database-rail', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
+const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'clear-cells', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'toggle-database-rail', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-cell-append-row', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
-const showTableActions = computed(() => props.tableScoped && !["inspector", "detail"].includes(props.surface));
+const showTableActions = computed(() => props.tableScoped && !["inspector", "detail", "grid"].includes(props.surface));
 const showSidebarTableActions = computed(() => props.kind === "table" && props.surface === "sidebar");
 const isGridMenu = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const shortcuts = useShortcuts();
@@ -153,8 +158,20 @@ const contextMenuStyle = computed(() => ({
     <template v-if="showClipboardActions">
       <button type="button" role="menuitem" :disabled="!canCopy" @click="emit('copy')"><Copy :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_63d90d977348') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.copy }}</kbd></button>
       <button type="button" role="menuitem" :disabled="!canPaste" @click="emit('paste')"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.paste }}</kbd></button>
+      <button v-if="canClearCells && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('clear-cells')"><Eraser :size="14" class="wb-context-icon" aria-hidden="true" />{{ clearCellsLabel || t('contextMenu.clearCell') }}<kbd class="wb-context-shortcut" aria-hidden="true">Delete</kbd></button>
       <button v-if="canSetNull && surface === 'grid' && kind !== 'grid-row'" type="button" role="menuitem" @click="emit('set-null')"><CircleSlash :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_cb818676f2e1') }}</button>
       <hr v-if="surface !== 'input'" class="wb-context-separator" role="separator" />
+    </template>
+    <!-- 单元格右键行操作组：聚焦行/格编辑，不含表/库级高危操作 -->
+    <template v-if="canGridCellRowActions && !rowReadOnly">
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-above', 1)"><ArrowUpToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('contextMenu.insertRowAbove') }}</button>
+      <button type="button" role="menuitem" @click="emit('grid-row-insert-below', 1)"><ArrowDownToLine :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('contextMenu.insertRowBelow') }}</button>
+      <button type="button" role="menuitem" class="danger" @click="emit('grid-row-delete')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteLabel }}</button>
+      <hr v-if="showFreezeActions || showTableActions" class="wb-context-separator" role="separator" />
+    </template>
+    <template v-else-if="canAppendRow && kind !== 'grid-row' && !rowReadOnly">
+      <button type="button" role="menuitem" @click="emit('grid-cell-append-row')"><Plus :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('contextMenu.appendRow') }}</button>
+      <hr v-if="showFreezeActions || showTableActions" class="wb-context-separator" role="separator" />
     </template>
     <!-- 行操作组 -->
     <template v-if="kind === 'grid-row' && !rowReadOnly">
@@ -193,7 +210,7 @@ const contextMenuStyle = computed(() => ({
       <button v-if="!canFreezeCell && !canFreezeRow && !canFreezeColumn" type="button" role="menuitem" @click="emit('freeze-first-column')"><Snowflake :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e6f957238ec6') }}</button>
       <button v-if="hasFreeze" type="button" role="menuitem" @click="emit('unfreeze')"><PinOff :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0592dd0b34a5') }}</button>
       <button v-if="canResetColumnOrder" type="button" role="menuitem" @click="emit('reset-column-order')"><ListRestart :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_3ac8482b6eb7') }}</button>
-      <hr v-if="showTableActions" class="wb-context-separator" role="separator" />
+      <hr v-if="showTableActions || surface === 'grid'" class="wb-context-separator" role="separator" />
     </template>
     <!-- 表操作组 -->
     <button v-if="showSidebarTableActions" type="button" role="menuitem" @click="emit('open-tables')"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.openTables', { count: tableCount }) : t('m_bf8ef131aa2d') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.open }}</kbd></button>
@@ -201,7 +218,7 @@ const contextMenuStyle = computed(() => ({
     <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd v-if="shortcutHints.rename" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.rename }}</kbd></button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_623281e9dfdb') }}</button>
-    <button v-if="showTableActions && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? t('m_5d43a2115ed9') : t('m_d7898968a0a2') }}</button>
+    <button v-if="(showTableActions || surface === 'grid') && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? t('m_5d43a2115ed9') : t('m_d7898968a0a2') }}</button>
     <hr v-if="showTableActions || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
     <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>

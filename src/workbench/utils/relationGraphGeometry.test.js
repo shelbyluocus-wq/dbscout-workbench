@@ -6,6 +6,7 @@ import {
   arrowZones,
   boxHitsSegment,
   cardPlacement,
+  fitLabelInFrame,
   glideStarts,
   labelBox,
   layoutSpread,
@@ -214,4 +215,40 @@ test("placing names stays quick on the largest graph drawn", () => {
   for (let frame = 0; frame < 5; frame += 1) placeLabels(nodes, lines, { center: "t0", gap: 4 });
   const perFrame = (performance.now() - started) / 5;
   assert.ok(perFrame < 40, `one placement took ${perFrame.toFixed(1)}ms`);
+});
+
+test("fitLabelInFrame keeps long center labels clear of the left edge without overlapping the node", () => {
+  const center = { id: "actbilayerdrawboxencmodelprop", x: 0, y: 0, radius: 11 };
+  const frame = { x0: -120, y0: -110, x1: 120, y1: 110 };
+  const clippedLeft = { direction: 4, ...labelBox(center, { x: -1, y: 0 }, { gap: 5, width: 135, height: 14 }) };
+  assert.ok(clippedLeft.x0 < frame.x0, "starts clipped beyond the left frame edge");
+
+  const fitted = fitLabelInFrame(clippedLeft, center, frame, { gap: 5, pad: 8 });
+  assert.ok(fitted.x0 >= frame.x0 + 8 - 1e-6, `left edge kept inside padding (${fitted.x0})`);
+  assert.ok(fitted.x1 <= frame.x1 - 8 + 1e-6, `right edge kept inside padding (${fitted.x1})`);
+  assert.equal(fitted.anchor, "middle", "falls back below/above instead of sitting on top of the circle");
+  assert.ok(fitted.y0 >= center.radius || fitted.y1 <= -center.radius, "clears the node circle vertically");
+
+  // A label already inside the frame is returned untouched.
+  const inside = { direction: 2, ...labelBox(center, { x: 0, y: 1 }, { gap: 5, width: 60, height: 14 }) };
+  assert.equal(fitLabelInFrame(inside, center, frame, { gap: 5, pad: 8 }), inside);
+});
+
+test("placeLabels with framePad keeps long center names in-frame without colliding with neighbour names", () => {
+  const center = { id: "actbilayerdrawboxencmodelprop", x: 0, y: 0, radius: 11, width: 135, height: 14, rank: 0 };
+  const goods = { id: "goodsprop", x: 92, y: 0, radius: 11, width: 68, height: 14, rank: 2 };
+  const gift = { id: "giftoptionalprop", x: -46, y: -80, radius: 11, width: 105, height: 14, rank: 2 };
+  const vip = { id: "vipbuyprop", x: -46, y: 80, radius: 11, width: 70, height: 14, rank: 2 };
+  const nodes = [center, goods, gift, vip];
+  const makeLine = (a, b) => ({ source: a.id, target: b.id, pieces: [[a.x, a.y, b.x, b.y]], arrows: [] });
+  const lines = [makeLine(center, goods), makeLine(center, gift), makeLine(center, vip), makeLine(gift, goods), makeLine(gift, vip)];
+  const frame = { x0: -120, y0: -120, x1: 145, y1: 120 };
+
+  const placed = placeLabels(nodes, lines, { center: center.id, gap: 5, frame, framePad: 8 });
+  const centerBox = placed.get(center.id);
+  const goodsBox = placed.get(goods.id);
+  assert.ok(centerBox && goodsBox, "both center and neighbour are named");
+  assert.ok(centerBox.x0 >= frame.x0 + 8 - 1e-6 && centerBox.x1 <= frame.x1 - 8 + 1e-6, "center stays in frame");
+  const overlap = centerBox.x0 < goodsBox.x1 && goodsBox.x0 < centerBox.x1 && centerBox.y0 < goodsBox.y1 && goodsBox.y0 < centerBox.y1;
+  assert.equal(overlap, false, "neighbour moves clear of the relocated center label");
 });

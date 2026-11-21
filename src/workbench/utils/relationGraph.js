@@ -358,8 +358,8 @@ export function layoutRelationGraph(local, labelFor = (id) => id, { spread = nul
     x *= stretchX;
     y *= stretchY;
     const label = graphLabel(labelFor(node.id));
-    // A name can sit on any side of its table; allow most of its width either way.
-    const reachX = node.radius + LABEL_OFFSET + label.length * LABEL_CHAR_WIDTH * 0.75;
+    // A name can sit on any side of its table; reserve realistic horizontal room so long names don't clip.
+    const reachX = node.radius + LABEL_OFFSET + label.length * LABEL_CHAR_WIDTH * 0.95;
     const reachY = node.radius + LABEL_OFFSET + LABEL_LINE_HEIGHT;
     positions.set(node.id, { x, y, label });
     bounds = {

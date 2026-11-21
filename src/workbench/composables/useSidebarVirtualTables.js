@@ -180,6 +180,7 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   function scrollTableIntoView(index, { margin = 48, smooth = true } = {}) {
     const container = resolveListElement(scrollContainerRef.value);
     if (!container || !Number.isFinite(index) || index < 0) return;
+    measureRowHeight();
     measureListTop();
     syncViewport();
     const rowH = rowHeight.value > 0 ? rowHeight.value : SIDEBAR_TABLE_ROW_HEIGHT;

@@ -308,7 +308,8 @@ const placement = computed(() => {
       unnamed.push({ id: node.id, x: point.x, y: point.y, radius: node.radius });
       continue;
     }
-    const width = Math.max(textWidth(texts.label, fontSize), texts.comment ? textWidth(texts.comment, commentSize) : 0);
+    const labelScale = node.depth === 0 ? 1.08 : 1;
+    const width = Math.max(textWidth(texts.label, fontSize) * labelScale, texts.comment ? textWidth(texts.comment, commentSize) : 0);
     const height = fontSize * LINE_HEIGHT + (texts.comment ? commentSize * LINE_HEIGHT : 0);
     named.push({ id: node.id, x: point.x, y: point.y, radius: node.radius, width, height, rank: nameRank(node, active, keepNeighbors) });
   }
@@ -322,12 +323,14 @@ const placement = computed(() => {
       arrows: arrowZones(geometry, { start: link.backward, end: link.forward }),
     }];
   });
+  const gap = LABEL_SCREEN_GAP / unitScale;
   const result = placeLabels(named, lines, {
     center: props.graph.center,
-    gap: LABEL_SCREEN_GAP / unitScale,
+    gap,
     previous: previousSides,
     obstacles: unnamed,
     frame: nameFrame.value,
+    framePad: nameFrame.value ? 8 / unitScale : null,
   });
   previousSides = new Map([...result].map(([id, side]) => [id, side.direction]));
   return result;

@@ -650,8 +650,8 @@ test("sidebar table search remains visible while scrolling table lists", () => {
   assert.match(tableBranchRule, /overflow\s*:\s*hidden/);
   assert.match(tableBranchRule, /contain\s*:\s*size/);
   assert.doesNotMatch(searchPanelRule, /position\s*:\s*sticky/);
-  assert.match(tableSearchWrapRule, /position\s*:\s*sticky/);
-  assert.match(tableSearchWrapRule, /top\s*:\s*0/);
+  assert.match(tableSearchWrapRule, /position\s*:\s*relative/);
+  assert.match(tableSearchWrapRule, /flex\s*:\s*0 0 auto/);
   assert.match(tableSearchWrapRule, /z-index\s*:/);
   assert.match(tableSearchWrapRule, /background\s*:\s*var\(--wb-chrome-surface\)/);
   const searchHistoryRule = ruleBody(".wb-sidebar-search-history");
@@ -702,7 +702,8 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(actionsRule, /display\s*:\s*inline-flex/);
   assert.match(actionsRule, /flex\s*:\s*0 0 auto/);
   assert.doesNotMatch(actionsRule, /position\s*:\s*sticky/, "actions never float over the search field");
-  assert.match(actionsRule, /margin-left\s*:\s*auto/);
+  assert.match(ruleBody(".wb-table-search-field"), /max-width\s*:\s*380px/);
+  assert.match(ruleBody(".wb-table-toolbar-row-summary"), /margin-left\s*:\s*auto/);
   assert.match(splitButtonRule, /height\s*:\s*28px/);
   assert.match(splitButtonRule, /flex\s*:\s*0 0 auto/);
   assert.match(splitButtonMainRule, /min-width\s*:\s*42px/);

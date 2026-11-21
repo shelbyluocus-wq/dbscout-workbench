@@ -313,6 +313,7 @@ const filteredTables = computed(() => effectiveSchemaSearchResults.value.map((re
 const {
   virtualRange: tableVirtualRange,
   listTop: tableListTop,
+  rowHeight: tableRowHeight,
   visibleTables,
   scrollTableIntoView,
   scrollContainer: tableScrollElement,
@@ -320,7 +321,6 @@ const {
   scrollContainerRef: tableScrollRef,
   listElRef: tableListRef,
   tables: filteredTables,
-  stickyHeaderSelector: ".wb-table-search-wrap",
 });
 
 const activeTableName = computed(() => (
@@ -458,8 +458,8 @@ function revealActiveTable() {
       requestAnimationFrame(() => attempt(count + 1));
       return;
     }
-    // 表区独立滚动；留出紧凑边距，顶部搜索框高度由 composable 实测。
-    scrollTableIntoView(index, { margin: 16 });
+    // 表区独立滚动；按整行高度留出 1 行上下文，避免自动定位时把上方相邻行截断半截。
+    scrollTableIntoView(index, { margin: tableRowHeight.value });
   };
 
   void nextTick(() => attempt(1));
@@ -895,12 +895,6 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
 
                 <Transition name="wb-branch">
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
-                  <div
-                    :ref="setTableScrollElement"
-                    class="wb-branch-inner wb-table-scroll"
-                    role="group"
-                    :aria-label="t('sidebar.tablesOf', { database: databaseLabel(connection.id, database) })"
-                  >
                   <SidebarSearchPanel
                     ref="searchPanelRef"
                     :query="treeQuery"
@@ -908,12 +902,14 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                     :database="database"
                     :schema-results="effectiveSchemaSearchResults"
                     :search-state="effectiveSearchState"
+                    :scroll-aria-label="t('sidebar.tablesOf', { database: databaseLabel(connection.id, database) })"
+                    @scroll-element="setTableScrollElement"
                     @update:query="emit('update:treeQuery', $event)"
                     @search-values="emit('search-values')"
                     @cancel-search-values="emit('cancel-search-values')"
                     @open-schema-result="openSchemaSearchResult"
                     @open-value-result="emit('open-value-result', $event)"
-                  />
+                  >
 
                   <template v-if="!treeQuery.trim()">
                     <div
@@ -957,7 +953,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                       <span class="wb-tree-loading-spinner" aria-hidden="true"></span> {{ t('m_4927a53bcc88') }} </p>
                     <p v-else-if="!filteredTables.length" class="wb-tree-empty">{{ t('m_4034e355eb62') }}</p>
                   </template>
-                  </div>
+                  </SidebarSearchPanel>
                 </section>
                 </Transition>
               </section>

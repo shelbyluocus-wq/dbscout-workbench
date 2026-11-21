@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { ChevronDown, ChevronUp } from "lucide-vue-next";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
@@ -10,6 +10,8 @@ import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 
 const props = defineProps({
   selectedCell: { type: Object, default: null },
+  cellContext: { type: Object, default: null },
+  rowSummary: { type: String, default: "" },
   textDraft: { type: String, default: "" },
   identityRemap: { type: Object, default: null },
   readOnly: { type: Boolean, default: false },
@@ -19,7 +21,7 @@ const props = defineProps({
 
 const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu", "exit-detail"]);
 
-const DETAIL_DEFAULT_HEIGHT = 200;
+const DETAIL_DEFAULT_HEIGHT = 160;
 const DETAIL_MIN_HEIGHT = 96;
 // Releasing the resize drag at/under this height collapses the panel to its
 // slim title bar; expanding later restores the default height.
@@ -64,9 +66,29 @@ const jsonPretty = computed(() => visibility.state.jsonPretty);
 const detailFormatting = computed(() => highlightDetailValue(viewDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
-const isPanelCollapsed = computed(() => visibility.state.collapsed);
+const hasSelectedCell = computed(() => Boolean(props.selectedCell));
+const isPanelCollapsed = computed(() => visibility.state.collapsed || !hasSelectedCell.value);
 const showJsonFormatToggle = computed(() => Boolean(props.selectedCell && isJsonDetail.value && !isPanelCollapsed.value));
 const isCompact = computed(() => detailHeight.value <= COMPACT_HEIGHT);
+const cellTargetLabel = computed(() => {
+  if (!props.selectedCell) return "";
+  const ctx = props.cellContext;
+  if (ctx?.isFieldComment || isFieldComment.value) {
+    const col = ctx?.column || props.selectedCell.column || "";
+    return col ? t("cellDetail.fieldCommentTarget", { column: col }) : "";
+  }
+  const col = ctx?.column || props.selectedCell.column || "";
+  if (!col) return "";
+  return ctx?.rowNumber ? t("cellDetail.rowColumn", { row: ctx.rowNumber, column: col }) : col;
+});
+const cellTargetComment = computed(() => (
+  props.selectedCell && !isFieldComment.value ? String(props.cellContext?.comment || "").trim() : ""
+));
+const copyFeedback = ref(false);
+let copyFeedbackTimer = 0;
+const canCopyDetail = computed(() => Boolean(
+  props.selectedCell && !props.isNull && String(sourceDraft.value ?? "").length > 0,
+));
 // 收起时内容区高度动画到 0，把垂直空间平滑还给数据网格；展开恢复为
 // 拖柄 + 编辑器高度。动画时长/缓动见 CSS 里的 pane-collapse token。
 const contentStyle = computed(() => (
@@ -278,13 +300,32 @@ function collapsePanel() {
 }
 
 function togglePanel() {
+  if (!hasSelectedCell.value) return;
   visibility.toggleCollapsed();
 }
 
 // 收起态整条标题栏可点击展开；展开态点击标签栏不动作，只有 chevron 触发折叠，
 // 避免在编辑器上方误触收起。
 function onHeaderClick() {
+  if (!hasSelectedCell.value) return;
   if (isPanelCollapsed.value) expandPanel();
+}
+
+async function copyDetailValue() {
+  const copyText = detailCopyText({ copyAllIfEmpty: true });
+  const clipboard = globalThis.navigator?.clipboard;
+  if (!copyText || typeof clipboard?.writeText !== "function") return;
+  try {
+    await clipboard.writeText(copyText);
+    copyFeedback.value = true;
+    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(() => {
+      copyFeedback.value = false;
+      copyFeedbackTimer = 0;
+    }, 1400);
+  } catch {
+    /* ignore clipboard permission errors */
+  }
 }
 
 // ── Resizable height (no drag icon, just a slim divider bar) ──────────
@@ -363,39 +404,38 @@ function onDividerKeydown(event) {
   }
 }
 
-onBeforeUnmount(finishResize);
+onBeforeUnmount(() => {
+  finishResize();
+  if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+  copyFeedbackTimer = 0;
+});
 </script>
 
 <template>
   <section
     ref="rootRef"
     class="wb-cell-detail"
-    :class="{ 'is-resizing': isResizing, 'is-collapsed': isPanelCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment }"
+    :class="{ 'is-resizing': isResizing, 'is-collapsed': isPanelCollapsed, 'is-compact': isCompact, 'is-read-only-context': readOnly, 'is-field-comment': isFieldComment, 'has-selection': hasSelectedCell }"
     :style="ambientStyle"
     :aria-label="t('m_946f88c2a713')"
   >
     <div
       class="wb-cell-detail-header"
-      :class="{ 'is-collapsed': isPanelCollapsed }"
+      :class="{ 'is-collapsed': isPanelCollapsed, 'has-selection': hasSelectedCell }"
       @click="onHeaderClick"
     >
-      <span v-if="!selectionStatItems.length" class="wb-cell-detail-title">{{ t('m_891aaf102229') }}</span>
-      <div
-        v-else
-        class="wb-cell-detail-stats"
-        :aria-label="t('m_63aec19ea490')"
-      >
+      <div class="wb-cell-detail-leading">
+        <span class="wb-cell-detail-title">{{ t('m_891aaf102229') }}</span>
         <span
-          v-for="item in selectionStats.items"
-          :key="item.key"
-          class="wb-cell-detail-stat"
+          v-if="cellTargetLabel"
+          class="wb-cell-detail-target"
+          :title="cellTargetComment ? `${cellTargetLabel} · ${cellTargetComment}` : cellTargetLabel"
         >
-          <span class="wb-cell-detail-stat-label">{{ t(`selectionStats.${item.key}`) }}</span>
-          <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
+          <span class="wb-cell-detail-target-key">{{ cellTargetLabel }}</span>
+          <span v-if="cellTargetComment" class="wb-cell-detail-target-comment">{{ cellTargetComment }}</span>
         </span>
-      </div>
-      <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
-      <div class="wb-cell-detail-header-actions">
+        <span v-else class="wb-cell-detail-idle-hint">{{ t('cellDetail.idleHint') }}</span>
+        <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
         <div
           v-if="showJsonFormatToggle"
           class="wb-cell-detail-format"
@@ -418,8 +458,44 @@ onBeforeUnmount(finishResize);
           >{{ t('m_f69273dbbebf') }}</button>
         </div>
         <button
+          v-if="canCopyDetail"
+          type="button"
+          class="wb-cell-detail-copy-btn"
+          :class="{ 'is-copied': copyFeedback }"
+          :title="copyFeedback ? t('cellDetail.copied') : t('cellDetail.copy')"
+          :aria-label="copyFeedback ? t('cellDetail.copied') : t('cellDetail.copy')"
+          @click.stop="copyDetailValue"
+        >
+          <Check v-if="copyFeedback" :size="12" :stroke-width="2.2" aria-hidden="true" />
+          <Copy v-else :size="12" :stroke-width="1.8" aria-hidden="true" />
+          <span>{{ copyFeedback ? t('cellDetail.copied') : t('cellDetail.copy') }}</span>
+        </button>
+      </div>
+      <div class="wb-cell-detail-header-actions">
+        <div
+          v-if="selectionStatItems.length"
+          class="wb-cell-detail-stats"
+          :aria-label="t('m_63aec19ea490')"
+        >
+          <span
+            v-for="item in selectionStats.items"
+            :key="item.key"
+            class="wb-cell-detail-stat"
+          >
+            <span class="wb-cell-detail-stat-label">{{ t(`selectionStats.${item.key}`) }}</span>
+            <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
+          </span>
+        </div>
+        <span
+          v-if="rowSummary"
+          class="wb-cell-detail-row-summary"
+          :class="{ 'has-divider': selectionStatItems.length > 0 }"
+          :title="rowSummary"
+        >{{ rowSummary }}</span>
+        <button
           type="button"
           class="wb-cell-detail-toggle"
+          :disabled="!hasSelectedCell"
           :aria-expanded="String(!isPanelCollapsed)"
           :aria-label="toggleLabel"
           :title="toggleLabel"

@@ -5049,6 +5049,7 @@ export function useGridEditor(
     commitInsertRow,
     commitInsertRows,
     setCellToNull,
+    clearSelectedCells,
     pasteIntoInsertInput,
     pasteIntoEditingInput,
     pasteGridText,
