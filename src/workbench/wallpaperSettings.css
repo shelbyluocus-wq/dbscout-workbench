@@ -126,6 +126,11 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
+.wb-wallpaper-overlay[data-theme="dark"] .wb-wallpaper-segment button.active {
+  background: var(--wb-control-hover);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+
 .wb-wallpaper-segment small {
   color: var(--wb-quiet-text);
   font-size: var(--wb-fs-caption);

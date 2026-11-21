@@ -9,13 +9,21 @@ const SIDEBAR_TABLE_BRANCH_PADDING_TOP = 3;
  * Sizes the expanded table branch to its content while preserving a scrollable
  * viewport cap for larger databases.
  */
-export function computeTableBranchMinHeight({ tableHeight = 0, listTop = 0, searching = false } = {}) {
-  if (searching) return SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
+export function computeTableBranchMinHeight({
+  tableHeight = 0,
+  listTop = 0,
+  searching = false,
+  maxHeight = SIDEBAR_TABLE_BRANCH_MAX_HEIGHT,
+} = {}) {
+  const cap = Number.isFinite(Number(maxHeight)) && Number(maxHeight) > 0
+    ? Math.max(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, Math.round(Number(maxHeight)))
+    : SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
+  if (searching) return cap;
 
   const contentHeight = Math.max(0, Number(tableHeight) || 0);
   const measuredListTop = Math.max(SIDEBAR_TABLE_LIST_TOP_FALLBACK, Number(listTop) || 0);
   const contentHeightWithChrome = measuredListTop + contentHeight + SIDEBAR_TABLE_BRANCH_PADDING_TOP;
-  return Math.min(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, contentHeightWithChrome);
+  return Math.min(cap, contentHeightWithChrome);
 }
 
 /**

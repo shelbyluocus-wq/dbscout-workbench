@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ArrowLeftRight, Circle, Ellipsis, FileSpreadsheet, Plus, Rocket, Search, Settings } from "lucide-vue-next";
+import { Circle, Ellipsis, FileSpreadsheet, Plus, Rocket, Search, Settings, Star } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
 import { previewDragOrder } from "../sidebarDragPreview.js";
@@ -26,7 +26,7 @@ export const ACTIVITY_RAIL_ENTRIES = Object.freeze([
   }),
   Object.freeze({
     id: "databaseFavorites",
-    icon: ArrowLeftRight,
+    icon: Star,
     labelKey: "m_b2772946e700",
     hintKey: "shell.databaseFavoritesHint",
     popup: "menu",

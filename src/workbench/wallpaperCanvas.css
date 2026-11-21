@@ -10,9 +10,13 @@
      content reveal. A plain percentage, not calc(), for older WebKit. */
   --wb-wallpaper-sheet: color-mix(in srgb, var(--wb-workspace-mist) var(--wb-wallpaper-veil, 90%), transparent);
   --wb-wallpaper-stripe: rgba(0, 0, 0, 0.018);
+  --wb-wallpaper-grid-cell: rgba(255, 255, 255, 0.36);
+  --wb-wallpaper-grid-cell-even: rgba(244, 246, 249, 0.44);
 }
 .mysql-workbench.has-wallpaper[data-theme="dark"] {
   --wb-wallpaper-stripe: rgba(255, 255, 255, 0.04);
+  --wb-wallpaper-grid-cell: transparent;
+  --wb-wallpaper-grid-cell-even: var(--wb-wallpaper-stripe);
 }
 .wb-wallpaper-canvas {
   position: absolute;
@@ -133,11 +137,17 @@
 }
 .mysql-workbench.has-wallpaper .wb-tab.active::before { --wb-tab-curve-origin: 0; }
 .mysql-workbench.has-wallpaper .wb-tab.active::after { --wb-tab-curve-origin: 100%; }
-/* Plain rows show the sheet; alternate rows keep their stripe as a tint.
-   Highlight, pending, selection, active and frozen states win. */
+/* Plain rows gently steady light-mode wallpaper waves behind dense data cells
+   while keeping the empty canvas and dark mode airy; alternate rows keep their
+   stripe as a tint. Highlight, pending, selection, active and frozen states win. */
 .mysql-workbench.has-wallpaper .wb-grid-row:not(.row-selected, .row-active, .row-range-active, :hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
-  background-color: transparent;
+  background-color: var(--wb-wallpaper-grid-cell);
 }
 .mysql-workbench.has-wallpaper .wb-grid-row.row-even:not(.row-selected, .row-active, .row-range-active, :hover) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
-  background-color: var(--wb-wallpaper-stripe);
+  background-color: var(--wb-wallpaper-grid-cell-even);
+}
+/* Give wide Database Home rows a crisper hover guide over light wallpapers so
+   the eye tracks smoothly from table name to size and modified time. */
+.mysql-workbench.has-wallpaper:not([data-theme="dark"]) .wb-dbhome-object-row:hover {
+  background: color-mix(in srgb, var(--wb-accent) 9%, rgba(255, 255, 255, 0.56));
 }

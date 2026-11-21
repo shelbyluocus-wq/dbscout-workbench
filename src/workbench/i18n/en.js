@@ -1209,6 +1209,7 @@ export default Object.freeze({
   "shell.databaseFavoritesHint": "Switch to a favorite database",
   "shell.tableTransferHint": "Run the conversion script and copy its output into project assets",
   "shell.settingsHint": "Theme, font, and shortcuts",
+  "shell.expandInspectorWithRelations": "Expand inspector ({count} relations)",
   "updater.title.idle": "Check for updates",
   "updater.title.checking": "Updating the SVN folder",
   "updater.title.available": "New version {version} available",

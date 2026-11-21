@@ -9,6 +9,7 @@ import { useAliases } from "../composables/aliasStore.js";
 import { DATABASE_TEXT_COLOR_PRESETS, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
+import { splitMiddleEllipsis } from "../utils/middleEllipsis.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
 import { ensureContrast } from "../utils/systemAccentTheme.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
@@ -295,11 +296,14 @@ const shortcutHintsByTabId = computed(() => {
   return map;
 });
 
+function tabMenuNameParts(tab) {
+  return splitMiddleEllipsis(tabMenuName(tab));
+}
+
 const tabTones = computed(() => {
   const tones = new Map();
-  let index = 0;
   for (const tab of previewTabs.value) {
-    if (tabKind(tab) !== "home") tones.set(tab.id, ["gold", "coral", "blue"][index++ % 3]);
+    if (tabKind(tab) !== "home") tones.set(tab.id, "accent");
   }
   return tones;
 });
@@ -473,7 +477,13 @@ onBeforeUnmount(() => {
         <span class="wb-tab-title" :class="{ 'wb-tab-title-stack': hasTabSubtitle(tab) }" :title="tabSourceTitle(tab)">
           <template v-if="hasTabSubtitle(tab)">
             <span class="wb-tab-line wb-tab-line-primary">
-              <span class="wb-tab-name">{{ tabMenuName(tab) }}</span>
+              <span
+                class="wb-tab-name"
+                :class="{ 'is-middle-ellipsis': Boolean(tabMenuNameParts(tab).tail) }"
+                :aria-label="tabMenuNameParts(tab).tail ? tabMenuName(tab) : undefined"
+              >
+                <span class="wb-middle-ellipsis-head" :aria-hidden="tabMenuNameParts(tab).tail ? 'true' : undefined">{{ tabMenuNameParts(tab).head }}</span><span v-if="tabMenuNameParts(tab).tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ tabMenuNameParts(tab).tail }}</span>
+              </span>
             </span>
             <span v-if="tab.opening" class="wb-tab-line wb-tab-line-secondary">
               <span class="wb-tab-opening-spinner" aria-hidden="true"></span>

@@ -49,6 +49,7 @@ const emit = defineEmits([
   "open-relation",
   "open-relations-review",
   "open-table",
+  "relation-summary",
 ]);
 
 const { databaseLabel } = useAliases();
@@ -116,6 +117,14 @@ watch(
         if (token === relationSummaryToken) relationSummary.value = null;
       }
     }, RELATION_SUMMARY_DELAY_MS);
+  },
+  { immediate: true },
+);
+
+watch(
+  relationSummary,
+  (summary) => {
+    emit("relation-summary", summary);
   },
   { immediate: true },
 );

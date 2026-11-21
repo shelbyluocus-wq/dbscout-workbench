@@ -1209,6 +1209,7 @@ export default Object.freeze({
   "shell.databaseFavoritesHint": "快速切换收藏的数据库",
   "shell.tableTransferHint": "运行转表脚本并覆盖进工程 assets",
   "shell.settingsHint": "外观、字体与快捷键",
+  "shell.expandInspectorWithRelations": "展开备注栏（当前表有 {count} 条关联）",
   "updater.title.idle": "检查更新",
   "updater.title.checking": "正在更新 SVN 目录",
   "updater.title.available": "发现新版本 {version}",

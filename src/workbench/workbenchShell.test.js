@@ -678,10 +678,11 @@ test("sidebar table rows preserve table-name width before showing optional comme
   const copyRule = styles.match(/\.wb-table-copy\s*\{([^}]*)\}/s)?.[1] || "";
   const commentRule = styles.match(/(?:^|\r?\n)\.wb-table-comment\s*\{([^}]*)\}/s)?.[1] || "";
 
-  assert.match(copyRule, /display:\s*block/);
+  assert.match(copyRule, /display:\s*flex/);
   assert.match(copyRule, /overflow:\s*hidden/);
-  assert.match(copyRule, /text-overflow:\s*ellipsis/);
   assert.match(copyRule, /white-space:\s*nowrap/);
+  assert.match(styles, /\.wb-middle-ellipsis-head\s*\{[^}]*text-overflow:\s*ellipsis/s);
+  assert.match(styles, /\.wb-middle-ellipsis-tail\s*\{[^}]*flex:\s*0 0 auto/s);
   assert.match(commentRule, /margin-left:\s*7px/);
   assert.match(commentRule, /font-size:\s*var\(--wb-fs-body\)/);
   assert.match(commentRule, /line-height:\s*1\.45/);
@@ -2010,7 +2011,7 @@ test("workbench titlebar hosts database controls and inspector collapse", () => 
   assert.match(orchestrator, /id="wb-topbar-tabs"/);
   assert.match(orchestrator, /class="wb-titlebar-inspector-controls"/);
   assert.match(orchestrator, /sidebarCollapsed \? '展开数据库栏' : '收起数据库栏'/);
-  assert.match(orchestrator, /inspectorCollapsed \? '展开备注栏' : '收起备注栏'/);
+  assert.match(orchestrator, /const inspectorToggleLabel = computed[\s\S]*?收起备注栏[\s\S]*?展开备注栏/);
   assert.match(orchestrator, /INSPECTOR_TITLEBAR_COLLAPSED_WIDTH\s*=\s*32/);
   assert.match(orchestrator, /INSPECTOR_MIN_WIDTH/);
   assert.match(orchestrator, /const inspectorTitlebarStyle = computed/);
@@ -2300,7 +2301,7 @@ test("inspector field remarks select the matching cell on the current visual row
   const inspector = read("./components/InspectorPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*"open-relation",\s*"open-relations-review",\s*"open-table",\s*\]\)/);
+  assert.match(inspector, /defineEmits\(\[\s*"contextmenu",\s*"select-column",\s*"schema-search",\s*"schema-search-previous",\s*"schema-search-next",\s*"open-relation",\s*"open-relations-review",\s*"open-table",\s*"relation-summary",\s*\]\)/);
   assert.match(inspector, /<article[\s\S]*class="wb-schema-column"/);
   assert.match(inspector, /role="button"/);
   assert.match(inspector, /tabindex="0"/);

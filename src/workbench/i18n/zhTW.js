@@ -1210,6 +1210,7 @@ export default Object.freeze({
   "shell.databaseFavoritesHint": "快速切換收藏的資料庫",
   "shell.tableTransferHint": "執行轉表指令碼並覆蓋進專案 assets",
   "shell.settingsHint": "外觀、字體與快捷鍵",
+  "shell.expandInspectorWithRelations": "展開備註欄（目前資料表有 {count} 條關聯）",
   "updater.title.idle": "檢查更新",
   "updater.title.checking": "正在更新 SVN 目錄",
   "updater.title.available": "發現新版本 {version}",

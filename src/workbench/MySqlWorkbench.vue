@@ -7,7 +7,7 @@ const {
   setAppearance: setWallpaperAppearance,
 } = useWallpaper();
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, toRaw, watch } from "vue";
-import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, Pencil, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, TableProperties, Upload, X } from "lucide-vue-next";
+import { ArrowLeftToLine, ArrowRightToLine, CopyX, DatabaseZap, Download, FolderOpen, Link2, ListX, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Pin, Plug, RefreshCw, Rocket, Send, ShieldCheck, TableProperties, Upload, X } from "lucide-vue-next";
 
 import {
   applyTableSchemaToDataTab,
@@ -1457,6 +1457,15 @@ const {
   toggleInspector,
   expandInspector,
 } = usePaneResize({ viewportWidth: windowWidth });
+
+const inspectorRelationSummary = ref(null);
+const inspectorToggleLabel = computed(() => {
+  if (!inspectorCollapsed.value) return t("m_c46872e25609");
+  const total = Number(inspectorRelationSummary.value?.total) || 0;
+  return total > 0
+    ? t("shell.expandInspectorWithRelations", { count: total })
+    : t("m_9cee1ce2caac");
+});
 
 const wallpaperStrength = ref(0);
 // Low-strength wallpaper already leaves enough contrast under resting tabs.
@@ -5717,10 +5726,8 @@ onBeforeUnmount(() => {
           :title="sidebarCollapsed ? t('m_9cb43e8f453f') : t('m_5219e5b37457')"
           @click.stop="toggleSidebar()"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline v-if="sidebarCollapsed" points="5,3 9,7 5,11" />
-            <polyline v-else points="9,3 5,7 9,11" />
-          </svg>
+          <PanelLeftOpen v-if="sidebarCollapsed" :size="15" :stroke-width="1.75" aria-hidden="true" />
+          <PanelLeftClose v-else :size="15" :stroke-width="1.75" aria-hidden="true" />
         </button>
       </div>
 
@@ -5743,14 +5750,19 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-header-btn wb-topbar-collapse-btn"
-          :aria-label="inspectorCollapsed ? t('m_9cee1ce2caac') : t('m_c46872e25609')"
-          :title="inspectorCollapsed ? t('m_9cee1ce2caac') : t('m_c46872e25609')"
+          :class="{ 'has-indicator': inspectorCollapsed && (inspectorRelationSummary?.total || 0) > 0 }"
+          :aria-label="inspectorToggleLabel"
+          :title="inspectorToggleLabel"
           @click.stop="toggleInspector()"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline v-if="inspectorCollapsed" points="9,3 5,7 9,11" />
-            <polyline v-else points="5,3 9,7 5,11" />
-          </svg>
+          <PanelRightOpen v-if="inspectorCollapsed" :size="15" :stroke-width="1.75" aria-hidden="true" />
+          <PanelRightClose v-else :size="15" :stroke-width="1.75" aria-hidden="true" />
+          <span
+            v-if="inspectorCollapsed && (inspectorRelationSummary?.total || 0) > 0"
+            class="wb-topbar-collapse-dot"
+            :class="{ 'is-pending': (inspectorRelationSummary?.pending || 0) > 0 }"
+            aria-hidden="true"
+          ></span>
         </button>
       </div>
 
@@ -5992,6 +6004,7 @@ onBeforeUnmount(() => {
         @open-relation="openRelationTab"
         @open-relations-review="openConfigRelationsReview"
         @open-table="openConfigRelationTable"
+        @relation-summary="inspectorRelationSummary = $event"
       />
     </section>
 

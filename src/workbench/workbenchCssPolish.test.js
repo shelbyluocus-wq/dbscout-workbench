@@ -251,9 +251,9 @@ test("open table chrome shrinks tabs without adding a horizontal scrollbar", () 
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabListRule, /padding-inline\s*:\s*var\(--wb-tab-curve-size\)/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*1\s+1\s+112px/);
+  assert.match(tabRule, /flex\s*:\s*1\s+1\s+156px/);
   assert.match(tabRule, /min-width\s*:\s*32px/);
-  assert.match(tabRule, /max-width\s*:\s*176px/);
+  assert.match(tabRule, /max-width\s*:\s*256px/);
   assert.match(tabRule, /position\s*:\s*relative/);
   assert.match(tabRule, /padding\s*:\s*0 28px 0 10px/);
   assert.doesNotMatch(ruleBody(".wb-tab-title"), /text-align\s*:\s*center/);
@@ -354,7 +354,7 @@ test("open table tabs use a colored outline in the top tab strip", () => {
   assert.match(tonedTabRule, /height\s*:\s*32px/);
   assert.match(tonedTabRule, /margin-bottom\s*:\s*4px/);
   assert.match(titleRule, /font-size\s*:\s*var\(--wb-fs-body\)/);
-  assert.match(tonedActiveRule, /border-color\s*:\s*var\(--wb-tab-tone\)/);
+  assert.match(tonedActiveRule, /border-color\s*:\s*var\(--wb-tab-border\)/);
   assert.match(tonedActiveRule, /background\s*:\s*color-mix\(in srgb, var\(--wb-tab-tone\) var\(--wb-tab-tint\), var\(--wb-tab-state-surface\)\)/);
   assert.match(activeBeforeRule, /content\s*:\s*none/);
   assert.match(activeAfterRule, /content\s*:\s*none/);
@@ -423,9 +423,9 @@ test("open table chrome avoids competing horizontal divider lines", () => {
   assert.match(tabListRule, /flex\s*:\s*1\s+1\s+auto/);
   assert.match(tabListRule, /min-width\s*:\s*0/);
   assert.match(tabRule, /display\s*:\s*inline-flex/);
-  assert.match(tabRule, /flex\s*:\s*1\s+1\s+112px/);
+  assert.match(tabRule, /flex\s*:\s*1\s+1\s+156px/);
   assert.match(tabRule, /min-width\s*:\s*32px/);
-  assert.match(tabRule, /max-width\s*:\s*176px/);
+  assert.match(tabRule, /max-width\s*:\s*256px/);
   assert.match(activeTabRule, /box-shadow\s*:\s*none/);
   assert.doesNotMatch(tabStripRule, /border-bottom\s*:/);
   assert.doesNotMatch(paneHeaderRule, /border-bottom\s*:/);
@@ -1246,7 +1246,7 @@ test("settings sheet floats at the bottom of the activity rail", () => {
   const sheet = ruleBody(".wb-sidebar-settings-sheet");
   assert.match(sheet, /position:\s*fixed/);
   assert.match(sheet, /left:\s*calc\(var\(--wb-activity-rail-width\) \+ 8px\)/);
-  assert.match(sheet, /bottom:\s*12px/);
+  assert.match(sheet, /bottom:\s*16px/);
   assert.match(sheet, /z-index:\s*80/);
   assert.match(sheet, /background:\s*var\(--wb-dialog-surface\)/);
   assert.match(ruleBody(".wb-activity-rail-bottom"), /margin-top:\s*auto/);

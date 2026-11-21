@@ -1129,10 +1129,27 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-topbar-collapse-btn {
+  position: relative;
   width: 30px;
   min-width: 30px;
   height: 30px;
   color: var(--wb-muted);
+}
+
+.wb-topbar-collapse-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-accent);
+  box-shadow: 0 0 0 1.5px var(--wb-wallpaper-frame-solid, var(--wb-chrome-surface));
+  pointer-events: none;
+}
+
+.wb-topbar-collapse-dot.is-pending {
+  background: var(--wb-warning, #d97706);
 }
 
 .wb-header-btn:hover {
@@ -9587,16 +9604,16 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-sidebar-settings-sheet {
   position: fixed;
   z-index: 80;
-  bottom: 12px;
+  bottom: 16px;
   left: calc(var(--wb-activity-rail-width) + 8px);
   display: grid;
   gap: 0;
-  width: 300px;
+  width: 304px;
   max-height: calc(100vh - 120px);
-  padding: 2px 12px;
+  padding: 4px 14px;
   overflow-y: auto;
   border: 1px solid var(--wb-floating-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--wb-dialog-surface);
   box-shadow: var(--wb-floating-shadow);
   transform-origin: bottom left;
@@ -9659,18 +9676,45 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-sidebar-settings-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 168px;
+  min-height: 26px;
   border: 1px solid var(--wb-line);
   border-radius: 6px;
   background: var(--wb-toolbar-surface);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
-  padding: 3px 10px;
+  padding: 3px 7px 3px 10px;
   cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.wb-sidebar-settings-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-settings-sheet svg.wb-sidebar-settings-chevron {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--wb-quiet-text);
+  transition: color 0.14s ease, transform 0.14s ease;
 }
 
 .wb-sidebar-settings-action:hover {
-  border-color: var(--wb-accent);
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border));
+  background: var(--wb-control-hover);
   color: var(--wb-accent-strong);
+}
+
+.wb-sidebar-settings-action:hover .wb-sidebar-settings-chevron {
+  color: var(--wb-accent-strong);
+  transform: translateX(1px);
 }
 
 .wb-sidebar-settings-row-themes {
@@ -10052,9 +10096,10 @@ label:has(input[type="checkbox"]:disabled) {
   /* One equal column per option: the appearance switch has three. */
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
+  gap: 2px;
   padding: 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--wb-text) 8%, transparent);
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
 }
 
 .wb-sidebar-theme-segment button {
@@ -10067,14 +10112,25 @@ label:has(input[type="checkbox"]:disabled) {
   background: transparent;
   color: var(--wb-secondary-text);
   font-size: var(--wb-fs-body);
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.wb-sidebar-theme-segment button:hover:not(:disabled, .active) {
+  background: color-mix(in srgb, var(--wb-text) 5%, transparent);
+  color: var(--wb-text);
 }
 
 .wb-sidebar-theme-segment button.active {
-  background: var(--wb-control-hover);
+  background: var(--wb-surface);
   color: var(--wb-text);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px color-mix(in srgb, var(--wb-text) 8%, transparent);
+}
+
+.wb-sidebar-settings-sheet[data-theme="dark"] .wb-sidebar-theme-segment button.active {
+  background: var(--wb-control-hover);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
 /* Three-way switches (language, appearance) sit under their label so every
@@ -11342,20 +11398,48 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-copy {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: flex-start;
+  height: 20px;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wb-table-name {
+  display: inline-flex;
+  flex: 0 0 auto;
+  max-width: 100%;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  font-weight: 500;
+}
+
+.wb-middle-ellipsis-head {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wb-table-name {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  font-weight: 500;
+.wb-middle-ellipsis-tail {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .wb-table-comment {
+  flex: 1 1 44px;
+  min-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin-left: 7px;
   color: var(--wb-remark-text);
   font-size: var(--wb-fs-body);
@@ -11960,10 +12044,10 @@ label:has(input[type="checkbox"]:disabled) {
   --wb-active-tab-surface: var(--wb-workspace-mist-raised);
   position: relative;
   display: inline-flex;
-  flex: 1 1 112px;
+  flex: 1 1 156px;
   align-items: center;
   min-width: 32px;
-  max-width: 176px;
+  max-width: 256px;
   height: 36px;
   min-height: 36px;
   padding: 0 28px 0 10px;
@@ -11981,8 +12065,10 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab[data-tab-tone] {
-  --wb-tab-tint: 8%;
-  --wb-tab-hover-tint: 14%;
+  --wb-tab-tone: var(--wb-accent-strong);
+  --wb-tab-border: color-mix(in srgb, var(--wb-accent) 44%, transparent);
+  --wb-tab-tint: 10%;
+  --wb-tab-hover-tint: 15%;
   height: 32px;
   min-height: 32px;
   margin-bottom: 4px;
@@ -11991,23 +12077,22 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 [data-theme="dark"] .wb-tab[data-tab-tone] {
-  --wb-tab-tint: 15%;
-  --wb-tab-hover-tint: 21%;
+  --wb-tab-border: color-mix(in srgb, var(--wb-accent) 50%, transparent);
+  --wb-tab-tint: 16%;
+  --wb-tab-hover-tint: 22%;
 }
-
-.wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #704803; }
-.wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #9d312a; }
-.wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #175878; }
-[data-theme="dark"] .wb-tab[data-tab-tone="gold"] { --wb-tab-tone: #e5b451; }
-[data-theme="dark"] .wb-tab[data-tab-tone="coral"] { --wb-tab-tone: #f5897f; }
-[data-theme="dark"] .wb-tab[data-tab-tone="blue"] { --wb-tab-tone: #83c5e6; }
 
 .wb-tab[data-tab-tone].active {
   --wb-tab-close-text: var(--wb-tab-tone);
   --wb-tab-close-text-hover: var(--wb-tab-tone);
-  border-color: var(--wb-tab-tone);
+  border-color: var(--wb-tab-border);
   background: color-mix(in srgb, var(--wb-tab-tone) var(--wb-tab-tint), var(--wb-tab-state-surface));
   color: var(--wb-tab-tone);
+}
+
+.wb-pane-tabbar:not(.is-focused-pane) .wb-tab[data-tab-tone].active {
+  border-color: color-mix(in srgb, var(--wb-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--wb-tab-tone) 6%, var(--wb-tab-state-surface));
 }
 
 .wb-tab[data-tab-tone].active:hover {
@@ -12015,8 +12100,8 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-tab[data-tab-tone]:not(.active):not(.is-opening):is(:hover, :focus-within) {
-  border-color: color-mix(in srgb, var(--wb-tab-tone) 52%, transparent);
-  background: color-mix(in srgb, var(--wb-tab-tone) var(--wb-tab-tint), var(--wb-tab-state-surface));
+  border-color: color-mix(in srgb, var(--wb-accent) 26%, transparent);
+  background: color-mix(in srgb, var(--wb-tab-tone) 6%, var(--wb-tab-state-surface));
 }
 
 .wb-tab[data-tab-tone] .wb-tab-close:is(:hover, :focus-visible) .wb-tab-close-mark {
@@ -12193,6 +12278,13 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wb-tab-name.is-middle-ellipsis {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  text-overflow: clip;
 }
 
 .wb-tab.active .wb-tab-title {
@@ -16559,6 +16651,7 @@ label:has(input[type="checkbox"]:disabled) {
 
 /* The whole row answers hover and selection, like a desktop file list. */
 .wb-dbhome-object-row {
+  box-sizing: border-box;
   display: grid;
   align-items: center;
   width: 100%;
@@ -16566,6 +16659,7 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: 30px;
   padding: 0;
   border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--wb-line) 78%, transparent);
   border-radius: 0;
   background: transparent;
   color: var(--wb-text);

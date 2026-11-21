@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
-import { Server } from "lucide-vue-next";
+import { ChevronRight, Server } from "lucide-vue-next";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
@@ -31,9 +31,10 @@ import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../s
 import { beginDatabaseDrag, endDatabaseDrag } from "../utils/databaseDragPayload.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
-import { computeTableBranchMinHeight, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
+import { computeTableBranchMinHeight, SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 import { useSidebarTableSelection } from "../composables/useSidebarTableSelection.js";
 import { isContextMenuKey, isDeleteCommandKey } from "../utils/listSelection.js";
+import { splitMiddleEllipsis } from "../utils/middleEllipsis.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 function themeLabel(theme) {
@@ -336,14 +337,29 @@ watch(() => props.treeQuery.trim(), (query) => {
 });
 watch(() => filteredTables.value.map((table) => table.tableName).join("\u001f"), () => tableSelection.prune());
 
+const treeViewportHeight = ref(0);
+const tableBranchMaxHeight = computed(() => {
+  const viewport = treeViewportHeight.value;
+  if (viewport <= 0) return SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
+  const connectionRows = Math.min(previewConnections.value.length, 6) * 30;
+  const databaseRows = Math.min(previewDatabases.value.length, 8) * 28;
+  const available = viewport - connectionRows - databaseRows - 16;
+  return Math.max(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, available);
+});
+
 const tableBranchMinHeight = computed(() => {
   const height = computeTableBranchMinHeight({
     tableHeight: tableVirtualRange.value.totalHeight,
     listTop: tableListTop.value,
     searching: !!props.treeQuery.trim(),
+    maxHeight: tableBranchMaxHeight.value,
   });
   return `${height}px`;
 });
+
+function tableNameParts(name) {
+  return splitMiddleEllipsis(name);
+}
 
 watch(
   () => props.activeTab?.id,
@@ -428,8 +444,13 @@ function revealSelectedDatabase() {
 // is brought into view when the tree is shown again.
 let treeVisibilityObserver = null;
 onMounted(() => {
-  if (typeof ResizeObserver !== "function" || !treeNavRef.value) return;
-  treeVisibilityObserver = new ResizeObserver(() => selectedDatabaseFollower.resume());
+  if (!treeNavRef.value) return;
+  treeViewportHeight.value = Math.round(treeNavRef.value.clientHeight || 0);
+  if (typeof ResizeObserver !== "function") return;
+  treeVisibilityObserver = new ResizeObserver(() => {
+    treeViewportHeight.value = Math.round(treeNavRef.value?.clientHeight || 0);
+    selectedDatabaseFollower.resume();
+  });
   treeVisibilityObserver.observe(treeNavRef.value);
 });
 onBeforeUnmount(() => {
@@ -942,7 +963,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                         >
                           <component :is="tableTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
-                            <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)">{{ entry.table.tableName }}</span>
+                            <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)" :class="{ 'is-middle-ellipsis': Boolean(tableNameParts(entry.table.tableName).tail) }" :aria-label="tableNameParts(entry.table.tableName).tail ? entry.table.tableName : undefined"><span class="wb-middle-ellipsis-head" :aria-hidden="tableNameParts(entry.table.tableName).tail ? 'true' : undefined">{{ tableNameParts(entry.table.tableName).head }}</span><span v-if="tableNameParts(entry.table.tableName).tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ tableNameParts(entry.table.tableName).tail }}</span></span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
                           </span>
                         </button>
@@ -1032,7 +1053,10 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
               <circle cx="8" cy="9" r="1.5" />
               <path d="m3 17 5-5 4 4 3-3 6 6" />
             </svg> {{ t('wallpaper.title') }} </span>
-          <button type="button" class="wb-sidebar-settings-action" aria-haspopup="dialog" :title="t('wallpaper.open')" :aria-label="`${t('wallpaper.open')} ${wallpaperName}`" @click.stop="openWallpaperSettings">{{ wallpaperName }}</button>
+          <button type="button" class="wb-sidebar-settings-action" aria-haspopup="dialog" :title="t('wallpaper.open')" :aria-label="`${t('wallpaper.open')} ${wallpaperName}`" @click.stop="openWallpaperSettings">
+            <span class="wb-sidebar-settings-action-label">{{ wallpaperName }}</span>
+            <ChevronRight :size="13" class="wb-sidebar-settings-chevron" aria-hidden="true" />
+          </button>
         </div>
         <div class="wb-sidebar-settings-row">
           <span class="wb-sidebar-settings-label">
@@ -1042,7 +1066,10 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
             class="wb-sidebar-settings-action wb-sidebar-font-action"
             :title="fontPreference === 'system' ? t('settings.systemFont') : fontLabel"
             @click.stop="openFontSettings"
-          >{{ fontPreference === 'system' ? t('settings.systemFont') : fontLabel }}</button>
+          >
+            <span class="wb-sidebar-settings-action-label">{{ fontPreference === 'system' ? t('settings.systemFont') : fontLabel }}</span>
+            <ChevronRight :size="13" class="wb-sidebar-settings-chevron" aria-hidden="true" />
+          </button>
         </div>
         </div>
         <div class="wb-sidebar-settings-group">
