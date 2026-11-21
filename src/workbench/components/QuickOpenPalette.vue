@@ -85,7 +85,7 @@ const matchMode = ref("fuzzy");
 const scopeMatchKind = ref("all");
 const scopeState = reactive(createQuickOpenScopeState());
 const resultWindow = reactive(createQuickOpenResultWindow());
-const cardSize = ref({ width: 760, height: 520 });
+const cardSize = ref({ width: 860, height: 580 });
 const cardRef = ref(null);
 const resizingAxis = ref("");
 const dbDropdownOpen = ref(false);
@@ -180,6 +180,12 @@ watch(
 );
 const hasFreshValues = computed(() => sidebarValueResultsAreFresh(props.valueSearchState || {}));
 const visibleValueResults = computed(() => (hasFreshValues.value ? props.valueSearchState?.valueResults || [] : []));
+const hasValueActivity = computed(() => Boolean(
+  props.valueSearchState?.valueLoading
+  || props.valueSearchState?.valueError
+  || visibleValueResults.value.length
+  || hasFreshValues.value,
+));
 const resultWindowRange = computed(() => quickOpenResultRange(resultWindow, results.value.length));
 const mountedResults = computed(() => results.value.slice(resultWindowRange.value.start, resultWindowRange.value.end));
 const excludedScopeTables = computed(() => new Set(scopeState.excludedTables));
@@ -847,7 +853,7 @@ onBeforeUnmount(() => {
           </Teleport>
         </div>
 
-        <div class="wb-quick-open-body">
+        <div class="wb-quick-open-body" :class="{ 'has-value-activity': hasValueActivity }">
           <section
             class="wb-quick-open-scope-panel"
             :aria-label="t('m_a1594fbd419e')"
@@ -858,9 +864,11 @@ onBeforeUnmount(() => {
               <QuickOpenKindFilter v-model="scopeMatchKind" :theme="theme" />
               <span class="wb-quick-open-scope-summary">
                 <template v-if="searchRunning">{{ t('m_cc50237edca2') }}</template>
+                <template v-else-if="hasQuery">
+                  {{ t('quickOpen.selectedTables', { count: selectedScopeCount }) }} · {{ scopeState.mode === "custom" ? t('m_aefac3869b51') : t('m_4a246a75ac8c') }}
+                </template>
                 <template v-else>
-                  {{ hasQuery ? `已选 ${selectedScopeCount}` : `全部 ${selectedScopeCount}` }}
-                  · {{ scopeState.mode === "custom" ? t('m_aefac3869b51') : t('m_4a246a75ac8c') }}
+                  {{ t('quickOpen.allTables', { count: selectedScopeCount }) }}
                 </template>
               </span>
               <button
@@ -875,6 +883,7 @@ onBeforeUnmount(() => {
               id="wb-quick-open-list"
               ref="listRef"
               class="wb-quick-open-results wb-quick-open-scope-results"
+              :class="{ 'has-scope-checks': hasQuery }"
               role="listbox"
               :aria-disabled="searchRunning ? 'true' : 'false'"
               @scroll.passive="handleResultsScroll"
@@ -894,11 +903,10 @@ onBeforeUnmount(() => {
                 @mousemove="selectedIndex = resultWindowRange.start + index"
                 @dblclick="activateSchemaResult(result)"
               >
-                <label class="wb-quick-open-scope-check" @click.stop>
+                <label v-if="hasQuery" class="wb-quick-open-scope-check" @click.stop>
                   <input
                     type="checkbox"
                     :checked="isScopeTableSelected(tableName(result.table))"
-                    :disabled="!hasQuery"
                     :aria-disabled="searchRunning ? 'true' : null"
                     :aria-label="`在值搜索中包含 ${tableName(result.table)}`"
                     @click="searchRunning && $event.preventDefault()"
@@ -913,10 +921,9 @@ onBeforeUnmount(() => {
                 >
                   <span class="wb-quick-open-item-title">
                     <span class="wb-table-name" v-html="highlightMatch(tableName(result.table), result, 'tableName')"></span>
-                    <SearchHitBadge :kind="result.matchKind" />
+                    <SearchHitBadge v-if="hasQuery" :kind="result.matchKind" />
                   </span>
                   <span v-if="tableComment(result.table)" class="wb-table-comment">
-                    <SearchHitBadge kind="tableComment" subtle />
                     <span v-html="highlightCommentMatch(tableComment(result.table), result, 'tableComment')"></span>
                   </span>
                   <span v-for="column in result.visibleColumns" :key="columnName(column)" class="wb-column-hit">
@@ -980,11 +987,9 @@ onBeforeUnmount(() => {
                     <SearchHitBadge kind="value" />
                   </span>
                   <span v-if="result.tableComment" class="wb-table-comment">
-                    <SearchHitBadge kind="tableComment" subtle />
                     <span>{{ result.tableComment }}</span>
                   </span>
                   <span class="wb-value-hit">
-                    <SearchHitBadge kind="value" subtle />
                     <span class="wb-column-hit-name">{{ result.columnName }}</span>:
                     <span v-html="highlightValue(result.previewValue)"></span>
                   </span>

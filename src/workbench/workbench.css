@@ -23976,8 +23976,8 @@ button.wb-table-mention:active {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(760px, calc(100vw - 24px));
-  height: min(520px, calc(100vh - 24px));
+  width: min(860px, calc(100vw - 24px));
+  height: min(580px, calc(100vh - 24px));
   min-width: min(560px, calc(100vw - 24px));
   min-height: min(360px, calc(100vh - 24px));
   max-width: calc(100vw - 24px);
@@ -23985,7 +23985,7 @@ button.wb-table-mention:active {
   overflow: hidden;
   align-self: flex-start;
   border: 1px solid var(--wb-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--wb-surface, var(--wb-bg));
   box-shadow: var(--wb-quick-open-shadow, 0 18px 48px rgba(0, 0, 0, 0.22));
 }
@@ -24099,37 +24099,43 @@ button.wb-table-mention:active {
   grid-template-columns: repeat(2, minmax(38px, 1fr));
   flex: 0 0 auto;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   padding: 2px;
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 6px;
-  background: var(--wb-field-surface);
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
 }
 
 .wb-quick-open-match-mode button {
-  height: 25px;
+  height: 26px;
   padding: 0 9px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   color: var(--wb-secondary-text);
   font: inherit;
   font-size: var(--wb-fs-caption);
-  font-weight: 550;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.wb-quick-open-match-mode button:hover,
-.wb-quick-open-match-mode button:focus-visible {
-  background: var(--wb-accent-soft);
+.wb-quick-open-match-mode button:hover:not(.is-active),
+.wb-quick-open-match-mode button:focus-visible:not(.is-active) {
+  background: color-mix(in srgb, var(--wb-text) 5%, transparent);
   color: var(--wb-text);
 }
 
 .wb-quick-open-match-mode button.is-active {
-  background: color-mix(in srgb, var(--wb-accent-soft) 72%, var(--wb-surface));
+  background: var(--wb-surface);
   color: var(--wb-text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-accent) 54%, var(--wb-border-strong));
-  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px color-mix(in srgb, var(--wb-text) 8%, transparent);
+  font-weight: 650;
+}
+
+.wb-quick-open-overlay[data-theme="dark"] .wb-quick-open-match-mode button.is-active {
+  background: var(--wb-control-hover);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
 
 .wb-quick-open-close {
@@ -24171,17 +24177,21 @@ button.wb-table-mention:active {
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   overflow-y: auto;
   list-style: none;
 }
 
 .wb-quick-open-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.85fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+.wb-quick-open-body.has-value-activity {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
 }
 
 .wb-quick-open-scope-panel,
@@ -24195,6 +24205,10 @@ button.wb-table-mention:active {
 
 .wb-quick-open-scope-panel {
   border-right: 1px solid var(--wb-border);
+}
+
+.wb-quick-open-value-panel {
+  background: color-mix(in srgb, var(--wb-field-surface) 34%, transparent);
 }
 
 .wb-quick-open-section-header {
@@ -24446,13 +24460,12 @@ button.wb-table-mention:active {
 }
 
 .wb-quick-open-value-guidance {
-  max-width: 280px;
-  margin: auto;
-  padding: 16px 24px;
+  margin: 10px 12px 0;
+  padding: 0;
   color: var(--wb-quiet-text);
   font-size: var(--wb-fs-caption);
   line-height: 1.55;
-  text-align: center;
+  text-align: left;
 }
 
 .wb-quick-open-item {
@@ -24460,14 +24473,14 @@ button.wb-table-mention:active {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   min-height: 28px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border-radius: 6px;
   cursor: default;
 }
 
-.wb-quick-open-scope-results .wb-quick-open-item {
+.wb-quick-open-scope-results.has-scope-checks .wb-quick-open-item {
   grid-template-columns: 22px minmax(0, 1fr);
-  padding-left: 4px;
+  padding-left: 6px;
 }
 
 .wb-quick-open-scope-check {

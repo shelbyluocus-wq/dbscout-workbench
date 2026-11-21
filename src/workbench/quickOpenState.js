@@ -1,6 +1,6 @@
 const QUICK_OPEN_SIZE_KEY = "dbscout.quickOpen.size.v1";
 
-export const QUICK_OPEN_DEFAULT_SIZE = Object.freeze({ width: 760, height: 520 });
+export const QUICK_OPEN_DEFAULT_SIZE = Object.freeze({ width: 860, height: 580 });
 export const QUICK_OPEN_MIN_SIZE = Object.freeze({ width: 560, height: 360 });
 export const QUICK_OPEN_RESULT_BATCH_SIZE = 60;
 export const QUICK_OPEN_MAX_MOUNTED_RESULTS = 120;

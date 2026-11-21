@@ -239,7 +239,7 @@ function setStrategy(value) {
               :disabled="busy || transferBusy"
               @change="transfer.updateTemplate(selected.id, { retentionDays: $event.target.value }); $event.target.value = selected.retentionDays"
             />
-            <span class="wb-rf-hint">{{ t('tableTransfer.retentionHint') }}</span>
+            <span class="wb-rf-hint">{{ t('tableTransfer.daysUnit') }} · {{ t('tableTransfer.retentionHint') }}</span>
           </dd>
         </div>
       </dl>

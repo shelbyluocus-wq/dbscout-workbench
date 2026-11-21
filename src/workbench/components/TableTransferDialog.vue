@@ -124,11 +124,18 @@ function cancelRun() {
 }
 
 const runDisabledReason = computed(() => {
-  if (isRunning.value) return "转表进行中…";
-  if (!activeTemplate.value?.scriptPath) return "请先选择转表脚本";
-  if (!activeTemplate.value?.projectRoot) return "请先选择游戏工程文件夹";
-  return "运行脚本 → 定位产出 → SVN 更新 → 覆盖拷贝进 assets";
+  if (isRunning.value) return t("m_38a2d609f30b");
+  const missingScript = !activeTemplate.value?.scriptPath;
+  const missingProject = !activeTemplate.value?.projectRoot;
+  if (missingScript && missingProject) return t("tableTransfer.needBothPaths");
+  if (missingScript) return t("tableTransfer.needScript");
+  if (missingProject) return t("tableTransfer.needProject");
+  return t("tableTransfer.runReadyTitle");
 });
+
+const missingRequirementHint = computed(() => (
+  !canRun.value && !isRunning.value ? runDisabledReason.value : ""
+));
 
 // Inline template naming. "add" shows the name field where the new tab will
 // appear; "rename" swaps the template's own tab for the field. The add button
@@ -355,7 +362,7 @@ async function deleteActiveTemplate() {
                 :aria-label="t('m_56675578a75d')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickScript">
-                <FileText :size="18" aria-hidden="true" /> {{ t('m_b902d80b8b41') }} </button>
+                <FileText :size="15" aria-hidden="true" /> {{ t('m_b902d80b8b41') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
@@ -364,7 +371,7 @@ async function deleteActiveTemplate() {
                 :disabled="isRunning || !activeTemplate.scriptPath"
                 @click="browseScript"
               >
-                <FolderSearch :size="18" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
+                <FolderSearch :size="15" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
@@ -378,7 +385,7 @@ async function deleteActiveTemplate() {
                 :aria-label="t('m_6fff77983833')"
               />
               <button type="button" class="wb-table-transfer-pick" :disabled="isRunning" @click="pickProjectDir">
-                <FolderOpen :size="18" aria-hidden="true" /> {{ t('m_93e76151bbeb') }} </button>
+                <FolderOpen :size="15" aria-hidden="true" /> {{ t('m_93e76151bbeb') }} </button>
               <button
                 type="button"
                 class="wb-table-transfer-browse"
@@ -387,22 +394,26 @@ async function deleteActiveTemplate() {
                 :disabled="isRunning || !activeTemplate.projectRoot"
                 @click="browseProject"
               >
-                <FolderSearch :size="18" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
+                <FolderSearch :size="15" aria-hidden="true" /> {{ t('m_a8c81f93f2e0') }} </button>
             </div>
           </div>
           <div class="wb-table-transfer-field">
             <label class="wb-table-transfer-label" for="wb-transfer-retention">{{ t('tableTransfer.retention') }}</label>
             <div>
-              <input
-                id="wb-transfer-retention"
-                type="number"
-                min="0"
-                max="3650"
-                step="1"
-                :value="activeTemplate.retentionDays"
-                :disabled="isRunning"
-                @change="transfer.updateTemplate(activeTemplate.id, { retentionDays: $event.target.value }); $event.target.value = activeTemplate.retentionDays"
-              />
+              <div class="wb-table-transfer-retention-row">
+                <input
+                  id="wb-transfer-retention"
+                  type="number"
+                  min="0"
+                  max="3650"
+                  step="1"
+                  :value="activeTemplate.retentionDays"
+                  :disabled="isRunning"
+                  @change="transfer.updateTemplate(activeTemplate.id, { retentionDays: $event.target.value }); $event.target.value = activeTemplate.retentionDays"
+                />
+                <span class="wb-table-transfer-unit">{{ t('tableTransfer.daysUnit') }}</span>
+                <span class="wb-table-transfer-field-hint">{{ t('tableTransfer.retentionShortHint') }}</span>
+              </div>
               <p v-if="transfer.cleanupMessage.value" role="status" class="wb-table-transfer-cleanup-error">{{ t('tableTransfer.cleanupFailed') }} {{ transfer.cleanupMessage.value }}</p>
             </div>
           </div>
@@ -464,6 +475,9 @@ async function deleteActiveTemplate() {
 
       <!-- Footer -->
       <footer class="wb-dialog-actions wb-table-transfer-footer">
+        <p v-if="missingRequirementHint" class="wb-table-transfer-footer-hint">
+          {{ missingRequirementHint }}
+        </p>
         <button v-if="isRunning" type="button" @click="cancelRun">{{ t('m_15a3277ed96d') }}</button>
         <button v-else type="button" @click="emit('close')">{{ t('m_3fd47edce45b') }}</button>
         <span :title="runDisabledReason">
@@ -483,14 +497,34 @@ async function deleteActiveTemplate() {
 
 <style scoped>
 #wb-transfer-retention {
-  width: 100px;
+  width: 78px;
   min-height: 30px;
   padding: 0 8px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--wb-cell-editor);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-table-transfer-retention-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-table-transfer-unit {
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  white-space: nowrap;
+}
+
+.wb-table-transfer-field-hint {
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.4;
 }
 
 #wb-transfer-retention:disabled {
@@ -574,21 +608,28 @@ label[for="wb-transfer-retention"] {
 .wb-table-transfer-tab {
   max-width: 220px;
   height: 30px;
-  padding: 0 16px;
+  padding: 0 14px;
   overflow: hidden;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--wb-pane-header);
-  color: var(--wb-text);
+  color: var(--wb-secondary-text);
   font-size: var(--wb-fs-body);
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+}
+
+.wb-table-transfer-tab:hover:not(:disabled, .is-active) {
+  border-color: color-mix(in srgb, var(--wb-accent) 45%, var(--wb-border-strong));
+  color: var(--wb-text);
 }
 
 .wb-table-transfer-tab.is-active {
-  border-color: var(--wb-accent);
-  background: var(--wb-cell-editor);
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border-strong));
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
   font-weight: 600;
 }
 
@@ -697,9 +738,9 @@ label[for="wb-transfer-retention"] {
   flex: 1;
   min-width: 0;
   height: 30px;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 3px;
+  border-radius: 6px;
   background: var(--wb-cell-editor);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
@@ -710,29 +751,31 @@ label[for="wb-transfer-retention"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   height: 30px;
-  padding: 0 12px;
+  padding: 0 11px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 3px;
+  border-radius: 6px;
   background: var(--wb-pane-header);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
   cursor: pointer;
   white-space: nowrap;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
 }
 
 .wb-table-transfer-pick {
-  width: 128px;
+  min-width: 112px;
 }
 
 .wb-table-transfer-browse {
-  width: 76px;
-  padding: 0 8px;
+  min-width: 96px;
+  padding: 0 10px;
 }
 
 .wb-table-transfer-path button:hover:not(:disabled) {
-  border-color: var(--wb-accent);
+  border-color: color-mix(in srgb, var(--wb-accent) 55%, var(--wb-border-strong));
+  background: var(--wb-control-hover);
 }
 
 .wb-table-transfer-path button:disabled {
@@ -852,5 +895,12 @@ label[for="wb-transfer-retention"] {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+
+.wb-table-transfer-footer-hint {
+  margin: 0 auto 0 0;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.4;
 }
 </style>
