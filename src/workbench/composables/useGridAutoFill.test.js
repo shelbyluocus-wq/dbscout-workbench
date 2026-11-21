@@ -55,3 +55,15 @@ test("Ctrl modifier toggles live during drag and honors release state", () => {
   assert.equal(fill.fillPreviewDetail.value?.mode, "series");
   assert.equal(fill.takeFillRequest(true).mode, "toggle");
 });
+
+test("updateFillPreview keeps the same object identity when cell bounds do not change", () => {
+  const fill = useGridAutoFill();
+  fill.beginFillSession({
+    sourceBounds: { top: 0, bottom: 0, left: 0, right: 0 },
+    sourceMatrix: [["10"]],
+  });
+  const first = fill.updateFillPreview(2, 0, { maxRow: 5, maxColumn: 2 });
+  const second = fill.updateFillPreview(2, 0, { maxRow: 5, maxColumn: 2 });
+  assert.equal(first, second);
+  assert.equal(fill.fillPreview.value, first);
+});

@@ -282,6 +282,31 @@ test("resolveFillPreview picks the dominant axis and stays inside loaded bounds"
   assert.equal(resolveFillPreview(source, 10, 1, { maxRow: 7, maxColumn: 8 }).fillCount, 4);
 });
 
+test("resolveFillPreview prefers pixel excursion with axis hysteresis over raw row/column counts", () => {
+  const source = { top: 1, bottom: 1, left: 1, right: 1 };
+  // Dragging 150px across 1 wide column while drifting 32px down 1 short row stays horizontal.
+  assert.equal(
+    resolveFillPreview(source, 2, 2, { pixelDelta: { vertical: 32, horizontal: 150 } }).direction,
+    "right",
+  );
+  // Once locked horizontal, minor vertical exceedance within hysteresis band stays horizontal.
+  assert.equal(
+    resolveFillPreview(source, 3, 2, {
+      pixelDelta: { vertical: 110, horizontal: 100 },
+      previousAxis: "horizontal",
+    }).direction,
+    "right",
+  );
+  // Decisive vertical movement switches cleanly to vertical.
+  assert.equal(
+    resolveFillPreview(source, 4, 2, {
+      pixelDelta: { vertical: 130, horizontal: 100 },
+      previousAxis: "horizontal",
+    }).direction,
+    "down",
+  );
+});
+
 test("mapFillTargets lists only the new cells in visual order", () => {
   const source = { top: 2, bottom: 2, left: 0, right: 0 };
   assert.deepEqual(mapFillTargets(source, "down", 2), [

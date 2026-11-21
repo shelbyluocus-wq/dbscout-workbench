@@ -28,6 +28,11 @@ import {
 } from "../utils/tableImportToolbarActions.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
 import { gridSelectionActualBounds } from "../utils/gridCellSelection.js";
+import {
+  clampRectToViewport,
+  resolveFillPreviewTipPosition,
+  resolveTargetBounds,
+} from "../utils/fillOverlayGeometry.js";
 import GridDataRow from "./GridDataRow.vue";
 import { createCellEditorHandlers, vImeValue } from "../utils/imeInput.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
@@ -43,12 +48,21 @@ const searchInputRef = ref(null);
 const isCellDragging = ref(false);
 const isRowDragging = ref(false);
 const isFillDragging = ref(false);
+const fillDragMoved = ref(false);
+const fillDragStart = ref(null);
+const fillDragPointer = ref(null);
+const fillScrolling = ref(false);
 const fillOverlayStyle = ref(null);
 const fillOverlayPlacement = ref({ flipLeft: false, flipUp: false });
+const fillPreviewOverlay = ref(null);
 const fillPreviewTipStyle = ref(null);
+const fillPreviewTipRef = ref(null);
+const fillOptionsMenuRef = ref(null);
 const fillOptionsOpen = ref(false);
 const openToolbarMenu = ref("");
 const gridShellRef = ref(null);
+let lastPreviewClientRect = null;
+let fillScrollRaf = 0;
 defineExpose({ gridWrapRef });
 
 const props = defineProps({
@@ -66,6 +80,7 @@ const props = defineProps({
   showFillHandle: { type: Boolean, default: false },
   isFilling: { type: Boolean, default: false },
   fillPreview: { type: Object, default: null },
+  fillSourceBounds: { type: Object, default: null },
   fillPreviewDetail: { type: Object, default: null },
   fillModifierActive: { type: Boolean, default: false },
   fillOptions: { type: Object, default: null },
@@ -638,6 +653,18 @@ const showBoundaryJumpBottom = computed(() => {
 
 function onGridWrapScroll(event) {
   emit('scroll', event);
+  if (isFillPreviewActive.value) {
+    fillScrolling.value = true;
+    if (fillScrollRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(fillScrollRaf);
+    if (typeof requestAnimationFrame === "function") {
+      fillScrollRaf = requestAnimationFrame(() => {
+        fillScrollRaf = 0;
+        fillScrolling.value = false;
+      });
+    } else {
+      fillScrolling.value = false;
+    }
+  }
   updateFillOverlayPosition();
   scheduleBoundaryScrollUpdate(event?.target);
   const now = typeof performance !== "undefined" ? performance.now() : 0;
@@ -984,50 +1011,167 @@ function findVisibleCellCorner(wrap, rowIndex, columnIndex, viewport) {
   return best;
 }
 
-function updateFillOverlayPosition() {
+const isFillPreviewActive = computed(() => Boolean(props.isFilling && props.fillPreview?.fillCount > 0));
+const isFillHandleHidden = computed(() => Boolean(isFillPreviewActive.value || (isFillDragging.value && fillDragMoved.value)));
+
+function syncGlobalFillCursor() {
+  const root = typeof document !== "undefined" ? document.documentElement : null;
+  if (!root) return;
+  const active = Boolean(isFillDragging.value || props.isFilling);
+  root.classList.toggle("wb-fill-drag-active", active);
+  root.classList.toggle("wb-fill-drag-toggle", active && Boolean(props.fillModifierActive));
+}
+
+function measureBoundsInViewport(wrap, bounds, viewport) {
+  if (!wrap || !bounds || !viewport) return null;
+  const findRow = (index) => {
+    const rows = wrap.querySelectorAll(`tr[data-row-selection-index="${index}"]`);
+    if (!rows.length) return null;
+    let picked = rows[0];
+    for (const candidate of rows) {
+      if (candidate.classList.contains("wb-frozen-row")) {
+        picked = candidate;
+        break;
+      }
+    }
+    return {
+      rect: picked.getBoundingClientRect(),
+      frozen: picked.classList.contains("wb-frozen-row"),
+    };
+  };
+  const firstRendered = visibleRowsWithVisualIndex.value[0]?.visualIndex ?? 0;
+  const topMatch = findRow(bounds.top);
+  const bottomMatch = bounds.bottom === bounds.top ? topMatch : findRow(bounds.bottom);
+  const rawTop = topMatch
+    ? topMatch.rect.top
+    : (bounds.top < firstRendered ? viewport.frozenRowBottom - 16 : viewport.contentBottom + 16);
+  const rawBottom = bottomMatch
+    ? bottomMatch.rect.bottom - 1
+    : (bounds.bottom < firstRendered ? viewport.frozenRowBottom - 16 : viewport.contentBottom + 16);
+  const minTop = topMatch?.frozen ? viewport.contentTop : viewport.frozenRowBottom;
+
+  const findCol = (index) => {
+    const cell = wrap.querySelector(`td[data-column-index="${index}"]`)
+      || wrap.querySelector(`th[data-column-index="${index}"]`);
+    if (!cell) return null;
+    return {
+      rect: cell.getBoundingClientRect(),
+      frozen: cell.classList.contains("frozen-col") || cell.classList.contains("frozen-corner"),
+    };
+  };
+  const leftMatch = findCol(bounds.left);
+  const rightMatch = bounds.right === bounds.left ? leftMatch : findCol(bounds.right);
+  if (!leftMatch || !rightMatch) return null;
+  const minLeft = leftMatch.frozen ? viewport.contentLeft : viewport.frozenColRight;
+
+  return clampRectToViewport(
+    {
+      left: leftMatch.rect.left,
+      right: rightMatch.rect.right - 1,
+      top: rawTop,
+      bottom: rawBottom,
+    },
+    viewport,
+    { minTop, minLeft },
+  );
+}
+
+function overlayBoxStyle(box) {
+  if (!box) return null;
+  return {
+    transform: `translate3d(${box.left}px, ${box.top}px, 0)`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+  };
+}
+
+function overlayClipClasses(box) {
+  if (!box) return {};
+  return {
+    "is-clipped-top": box.clippedTop,
+    "is-clipped-bottom": box.clippedBottom,
+    "is-clipped-left": box.clippedLeft,
+    "is-clipped-right": box.clippedRight,
+  };
+}
+
+function updateFillPreviewTipOnly() {
   const wrap = gridWrapRef.value;
   const shell = gridShellRef.value;
-  if (!wrap || !shell) {
-    fillOverlayStyle.value = null;
+  if (!wrap || !shell || !isFillPreviewActive.value || !props.fillPreviewDetail) {
     fillPreviewTipStyle.value = null;
     return;
   }
   const viewport = visibleGridDataRect(wrap);
   const shellRect = shell.getBoundingClientRect();
+  const tipRect = fillPreviewTipRef.value?.getBoundingClientRect?.();
+  const tipWidth = tipRect?.width > 0 ? tipRect.width : 124;
+  const tipHeight = tipRect?.height > 0 ? tipRect.height : 26;
+  const pos = resolveFillPreviewTipPosition({
+    previewRect: lastPreviewClientRect,
+    direction: props.fillPreview.direction,
+    pointer: fillDragPointer.value,
+    viewport,
+    shellRect,
+    tipWidth,
+    tipHeight,
+  });
+  fillPreviewTipStyle.value = pos ? { left: `${pos.left}px`, top: `${pos.top}px` } : null;
+}
 
-  if (props.isFilling && props.fillPreview?.fillCount > 0 && props.fillPreviewDetail) {
+function updateFillOverlayPosition() {
+  const wrap = gridWrapRef.value;
+  const shell = gridShellRef.value;
+  if (!wrap || !shell) {
     fillOverlayStyle.value = null;
+    fillPreviewOverlay.value = null;
+    fillPreviewTipStyle.value = null;
+    lastPreviewClientRect = null;
+    return;
+  }
+  const viewport = visibleGridDataRect(wrap);
+  const shellRect = shell.getBoundingClientRect();
+
+  if (isFillPreviewActive.value) {
     const previewBounds = props.fillPreview.previewBounds;
+    const sourceBounds = props.fillSourceBounds || gridSelectionActualBounds(props.selectedRange);
     const direction = props.fillPreview.direction;
-    const anchorRow = direction === "up" ? previewBounds.top : previewBounds.bottom;
-    const anchorCol = direction === "left" ? previewBounds.left : previewBounds.right;
-    const anchorCell = wrap.querySelector(
-      `td[data-visual-row-index="${anchorRow}"][data-column-index="${anchorCol}"]`,
-    );
-    const cellRect = anchorCell?.getBoundingClientRect();
-    const rawX = cellRect
-      ? (direction === "left" ? cellRect.left : cellRect.right + 8)
-      : viewport.contentRight - 140;
-    const rawY = cellRect
-      ? (direction === "up" ? cellRect.top : cellRect.bottom + 4)
-      : viewport.contentBottom - 32;
-    const clampedX = Math.max(
-      viewport.contentLeft + 6,
-      Math.min(rawX, viewport.contentRight - 148),
-    );
-    const clampedY = Math.max(
-      viewport.contentTop + 4,
-      Math.min(rawY, viewport.contentBottom - 30),
-    );
-    fillPreviewTipStyle.value = {
-      left: `${clampedX - shellRect.left}px`,
-      top: `${clampedY - shellRect.top}px`,
-    };
+    const targetBounds = resolveTargetBounds(sourceBounds, direction, props.fillPreview.fillCount);
+    const previewBox = measureBoundsInViewport(wrap, previewBounds, viewport);
+    const sourceBox = measureBoundsInViewport(wrap, sourceBounds, viewport);
+    const targetBox = measureBoundsInViewport(wrap, targetBounds, viewport);
+    lastPreviewClientRect = previewBox;
+    const clipWidth = Math.max(0, viewport.contentRight - viewport.contentLeft);
+    const clipHeight = Math.max(0, viewport.contentBottom - viewport.contentTop);
+    fillPreviewOverlay.value = previewBox && clipWidth > 0 && clipHeight > 0
+      ? {
+          clipStyle: {
+            left: `${viewport.contentLeft - shellRect.left}px`,
+            top: `${viewport.contentTop - shellRect.top}px`,
+            width: `${clipWidth}px`,
+            height: `${clipHeight}px`,
+          },
+          sourceStyle: overlayBoxStyle(sourceBox),
+          sourceClasses: overlayClipClasses(sourceBox),
+          targetStyle: overlayBoxStyle(targetBox),
+          previewStyle: overlayBoxStyle(previewBox),
+          previewClasses: overlayClipClasses(previewBox),
+        }
+      : null;
+
+    if (props.fillPreviewDetail) {
+      updateFillPreviewTipOnly();
+    } else {
+      fillPreviewTipStyle.value = null;
+    }
     return;
   }
 
+  fillPreviewOverlay.value = null;
   fillPreviewTipStyle.value = null;
-  if (!props.showFillHandle && !props.fillOptions?.canToggleMode) {
+  lastPreviewClientRect = null;
+
+  if (!props.showFillHandle && !isFillDragging.value && !props.fillOptions?.canToggleMode) {
     fillOverlayStyle.value = null;
     return;
   }
@@ -1042,8 +1186,8 @@ function updateFillOverlayPosition() {
     return;
   }
   fillOverlayPlacement.value = {
-    flipLeft: viewport.contentRight - best.right < 140,
-    flipUp: viewport.contentBottom - best.bottom < 104,
+    flipLeft: viewport.contentRight - best.right < 156,
+    flipUp: viewport.contentBottom - best.bottom < 112,
   };
   fillOverlayStyle.value = {
     left: `${best.right - shellRect.left}px`,
@@ -1051,14 +1195,26 @@ function updateFillOverlayPosition() {
   };
 }
 
+function resetLocalFillDrag() {
+  isFillDragging.value = false;
+  fillDragMoved.value = false;
+  fillDragStart.value = null;
+  fillDragPointer.value = null;
+}
+
 function onFillHandleMouseDown(event) {
-  isFillDragging.value = true;
   fillOptionsOpen.value = false;
+  // On the second click of a double-click, avoid starting a fresh drag session so native dblclick fires cleanly.
+  if (event.detail >= 2) return;
+  isFillDragging.value = true;
+  fillDragMoved.value = false;
+  fillDragStart.value = { x: event.clientX, y: event.clientY };
+  fillDragPointer.value = { x: event.clientX, y: event.clientY };
   emit("fill-start", event);
 }
 
 function onFillHandleDoubleClick(event) {
-  isFillDragging.value = false;
+  resetLocalFillDrag();
   fillOptionsOpen.value = false;
   emit("fill-dblclick", event);
 }
@@ -1069,25 +1225,33 @@ function continueFillDrag(event) {
     endFillDrag(event);
     return;
   }
+  fillDragPointer.value = { x: event.clientX, y: event.clientY };
+  if (!fillDragMoved.value && fillDragStart.value) {
+    const dx = event.clientX - fillDragStart.value.x;
+    const dy = event.clientY - fillDragStart.value.y;
+    if (dx * dx + dy * dy < 9) return;
+    fillDragMoved.value = true;
+  }
   emit("fill-pointer", event);
+  if (isFillPreviewActive.value) updateFillPreviewTipOnly();
 }
 
 function endFillDrag(event) {
   if (!isFillDragging.value) return;
-  isFillDragging.value = false;
+  resetLocalFillDrag();
   emit("fill-end", event);
 }
 
 function cancelFillDragFromBlur() {
   if (!isFillDragging.value && !props.isFilling) return;
-  isFillDragging.value = false;
+  resetLocalFillDrag();
   emit("fill-cancel");
 }
 
 function handleFillKeyEvent(event) {
   if (isFillDragging.value || props.isFilling) {
     if (event.key === "Escape") {
-      isFillDragging.value = false;
+      resetLocalFillDrag();
       emit("fill-cancel");
       return;
     }
@@ -1109,6 +1273,37 @@ function handleWindowMouseDownForFillOptions(event) {
 
 function toggleFillOptionsMenu() {
   fillOptionsOpen.value = !fillOptionsOpen.value;
+  if (fillOptionsOpen.value) {
+    nextTick(() => {
+      const activeItem = fillOptionsMenuRef.value?.querySelector?.(".wb-fill-options-item.active")
+        || fillOptionsMenuRef.value?.querySelector?.(".wb-fill-options-item");
+      activeItem?.focus?.();
+    });
+  }
+}
+
+function onFillOptionsMenuKeydown(event) {
+  const items = [...(fillOptionsMenuRef.value?.querySelectorAll?.(".wb-fill-options-item") || [])];
+  if (!items.length) return;
+  const currentIndex = items.indexOf(document.activeElement);
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    items[(currentIndex + 1 + items.length) % items.length]?.focus();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    items[(currentIndex - 1 + items.length) % items.length]?.focus();
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    items[0]?.focus();
+  } else if (event.key === "End") {
+    event.preventDefault();
+    items[items.length - 1]?.focus();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    fillOptionsOpen.value = false;
+    gridWrapRef.value?.focus?.();
+  }
 }
 
 function chooseFillOption(mode) {
@@ -1320,6 +1515,7 @@ watch(
     props.showFillHandle,
     props.isFilling,
     props.fillPreview,
+    props.fillSourceBounds,
     props.fillPreviewDetail,
     props.fillOptions,
     props.selectedRange,
@@ -1341,7 +1537,12 @@ watch(
 );
 
 watch(() => props.isFilling, (active) => {
-  if (!active) isFillDragging.value = false;
+  if (!active) resetLocalFillDrag();
+  syncGlobalFillCursor();
+});
+
+watch(() => [isFillDragging.value, props.fillModifierActive], () => {
+  syncGlobalFillCursor();
 });
 
 watch(() => props.fillOptions, (value) => {
@@ -1370,6 +1571,12 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  resetLocalFillDrag();
+  syncGlobalFillCursor();
+  if (fillScrollRaf && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(fillScrollRaf);
+    fillScrollRaf = 0;
+  }
   window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mousemove', continueFillDrag);
@@ -1599,7 +1806,7 @@ function handleTableContextMenu(event) {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-fill-toggle': (isFilling || isFillDragging) && fillModifierActive, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-fill-previewing': isFillPreviewActive, 'is-fill-toggle': (isFilling || isFillDragging) && fillModifierActive, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -2143,14 +2350,40 @@ function handleTableContextMenu(event) {
         aria-hidden="true"
       >{{ columnReorder.ghost.label }}</div>
       <div
-        v-if="fillOverlayStyle && (showFillHandle || fillOptions?.canToggleMode)"
+        v-if="fillPreviewOverlay"
+        class="wb-fill-preview-clip"
+        :class="{ 'is-scrolling': fillScrolling }"
+        :style="fillPreviewOverlay.clipStyle"
+        aria-hidden="true"
+      >
+        <div
+          v-if="fillPreviewOverlay.targetStyle"
+          class="wb-fill-target-wash"
+          :style="fillPreviewOverlay.targetStyle"
+        ></div>
+        <div
+          v-if="fillPreviewOverlay.sourceStyle"
+          class="wb-fill-source-frame"
+          :class="fillPreviewOverlay.sourceClasses"
+          :style="fillPreviewOverlay.sourceStyle"
+        ></div>
+        <div
+          v-if="fillPreviewOverlay.previewStyle"
+          class="wb-fill-preview-frame"
+          :class="fillPreviewOverlay.previewClasses"
+          :style="fillPreviewOverlay.previewStyle"
+        ></div>
+      </div>
+      <div
+        v-if="fillOverlayStyle && (showFillHandle || isFillDragging || fillOptions?.canToggleMode)"
         class="wb-fill-overlay"
         :style="fillOverlayStyle"
       >
         <button
-          v-if="showFillHandle && !isFilling && !isFillDragging"
+          v-if="showFillHandle || isFillDragging"
           type="button"
           class="wb-fill-handle"
+          :class="{ 'is-fill-hidden': isFillHandleHidden }"
           :aria-label="t('m_83dfa4b49abe')"
           :title="tPlatform('grid.fillHandleHint')"
           @mousedown.left.stop.prevent="onFillHandleMouseDown"
@@ -2159,7 +2392,7 @@ function handleTableContextMenu(event) {
         <div
           v-if="fillOptions?.canToggleMode && !isFilling && !isFillDragging"
           class="wb-fill-options"
-          :class="{ 'is-flip-left': fillOverlayPlacement.flipLeft, 'is-flip-up': fillOverlayPlacement.flipUp }"
+          :class="{ 'is-flip-left': fillOverlayPlacement.flipLeft, 'is-flip-up': fillOverlayPlacement.flipUp, 'is-open': fillOptionsOpen }"
         >
           <button
             type="button"
@@ -2171,9 +2404,24 @@ function handleTableContextMenu(event) {
             @mousedown.stop.prevent
             @click.stop="toggleFillOptionsMenu"
           >
-            <span class="wb-fill-options-glyph" aria-hidden="true"></span>
+            <svg class="wb-fill-options-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <rect x="1" y="1" width="4.5" height="4.5" rx="0.6" stroke="currentColor" stroke-width="1.1" />
+              <rect x="6.5" y="1" width="4.5" height="4.5" rx="0.6" stroke="currentColor" stroke-width="1.1" opacity="0.55" />
+              <rect x="1" y="6.5" width="4.5" height="4.5" rx="0.6" stroke="currentColor" stroke-width="1.1" opacity="0.55" />
+              <rect x="6.5" y="6.5" width="4.5" height="4.5" rx="0.6" fill="var(--wb-accent)" />
+            </svg>
+            <svg class="wb-fill-options-caret" width="7" height="5" viewBox="0 0 7 5" fill="none" aria-hidden="true">
+              <path d="M1 1.25L3.5 3.75L6 1.25" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </button>
-          <menu v-if="fillOptionsOpen" class="wb-fill-options-menu" role="menu" @mousedown.stop>
+          <menu
+            v-if="fillOptionsOpen"
+            ref="fillOptionsMenuRef"
+            class="wb-fill-options-menu"
+            role="menu"
+            @mousedown.stop
+            @keydown="onFillOptionsMenuKeydown"
+          >
             <button
               type="button"
               role="menuitemradio"
@@ -2203,12 +2451,19 @@ function handleTableContextMenu(event) {
       </div>
       <div
         v-if="isFilling && fillPreviewDetail && fillPreviewTipStyle"
+        ref="fillPreviewTipRef"
         class="wb-fill-preview-tip"
         :style="fillPreviewTipStyle"
         aria-live="polite"
       >
-        <span class="wb-fill-preview-value">{{ fillPreviewDetail.displayValue }}</span>
-        <span class="wb-fill-preview-mode">
+        <span
+          class="wb-fill-preview-value"
+          :class="{ 'is-empty': fillPreviewDetail.displayValue === '' }"
+        >{{ fillPreviewDetail.displayValue === '' ? '""' : fillPreviewDetail.displayValue }}</span>
+        <span
+          class="wb-fill-preview-mode"
+          :class="{ 'is-series': fillPreviewDetail.mode === 'series' }"
+        >
           {{ fillPreviewDetail.mode === 'series' ? t('grid.fillModeSeries') : t('grid.fillModeCopy') }}
         </span>
       </div>

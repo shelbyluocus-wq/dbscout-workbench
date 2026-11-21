@@ -300,6 +300,7 @@ const {
   showFillHandle,
   isFilling,
   fillPreview,
+  fillSourceBounds,
   fillPreviewDetail,
   fillModifierActive,
   fillOptions,
@@ -1822,6 +1823,7 @@ onMounted(() => emitPaneState());
       :show-fill-handle="showFillHandle"
       :is-filling="isFilling"
       :fill-preview="fillPreview"
+      :fill-source-bounds="fillSourceBounds"
       :fill-preview-detail="fillPreviewDetail"
       :fill-modifier-active="fillModifierActive"
       :fill-options="fillOptions"

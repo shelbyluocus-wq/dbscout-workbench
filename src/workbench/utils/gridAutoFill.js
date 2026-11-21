@@ -695,6 +695,23 @@ function clampIndex(value, max) {
   return next;
 }
 
+function shouldChooseVerticalFill(rowDelta, columnDelta, limits) {
+  if (rowDelta === 0) return false;
+  if (columnDelta === 0) return true;
+  const pixelDelta = limits?.pixelDelta;
+  if (
+    pixelDelta
+    && Number.isFinite(pixelDelta.vertical)
+    && Number.isFinite(pixelDelta.horizontal)
+  ) {
+    const bias = limits.previousAxis === "horizontal"
+      ? 1.18
+      : (limits.previousAxis === "vertical" ? 1 / 1.18 : 1);
+    return pixelDelta.vertical >= pixelDelta.horizontal * bias;
+  }
+  return Math.abs(rowDelta) >= Math.abs(columnDelta);
+}
+
 export function resolveFillPreview(sourceBounds, hoverRow, hoverColumn, limits = {}) {
   if (!sourceBounds) return { fillCount: 0, previewBounds: null };
   const row = clampIndex(hoverRow, limits.maxRow);
@@ -708,7 +725,7 @@ export function resolveFillPreview(sourceBounds, hoverRow, hoverColumn, limits =
   if (rowDelta === 0 && columnDelta === 0) {
     return { fillCount: 0, previewBounds: cloneBounds(sourceBounds) };
   }
-  if (rowDelta !== 0 && Math.abs(rowDelta) >= Math.abs(columnDelta)) {
+  if (shouldChooseVerticalFill(rowDelta, columnDelta, limits)) {
     const direction = rowDelta > 0 ? "down" : "up";
     const fillCount = Math.abs(rowDelta);
     return {

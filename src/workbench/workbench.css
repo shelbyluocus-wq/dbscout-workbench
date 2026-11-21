@@ -12,10 +12,10 @@
   --wb-root-background: var(--wb-root-background-light);
   --wb-text-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
   --wb-text-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='24' viewBox='0 0 17 24'%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 3v18M5.5 3h6M5.5 21h6' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 12;
-  --wb-fill-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
-  --wb-fill-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
-  --wb-fill-cursor-plus-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%231a1c20' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='%231a1c20' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
-  --wb-fill-cursor-plus-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8.5 2v13M2 8.5h13' fill='none' stroke='%23e2e4e8' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='%23e2e4e8' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-cursor-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='square'/%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='%23111317' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-cursor-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 17 17'%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='square'/%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='%23f1f3f6' stroke-width='1.5' stroke-linecap='square'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-cursor-plus-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='square'/%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='%23111317' stroke-width='1.5' stroke-linecap='square'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='square'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='%23111317' stroke-width='1.2' stroke-linecap='square'/%3E%3C/svg%3E") 8 8;
+  --wb-fill-cursor-plus-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='black' stroke-width='3.2' stroke-linecap='square'/%3E%3Cpath d='M8.5 2.5v12M2.5 8.5h12' fill='none' stroke='%23f1f3f6' stroke-width='1.5' stroke-linecap='square'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='square'/%3E%3Cpath d='M16.5 12v6M13.5 15h6' fill='none' stroke='%23f1f3f6' stroke-width='1.2' stroke-linecap='square'/%3E%3C/svg%3E") 8 8;
   --wb-fill-handle-left: -5px;
   --wb-fill-handle-top: -6px;
   --wb-fill-handle-size: 6px;
@@ -19292,11 +19292,32 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-grid td.selected.range-selected {
   z-index: 2;
-  box-shadow: inset 0 0 0 2px var(--wb-accent);
+  box-shadow: none;
 }
 
 .wb-grid td.range-anchor .wb-cell-text {
   background: transparent;
+}
+
+html.wb-fill-drag-active,
+html.wb-fill-drag-active * {
+  cursor: var(--wb-fill-cursor-light), crosshair !important;
+  user-select: none;
+}
+
+html.wb-fill-drag-active.wb-fill-drag-toggle,
+html.wb-fill-drag-active.wb-fill-drag-toggle * {
+  cursor: var(--wb-fill-cursor-plus-light), copy !important;
+}
+
+html[data-wb-theme="dark"].wb-fill-drag-active,
+html[data-wb-theme="dark"].wb-fill-drag-active * {
+  cursor: var(--wb-fill-cursor-dark), crosshair !important;
+}
+
+html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle,
+html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
+  cursor: var(--wb-fill-cursor-plus-dark), copy !important;
 }
 
 .wb-grid-wrap.is-filling,
@@ -19319,43 +19340,97 @@ label:has(input[type="checkbox"]:disabled) {
   cursor: var(--wb-fill-cursor-plus-dark), copy;
 }
 
-.wb-grid td.fill-target .wb-cell-text {
-  background: color-mix(in srgb, var(--wb-accent) 6%, transparent);
+/* While dragging the fill handle, the continuous Excel overlay renders the source and preview frames cleanly. */
+.wb-grid-wrap.is-fill-previewing .wb-grid td.range-top::before,
+.wb-grid-wrap.is-fill-previewing .wb-grid td.range-bottom::before,
+.wb-grid-wrap.is-fill-previewing .wb-grid td.range-left::after,
+.wb-grid-wrap.is-fill-previewing .wb-grid td.range-right::after {
+  display: none;
 }
 
-.wb-grid td.fill-target.range-top::before,
-.wb-grid td.fill-target.range-bottom::before {
-  background: repeating-linear-gradient(
-    90deg,
-    var(--wb-accent) 0 4px,
-    transparent 4px 7px
-  );
+.wb-grid-wrap.is-fill-previewing .wb-grid td.fill-target .wb-cell-text {
+  background: transparent;
 }
 
-.wb-grid td.fill-target.range-top.range-bottom::before {
-  background:
-    repeating-linear-gradient(90deg, var(--wb-accent) 0 4px, transparent 4px 7px) top / 100% 2px no-repeat,
-    repeating-linear-gradient(90deg, var(--wb-accent) 0 4px, transparent 4px 7px) bottom / 100% 2px no-repeat;
+.wb-fill-preview-clip {
+  position: absolute;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout style;
 }
 
-.wb-grid td.fill-target.range-left::after,
-.wb-grid td.fill-target.range-right::after {
-  background: repeating-linear-gradient(
-    180deg,
-    var(--wb-accent) 0 4px,
-    transparent 4px 7px
-  );
+.wb-fill-target-wash,
+.wb-fill-source-frame,
+.wb-fill-preview-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
-.wb-grid td.fill-target.range-left.range-right::after {
-  background:
-    repeating-linear-gradient(180deg, var(--wb-accent) 0 4px, transparent 4px 7px) left / 2px 100% no-repeat,
-    repeating-linear-gradient(180deg, var(--wb-accent) 0 4px, transparent 4px 7px) right / 2px 100% no-repeat;
+.wb-fill-target-wash,
+.wb-fill-preview-frame {
+  transition:
+    transform 65ms cubic-bezier(0.2, 0, 0, 1),
+    width 65ms cubic-bezier(0.2, 0, 0, 1),
+    height 65ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.wb-fill-preview-clip.is-scrolling .wb-fill-target-wash,
+.wb-fill-preview-clip.is-scrolling .wb-fill-preview-frame {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-fill-target-wash,
+  .wb-fill-preview-frame,
+  .wb-fill-options {
+    transition: none;
+    animation: none;
+  }
+}
+
+.wb-fill-target-wash {
+  background: color-mix(in srgb, var(--wb-accent) 7%, transparent);
+}
+
+.mysql-workbench[data-theme="dark"] .wb-fill-target-wash {
+  background: color-mix(in srgb, var(--wb-accent) 12%, transparent);
+}
+
+.wb-fill-source-frame {
+  border: 1px solid color-mix(in srgb, var(--wb-accent) 46%, transparent);
+}
+
+.wb-fill-preview-frame {
+  border: 2px solid var(--wb-accent);
+}
+
+.wb-fill-source-frame.is-clipped-top,
+.wb-fill-preview-frame.is-clipped-top {
+  border-top-width: 0;
+}
+
+.wb-fill-source-frame.is-clipped-bottom,
+.wb-fill-preview-frame.is-clipped-bottom {
+  border-bottom-width: 0;
+}
+
+.wb-fill-source-frame.is-clipped-left,
+.wb-fill-preview-frame.is-clipped-left {
+  border-left-width: 0;
+}
+
+.wb-fill-source-frame.is-clipped-right,
+.wb-fill-preview-frame.is-clipped-right {
+  border-right-width: 0;
 }
 
 .wb-fill-overlay {
   position: absolute;
-  z-index: 5;
+  z-index: 6;
   width: 0;
   height: 0;
   pointer-events: none;
@@ -19374,9 +19449,10 @@ label:has(input[type="checkbox"]:disabled) {
   margin: 0;
   box-sizing: border-box;
   border: 0;
+  border-radius: 0;
   outline: none;
   background: var(--wb-accent);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px var(--wb-grid-row);
   color: transparent;
   line-height: 0;
   font-size: 0;
@@ -19385,15 +19461,21 @@ label:has(input[type="checkbox"]:disabled) {
   pointer-events: auto;
 }
 
+.wb-fill-handle.is-fill-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .wb-fill-handle:hover,
 .wb-fill-handle:hover:not(:disabled),
 .wb-fill-handle:active:not(:disabled),
 .wb-fill-handle:focus,
 .wb-fill-handle:focus-visible {
   border: 0;
+  border-radius: 0;
   outline: none;
   background: var(--wb-accent);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px var(--wb-grid-row);
   color: transparent;
 }
 
@@ -19404,66 +19486,90 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-fill-handle::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -5px;
 }
 
 .wb-fill-options {
   position: absolute;
-  left: 8px;
-  top: 2px;
+  left: 6px;
+  top: 6px;
   pointer-events: auto;
+  animation: wb-fill-options-in var(--wb-duration-fast) var(--wb-ease-out);
+}
+
+@keyframes wb-fill-options-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .wb-fill-options.is-flip-left {
   left: auto;
-  right: 8px;
+  right: 6px;
 }
 
 .wb-fill-options.is-flip-up {
   top: auto;
-  bottom: 8px;
+  bottom: 6px;
 }
 
 .wb-fill-options-trigger {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 28px;
+  height: 20px;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 3px;
-  background: var(--wb-table-surface);
-  box-shadow: var(--wb-shadow);
+  border-radius: 4px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-muted);
+  box-shadow: var(--wb-floating-shadow);
   cursor: pointer;
+  transition: border-color var(--wb-duration-fast) ease, background var(--wb-duration-fast) ease, color var(--wb-duration-fast) ease;
 }
 
-.wb-fill-options-trigger:hover {
+.wb-fill-options-trigger:hover:not(:disabled),
+.wb-fill-options.is-open .wb-fill-options-trigger {
   border-color: var(--wb-accent);
-  background: var(--wb-control-hover);
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
 }
 
-.wb-fill-options-glyph {
-  width: 6px;
-  height: 6px;
-  border-right: 1.75px solid var(--wb-accent);
-  border-bottom: 1.75px solid var(--wb-accent);
-  transform: translate(0, -1.5px) rotate(45deg);
+.wb-fill-options-trigger:focus-visible {
+  border-color: var(--wb-accent);
+  outline: 2px solid var(--wb-accent);
+  outline-offset: 1px;
+}
+
+.wb-fill-options-icon,
+.wb-fill-options-caret {
+  flex: 0 0 auto;
 }
 
 .wb-fill-options-menu {
   position: absolute;
-  top: 22px;
+  top: calc(100% + 4px);
   left: 0;
   z-index: 6;
   display: grid;
   gap: 2px;
-  min-width: 124px;
+  min-width: 136px;
   margin: 0;
   padding: 4px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 6px;
-  background: var(--wb-table-surface);
-  box-shadow: var(--wb-shadow);
+  border-radius: 7px;
+  background: var(--wb-menu-surface);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--wb-floating-shadow-strong);
 }
 
 .wb-fill-options.is-flip-left .wb-fill-options-menu {
@@ -19473,20 +19579,24 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-fill-options.is-flip-up .wb-fill-options-menu {
   top: auto;
-  bottom: 22px;
+  bottom: calc(100% + 4px);
 }
 
 .wb-fill-options-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 5px 8px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 4px 10px 4px 8px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
+  font-weight: 400;
+  line-height: 1.3;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -19504,8 +19614,16 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-fill-options-item.active,
-.wb-fill-options-item:hover {
+.wb-fill-options-item:hover:not(:disabled),
+.wb-fill-options-item:focus-visible {
+  border: 0;
+  outline: none;
   background: var(--wb-accent-soft);
+  color: var(--wb-text);
+}
+
+.wb-fill-options-item.active {
+  font-weight: 500;
 }
 
 .wb-fill-preview-tip {
@@ -19514,13 +19632,14 @@ label:has(input[type="checkbox"]:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 228px;
   padding: 3px 8px;
   border: 1px solid var(--wb-border-strong);
-  border-radius: 4px;
-  background: var(--wb-table-surface);
+  border-radius: 5px;
+  background: var(--wb-menu-surface);
+  backdrop-filter: blur(12px);
   color: var(--wb-text);
-  box-shadow: var(--wb-shadow);
+  box-shadow: var(--wb-floating-shadow);
   font-size: var(--wb-fs-caption);
   line-height: 1.35;
   pointer-events: none;
@@ -19530,16 +19649,33 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-fill-preview-value {
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.wb-fill-preview-value.is-empty {
+  color: var(--wb-quiet-text);
+  font-style: italic;
+  font-weight: 400;
 }
 
 .wb-fill-preview-mode {
   flex: 0 0 auto;
-  padding: 0 5px;
+  padding: 1px 5px;
   border-radius: 3px;
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
+  color: var(--wb-muted);
+  font-size: var(--wb-fs-micro);
+  line-height: 1.25;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-fill-preview-mode {
+  background: color-mix(in srgb, var(--wb-text) 10%, transparent);
+}
+
+.wb-fill-preview-mode.is-series {
   background: var(--wb-accent-soft);
   color: var(--wb-accent-strong);
-  font-size: var(--wb-fs-micro);
 }
 
 .wb-grid td.range-top::before,

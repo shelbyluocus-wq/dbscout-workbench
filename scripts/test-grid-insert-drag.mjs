@@ -365,6 +365,7 @@ try {
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(row3Box.x + row3Box.width / 2, row3Box.y + row3Box.height / 2, { steps: 6 });
+  await page.locator(".wb-fill-preview-frame").waitFor({ state: "visible", timeout: 2000 });
   const previewTip = page.locator(".wb-fill-preview-tip");
   await previewTip.waitFor({ state: "visible", timeout: 2000 });
   const tipSeriesText = (await previewTip.textContent()).trim();
@@ -385,7 +386,14 @@ try {
   ]);
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
-  console.log("WPS/Excel fill rules, live preview tooltip, option switch, selection and batch undo passed.");
+
+  // Double-clicking the fill handle fills down smoothly in the real browser.
+  await fillCell(0).click();
+  await page.locator(".wb-fill-handle").dblclick();
+  await waitForFillValues(Array.from({ length: 5 }, () => String(fillDownSource)));
+  await page.keyboard.press(shortcut("Z"));
+  await waitForFillValues(fillBefore.map(([value]) => value));
+  console.log("WPS/Excel fill rules, live preview tooltip, double-click fill, option switch, selection and batch undo passed.");
 
   // Selecting a cell focuses its hidden IME input. Clipboard events from that
   // input must paste into the grid, not disappear into the empty input.

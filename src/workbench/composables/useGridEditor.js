@@ -73,12 +73,13 @@ import {
   planAutoFill,
   resolveDoubleClickFillCount,
 } from "../utils/gridAutoFill.js";
+import { resolvePixelAxisDelta } from "../utils/fillOverlayGeometry.js";
 import { useGridAutoFill } from "./useGridAutoFill.js";
 import { useShortcuts } from "./useShortcuts.js";
 
 const ROW_INDEX_WIDTH = 38;
 const RANGE_AUTOSCROLL_EDGE = 28;
-const RANGE_AUTOSCROLL_MAX_STEP = 18;
+const RANGE_AUTOSCROLL_MAX_STEP = 28;
 const VISUAL_ROW_INDEX_ATTRIBUTE = "data-visual-row-index";
 const COLUMN_INDEX_ATTRIBUTE = "data-column-index";
 const MAX_SPARSE_CLIPBOARD_CELLS = 100_000;
@@ -1488,12 +1489,71 @@ export function useGridEditor(
     const rowCount = selectableRowCount(tab);
     if (rowCount === 0) return -1;
     const rect = wrap.getBoundingClientRect();
+    const measuredTheadHeight = wrap.querySelector?.("thead")?.getBoundingClientRect?.().height;
     const fieldCommentBandHeight = tab?.fieldCommentsExpanded === false
       ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
       : resolveFieldCommentHeight(tab);
-    const headerBandHeight = GRID_HEADER_HEIGHT + fieldCommentBandHeight;
+    const headerBandHeight = Number.isFinite(measuredTheadHeight) && measuredTheadHeight > 0
+      ? measuredTheadHeight
+      : GRID_HEADER_HEIGHT + fieldCommentBandHeight;
     const y = clientY - rect.top + wrap.scrollTop - headerBandHeight;
     return Math.max(0, Math.min(rowCount - 1, Math.floor(y / resolveGridRowHeight(tab))));
+  }
+
+  function resolveFillSourceViewportRect(wrap, sourceBounds, tab) {
+    if (!wrap || !sourceBounds) return null;
+    const wrapRect = wrap.getBoundingClientRect?.();
+    if (!wrapRect) return null;
+    const measuredTheadHeight = wrap.querySelector?.("thead")?.getBoundingClientRect?.().height;
+    const fieldCommentBandHeight = tab?.fieldCommentsExpanded === false
+      ? GRID_FIELD_COMMENT_COLLAPSED_HEIGHT
+      : resolveFieldCommentHeight(tab);
+    const headerBandHeight = Number.isFinite(measuredTheadHeight) && measuredTheadHeight > 0
+      ? measuredTheadHeight
+      : GRID_HEADER_HEIGHT + fieldCommentBandHeight;
+    const rowHeightPx = resolveGridRowHeight(tab);
+    const findRowRect = (index) => {
+      const rows = wrap.querySelectorAll?.(`tr[data-row-selection-index="${index}"]`);
+      if (!rows?.length) return null;
+      let picked = rows[0];
+      for (const candidate of rows) {
+        if (candidate.classList?.contains?.("wb-frozen-row")) {
+          picked = candidate;
+          break;
+        }
+      }
+      return picked.getBoundingClientRect?.() || null;
+    };
+    const topRowRect = findRowRect(sourceBounds.top);
+    const bottomRowRect = sourceBounds.bottom === sourceBounds.top
+      ? topRowRect
+      : findRowRect(sourceBounds.bottom);
+    const top = topRowRect
+      ? topRowRect.top
+      : wrapRect.top + headerBandHeight - (wrap.scrollTop || 0) + sourceBounds.top * rowHeightPx;
+    const bottom = bottomRowRect
+      ? bottomRowRect.bottom
+      : wrapRect.top + headerBandHeight - (wrap.scrollTop || 0) + (sourceBounds.bottom + 1) * rowHeightPx;
+
+    const findColRect = (index) => (
+      wrap.querySelector?.(`td[data-column-index="${index}"]`)?.getBoundingClientRect?.()
+      || wrap.querySelector?.(`th[data-column-index="${index}"]`)?.getBoundingClientRect?.()
+      || null
+    );
+    const leftColRect = findColRect(sourceBounds.left);
+    const rightColRect = sourceBounds.right === sourceBounds.left
+      ? leftColRect
+      : findColRect(sourceBounds.right);
+    const colWin = columnWindow?.value;
+    const fallbackLeft = colWin?.offsets?.length > sourceBounds.left
+      ? wrapRect.left + ROW_INDEX_WIDTH + colWin.offsets[sourceBounds.left] - (sourceBounds.left < (colWin.frozenCount || 0) ? 0 : (wrap.scrollLeft || 0))
+      : wrapRect.left + ROW_INDEX_WIDTH + sourceBounds.left * 126 - (wrap.scrollLeft || 0);
+    const fallbackRight = colWin?.offsets?.length > sourceBounds.right + 1
+      ? wrapRect.left + ROW_INDEX_WIDTH + colWin.offsets[sourceBounds.right + 1] - (sourceBounds.right < (colWin.frozenCount || 0) ? 0 : (wrap.scrollLeft || 0))
+      : fallbackLeft + (sourceBounds.right - sourceBounds.left + 1) * 126;
+    const left = leftColRect ? leftColRect.left : fallbackLeft;
+    const right = rightColRect ? rightColRect.right : fallbackRight;
+    return { left, right, top, bottom };
   }
 
   function updateRangeFocusFromPointer(event) {
@@ -1509,7 +1569,13 @@ export function useGridEditor(
 
   function autoscrollStep(distance) {
     if (distance <= 0) return 0;
-    return Math.min(RANGE_AUTOSCROLL_MAX_STEP, Math.ceil(distance / 3));
+    if (distance <= RANGE_AUTOSCROLL_EDGE) {
+      return Math.max(2, Math.round(distance * 0.25));
+    }
+    return Math.min(
+      RANGE_AUTOSCROLL_MAX_STEP,
+      Math.round(7 + (distance - RANGE_AUTOSCROLL_EDGE) * 0.35),
+    );
   }
 
   function stopRangeAutoscroll() {
@@ -1520,13 +1586,27 @@ export function useGridEditor(
   function rangeAutoscrollTarget(wrap, event) {
     const rect = wrap.getBoundingClientRect();
     const theadHeight = wrap.querySelector?.("thead")?.getBoundingClientRect?.().height || 0;
-    const topEdge = rect.top + theadHeight + RANGE_AUTOSCROLL_EDGE;
+    const frozenRowsList = wrap.querySelectorAll?.("tr.wb-frozen-row");
+    const lastFrozenRowBottom = frozenRowsList?.length
+      ? frozenRowsList[frozenRowsList.length - 1].getBoundingClientRect?.().bottom
+      : null;
+    const frozenColRight = wrap.querySelector?.("td.frozen-col-edge, th.frozen-col-edge")?.getBoundingClientRect?.().right || null;
+    const hasScrollbarY = Number.isFinite(rect.height) && wrap.clientHeight > 0 && rect.height - wrap.clientHeight <= 20;
+    const hasScrollbarX = Number.isFinite(rect.width) && wrap.clientWidth > 0 && rect.width - wrap.clientWidth <= 20;
+    const contentTop = Math.max(rect.top + theadHeight, Number.isFinite(lastFrozenRowBottom) ? lastFrozenRowBottom : 0);
+    const contentBottom = hasScrollbarY ? rect.top + wrap.clientHeight : rect.bottom;
+    const contentLeft = Math.max(rect.left + ROW_INDEX_WIDTH, Number.isFinite(frozenColRight) ? frozenColRight : 0);
+    const contentRight = hasScrollbarX ? rect.left + wrap.clientWidth : rect.right;
+    const topEdge = contentTop + RANGE_AUTOSCROLL_EDGE;
+    const bottomEdge = contentBottom - RANGE_AUTOSCROLL_EDGE;
+    const leftEdge = contentLeft + RANGE_AUTOSCROLL_EDGE;
+    const rightEdge = contentRight - RANGE_AUTOSCROLL_EDGE;
     let nextTop = wrap.scrollTop;
     let nextLeft = wrap.scrollLeft;
     if (event.clientY < topEdge) nextTop -= autoscrollStep(topEdge - event.clientY);
-    else if (event.clientY > rect.bottom - RANGE_AUTOSCROLL_EDGE) nextTop += autoscrollStep(event.clientY - (rect.bottom - RANGE_AUTOSCROLL_EDGE));
-    if (event.clientX < rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE) nextLeft -= autoscrollStep(rect.left + ROW_INDEX_WIDTH + RANGE_AUTOSCROLL_EDGE - event.clientX);
-    else if (event.clientX > rect.right - RANGE_AUTOSCROLL_EDGE) nextLeft += autoscrollStep(event.clientX - (rect.right - RANGE_AUTOSCROLL_EDGE));
+    else if (event.clientY > bottomEdge) nextTop += autoscrollStep(event.clientY - bottomEdge);
+    if (event.clientX < leftEdge) nextLeft -= autoscrollStep(leftEdge - event.clientX);
+    else if (event.clientX > rightEdge) nextLeft += autoscrollStep(event.clientX - rightEdge);
     return {
       top: Math.max(0, nextTop),
       left: Math.max(0, nextLeft),
@@ -1546,8 +1626,16 @@ export function useGridEditor(
     wrap.scrollTop = target.top;
     wrap.scrollLeft = target.left;
     if (wrap.scrollTop === previousTop && wrap.scrollLeft === previousLeft) return;
-    if (isFilling.value) updateFillFocusFromPointer(event);
-    else updateRangeFocusFromPointer(event);
+    // Omit stale event.target so coordinate lookup resolves the newly scrolled-in cell.
+    const livePointer = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
+    };
+    if (isFilling.value) updateFillFocusFromPointer(livePointer);
+    else updateRangeFocusFromPointer(livePointer);
     rangeAutoscrollFrame = requestAnimationFrame(runRangeAutoscroll);
   }
 
@@ -1828,9 +1916,16 @@ export function useGridEditor(
     const wrap = gridWrapRef.value;
     const sessionBounds = fillSourceBounds.value || gridSelectionActualBounds(selectedRange.value);
     if (!tab || !wrap || !sessionBounds || selectableRowCount(tab) === 0 || activeColumns.value.length === 0) return;
+    const sourceRect = resolveFillSourceViewportRect(wrap, sessionBounds, tab);
+    const pixelDelta = resolvePixelAxisDelta({
+      pointerX: event?.clientX,
+      pointerY: event?.clientY,
+      sourceRect,
+    });
     const limits = {
       maxRow: selectableRowCount(tab) - 1,
       maxColumn: activeColumns.value.length - 1,
+      ...(pixelDelta ? { pixelDelta } : {}),
     };
     const renderedIndexes = renderedCellIndexesFromPointer(wrap, event);
     const rowIndex = renderedIndexes?.rowIndex ?? rowIndexFromPointer(wrap, event.clientY, tab);
@@ -1838,8 +1933,9 @@ export function useGridEditor(
     const preview = updateFillPreview(rowIndex, columnIndex, limits);
     const wrapRect = wrap.getBoundingClientRect?.();
     if (wrapRect && preview) {
+      const contentBottom = wrap.clientHeight > 0 ? wrapRect.top + wrap.clientHeight : wrapRect.bottom;
       const pastUnloadedBottom = !tab.fullyLoaded
-        && event.clientY > wrapRect.bottom
+        && event.clientY > contentBottom
         && rowIndex >= limits.maxRow;
       if (pastUnloadedBottom && !fillReachedEndNotified) {
         fillReachedEndNotified = true;
@@ -1873,14 +1969,13 @@ export function useGridEditor(
     const start = positionFromIndexes(tab, bounds.top, bounds.left);
     const end = positionFromIndexes(tab, bounds.bottom, bounds.right);
     if (!start || !end) return;
-    const range = selectedRange.value;
     selectedRange.value = createGridSelection(
       tab.id,
       start.position,
       end.position,
-      { shiftAnchor: range?.tabId === tab.id ? range.shiftAnchor || range.anchor : start.position },
+      { shiftAnchor: start.position },
     );
-    setActiveSelectionPosition(tab, end);
+    setActiveSelectionPosition(tab, start);
   }
 
   function coalesceFillUndoEntry(tab, previousEntry, nextEntry) {
@@ -4908,6 +5003,7 @@ export function useGridEditor(
     showFillHandle,
     isFilling,
     fillPreview,
+    fillSourceBounds,
     fillPreviewDetail,
     fillModifierActive,
     fillOptions,

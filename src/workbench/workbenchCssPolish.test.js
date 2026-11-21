@@ -1493,6 +1493,8 @@ test("fill handle uses accent tokens and sits outside clipped cells", () => {
   assert.match(handle, /min-width:\s*0/);
   assert.match(handle, /background:\s*var\(--wb-accent\)/);
   assert.match(handle, /border:\s*0/);
+  assert.match(handle, /border-radius:\s*0/);
+  assert.match(handle, /box-shadow:\s*0 0 0 1px var\(--wb-grid-row\)/);
   assert.match(handle, /transition:\s*none/);
   assert.match(handle, /cursor:\s*var\(--wb-fill-cursor-light\)/);
   assert.doesNotMatch(handle, /--wb-table-surface/);
@@ -1501,6 +1503,10 @@ test("fill handle uses accent tokens and sits outside clipped cells", () => {
   assert.match(ruleBody(".wb-fill-overlay"), /position:\s*absolute/);
   assert.match(ruleBody(".wb-fill-overlay"), /pointer-events:\s*none/);
   assert.match(handle, /pointer-events:\s*auto/);
+  assert.match(ruleBody(".wb-fill-preview-frame"), /border:\s*2px solid var\(--wb-accent\)/);
+  assert.doesNotMatch(css, /\.wb-grid td\.fill-target\.range-top::before/);
+  assert.match(ruleBody(".wb-fill-options-trigger"), /min-height:\s*0/);
+  assert.match(ruleBody(".wb-fill-options-menu"), /top:\s*calc\(100% \+ 4px\)/);
   assert.match(ruleBody(".wb-fill-options-item.active"), /background:\s*var\(--wb-accent-soft\)/);
 });
 
