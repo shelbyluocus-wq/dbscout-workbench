@@ -133,12 +133,9 @@ function generateArithmetic(start, step, count, sign) {
   return sign > 0 ? values : values.reverse();
 }
 
-function planNumberSeries(rawValues, fillCount, sign, allowSingleNumberSeries) {
+function planNumberSeries(rawValues, fillCount, sign) {
   const parsed = rawValues.map(parsePlainNumber);
   if (parsed.some((item) => !item)) return null;
-  // WPS / Excel rule: dragging a single plain number copies by default;
-  // explicit series mode (or Ctrl toggle) increments by 1.
-  if (parsed.length === 1 && !allowSingleNumberSeries) return null;
   const progression = detectArithmetic(parsed.map((item) => item.value));
   if (!progression || progression.constant) return null;
   const start = sign > 0 ? parsed[parsed.length - 1].value : parsed[0].value;
@@ -536,7 +533,6 @@ function planAxisValues(values, fillCount, sign, mode) {
   if (copyValues.every((value) => value == null || value === "")) {
     return { mode: "copy", values: tileValues(copyValues, fillCount, sign) };
   }
-  const allowSingleNumberSeries = mode === "series";
   const listValues = planListSeries(copyValues, fillCount, sign);
   if (listValues) return { mode: "series", values: listValues };
   const dateTimeValues = planDateTimeSeries(copyValues, fillCount, sign);
@@ -545,7 +541,7 @@ function planAxisValues(values, fillCount, sign, mode) {
   if (dateValues) return { mode: "series", values: dateValues };
   const timeValues = planTimeSeries(copyValues, fillCount, sign);
   if (timeValues) return { mode: "series", values: timeValues };
-  const numberValues = planNumberSeries(copyValues, fillCount, sign, allowSingleNumberSeries);
+  const numberValues = planNumberSeries(copyValues, fillCount, sign);
   if (numberValues) return { mode: "series", values: numberValues };
   const textNumberValues = planTextNumberSeries(copyValues, fillCount, sign);
   if (textNumberValues) return { mode: "series", values: textNumberValues };

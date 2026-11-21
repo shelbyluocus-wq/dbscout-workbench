@@ -19320,6 +19320,22 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
   cursor: var(--wb-fill-cursor-plus-dark), copy !important;
 }
 
+.wb-grid-wrap.is-filling {
+  --wb-row-hover: var(--wb-grid-row);
+}
+
+.wb-grid-wrap.is-filling .wb-grid-row.row-even {
+  --wb-row-hover: var(--wb-grid-row-alt);
+}
+
+.mysql-workbench.has-wallpaper .wb-grid-wrap.is-filling .wb-grid-row:hover:not(.row-selected, .row-active, .row-range-active) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
+  background-color: transparent;
+}
+
+.mysql-workbench.has-wallpaper .wb-grid-wrap.is-filling .wb-grid-row.row-even:hover:not(.row-selected, .row-active, .row-range-active) td:not(.wb-row-index, .frozen-col, .frozen-row, .frozen-corner, .selected, .range-selected, .col-active, .editing, .pending, .error, .search-match) {
+  background-color: var(--wb-wallpaper-stripe);
+}
+
 .wb-grid-wrap.is-filling,
 .wb-grid-wrap.is-filling * {
   cursor: var(--wb-fill-cursor-light), crosshair;
@@ -19364,30 +19380,12 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
 .wb-fill-source-frame,
 .wb-fill-preview-frame {
   position: absolute;
-  left: 0;
-  top: 0;
   box-sizing: border-box;
   pointer-events: none;
 }
 
-.wb-fill-target-wash,
-.wb-fill-preview-frame {
-  transition:
-    transform 65ms cubic-bezier(0.2, 0, 0, 1),
-    width 65ms cubic-bezier(0.2, 0, 0, 1),
-    height 65ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.wb-fill-preview-clip.is-scrolling .wb-fill-target-wash,
-.wb-fill-preview-clip.is-scrolling .wb-fill-preview-frame {
-  transition: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .wb-fill-target-wash,
-  .wb-fill-preview-frame,
   .wb-fill-options {
-    transition: none;
     animation: none;
   }
 }
@@ -19400,30 +19398,43 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
   background: color-mix(in srgb, var(--wb-accent) 12%, transparent);
 }
 
+/* Draw only the single seam dividing the original source cells from the fill targets. */
 .wb-fill-source-frame {
-  border: 1px solid color-mix(in srgb, var(--wb-accent) 46%, transparent);
+  border: 0 solid color-mix(in srgb, var(--wb-accent) 46%, transparent);
+}
+
+.wb-fill-source-frame.is-seam-bottom {
+  border-bottom-width: 1px;
+}
+
+.wb-fill-source-frame.is-seam-top {
+  border-top-width: 1px;
+}
+
+.wb-fill-source-frame.is-seam-right {
+  border-right-width: 1px;
+}
+
+.wb-fill-source-frame.is-seam-left {
+  border-left-width: 1px;
 }
 
 .wb-fill-preview-frame {
   border: 2px solid var(--wb-accent);
 }
 
-.wb-fill-source-frame.is-clipped-top,
 .wb-fill-preview-frame.is-clipped-top {
   border-top-width: 0;
 }
 
-.wb-fill-source-frame.is-clipped-bottom,
 .wb-fill-preview-frame.is-clipped-bottom {
   border-bottom-width: 0;
 }
 
-.wb-fill-source-frame.is-clipped-left,
 .wb-fill-preview-frame.is-clipped-left {
   border-left-width: 0;
 }
 
-.wb-fill-source-frame.is-clipped-right,
 .wb-fill-preview-frame.is-clipped-right {
   border-right-width: 0;
 }
@@ -19636,14 +19647,17 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
   padding: 3px 8px;
   border: 1px solid var(--wb-border-strong);
   border-radius: 5px;
-  background: var(--wb-menu-surface);
-  backdrop-filter: blur(12px);
+  background: var(--wb-grid-row);
   color: var(--wb-text);
   box-shadow: var(--wb-floating-shadow);
   font-size: var(--wb-fs-caption);
   line-height: 1.35;
   pointer-events: none;
   white-space: nowrap;
+}
+
+.mysql-workbench[data-theme="dark"] .wb-fill-preview-tip {
+  background: var(--wb-chrome-surface);
 }
 
 .wb-fill-preview-value {

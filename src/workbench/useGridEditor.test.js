@@ -6055,7 +6055,7 @@ test("fill handle is hidden on read-only tabs and while editing", () => {
   assert.equal(readonly.editor.showFillHandle.value, false);
 });
 
-test("dragging the fill handle follows WPS/Excel rules: single number copies, two numbers fill series, Ctrl toggles", async () => {
+test("dragging the fill handle increments single numbers by default and Ctrl toggles to copy", async () => {
   const { editor, tab, invokeCalls, statusText } = createEditor({
     columns: [
       { column_name: "id", is_primary_key: true },
@@ -6076,10 +6076,10 @@ test("dragging the fill handle follows WPS/Excel rules: single number copies, tw
   const result = await editor.finishFillDrag();
 
   assert.equal(result.ok, true);
-  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "1", "1", "1"]);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["1", "2", "3", "4"]);
   assert.equal(updatedCellCount(invokeCalls), 3);
   assert.match(statusText.value, /已填充 3 个单元格/);
-  assert.equal(editor.fillOptions.value?.appliedMode, "copy");
+  assert.equal(editor.fillOptions.value?.appliedMode, "series");
   assert.equal(editor.fillOptions.value?.canToggleMode, true);
   assert.equal(editor.selectedRange.value.focus.rowIndex, 3);
 
@@ -6115,10 +6115,10 @@ test("upward fill keeps the whole range selected for another fill and batch undo
     { id: "4", level: "10" },
   ];
   pointerSelect(editor, tab, 3, 1);
-  editor.startFillDrag({ preventDefault() {}, ctrlKey: true });
+  editor.startFillDrag({ preventDefault() {}, ctrlKey: false });
   editor.extendFillTo(1, 1);
   assert.deepEqual(selectedCoordinates(editor, tab), ["1:1", "2:1", "3:1"]);
-  assert.equal((await editor.finishFillDrag({ ctrlKey: true })).ok, true);
+  assert.equal((await editor.finishFillDrag({ ctrlKey: false })).ok, true);
   assert.deepEqual(tab.rows.map((row) => row.level), ["a", "8", "9", "10"]);
   assert.deepEqual(selectedCoordinates(editor, tab), ["1:1", "2:1", "3:1"]);
   assert.equal(updatedCellCount(invokeCalls), 2);
@@ -6158,16 +6158,16 @@ for (const { direction, sourceRow, sourceColumn, targetRow, targetColumn, expect
   });
 }
 
-test("upward copy fill can switch to a series without losing its selection", async () => {
+test("upward series fill can switch to copy without losing its selection", async () => {
   const { editor, tab } = createEditor();
   pointerSelect(editor, tab, 2, 1);
   editor.startFillDrag({ preventDefault() {} });
   editor.extendFillTo(0, 1);
   assert.equal((await editor.finishFillDrag()).ok, true);
-  assert.deepEqual(tab.rows.map((row) => row.level), ["14", "14", "14"]);
-  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1"]);
-  assert.equal((await editor.applyFillOption("series")).ok, true);
   assert.deepEqual(tab.rows.map((row) => row.level), ["12", "13", "14"]);
+  assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1"]);
+  assert.equal((await editor.applyFillOption("copy")).ok, true);
+  assert.deepEqual(tab.rows.map((row) => row.level), ["14", "14", "14"]);
   assert.deepEqual(selectedCoordinates(editor, tab), ["0:1", "1:1", "2:1"]);
 });
 
@@ -6320,9 +6320,9 @@ test("a finished fill is undone as one batch", async () => {
     { id: "3", level: "y" },
   ];
   pointerSelect(editor, tab, 0, 1);
-  editor.startFillDrag({ preventDefault() {}, ctrlKey: true });
+  editor.startFillDrag({ preventDefault() {} });
   editor.extendFillTo(2, 1);
-  await editor.finishFillDrag({ ctrlKey: true });
+  await editor.finishFillDrag();
   assert.deepEqual(tab.rows.map((row) => row.level), ["1", "2", "3"]);
 
   const undoStatus = { value: "" };

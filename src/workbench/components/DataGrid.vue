@@ -51,7 +51,6 @@ const isFillDragging = ref(false);
 const fillDragMoved = ref(false);
 const fillDragStart = ref(null);
 const fillDragPointer = ref(null);
-const fillScrolling = ref(false);
 const fillOverlayStyle = ref(null);
 const fillOverlayPlacement = ref({ flipLeft: false, flipUp: false });
 const fillPreviewOverlay = ref(null);
@@ -62,7 +61,6 @@ const fillOptionsOpen = ref(false);
 const openToolbarMenu = ref("");
 const gridShellRef = ref(null);
 let lastPreviewClientRect = null;
-let fillScrollRaf = 0;
 defineExpose({ gridWrapRef });
 
 const props = defineProps({
@@ -653,18 +651,6 @@ const showBoundaryJumpBottom = computed(() => {
 
 function onGridWrapScroll(event) {
   emit('scroll', event);
-  if (isFillPreviewActive.value) {
-    fillScrolling.value = true;
-    if (fillScrollRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(fillScrollRaf);
-    if (typeof requestAnimationFrame === "function") {
-      fillScrollRaf = requestAnimationFrame(() => {
-        fillScrollRaf = 0;
-        fillScrolling.value = false;
-      });
-    } else {
-      fillScrolling.value = false;
-    }
-  }
   updateFillOverlayPosition();
   scheduleBoundaryScrollUpdate(event?.target);
   const now = typeof performance !== "undefined" ? performance.now() : 0;
@@ -1079,9 +1065,20 @@ function measureBoundsInViewport(wrap, bounds, viewport) {
 function overlayBoxStyle(box) {
   if (!box) return null;
   return {
-    transform: `translate3d(${box.left}px, ${box.top}px, 0)`,
+    left: `${box.left}px`,
+    top: `${box.top}px`,
     width: `${box.width}px`,
     height: `${box.height}px`,
+  };
+}
+
+function sourceSeamClasses(box, direction) {
+  if (!box || !direction) return {};
+  return {
+    "is-seam-bottom": direction === "down" && !box.clippedBottom,
+    "is-seam-top": direction === "up" && !box.clippedTop,
+    "is-seam-right": direction === "right" && !box.clippedRight,
+    "is-seam-left": direction === "left" && !box.clippedLeft,
   };
 }
 
@@ -1152,7 +1149,7 @@ function updateFillOverlayPosition() {
             height: `${clipHeight}px`,
           },
           sourceStyle: overlayBoxStyle(sourceBox),
-          sourceClasses: overlayClipClasses(sourceBox),
+          sourceClasses: sourceSeamClasses(sourceBox, direction),
           targetStyle: overlayBoxStyle(targetBox),
           previewStyle: overlayBoxStyle(previewBox),
           previewClasses: overlayClipClasses(previewBox),
@@ -1531,7 +1528,7 @@ watch(
     frozenColumnCount.value,
   ],
   () => {
-    nextTick(updateFillOverlayPosition);
+    updateFillOverlayPosition();
   },
   { flush: "post" },
 );
@@ -1573,10 +1570,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resetLocalFillDrag();
   syncGlobalFillCursor();
-  if (fillScrollRaf && typeof cancelAnimationFrame === "function") {
-    cancelAnimationFrame(fillScrollRaf);
-    fillScrollRaf = 0;
-  }
   window.removeEventListener('mousemove', continueRangeSelection);
   window.removeEventListener('mousemove', continueRowDragSelection);
   window.removeEventListener('mousemove', continueFillDrag);
@@ -1806,7 +1799,7 @@ function handleTableContextMenu(event) {
       <div
         ref="gridWrapRef"
         class="wb-grid-wrap"
-        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-fill-previewing': isFillPreviewActive, 'is-fill-toggle': (isFilling || isFillDragging) && fillModifierActive, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
+        :class="{ 'is-selecting-range': isSelectingRange || isCellDragging, 'is-filling': isFilling || isFillDragging, 'is-fill-previewing': Boolean(fillPreviewOverlay), 'is-fill-toggle': (isFilling || isFillDragging) && fillModifierActive, 'is-row-selecting': isRowDragging, 'is-reordering-columns': columnReorderSurface.reordering, 'is-column-drop-forbidden': columnReorderSurface.forbidden }"
         role="grid"
         :aria-rowcount="gridAriaRowCount"
         :aria-colcount="1 + activeColumns.length"
@@ -2352,7 +2345,6 @@ function handleTableContextMenu(event) {
       <div
         v-if="fillPreviewOverlay"
         class="wb-fill-preview-clip"
-        :class="{ 'is-scrolling': fillScrolling }"
         :style="fillPreviewOverlay.clipStyle"
         aria-hidden="true"
       >

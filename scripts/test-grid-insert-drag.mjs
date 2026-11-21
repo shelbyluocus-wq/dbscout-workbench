@@ -325,11 +325,9 @@ try {
   const waitForFillValues = (values) => Promise.all(fillRows.map((row, index) => waitForValues(row, [3], [values[index]])));
   const fillUpValues = [fillBefore[0][0], String(fillSource - 3), String(fillSource - 2), String(fillSource - 1), String(fillSource)];
 
-  // Single-number upward fill copies by default; holding Control toggles to series.
+  // Single-number upward fill decrements series by default; holding Control toggles to copy.
   await fillCell(4).click();
-  await page.keyboard.down("Control");
   await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(1));
-  await page.keyboard.up("Control");
   await waitForFillValues(fillUpValues);
   await waitForCellSelection(page, ["1:3", "2:3", "3:3", "4:3"]);
 
@@ -342,16 +340,16 @@ try {
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
 
-  // Single-number downward fill copies by default; switching via options menu turns it into series,
+  // Single-number downward fill increments by 1 by default; switching via options menu turns it into copy,
   // and a single Ctrl/Cmd+Z reverts both the initial fill and the mode switch together.
   await fillCell(0).click();
   const fillDownSource = Number(fillBefore[0][0]);
   await dragBetween(page, page.locator(".wb-fill-handle"), fillCell(3));
-  await waitForFillValues([String(fillDownSource), String(fillDownSource), String(fillDownSource), String(fillDownSource), fillBefore[4][0]]);
+  await waitForFillValues([String(fillDownSource), String(fillDownSource + 1), String(fillDownSource + 2), String(fillDownSource + 3), fillBefore[4][0]]);
   await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3"]);
   await page.locator(".wb-fill-options-trigger").click();
-  await page.getByRole("menuitemradio", { name: "填充序列", exact: true }).click();
-  await waitForFillValues([String(fillDownSource), String(fillDownSource + 1), String(fillDownSource + 2), String(fillDownSource + 3), fillBefore[4][0]]);
+  await page.getByRole("menuitemradio", { name: "复制单元格", exact: true }).click();
+  await waitForFillValues([String(fillDownSource), String(fillDownSource), String(fillDownSource), String(fillDownSource), fillBefore[4][0]]);
   await waitForCellSelection(page, ["0:3", "1:3", "2:3", "3:3"]);
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
@@ -387,10 +385,10 @@ try {
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
 
-  // Double-clicking the fill handle fills down smoothly in the real browser.
+  // Double-clicking the fill handle fills incrementing series down smoothly in the real browser.
   await fillCell(0).click();
   await page.locator(".wb-fill-handle").dblclick();
-  await waitForFillValues(Array.from({ length: 5 }, () => String(fillDownSource)));
+  await waitForFillValues(Array.from({ length: 5 }, (_, index) => String(fillDownSource + index)));
   await page.keyboard.press(shortcut("Z"));
   await waitForFillValues(fillBefore.map(([value]) => value));
   console.log("WPS/Excel fill rules, live preview tooltip, double-click fill, option switch, selection and batch undo passed.");

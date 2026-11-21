@@ -15,20 +15,20 @@ function filledValues(sourceMatrix, direction, fillCount, mode = "auto") {
   return result;
 }
 
-test("WPS/Excel rule: single plain number copies by default and Ctrl/series increments by 1", () => {
-  const auto = filledValues([["1"]], "down", 3);
-  assert.equal(auto.mode, "copy");
+test("single plain number increments by 1 by default and Ctrl/copy repeats the value", () => {
+  const auto = filledValues([["1"]], "down", 4);
+  assert.equal(auto.mode, "series");
   assert.equal(auto.canToggleMode, true);
-  assert.deepEqual(auto.matrix, [["1"], ["1"], ["1"]]);
+  assert.deepEqual(auto.matrix, [["2"], ["3"], ["4"], ["5"]]);
 
   const toggled = filledValues([["1"]], "down", 3, "toggle");
-  assert.equal(toggled.mode, "series");
+  assert.equal(toggled.mode, "copy");
   assert.equal(toggled.canToggleMode, true);
-  assert.deepEqual(toggled.matrix, [["2"], ["3"], ["4"]]);
+  assert.deepEqual(toggled.matrix, [["1"], ["1"], ["1"]]);
 
-  const explicitSeries = filledValues([["1"]], "down", 3, "series");
-  assert.equal(explicitSeries.mode, "series");
-  assert.deepEqual(explicitSeries.matrix, [["2"], ["3"], ["4"]]);
+  const explicitCopy = filledValues([["1"]], "down", 3, "copy");
+  assert.equal(explicitCopy.mode, "copy");
+  assert.deepEqual(explicitCopy.matrix, [["1"], ["1"], ["1"]]);
 });
 
 test("WPS/Excel rule: two arithmetic numbers continue a series by default and Ctrl/copy tiles 1, 2, 1, 2", () => {
@@ -138,9 +138,9 @@ test("null values are preserved as null instead of turning into empty strings", 
   assert.deepEqual(result.matrix, [[null], [""], [null]]);
 });
 
-test("filling up or left decrements series and copies single numbers by default", () => {
-  assert.deepEqual(filledValues([["5"]], "up", 3).matrix, [["5"], ["5"], ["5"]]);
-  assert.deepEqual(filledValues([["5"]], "up", 3, "series").matrix, [["2"], ["3"], ["4"]]);
+test("filling up or left decrements series by default and copy repeats the value", () => {
+  assert.deepEqual(filledValues([["5"]], "up", 3).matrix, [["2"], ["3"], ["4"]]);
+  assert.deepEqual(filledValues([["5"]], "up", 3, "copy").matrix, [["5"], ["5"], ["5"]]);
   assert.deepEqual(filledValues([["星期一"]], "up", 2).matrix, [["星期六"], ["星期日"]]);
   assert.deepEqual(filledValues([["1", "2"]], "left", 2).matrix, [["-1", "0"]]);
 });
@@ -157,13 +157,13 @@ test("each column is planned independently when filling down", () => {
 
   const mixedSingle = filledValues([["1", "产品1"]], "down", 2);
   assert.deepEqual(mixedSingle.matrix, [
-    ["1", "产品2"],
-    ["1", "产品3"],
-  ]);
-  const mixedSeries = filledValues([["1", "产品1"]], "down", 2, "series");
-  assert.deepEqual(mixedSeries.matrix, [
     ["2", "产品2"],
     ["3", "产品3"],
+  ]);
+  const mixedCopy = filledValues([["1", "产品1"]], "down", 2, "copy");
+  assert.deepEqual(mixedCopy.matrix, [
+    ["1", "产品1"],
+    ["1", "产品1"],
   ]);
 });
 
