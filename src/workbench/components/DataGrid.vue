@@ -93,7 +93,6 @@ const props = defineProps({
   highlightCell: { type: Function, default: () => "" },
   hasSearchMatches: { type: Boolean, default: false },
   searchHitSummary: { type: Object, default: () => ({ current: 0, total: 0, label: "" }) },
-  rowSummary: { type: String, default: "" },
   schemaSearchMatches: { type: Array, default: () => [] },
   schemaSearchIndex: { type: Number, default: -1 },
   schemaSearchSummary: { type: String, default: "" },
@@ -197,7 +196,6 @@ useToolbarFit(tableToolbarRef, {
     props.tab?.sort?.descending,
     props.schemaSearchMatches.length ? props.schemaSearchSummary : "",
     props.searchHitSummary?.label,
-    props.rowSummary,
     activeFilterModeLabel.value,
     importActions.value.primary.label,
     t("m_131b13aa2659"),
@@ -1795,11 +1793,6 @@ function handleTableContextMenu(event) {
         @close="closeToolbarMenu"
         @select="handleToolbarAction"
       />
-      <span
-        v-if="rowSummary"
-        class="wb-table-toolbar-row-summary"
-        :title="rowSummary"
-      >{{ rowSummary }}</span>
     </header>
 
     <div ref="gridShellRef" class="wb-grid-shell">

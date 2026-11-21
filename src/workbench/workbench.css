@@ -13984,17 +13984,6 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: stretch;
 }
 
-.wb-table-toolbar-row-summary {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 8px;
-  color: var(--wb-quiet-text);
-  font-size: var(--wb-fs-caption);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  user-select: none;
-}
-
 @container (max-width: 132px) {
   .wb-tab-title > small:not(.wb-tab-kind) {
     display: none;
@@ -14309,10 +14298,6 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-table-toolbar:is([data-fit="1"], [data-fit="2"]) .wb-table-toolbar-actions > .wb-table-toolbar-secondary {
-  display: none;
-}
-
-.wb-table-toolbar:is([data-fit="1"], [data-fit="2"], [data-fit="3"]) .wb-table-toolbar-row-summary {
   display: none;
 }
 

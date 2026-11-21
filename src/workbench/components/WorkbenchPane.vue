@@ -1877,7 +1877,6 @@ onMounted(() => emitPaneState());
       :highlight-cell="highlightCell"
       :has-search-matches="hasSearchMatches"
       :search-hit-summary="searchHitSummary"
-      :row-summary="dataTabRowSummary"
       :schema-search-matches="schemaSearchMatches"
       :schema-search-index="schemaSearchIndex"
       :schema-search-summary="schemaSearchSummary"
