@@ -66,7 +66,7 @@ pub async fn cached_page(app: &AppHandle, context: &Context, table: &str, offset
         }
         crate::db::read_db_page_in_database(&pool, &context.database, cached_meta.as_ref().unwrap(), "mcp-relations", &TablePageRequest {
             page: Some(1), page_size: Some(limit), offset: Some(offset), include_total: Some(false),
-            filter: relation.map(|relation| TablePageFilter { query: String::new(), columns: vec![], mode: None, relation: Some(relation) }),
+            filter: relation.map(|relation| TablePageFilter { query: String::new(), columns: vec![], mode: None, relation: Some(relation), column_filters: Vec::new() }),
             sort: None,
         }).await
     }).await

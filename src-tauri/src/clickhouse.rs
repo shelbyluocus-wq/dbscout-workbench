@@ -1045,6 +1045,7 @@ mod tests {
                 columns: vec!["event_name".into()],
                 mode: None,
                 relation: None,
+                ..Default::default()
             }),
             sort: None,
         };

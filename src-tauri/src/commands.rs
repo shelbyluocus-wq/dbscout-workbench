@@ -4234,20 +4234,24 @@ pub async fn replace_in_table(
     {
         let schema_snapshot =
             fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
-        let rows = crate::replace::fetch_replace_candidate_rows(
+        let rows = crate::replace::fetch_replace_candidate_rows_with_options(
             &pool,
             &session.database,
             schema_snapshot.schema(),
             &query,
             request.case_sensitive,
+            request.whole_cell,
+            request.column_name.as_deref(),
         )
         .await?;
-        crate::replace::collect_patches_from_rows(
+        crate::replace::collect_patches_from_rows_with_options(
             schema_snapshot.schema(),
             &rows,
             &query,
             &request.replacement,
             request.case_sensitive,
+            request.whole_cell,
+            request.column_name.as_deref(),
         )
     } else {
         let mut rt = state.runtime.lock().await;
@@ -4262,12 +4266,14 @@ pub async fn replace_in_table(
         let profile = rt.demo_profile;
         let rows =
             ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
-        crate::replace::collect_patches_from_rows(
+        crate::replace::collect_patches_from_rows_with_options(
             &table,
             rows,
             &query,
             &request.replacement,
             request.case_sensitive,
+            request.whole_cell,
+            request.column_name.as_deref(),
         )
     };
 
@@ -4330,20 +4336,24 @@ pub async fn find_in_table(
     if let Some(pool) = session_database_pool(&state, &session).await? {
         let schema_snapshot =
             fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
-        let rows = crate::replace::fetch_replace_candidate_rows(
+        let rows = crate::replace::fetch_replace_candidate_rows_with_options(
             &pool,
             &session.database,
             schema_snapshot.schema(),
             &query,
             request.case_sensitive,
+            request.whole_cell,
+            request.column_name.as_deref(),
         )
         .await?;
         let (matches, total_cells, total_occurrences, truncated) =
-            crate::replace::collect_matches_from_rows(
+            crate::replace::collect_matches_from_rows_with_options(
                 schema_snapshot.schema(),
                 &rows,
                 &query,
                 request.case_sensitive,
+                request.whole_cell,
+                request.column_name.as_deref(),
                 limit,
             );
         return Ok(FindInTableResult {
@@ -4369,11 +4379,13 @@ pub async fn find_in_table(
     let profile = rt.demo_profile;
     let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
     let (matches, total_cells, total_occurrences, truncated) =
-        crate::replace::collect_matches_from_rows(
+        crate::replace::collect_matches_from_rows_with_options(
             &table,
             rows,
             &query,
             request.case_sensitive,
+            request.whole_cell,
+            request.column_name.as_deref(),
             limit,
         );
     Ok(FindInTableResult {
@@ -4382,6 +4394,74 @@ pub async fn find_in_table(
         total_occurrences,
         truncated,
     })
+}
+
+#[tauri::command]
+pub async fn fetch_column_distinct_values(
+    request: ColumnDistinctValuesRequest,
+    perf_context: PerfContext,
+    state: State<'_, AppState>,
+) -> Result<ColumnDistinctValuesResult, String> {
+    let column_name = request.column_name.trim().to_string();
+    if column_name.is_empty() {
+        return Err("列名不能为空".into());
+    }
+    let session = {
+        let mut rt = state.runtime.lock().await;
+        rt.sessions
+            .acquire(&request.session_id)
+            .ok_or_else(|| "表会话已失效，请重新打开表".to_string())?
+    };
+    let limit = request.limit.unwrap_or(200).clamp(1, 500);
+
+    if let Some(pool) = session_database_pool(&state, &session).await? {
+        let schema_snapshot =
+            fresh_session_schema(&request.session_id, &session, &perf_context, &state).await?;
+        let pool_key = session
+            .pool_key
+            .clone()
+            .unwrap_or_else(|| PoolKey::new(&session.connection_id, &session.database));
+        return run_pool_work(
+            &state.work_scheduler,
+            &pool_key,
+            WorkClass::Foreground,
+            FOREGROUND_DB_TIMEOUT,
+            crate::db::read_column_distinct_values(
+                &pool,
+                &session.database,
+                schema_snapshot.schema(),
+                &column_name,
+                request.search.as_deref(),
+                limit,
+                request.filter.as_ref(),
+            ),
+        )
+        .await;
+    }
+
+    if session.kind == DatabaseKind::MongoDb || session.kind == DatabaseKind::ClickHouse {
+        return Err("当前引擎暂不支持服务端枚举，已回退至当前页数据".into());
+    }
+
+    let mut rt = state.runtime.lock().await;
+    let schema = demo_schema_for_runtime(
+        &rt.demo_schema_overrides,
+        rt.demo_profile,
+        &session.database,
+        &rt.selected_database,
+        &rt.schema,
+    );
+    let table = resolve_demo_table(&session.table_name, &schema)?;
+    let profile = rt.demo_profile;
+    let rows = ensure_demo_rows_for_mutation(&mut rt.demo_rows, profile, &session.database, &table);
+    crate::demo::read_demo_column_distinct_values(
+        rows,
+        &table.columns,
+        &column_name,
+        request.search.as_deref(),
+        limit,
+        request.filter.as_ref(),
+    )
 }
 
 const PRIMARY_KEY_DUPLICATE_MESSAGE: &str = "主键重复，不能保存";

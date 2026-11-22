@@ -48,12 +48,15 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
         @click="toggle"
       >
         <ChevronRight :size="12" :stroke-width="2.2" class="wb-incoming-chevron" :class="{ 'is-open': state.expanded }" aria-hidden="true" />
-        <span class="wb-incoming-title">
-          <CommentTip :name="table" :comment="tableComment"><span class="wb-incoming-table">{{ table }}</span></CommentTip><span class="wb-incoming-column">.<CommentTip
-            field
-            :name="`${table}.${column}`"
-            :comment="columnComment"
-          >{{ column }}</CommentTip></span>
+        <span class="wb-incoming-title-wrap">
+          <span class="wb-incoming-title">
+            <CommentTip :name="table" :comment="tableComment"><span class="wb-incoming-table">{{ table }}</span></CommentTip><span class="wb-incoming-column">.<CommentTip
+              field
+              :name="`${table}.${column}`"
+              :comment="columnComment"
+            >{{ column }}</CommentTip></span>
+          </span>
+          <span v-if="tableComment" class="wb-incoming-comment" :title="tableComment">{{ tableComment }}</span>
         </span>
         <span v-if="listKind" class="wb-incoming-tag">{{ t('relations.kindList') }}</span>
         <span v-if="unsupported" class="wb-incoming-count">{{ t('relations.incoming.unchecked') }}</span>
@@ -138,13 +141,30 @@ const openAllLabel = computed(() => (Number.isFinite(props.count) && props.count
   gap: 5px;
   min-width: 0;
   min-height: 26px;
-  padding: 0 6px 0 4px;
+  padding: 3px 6px 3px 4px;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
   text-align: left;
+}
+
+.wb-incoming-title-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.wb-incoming-comment {
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-incoming-toggle:hover:not(:disabled),

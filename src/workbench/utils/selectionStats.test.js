@@ -75,6 +75,17 @@ test("buildSelectionStats reports average, count, and sum like a spreadsheet sta
     { key: "count", label: "计数", text: "5" },
     { key: "sum", label: "求和", text: "60" },
   ]);
+  assert.equal(stats.min, 10);
+  assert.equal(stats.max, 30);
+  assert.deepEqual(stats.rangeItems, [
+    { key: "min", label: "最小", text: "10" },
+    { key: "max", label: "最大", text: "30" },
+  ]);
+});
+
+test("buildSelectionStats omits min/max rangeItems when all numbers are equal or fewer than two", () => {
+  assert.deepEqual(buildSelectionStats([5, "5", "5"]).rangeItems, []);
+  assert.deepEqual(buildSelectionStats([5, "文本"]).rangeItems, []);
 });
 
 

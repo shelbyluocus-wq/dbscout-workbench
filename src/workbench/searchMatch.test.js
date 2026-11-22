@@ -235,3 +235,23 @@ test("replaceSearchText handles unicode whose lowercase changes length", () => {
   assert.equal(result.replacedCount, 2);
   assert.equal(result.text, "yxy");
 });
+
+test("findSearchRanges and replaceSearchText honor wholeCell option", () => {
+  assert.deepEqual(findSearchRanges("100", "100", { wholeCell: true }), [{ start: 0, end: 3 }]);
+  assert.deepEqual(findSearchRanges("1001", "100", { wholeCell: true }), []);
+  assert.deepEqual(findSearchRanges("Hero", "hero", { wholeCell: true }), [{ start: 0, end: 4 }]);
+  assert.deepEqual(findSearchRanges("Hero", "hero", { wholeCell: true, caseSensitive: true }), []);
+
+  assert.deepEqual(
+    replaceSearchText("100", "100", "200", { wholeCell: true }),
+    { text: "200", replacedCount: 1 },
+  );
+  assert.deepEqual(
+    replaceSearchText("1001", "100", "200", { wholeCell: true }),
+    { text: "1001", replacedCount: 0 },
+  );
+  assert.deepEqual(
+    replaceSearchText("Hero", "hero", "Boss", { wholeCell: true, caseSensitive: true }),
+    { text: "Hero", replacedCount: 0 },
+  );
+});

@@ -30,6 +30,8 @@ const findInputRef = ref(null);
 const query = ref("");
 const replacement = ref("");
 const caseSensitive = ref(false);
+const wholeCell = ref(false);
+const selectedColumn = ref("");
 const feedback = ref({ kind: "", text: "" });
 
 const findText = computed(() => query.value.trim());
@@ -65,6 +67,20 @@ let listRequestSeq = 0;
 // Passive typing is debounced because an unscoped lookup scans the whole table.
 // Enter and the navigation buttons bypass this delay through refreshListNow().
 const TABLE_LIST_DEBOUNCE_MS = 350;
+
+const columnOptions = computed(() => {
+  const items = [];
+  for (const column of props.paneState.activeColumns || []) {
+    const name = String(column?.column_name ?? column?.columnName ?? "");
+    if (!name) continue;
+    const comment = String(column?.column_comment ?? column?.columnComment ?? "").trim();
+    items.push({
+      name,
+      label: comment && comment !== name ? `${name} · ${comment}` : name,
+    });
+  }
+  return items;
+});
 
 const columnLabelByName = computed(() => {
   const map = new Map();
@@ -145,6 +161,13 @@ function identityLabel(rowIdentity) {
 
 function matchPreviewHtml(match) {
   const preview = contiguousSearchPreview(match.value, findText.value, 72);
+  if (wholeCell.value) {
+    const matched = findSearchRanges(String(match.value ?? ""), findText.value, {
+      caseSensitive: caseSensitive.value,
+      wholeCell: true,
+    }).length > 0;
+    return highlightSearchRanges(preview, matched && preview.length ? [{ start: 0, end: preview.length }] : []);
+  }
   return highlightSearchRanges(preview, findSearchRanges(preview, findText.value, { caseSensitive: caseSensitive.value }));
 }
 
@@ -163,6 +186,8 @@ function applySelectionList(seq = listSeq) {
   const items = props.paneState.listSelectionMatches?.({
     query: findText.value,
     caseSensitive: caseSensitive.value,
+    wholeCell: wholeCell.value,
+    columnName: selectedColumn.value,
   }) || [];
   matches.value = items;
   totalCells.value = items.length;
@@ -190,6 +215,8 @@ async function applyTableList(seq) {
         sessionId: tab.sessionId,
         query: findText.value,
         caseSensitive: caseSensitive.value,
+        wholeCell: wholeCell.value,
+        columnName: selectedColumn.value || null,
         limit: 500,
       },
     });
@@ -259,6 +286,8 @@ watch(
   [
     findText,
     caseSensitive,
+    wholeCell,
+    selectedColumn,
     scopeIsSelection,
     selectionCellCount,
     // 选区内容只在选区范围内影响列表；整表范围内跳转产生的选区变化（单元格
@@ -270,6 +299,9 @@ watch(
 );
 
 watch(activeTableIdentity, () => {
+  if (selectedColumn.value && !columnOptions.value.some((col) => col.name === selectedColumn.value)) {
+    selectedColumn.value = "";
+  }
   matches.value = [];
   activeIndex.value = -1;
   totalCells.value = 0;
@@ -332,6 +364,7 @@ async function replaceCurrent() {
       query: findText.value,
       replacement: replacement.value,
       caseSensitive: caseSensitive.value,
+      wholeCell: wholeCell.value,
     });
     if (!result?.ok) {
       setFeedback("error", result?.reason || "替换失败");
@@ -342,7 +375,10 @@ async function replaceCurrent() {
       if (scopeIsSelection.value) {
         applySelectionList();
       } else {
-        const stillMatches = findSearchRanges(result.newValue, findText.value, { caseSensitive: caseSensitive.value }).length;
+        const stillMatches = findSearchRanges(result.newValue, findText.value, {
+          caseSensitive: caseSensitive.value,
+          wholeCell: wholeCell.value,
+        }).length;
         if (stillMatches > 0) {
           matches.value[index] = { ...match, value: result.newValue, occurrences: stillMatches };
           totalOccurrences.value -= result.replaced - stillMatches;
@@ -369,6 +405,8 @@ async function replaceAllInSelection() {
     query: findText.value,
     replacement: replacement.value,
     caseSensitive: caseSensitive.value,
+    wholeCell: wholeCell.value,
+    columnName: selectedColumn.value,
   });
   if (!result) return;
   if (!result.ok) {
@@ -392,6 +430,8 @@ async function replaceAllInTable() {
     query: findText.value,
     replacement: replacement.value,
     caseSensitive: caseSensitive.value,
+    wholeCell: wholeCell.value,
+    columnName: selectedColumn.value || null,
     dryRun: true,
   };
   const preview = await props.invokeWorkbench("replace_in_table", { request });
@@ -401,10 +441,14 @@ async function replaceAllInTable() {
     setFeedback("", "整张表中没有匹配的内容");
     return;
   }
+  const scopeNote = selectedColumn.value
+    ? `列「${columnTooltip(selectedColumn.value)}」`
+    : "整张表";
+  const matchNote = wholeCell.value ? "（整格匹配）" : "";
   const confirmed = await confirm({
     title: "全部替换",
     message:
-      `将在整张表中把「${findText.value}」替换为「${replacement.value}」。\n` +
+      `将在${scopeNote}中把「${findText.value}」替换为「${replacement.value}」${matchNote}。\n` +
       `共 ${cells} 处，涉及 ${rows} 行（包括未加载的行）。\n\n` +
       `该操作会记录审计日志，可通过备份/回滚功能恢复，也可按 Ctrl+Z 撤销。`,
     confirmText: "全部替换",
@@ -802,11 +846,27 @@ onBeforeUnmount(() => {
           />
         </label>
 
+        <label v-if="columnOptions.length" class="wb-dialog-field wb-replace-field">
+          <span>{{ t('findReplace.columnScope') }}</span>
+          <select v-model="selectedColumn" :disabled="isBusy">
+            <option value="">{{ t('findReplace.allColumns') }}</option>
+            <option v-for="col in columnOptions" :key="col.name" :value="col.name">
+              {{ col.label }}
+            </option>
+          </select>
+        </label>
+
         <div class="wb-find-replace-options">
-          <label class="wb-replace-option">
-            <input v-model="caseSensitive" type="checkbox" :disabled="isBusy" />
-            <span>{{ t('m_8c7e3447ec67') }}</span>
-          </label>
+          <div class="wb-find-replace-checks">
+            <label class="wb-replace-option">
+              <input v-model="caseSensitive" type="checkbox" :disabled="isBusy" />
+              <span>{{ t('m_8c7e3447ec67') }}</span>
+            </label>
+            <label class="wb-replace-option">
+              <input v-model="wholeCell" type="checkbox" :disabled="isBusy" />
+              <span>{{ t('findReplace.wholeCell') }}</span>
+            </label>
+          </div>
           <span class="wb-find-replace-scope-text" :class="{ 'is-selection': scopeIsSelection }">
             <template v-if="scopeIsSelection">{{ t('m_e0efb68c4a25') }} {{ selectionCellCount }} {{ t('m_5e6d00b1ff75') }}</template>
             <template v-else>{{ t('m_21c41420e543') }}</template>

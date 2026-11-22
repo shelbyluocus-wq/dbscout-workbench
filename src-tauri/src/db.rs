@@ -119,6 +119,7 @@ pub fn build_filter_sql(
     let clauses = [
         query_filter_clause(columns, filter),
         crate::config_relations::filter::sql_clause(columns, filter.relation.as_ref()),
+        column_filters_clause(columns, &filter.column_filters),
     ];
     let mut predicates = Vec::new();
     let mut binds = Vec::new();
@@ -130,6 +131,268 @@ pub fn build_filter_sql(
         return (String::new(), Vec::new());
     }
     (format!(" WHERE {}", predicates.join(" AND ")), binds)
+}
+
+fn is_numeric_column(column: &ColumnMeta) -> bool {
+    matches!(
+        normalized_column_data_type(column).as_str(),
+        "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "decimal"
+            | "numeric"
+            | "float"
+            | "double"
+            | "real"
+            | "year"
+    )
+}
+
+fn is_plain_decimal(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let start = if bytes[0] == b'-' || bytes[0] == b'+' { 1 } else { 0 };
+    if start >= bytes.len() {
+        return false;
+    }
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    for &b in &bytes[start..] {
+        if b.is_ascii_digit() {
+            saw_digit = true;
+        } else if b == b'.' && !saw_dot {
+            saw_dot = true;
+        } else {
+            return false;
+        }
+    }
+    saw_digit
+}
+
+pub fn escape_like_prefix(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("{escaped}%")
+}
+
+pub fn column_filters_clause(
+    columns: &[ColumnMeta],
+    filters: &[ColumnFilter],
+) -> Option<(String, Vec<String>)> {
+    if filters.is_empty() {
+        return None;
+    }
+    let mut predicates = Vec::new();
+    let mut binds = Vec::new();
+
+    for cf in filters {
+        if cf.is_empty() {
+            continue;
+        }
+        let target = cf.column.trim();
+        let Some(column) = columns
+            .iter()
+            .find(|col| col.column_name.eq_ignore_ascii_case(target))
+        else {
+            continue;
+        };
+        let col_ident = format!("`{}`", escape_ident(&column.column_name));
+        let mut col_parts = Vec::new();
+
+        if !cf.values.is_empty() || cf.include_null {
+            let mut val_parts = Vec::new();
+            if !cf.values.is_empty() {
+                let placeholders = vec!["?"; cf.values.len()].join(", ");
+                val_parts.push(format!("CAST({col_ident} AS CHAR) IN ({placeholders})"));
+                binds.extend(cf.values.iter().cloned());
+            }
+            if cf.include_null {
+                val_parts.push(format!("{col_ident} IS NULL"));
+            }
+            if val_parts.len() == 1 {
+                col_parts.push(val_parts.remove(0));
+            } else {
+                col_parts.push(format!("({})", val_parts.join(" OR ")));
+            }
+        }
+
+        let op = cf.operator.trim();
+        match op {
+            "eq" if !cf.value.is_empty() => {
+                col_parts.push(format!("CAST({col_ident} AS CHAR) = ?"));
+                binds.push(cf.value.clone());
+            }
+            "neq" if !cf.value.is_empty() => {
+                col_parts.push(format!("({col_ident} IS NULL OR CAST({col_ident} AS CHAR) <> ?)"));
+                binds.push(cf.value.clone());
+            }
+            "contains" if !cf.value.is_empty() => {
+                col_parts.push(format!(
+                    "LOWER(CAST({col_ident} AS CHAR)) LIKE ? ESCAPE '\\\\'"
+                ));
+                binds.push(escape_like_pattern(&cf.value.to_lowercase()));
+            }
+            "notContains" if !cf.value.is_empty() => {
+                col_parts.push(format!(
+                    "({col_ident} IS NULL OR LOWER(CAST({col_ident} AS CHAR)) NOT LIKE ? ESCAPE '\\\\')"
+                ));
+                binds.push(escape_like_pattern(&cf.value.to_lowercase()));
+            }
+            "startsWith" if !cf.value.is_empty() => {
+                col_parts.push(format!(
+                    "LOWER(CAST({col_ident} AS CHAR)) LIKE ? ESCAPE '\\\\'"
+                ));
+                binds.push(escape_like_prefix(&cf.value.to_lowercase()));
+            }
+            "gt" | "gte" | "lt" | "lte" if !cf.value.is_empty() => {
+                let sql_op = match op {
+                    "gt" => ">",
+                    "gte" => ">=",
+                    "lt" => "<",
+                    _ => "<=",
+                };
+                let trimmed = cf.value.trim();
+                if is_numeric_column(column) && is_plain_decimal(trimmed) {
+                    col_parts.push(format!(
+                        "({col_ident} IS NOT NULL AND {col_ident} {sql_op} CAST(? AS DECIMAL(65, 10)))"
+                    ));
+                    binds.push(trimmed.to_string());
+                } else if is_numeric_column(column) && trimmed.parse::<f64>().is_ok() {
+                    col_parts.push(format!(
+                        "({col_ident} IS NOT NULL AND ({col_ident} + 0) {sql_op} (? + 0))"
+                    ));
+                    binds.push(trimmed.to_string());
+                } else {
+                    col_parts.push(format!(
+                        "({col_ident} IS NOT NULL AND CAST({col_ident} AS CHAR) {sql_op} ?)"
+                    ));
+                    binds.push(cf.value.clone());
+                }
+            }
+            "isEmpty" => {
+                col_parts.push(format!(
+                    "({col_ident} IS NULL OR CAST({col_ident} AS CHAR) = '')"
+                ));
+            }
+            "isNotEmpty" => {
+                col_parts.push(format!(
+                    "({col_ident} IS NOT NULL AND CAST({col_ident} AS CHAR) <> '')"
+                ));
+            }
+            _ => {}
+        }
+
+        if col_parts.len() == 1 {
+            predicates.push(col_parts.remove(0));
+        } else if !col_parts.is_empty() {
+            predicates.push(format!("({})", col_parts.join(" AND ")));
+        }
+    }
+
+    if predicates.is_empty() {
+        None
+    } else {
+        Some((format!("({})", predicates.join(" AND ")), binds))
+    }
+}
+
+pub async fn read_column_distinct_values(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    column_name: &str,
+    search: Option<&str>,
+    limit: u32,
+    base_filter: Option<&TablePageFilter>,
+) -> Result<ColumnDistinctValuesResult, String> {
+    let target = column_name.trim();
+    let column = table
+        .columns
+        .iter()
+        .find(|col| col.column_name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| format!("列「{target}」不存在"))?;
+
+    let col_ident = format!("`{}`", escape_ident(&column.column_name));
+    let safe_limit = limit.clamp(1, 500) as usize;
+    let fetch_limit = (safe_limit + 1) as i64;
+
+    // 保留其它列筛选 / 搜索 / 关联筛选，但排除本列自身的筛选条件（Excel 自动筛选语义）。
+    let scoped_filter = base_filter.map(|f| {
+        let mut cloned = f.clone();
+        cloned
+            .column_filters
+            .retain(|cf| !cf.column.eq_ignore_ascii_case(&column.column_name));
+        cloned
+    });
+    let page_request = TablePageRequest {
+        page: None,
+        page_size: None,
+        offset: None,
+        include_total: None,
+        filter: scoped_filter,
+        sort: None,
+    };
+    let (mut where_sql, mut binds) = build_filter_sql(&table.columns, &page_request);
+    if let Some(keyword) = search.map(str::trim).filter(|s| !s.is_empty()) {
+        let clause = format!("LOWER(CAST({col_ident} AS CHAR)) LIKE ? ESCAPE '\\\\'");
+        if where_sql.is_empty() {
+            where_sql = format!(" WHERE {clause}");
+        } else {
+            where_sql.push_str(" AND ");
+            where_sql.push_str(&clause);
+        }
+        binds.push(escape_like_pattern(&keyword.to_lowercase()));
+    }
+
+    let sql = format!(
+        "SELECT /*+ MAX_EXECUTION_TIME(5000) */ \
+         CAST({col_ident} AS CHAR) AS `val`, COUNT(*) AS `cnt` \
+         FROM {}{where_sql} \
+         GROUP BY CAST({col_ident} AS CHAR) \
+         ORDER BY COUNT(*) DESC, CAST({col_ident} AS CHAR) ASC \
+         LIMIT ?",
+        qualified_table(database, &table.table_name),
+    );
+    let mut statement = sqlx::query(&sql);
+    for bind in &binds {
+        statement = statement.bind(bind);
+    }
+    statement = statement.bind(fetch_limit);
+
+    let raw_rows = statement
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("读取列筛选值失败: {error}"))?;
+
+    let truncated = raw_rows.len() > safe_limit;
+    let mut values = raw_rows
+        .into_iter()
+        .take(safe_limit)
+        .map(|row| {
+            let value = mysql_text::optional_string(&row, "val").unwrap_or(None);
+            let count = row
+                .try_get::<i64, _>("cnt")
+                .map(|v| v.max(0) as u64)
+                .or_else(|_| row.try_get::<u64, _>("cnt"))
+                .unwrap_or(0);
+            ColumnDistinctValueItem { value, count }
+        })
+        .collect::<Vec<_>>();
+    // 将空值置顶方便勾选，其余保持按频次降序。
+    values.sort_by(|a, b| match (&a.value, &b.value) {
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    });
+
+    Ok(ColumnDistinctValuesResult { values, truncated })
 }
 
 fn query_filter_clause(
@@ -1631,6 +1894,7 @@ mod tests {
                 columns: vec!["name".into()],
                 mode: Some("exact".into()),
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -1793,6 +2057,7 @@ mod tests {
                 columns: vec!["remark`text".into()],
                 mode: None,
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -1825,6 +2090,7 @@ mod tests {
                 columns: vec![],
                 mode: None,
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -1857,6 +2123,7 @@ mod tests {
                 columns: vec![],
                 mode: Some("exact".into()),
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -1886,6 +2153,7 @@ mod tests {
                 columns: vec![],
                 mode: Some("continuous".into()),
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -1897,6 +2165,67 @@ mod tests {
             " WHERE ((LOWER(CAST(`name` AS CHAR)) LIKE ? ESCAPE '\\\\'))"
         );
         assert_eq!(values, vec!["%hrp%"]);
+    }
+
+    #[test]
+    fn build_filter_sql_supports_column_value_lists_and_conditions() {
+        let mut level = ColumnMeta::with_basic("level", "int(11)", "", false, false);
+        level.data_type = Some("int".into());
+        let columns = vec![
+            ColumnMeta::with_basic("kind", "varchar(32)", "", false, true),
+            level,
+            ColumnMeta::with_basic("name", "varchar(64)", "", false, true),
+        ];
+        let request = TablePageRequest {
+            page: None,
+            page_size: None,
+            offset: None,
+            include_total: None,
+            filter: Some(TablePageFilter {
+                query: String::new(),
+                columns: vec![],
+                mode: None,
+                relation: None,
+                column_filters: vec![
+                    ColumnFilter {
+                        column: "kind".into(),
+                        values: vec!["1".into(), "2".into()],
+                        include_null: true,
+                        operator: String::new(),
+                        value: String::new(),
+                    },
+                    ColumnFilter {
+                        column: "level".into(),
+                        values: vec![],
+                        include_null: false,
+                        operator: "gte".into(),
+                        value: "50".into(),
+                    },
+                    ColumnFilter {
+                        column: "name".into(),
+                        values: vec![],
+                        include_null: false,
+                        operator: "contains".into(),
+                        value: "Hero_1".into(),
+                    },
+                    ColumnFilter {
+                        column: "nonexistent".into(),
+                        values: vec!["x".into()],
+                        include_null: false,
+                        operator: String::new(),
+                        value: String::new(),
+                    },
+                ],
+            }),
+            sort: None,
+        };
+
+        let (sql, binds) = build_filter_sql(&columns, &request);
+        assert_eq!(
+            sql,
+            " WHERE ((CAST(`kind` AS CHAR) IN (?, ?) OR `kind` IS NULL) AND (`level` IS NOT NULL AND `level` >= CAST(? AS DECIMAL(65, 10))) AND LOWER(CAST(`name` AS CHAR)) LIKE ? ESCAPE '\\\\')"
+        );
+        assert_eq!(binds, vec!["1", "2", "50", "%hero\\_1%"]);
     }
 
     #[test]

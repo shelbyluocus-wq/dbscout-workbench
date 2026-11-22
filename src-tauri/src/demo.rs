@@ -1754,6 +1754,136 @@ pub fn read_demo_search_scan_page(
     rows[start..end].to_vec()
 }
 
+fn demo_row_matches_column_filters(
+    row: &HashMap<String, String>,
+    columns: &[ColumnMeta],
+    filters: &[ColumnFilter],
+) -> bool {
+    for cf in filters {
+        if cf.is_empty() {
+            continue;
+        }
+        let target = cf.column.trim();
+        let Some(column) = columns
+            .iter()
+            .find(|col| col.column_name.eq_ignore_ascii_case(target))
+        else {
+            continue;
+        };
+        let cell_opt = row.get(&column.column_name).map(String::as_str);
+        let cell = cell_opt.unwrap_or("");
+        if !cf.values.is_empty() || cf.include_null {
+            let matches_null = cf.include_null && cell_opt.is_none();
+            let matches_val = cell_opt.is_some() && cf.values.iter().any(|v| v == cell);
+            if !matches_null && !matches_val {
+                return false;
+            }
+        }
+        let op = cf.operator.trim();
+        let ok = match op {
+            "" => true,
+            "eq" if !cf.value.is_empty() => cell == cf.value,
+            "neq" if !cf.value.is_empty() => cell != cf.value,
+            "contains" if !cf.value.is_empty() => {
+                cell.to_lowercase().contains(&cf.value.to_lowercase())
+            }
+            "notContains" if !cf.value.is_empty() => {
+                !cell.to_lowercase().contains(&cf.value.to_lowercase())
+            }
+            "startsWith" if !cf.value.is_empty() => {
+                cell.to_lowercase().starts_with(&cf.value.to_lowercase())
+            }
+            "gt" | "gte" | "lt" | "lte" if !cf.value.is_empty() => {
+                if cell.is_empty() {
+                    false
+                } else if let (Ok(lhs), Ok(rhs)) =
+                    (cell.trim().parse::<f64>(), cf.value.trim().parse::<f64>())
+                {
+                    match op {
+                        "gt" => lhs > rhs,
+                        "gte" => lhs >= rhs,
+                        "lt" => lhs < rhs,
+                        _ => lhs <= rhs,
+                    }
+                } else {
+                    match op {
+                        "gt" => cell > cf.value.as_str(),
+                        "gte" => cell >= cf.value.as_str(),
+                        "lt" => cell < cf.value.as_str(),
+                        _ => cell <= cf.value.as_str(),
+                    }
+                }
+            }
+            "isEmpty" => cell.is_empty(),
+            "isNotEmpty" => !cell.is_empty(),
+            _ => true,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+pub(crate) fn read_demo_column_distinct_values(
+    rows: &[HashMap<String, String>],
+    columns: &[ColumnMeta],
+    column_name: &str,
+    search: Option<&str>,
+    limit: u32,
+    base_filter: Option<&TablePageFilter>,
+) -> Result<ColumnDistinctValuesResult, String> {
+    let target = column_name.trim();
+    let column = columns
+        .iter()
+        .find(|col| col.column_name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| format!("列「{target}」不存在"))?;
+    let scoped_filter = base_filter.map(|f| {
+        let mut cloned = f.clone();
+        cloned
+            .column_filters
+            .retain(|cf| !cf.column.eq_ignore_ascii_case(&column.column_name));
+        cloned
+    });
+    let needle = search
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
+    let mut counts: HashMap<Option<String>, u64> = HashMap::new();
+    for row in rows {
+        if !row_matches_filter(row, columns, scoped_filter.as_ref()) {
+            continue;
+        }
+        let val = row.get(&column.column_name).cloned();
+        if let Some(ref keyword) = needle {
+            let text = val.as_deref().unwrap_or("");
+            if !text.to_lowercase().contains(keyword) {
+                continue;
+            }
+        }
+        *counts.entry(val).or_insert(0) += 1;
+    }
+    let mut items = counts
+        .into_iter()
+        .map(|(value, count)| ColumnDistinctValueItem { value, count })
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| match (&a.value, &b.value) {
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        _ => b
+            .count
+            .cmp(&a.count)
+            .then_with(|| a.value.cmp(&b.value)),
+    });
+    let safe_limit = limit.clamp(1, 500) as usize;
+    let truncated = items.len() > safe_limit;
+    items.truncate(safe_limit);
+    Ok(ColumnDistinctValuesResult {
+        values: items,
+        truncated,
+    })
+}
+
 pub(crate) fn row_matches_filter(
     row: &HashMap<String, String>,
     columns: &[ColumnMeta],
@@ -1763,6 +1893,9 @@ pub(crate) fn row_matches_filter(
         return true;
     };
     if !crate::config_relations::filter::row_matches(row, columns, filter.relation.as_ref()) {
+        return false;
+    }
+    if !demo_row_matches_column_filters(row, columns, &filter.column_filters) {
         return false;
     }
     let raw_query = filter.query.trim();
@@ -2004,6 +2137,7 @@ mod tests {
                 columns: vec!["username".into()],
                 mode: None,
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: Some(TablePageSort {
                 column_name: "level".into(),
@@ -2254,6 +2388,7 @@ mod tests {
                 columns: vec![],
                 mode: None,
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };
@@ -2295,6 +2430,7 @@ mod tests {
                 columns: vec![],
                 mode: Some("continuous".into()),
                 relation: None,
+                column_filters: Vec::new(),
             }),
             sort: None,
         };

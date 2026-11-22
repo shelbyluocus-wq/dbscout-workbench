@@ -205,9 +205,41 @@ pub struct TableMeta {
     pub columns: Vec<ColumnMeta>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnFilter {
+    pub column: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+    #[serde(default)]
+    pub include_null: bool,
+    #[serde(default)]
+    pub operator: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+impl ColumnFilter {
+    pub fn is_empty(&self) -> bool {
+        if self.column.trim().is_empty() {
+            return true;
+        }
+        let op = self.operator.trim();
+        let has_values = !self.values.is_empty() || self.include_null;
+        let has_condition = match op {
+            "isEmpty" | "isNotEmpty" => true,
+            "eq" | "neq" | "contains" | "notContains" | "startsWith" | "gt" | "gte" | "lt"
+            | "lte" => !self.value.is_empty(),
+            _ => false,
+        };
+        !has_values && !has_condition
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TablePageFilter {
+    #[serde(default)]
     pub query: String,
     #[serde(default)]
     pub columns: Vec<String>,
@@ -217,12 +249,44 @@ pub struct TablePageFilter {
     /// `query` using AND.
     #[serde(default)]
     pub relation: Option<RelationFilter>,
+    /// Per-column Excel-style value / condition filters; combined using AND.
+    #[serde(default)]
+    pub column_filters: Vec<ColumnFilter>,
 }
 
 impl TablePageFilter {
     pub fn is_empty(&self) -> bool {
-        self.query.trim().is_empty() && self.relation.as_ref().is_none_or(RelationFilter::is_empty)
+        self.query.trim().is_empty()
+            && self.relation.as_ref().is_none_or(RelationFilter::is_empty)
+            && self.column_filters.iter().all(ColumnFilter::is_empty)
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDistinctValuesRequest {
+    pub session_id: String,
+    pub column_name: String,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub filter: Option<TablePageFilter>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDistinctValueItem {
+    pub value: Option<String>,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDistinctValuesResult {
+    pub values: Vec<ColumnDistinctValueItem>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, Hash)]
@@ -422,6 +486,10 @@ pub struct ReplaceInTableRequest {
     pub replacement: String,
     #[serde(default)]
     pub case_sensitive: bool,
+    #[serde(default)]
+    pub whole_cell: bool,
+    #[serde(default)]
+    pub column_name: Option<String>,
     /// 只统计命中数，不执行写入（全部替换前的预览确认）。
     #[serde(default)]
     pub dry_run: bool,
@@ -444,6 +512,10 @@ pub struct FindInTableRequest {
     pub query: String,
     #[serde(default)]
     pub case_sensitive: bool,
+    #[serde(default)]
+    pub whole_cell: bool,
+    #[serde(default)]
+    pub column_name: Option<String>,
     /// 返回的命中单元格上限（默认 500）；统计数字不受影响。
     pub limit: Option<u32>,
 }

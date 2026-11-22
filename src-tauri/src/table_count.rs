@@ -15,7 +15,7 @@ use tokio::{
 
 use crate::{
     runtime_resources::PoolKey,
-    types::{RelationFilter, RelationMatchKind, TableCountResult, TablePageFilter},
+    types::{ColumnFilter, RelationFilter, RelationMatchKind, TableCountResult, TablePageFilter},
     work_scheduler::WorkCancellation,
 };
 
@@ -76,6 +76,39 @@ pub(crate) struct CountFilterSignature {
     columns: Vec<String>,
     mode: String,
     relation: Option<RelationSignature>,
+    column_filters: Vec<ColumnFilterSignature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ColumnFilterSignature {
+    column: String,
+    values: Vec<String>,
+    include_null: bool,
+    operator: String,
+    value: String,
+}
+
+impl ColumnFilterSignature {
+    fn from_filters(filters: &[ColumnFilter]) -> Vec<Self> {
+        let mut out = filters
+            .iter()
+            .filter(|cf| !cf.is_empty())
+            .map(|cf| {
+                let mut values = cf.values.clone();
+                values.sort_unstable();
+                values.dedup();
+                Self {
+                    column: normalize_component(&cf.column),
+                    values,
+                    include_null: cf.include_null,
+                    operator: cf.operator.trim().to_string(),
+                    value: cf.value.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        out.sort();
+        out
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -106,10 +139,12 @@ impl CountFilterSignature {
             return Self::default();
         };
         let relation = RelationSignature::from_filter(filter.relation.as_ref());
+        let column_filters = ColumnFilterSignature::from_filters(&filter.column_filters);
         let query = filter.query.trim().to_string();
         if query.is_empty() {
             return Self {
                 relation,
+                column_filters,
                 ..Self::default()
             };
         }
@@ -131,6 +166,7 @@ impl CountFilterSignature {
             columns,
             mode: mode.into(),
             relation,
+            column_filters,
         }
     }
 }
@@ -780,7 +816,7 @@ mod tests {
 
     use crate::{
         runtime_resources::PoolKey,
-        types::{TableCountResult, TablePageFilter},
+        types::{ColumnFilter, TableCountResult, TablePageFilter},
     };
 
     use super::{CountFilterSignature, TableCountConfig, TableCountManager};
@@ -810,6 +846,7 @@ mod tests {
             columns: vec!["name".into()],
             mode: Some(mode.into()),
             relation: None,
+            column_filters: Vec::new(),
         };
 
         let continuous = CountFilterSignature::from_filter(Some(&filter("continuous")));
@@ -1026,12 +1063,14 @@ mod tests {
             columns: vec!["name".into()],
             mode: Some("exact".into()),
             relation: None,
+            column_filters: Vec::new(),
         };
         let fuzzy_filter = TablePageFilter {
             query: "ali".into(),
             columns: vec!["name".into()],
             mode: Some("fuzzy".into()),
             relation: None,
+            column_filters: Vec::new(),
         };
         for (request_id, filter) in [("session-a", &exact_filter), ("session-b", &fuzzy_filter)] {
             manager
@@ -1119,12 +1158,14 @@ mod tests {
             columns: vec![" Name ".into(), "ID".into(), "name".into()],
             mode: Some(" EXACT ".into()),
             relation: None,
+            column_filters: Vec::new(),
         };
         let right = TablePageFilter {
             query: "Hero".into(),
             columns: vec!["id".into(), "NAME".into()],
             mode: Some("exact".into()),
             relation: None,
+            column_filters: Vec::new(),
         };
 
         assert_eq!(
@@ -1138,6 +1179,49 @@ mod tests {
                 ..right
             })),
             "exact query values remain case-sensitive",
+        );
+    }
+
+    #[test]
+    fn filter_signatures_distinguish_and_normalize_column_filters() {
+        let a = TablePageFilter {
+            column_filters: vec![ColumnFilter {
+                column: "Kind".into(),
+                values: vec!["2".into(), "1".into(), "2".into()],
+                include_null: false,
+                operator: String::new(),
+                value: String::new(),
+            }],
+            ..TablePageFilter::default()
+        };
+        let b = TablePageFilter {
+            column_filters: vec![ColumnFilter {
+                column: "kind".into(),
+                values: vec!["1".into(), "2".into()],
+                include_null: false,
+                operator: String::new(),
+                value: String::new(),
+            }],
+            ..TablePageFilter::default()
+        };
+        let c = TablePageFilter {
+            column_filters: vec![ColumnFilter {
+                column: "kind".into(),
+                values: vec!["1".into()],
+                include_null: false,
+                operator: String::new(),
+                value: String::new(),
+            }],
+            ..TablePageFilter::default()
+        };
+
+        assert_eq!(
+            CountFilterSignature::from_filter(Some(&a)),
+            CountFilterSignature::from_filter(Some(&b)),
+        );
+        assert_ne!(
+            CountFilterSignature::from_filter(Some(&a)),
+            CountFilterSignature::from_filter(Some(&c)),
         );
     }
 

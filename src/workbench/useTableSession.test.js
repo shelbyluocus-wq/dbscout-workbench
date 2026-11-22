@@ -3200,3 +3200,77 @@ test("an in-place fetch without a known change keeps a provisional total", async
   assert.equal(tab.totalRows, 20000, "the scrollbar keeps its length until the table is counted again");
   assert.equal(tab.totalRowsExact, false);
 });
+
+test("column filters and searchFilterActive route cleanly to backend filters without leaking highlight-only search queries", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-cf",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "item",
+    tableKey: "mysql-1\u001fgame\u001fitem",
+    sessionId: "item-session",
+    columns: [{ column_name: "id" }, { column_name: "kind" }],
+    rows: [],
+    totalRows: 2,
+    totalRowsExact: true,
+    hasMore: false,
+    page: 1,
+    pageSize: REQUEST_PAGE_SIZE,
+    filter: "sword",
+    searchQuery: "sword",
+    searchFilterActive: false,
+    columnFilters: [],
+    filterMode: "continuous",
+    hitResultMode: false,
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    return {
+      sessionId: "item-session",
+      columns: [{ column_name: "id" }, { column_name: "kind" }],
+      rows: [{ id: "1", kind: "2" }],
+      totalRows: 1,
+      totalRowsExact: true,
+      hasMore: false,
+      page: 1,
+      pageSize: REQUEST_PAGE_SIZE,
+    };
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  await session.applyColumnFilter(tab, "kind", { values: ["2"] });
+  assert.deepEqual(calls.at(-1).payload.request.filter, {
+    query: "",
+    columns: [],
+    mode: "continuous",
+    columnFilters: [{ column: "kind", values: ["2"], includeNull: false, operator: "", value: "" }],
+  });
+
+  tab.searchFilterActive = true;
+  await session.applySearchFilter(tab);
+  assert.deepEqual(calls.at(-1).payload.request.filter, {
+    query: "sword",
+    columns: [],
+    mode: "continuous",
+    columnFilters: [{ column: "kind", values: ["2"], includeNull: false, operator: "", value: "" }],
+  });
+
+  await session.clearColumnFilters(tab);
+  assert.deepEqual(calls.at(-1).payload.request.filter, {
+    query: "sword",
+    columns: [],
+    mode: "continuous",
+  });
+
+  tab.searchFilterActive = false;
+  await session.applySearchFilter(tab);
+  assert.equal(calls.at(-1).payload.request.filter, null);
+  await session.dispose();
+});

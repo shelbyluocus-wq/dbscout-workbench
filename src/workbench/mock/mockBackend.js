@@ -22,6 +22,7 @@ import { validateCreateTableDraft } from "../utils/createTable.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
 import { compareSortValues } from "../utils/naturalSort.js";
+import { collectLocalDistinctValues, matchesColumnFilterRow, normalizeColumnFilters } from "../utils/columnFilter.js";
 
 let mockSessionSeq = 0;
 let mockObjectIdSeq = 0x1000;
@@ -975,6 +976,10 @@ function mockRowsFor(tableName, connectionId, database, filter = null, sort = nu
   if (filter?.relation) {
     rows = rows.filter((row) => relationRowMatches(row, table.columns, filter.relation));
   }
+  const activeColumnFilters = normalizeColumnFilters(filter?.columnFilters);
+  if (activeColumnFilters.length) {
+    rows = rows.filter((row) => activeColumnFilters.every((rule) => matchesColumnFilterRow(row, rule)));
+  }
   if (sort?.columnName || sort?.column_name) {
     const sortColumn = sort.columnName || sort.column_name;
     rows.sort((a, b) => {
@@ -1801,6 +1806,24 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "cancel_table_count") {
     return { cancelled: true };
   }
+  if (command === "fetch_column_distinct_values") {
+    const request = payload.request || payload || {};
+    const { tableName, connectionId, database } = requireMockSessionContext(request.sessionId);
+    const columnNameTarget = String(request.columnName || "").trim();
+    const scopedFilter = request.filter
+      ? {
+        ...request.filter,
+        columnFilters: normalizeColumnFilters(request.filter.columnFilters).filter(
+          (item) => item.column.toLowerCase() !== columnNameTarget.toLowerCase(),
+        ),
+      }
+      : null;
+    const { rows } = mockRowsFor(tableName, connectionId, database, scopedFilter, null);
+    return collectLocalDistinctValues(rows, columnNameTarget, {
+      search: request.search || "",
+      limit: Number(request.limit) || 200,
+    });
+  }
   if (command === "search_values") {
     const { connectionId, database } = resolveContext(payload.request || payload);
     const request = payload.request || payload;
@@ -1920,16 +1943,19 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
     const columns = (table?.columns || []).map(columnName);
+    const targetColumn = String(request.columnName || "").trim();
+    const scanColumns = targetColumn ? columns.filter((col) => col === targetColumn) : columns;
     const identityKeys = primaryKeyColumns(table).length ? primaryKeyColumns(table) : columns;
     const dryRun = Boolean(request.dryRun);
     const caseSensitive = Boolean(request.caseSensitive);
+    const wholeCell = Boolean(request.wholeCell);
     let replacedCells = 0;
     const patches = [];
     rows.forEach((row) => {
       const changes = [];
-      for (const column of columns) {
+      for (const column of scanColumns) {
         if (row[column] == null) continue;
-        const next = replaceSearchText(row[column], query, request.replacement, { caseSensitive });
+        const next = replaceSearchText(row[column], query, request.replacement, { caseSensitive, wholeCell });
         if (!next.replacedCount) continue;
         replacedCells += next.replacedCount;
         changes.push({ columnName: column, oldValue: String(row[column]), newValue: next.text });
@@ -1959,17 +1985,20 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const table = resolvedTable(connectionId, database, tableName);
     const rows = getOrInitRows(connectionId, database, tableName);
     const columns = (table?.columns || []).map(columnName);
+    const targetColumn = String(request.columnName || "").trim();
+    const scanColumns = targetColumn ? columns.filter((col) => col === targetColumn) : columns;
     const identityKeys = primaryKeyColumns(table).length ? primaryKeyColumns(table) : columns;
     const caseSensitive = Boolean(request.caseSensitive);
+    const wholeCell = Boolean(request.wholeCell);
     const limit = Math.max(1, Math.min(2000, Number(request.limit) || 500));
     const matches = [];
     let totalCells = 0;
     let totalOccurrences = 0;
     let truncated = false;
     for (const row of rows) {
-      for (const column of columns) {
+      for (const column of scanColumns) {
         if (row[column] == null) continue;
-        const next = replaceSearchText(row[column], query, "", { caseSensitive });
+        const next = replaceSearchText(row[column], query, "", { caseSensitive, wholeCell });
         if (!next.replacedCount) continue;
         totalCells += 1;
         totalOccurrences += next.replacedCount;

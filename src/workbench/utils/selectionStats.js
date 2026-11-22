@@ -50,14 +50,27 @@ function statItems(count, numericCount, sum) {
   ].filter(Boolean);
 }
 
-export function statsFromTotals(count, numericCount, sum) {
+function rangeStatItems(numericCount, min, max) {
+  if (numericCount < 2 || !Number.isFinite(min) || !Number.isFinite(max) || min === max) return [];
+  return [
+    { key: "min", label: "最小", text: formatStatNumber(min) },
+    { key: "max", label: "最大", text: formatStatNumber(max) },
+  ];
+}
+
+export function statsFromTotals(count, numericCount, sum, min = null, max = null) {
   if (!count) return null;
+  const resolvedMin = numericCount > 0 && Number.isFinite(min) ? min : null;
+  const resolvedMax = numericCount > 0 && Number.isFinite(max) ? max : null;
   return {
     count,
     numericCount,
     sum,
     average: numericCount > 0 ? sum / numericCount : null,
+    min: resolvedMin,
+    max: resolvedMax,
     items: statItems(count, numericCount, sum),
+    rangeItems: rangeStatItems(numericCount, resolvedMin, resolvedMax),
   };
 }
 
@@ -65,16 +78,20 @@ export function createSelectionStatsAccumulator() {
   let count = 0;
   let numericCount = 0;
   let sum = 0;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
   return {
     add(value) {
       count += 1;
       const number = parseNumericCellValue(value);
       if (number == null) return;
       sum += number;
+      if (number < min) min = number;
+      if (number > max) max = number;
       numericCount += 1;
     },
     result() {
-      return statsFromTotals(count, numericCount, sum);
+      return statsFromTotals(count, numericCount, sum, min, max);
     },
   };
 }

@@ -2699,17 +2699,23 @@ export function useGridEditor(
 
   // 选区内查找替换：数据行单元格走 commitCellBatch 原子批量提交，新增行草稿
   // 格走 insert-draft 历史；两者共享同一个撤销事务，Ctrl+Z 一次全部撤回。
-  async function replaceSelectionCells(tab, range, { query, replacement, caseSensitive } = {}) {
+  async function replaceSelectionCells(
+    tab,
+    range,
+    { query, replacement, caseSensitive, wholeCell = false, columnName = "" } = {},
+  ) {
     if (!tab || !range || range.tabId !== tab.id) return { ok: false, reason: "当前没有多选单元格" };
+    const targetColumn = String(columnName || "").trim();
     const beforeInsertRows = captureInsertDraftState(tab);
     const edits = [];
     const draftEdits = [];
     let replacedCount = 0;
     for (const { entry, column } of selectedGridCells(tab, range)) {
+      if (targetColumn && column !== targetColumn) continue;
       if (entry.type === "insert") {
         if (rejectInsertRowMutationWhileSaving(tab, entry.insertRow?.id)) continue;
         const draftText = String(entry.insertRow?.draft?.[column] ?? "");
-        const next = replaceSearchText(draftText, query, replacement, { caseSensitive });
+        const next = replaceSearchText(draftText, query, replacement, { caseSensitive, wholeCell });
         if (!next.replacedCount) continue;
         replacedCount += next.replacedCount;
         draftEdits.push({ insertRow: entry.insertRow, column, value: next.text });
@@ -2717,7 +2723,7 @@ export function useGridEditor(
       }
       if (entry.type !== "data" || !entry.row) continue;
       const value = displayCellValue(editState, tab, entry.row, column);
-      const next = replaceSearchText(value, query, replacement, { caseSensitive });
+      const next = replaceSearchText(value, query, replacement, { caseSensitive, wholeCell });
       if (!next.replacedCount) continue;
       replacedCount += next.replacedCount;
       edits.push({ row: entry.row, column, value: next.text });

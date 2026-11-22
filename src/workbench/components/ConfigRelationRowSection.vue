@@ -5,7 +5,7 @@
 // debounced per selection and dropped when the selection moves on.
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, MousePointerClick } from "lucide-vue-next";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, MousePointerClick, Search, X } from "lucide-vue-next";
 import { findRowByKey, rowIdentityLabel } from "../utils/rowIdentity.js";
 import {
   isEmptyReferenceValue,
@@ -172,9 +172,31 @@ const incomingEntries = computed(() => {
     // A relation whose key is empty in this row has nothing to count.
     .filter((entry) => !isEmptyReferenceValue(entry.value));
 });
+const incomingQuery = ref("");
+watch([scopeKey, tableName], () => {
+  incomingQuery.value = "";
+});
+
 const referencedRows = computed(() => incomingEntries.value.filter((entry) => entry.result?.count !== 0));
+const showIncomingSearch = computed(() => referencedRows.value.length >= 6);
+const filteredReferencedRows = computed(() => {
+  const needle = incomingQuery.value.trim().toLowerCase();
+  if (!needle) return referencedRows.value;
+  return referencedRows.value.filter((entry) => {
+    const srcTable = sourceTableName(entry.relation).toLowerCase();
+    const srcCol = String(entry.relation.sourceColumn || "").toLowerCase();
+    const tblComment = tableDisplayComment(props.tables, entry.relation.sourceTable).toLowerCase();
+    const colComment = tableColumnComment(props.tables, entry.relation.sourceTable, entry.relation.sourceColumn).toLowerCase();
+    return srcTable.includes(needle)
+      || srcCol.includes(needle)
+      || `${srcTable}.${srcCol}`.includes(needle)
+      || tblComment.includes(needle)
+      || colComment.includes(needle);
+  });
+});
 
 const referenceTotal = computed(() => referencedRows.value.reduce((sum, entry) => sum + (Number(entry.result?.count) || 0), 0));
+const filteredReferenceTotal = computed(() => filteredReferencedRows.value.reduce((sum, entry) => sum + (Number(entry.result?.count) || 0), 0));
 const loaded = computed(() => targetsLoaded.value && referencesLoaded.value);
 const rowEmpty = computed(() => loaded.value && !rowError.value && !outgoingRows.value.length && !referencedRows.value.length);
 
@@ -327,10 +349,32 @@ function targetTitle(target, relation) {
           <div class="wb-relations-group-label is-incoming">
             <ArrowDownLeft :size="12" :stroke-width="2.2" aria-hidden="true" />
             <span>{{ t('relations.row.incoming') }}</span>
-            <span v-if="referencesLoaded && referenceTotal" class="wb-relations-group-total">{{ t('relations.incoming.rows', { count: referenceTotal }) }}</span>
+            <span v-if="incomingQuery.trim()" class="wb-relations-group-total">
+              {{ t('relations.incoming.filteredCount', { shown: filteredReferencedRows.length, total: referencedRows.length, rows: filteredReferenceTotal }) }}
+            </span>
+            <span v-else-if="referencesLoaded && referenceTotal" class="wb-relations-group-total">{{ t('relations.incoming.rows', { count: referenceTotal }) }}</span>
           </div>
+          <label v-if="showIncomingSearch" class="wb-incoming-filter">
+            <Search :size="12" aria-hidden="true" />
+            <input
+              v-model="incomingQuery"
+              type="text"
+              :placeholder="t('relations.incoming.searchPlaceholder')"
+              :aria-label="t('relations.incoming.searchPlaceholder')"
+            />
+            <button
+              v-if="incomingQuery"
+              type="button"
+              class="wb-incoming-filter-clear"
+              :aria-label="t('m_ee32f25f7050')"
+              @click="incomingQuery = ''"
+            ><X :size="11" aria-hidden="true" /></button>
+          </label>
+          <p v-if="incomingQuery.trim() && !filteredReferencedRows.length" class="wb-relations-hint is-quiet">
+            {{ t('relations.incoming.noMatch') }}
+          </p>
           <IncomingRelationRows
-            v-for="entry in referencedRows"
+            v-for="entry in filteredReferencedRows"
             :key="entry.relation.id"
             :table="sourceTableName(entry.relation)"
             :table-comment="tableDisplayComment(tables, entry.relation.sourceTable)"
@@ -360,6 +404,54 @@ function targetTitle(target, relation) {
 </template>
 
 <style scoped>
+.wb-incoming-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  margin: 2px 0 4px;
+  padding: 0 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-field-surface);
+  color: var(--wb-secondary-text);
+}
+
+.wb-incoming-filter:focus-within {
+  border-color: var(--wb-accent);
+}
+
+.wb-incoming-filter input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-caption);
+  outline: none;
+}
+
+.wb-incoming-filter-clear {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-incoming-filter-clear:hover {
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
+}
+
 .wb-relations-row-identity {
   min-width: 0;
   overflow: hidden;

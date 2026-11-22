@@ -120,6 +120,7 @@ export function useTableSearch(activeTab, {
   loadSearchResultPage,
   loadNextSearchResultPage,
   cancelSearchResultPage,
+  onSearchFilterChange,
   selectCellAt,
   statusText,
   isEditing = () => false,
@@ -301,6 +302,12 @@ export function useTableSearch(activeTab, {
     try {
       tab.filter = query;
       tab.searchQuery = query;
+      if (tab.searchFilterActive && typeof onSearchFilterChange === "function") {
+        const filtered = await onSearchFilterChange(tab);
+        if (runId !== searchRunId || activeTab.value !== tab || filtered?.stale) {
+          return { ok: false, stale: true };
+        }
+      }
       while (runId === searchRunId && activeTab.value === tab && !tab.fullyLoaded) {
         const previousRowCount = tabRows(tab).length;
         const loaded = await loadNextOrdinaryPage(tab);
@@ -336,8 +343,14 @@ export function useTableSearch(activeTab, {
       restored = await loadSearchResultPage?.(tab, "") || restored;
     }
     if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+    const wasSearchFilterActive = Boolean(tab.searchFilterActive);
     tab.filter = "";
     tab.searchQuery = "";
+    tab.searchFilterActive = false;
+    if (wasSearchFilterActive && typeof onSearchFilterChange === "function") {
+      restored = await onSearchFilterChange(tab) || restored;
+      if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
+    }
     resetSearchMatches();
     const saved = savedSelectionByTab.get(tab);
     savedSelectionByTab.delete(tab);

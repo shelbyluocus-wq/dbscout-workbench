@@ -245,23 +245,32 @@ function findAllReplaceRanges(text, needle, caseSensitive) {
  * case-insensitive by default), in source order. Empty query → empty list.
  * Used by the find/replace dialog to highlight hits in the result list.
  */
-export function findSearchRanges(value, query, { caseSensitive = false } = {}) {
+export function findSearchRanges(value, query, { caseSensitive = false, wholeCell = false } = {}) {
   const text = String(value ?? "");
   const needle = String(query ?? "");
   if (!needle) return [];
+  if (wholeCell) {
+    const matched = caseSensitive ? text === needle : text.toLowerCase() === needle.toLowerCase();
+    return matched ? [{ start: 0, end: text.length }] : [];
+  }
   return findAllReplaceRanges(text, caseSensitive ? needle : needle.toLowerCase(), caseSensitive);
 }
 
 /**
  * Replace every occurrence of `query` inside `value` with `replacement`
- * (Excel-style substring replace). Matching is case-insensitive by default.
+ * (Excel-style substring replace, or full-cell exact match when `wholeCell` is
+ * true). Matching is case-insensitive by default.
  * Returns `{ text, replacedCount }`; an empty/absent query is a no-op.
  */
-export function replaceSearchText(value, query, replacement, { caseSensitive = false } = {}) {
+export function replaceSearchText(value, query, replacement, { caseSensitive = false, wholeCell = false } = {}) {
   const text = String(value ?? "");
   const needle = String(query ?? "");
   if (!needle) return { text, replacedCount: 0 };
   const substitute = String(replacement ?? "");
+  if (wholeCell) {
+    const matched = caseSensitive ? text === needle : text.toLowerCase() === needle.toLowerCase();
+    return matched ? { text: substitute, replacedCount: 1 } : { text, replacedCount: 0 };
+  }
   const ranges = findAllReplaceRanges(text, caseSensitive ? needle : needle.toLowerCase(), caseSensitive);
   if (!ranges.length) return { text, replacedCount: 0 };
 

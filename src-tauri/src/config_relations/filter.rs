@@ -285,6 +285,7 @@ mod tests {
             columns: Vec::new(),
             mode: None,
             relation: Some(relation("ID", RelationMatchKind::Equals, &["1"])),
+            column_filters: Vec::new(),
         });
         assert!(ensure_engine_supports(&request).is_err());
     }

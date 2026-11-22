@@ -104,6 +104,8 @@ function createEmptyTab({ id, connectionId = "", database = "", tableName, table
     fullyLoaded: false,
     filter: "",
     filterMode: DEFAULT_TABLE_FILTER_MODE,
+    searchFilterActive: false,
+    columnFilters: [],
     hitResultMode: false,
     hitResultSourceTabId: "",
     hitResultSourcePaneId: "",

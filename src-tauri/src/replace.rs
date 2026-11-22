@@ -24,8 +24,30 @@ pub fn replace_text(
     replacement: &str,
     case_sensitive: bool,
 ) -> (String, u64) {
+    replace_text_with_options(value, query, replacement, case_sensitive, false)
+}
+
+pub fn replace_text_with_options(
+    value: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    whole_cell: bool,
+) -> (String, u64) {
     if query.is_empty() {
         return (value.to_string(), 0);
+    }
+    if whole_cell {
+        let matched = if case_sensitive {
+            value == query
+        } else {
+            value.to_lowercase() == query.to_lowercase()
+        };
+        return if matched {
+            (replacement.to_string(), 1)
+        } else {
+            (value.to_string(), 0)
+        };
     }
     let source: Vec<char> = value.chars().collect();
     // (比较用字符, 原始字符下标)
@@ -100,6 +122,16 @@ fn identity_columns(table: &TableMeta) -> Vec<&str> {
     }
 }
 
+fn target_columns<'a>(table: &'a TableMeta, column_name: Option<&str>) -> Vec<&'a str> {
+    let filter = column_name.map(str::trim).filter(|name| !name.is_empty());
+    table
+        .columns
+        .iter()
+        .map(|column| column.column_name.as_str())
+        .filter(|name| filter.is_none_or(|target| target == *name))
+        .collect()
+}
+
 /// 对扫描行（列名 → 字符串值，NULL 已归一为 ""）逐格精确替换，产出批量
 /// patch 与替换总处数。未命中的行不会出现在结果里。
 pub fn collect_patches_from_rows(
@@ -109,21 +141,33 @@ pub fn collect_patches_from_rows(
     replacement: &str,
     case_sensitive: bool,
 ) -> (Vec<UpdateRowPatch>, u64) {
+    collect_patches_from_rows_with_options(table, rows, query, replacement, case_sensitive, false, None)
+}
+
+pub fn collect_patches_from_rows_with_options(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    whole_cell: bool,
+    column_name: Option<&str>,
+) -> (Vec<UpdateRowPatch>, u64) {
     let identity = identity_columns(table);
+    let columns = target_columns(table, column_name);
     let mut patches = Vec::new();
     let mut occurrences = 0u64;
     for row in rows {
         let mut changes = Vec::new();
-        for column in &table.columns {
-            let name = column.column_name.as_str();
-            let Some(value) = row.get(name) else { continue };
-            let (next, count) = replace_text(value, query, replacement, case_sensitive);
+        for name in &columns {
+            let Some(value) = row.get(*name) else { continue };
+            let (next, count) = replace_text_with_options(value, query, replacement, case_sensitive, whole_cell);
             if count == 0 {
                 continue;
             }
             occurrences += count;
             changes.push(CellUpdateChange {
-                column_name: name.to_string(),
+                column_name: (*name).to_string(),
                 old_value: Some(value.clone()),
                 new_value: Some(next),
             });
@@ -152,16 +196,28 @@ pub fn collect_matches_from_rows(
     case_sensitive: bool,
     limit: usize,
 ) -> (Vec<TableMatchItem>, u64, u64, bool) {
+    collect_matches_from_rows_with_options(table, rows, query, case_sensitive, false, None, limit)
+}
+
+pub fn collect_matches_from_rows_with_options(
+    table: &TableMeta,
+    rows: &[HashMap<String, String>],
+    query: &str,
+    case_sensitive: bool,
+    whole_cell: bool,
+    column_name: Option<&str>,
+    limit: usize,
+) -> (Vec<TableMatchItem>, u64, u64, bool) {
     let identity = identity_columns(table);
+    let columns = target_columns(table, column_name);
     let mut matches = Vec::new();
     let mut total_cells = 0u64;
     let mut total_occurrences = 0u64;
     let mut truncated = false;
     for row in rows {
-        for column in &table.columns {
-            let name = column.column_name.as_str();
-            let Some(value) = row.get(name) else { continue };
-            let (_, count) = replace_text(value, query, "", case_sensitive);
+        for name in &columns {
+            let Some(value) = row.get(*name) else { continue };
+            let (_, count) = replace_text_with_options(value, query, "", case_sensitive, whole_cell);
             if count == 0 {
                 continue;
             }
@@ -174,7 +230,7 @@ pub fn collect_matches_from_rows(
                     .collect();
                 matches.push(TableMatchItem {
                     row_identity,
-                    column_name: name.to_string(),
+                    column_name: (*name).to_string(),
                     value: value.clone(),
                     occurrences: count,
                 });
@@ -192,42 +248,64 @@ fn replace_filter_where(
     table: &TableMeta,
     query: &str,
     case_sensitive: bool,
+    whole_cell: bool,
+    column_name: Option<&str>,
 ) -> Option<(String, Vec<String>)> {
     if !case_sensitive && !query.is_ascii() {
         return None;
     }
-    let pattern = if case_sensitive {
+    let columns = target_columns(table, column_name);
+    if columns.is_empty() {
+        return Some((" WHERE 1 = 0".to_string(), Vec::new()));
+    }
+    let bind_value = if whole_cell {
+        if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        }
+    } else if case_sensitive {
         db::escape_like_pattern(query)
     } else {
         db::escape_like_pattern(&query.to_lowercase())
     };
-    let conditions = table
-        .columns
+    let conditions = columns
         .iter()
-        .map(|column| {
-            let casted = format!("CAST(`{}` AS CHAR)", db::escape_ident(&column.column_name));
-            if case_sensitive {
-                format!("{casted} LIKE BINARY ? ESCAPE '\\\\'")
-            } else {
-                format!("LOWER({casted}) LIKE ? ESCAPE '\\\\'")
+        .map(|name| {
+            let casted = format!("CAST(`{}` AS CHAR)", db::escape_ident(name));
+            match (whole_cell, case_sensitive) {
+                (true, true) => format!("BINARY {casted} = ?"),
+                (true, false) => format!("LOWER({casted}) = ?"),
+                (false, true) => format!("{casted} LIKE BINARY ? ESCAPE '\\\\'"),
+                (false, false) => format!("LOWER({casted}) LIKE ? ESCAPE '\\\\'"),
             }
         })
         .collect::<Vec<_>>();
-    if conditions.is_empty() {
-        return None;
-    }
-    let binds = conditions.iter().map(|_| pattern.clone()).collect();
+    let binds = conditions.iter().map(|_| bind_value.clone()).collect();
     Some((format!(" WHERE ({})", conditions.join(" OR ")), binds))
 }
 
 /// 拉取全部可能命中的候选行（列值统一 CAST AS CHAR，NULL 归一为 ""，
 /// 与表搜索扫描页的取值语义一致）。
+#[allow(dead_code)]
 pub async fn fetch_replace_candidate_rows(
     pool: &MySqlPool,
     database: &str,
     table: &TableMeta,
     query: &str,
     case_sensitive: bool,
+) -> Result<Vec<HashMap<String, String>>, String> {
+    fetch_replace_candidate_rows_with_options(pool, database, table, query, case_sensitive, false, None).await
+}
+
+pub async fn fetch_replace_candidate_rows_with_options(
+    pool: &MySqlPool,
+    database: &str,
+    table: &TableMeta,
+    query: &str,
+    case_sensitive: bool,
+    whole_cell: bool,
+    column_name: Option<&str>,
 ) -> Result<Vec<HashMap<String, String>>, String> {
     let select_columns = table
         .columns
@@ -241,7 +319,7 @@ pub async fn fetch_replace_candidate_rows(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let (where_sql, binds) = replace_filter_where(table, query, case_sensitive)
+    let (where_sql, binds) = replace_filter_where(table, query, case_sensitive, whole_cell, column_name)
         .unwrap_or_else(|| (String::new(), Vec::new()));
     let sql = format!(
         "SELECT /*+ MAX_EXECUTION_TIME(30000) */ {} FROM {}{}",
@@ -429,5 +507,80 @@ mod tests {
         let (sensitive, cells, _, _) = collect_matches_from_rows(&table, &rows, "FOO", true, 500);
         assert_eq!(cells, 0);
         assert_eq!(sensitive.len(), 0);
+    }
+
+    #[test]
+    fn honors_whole_cell_and_column_scope_options() {
+        assert_eq!(
+            replace_text_with_options("100", "100", "200", false, true),
+            ("200".to_string(), 1)
+        );
+        assert_eq!(
+            replace_text_with_options("1001", "100", "200", false, true),
+            ("1001".to_string(), 0)
+        );
+        assert_eq!(
+            replace_text_with_options("Foo", "foo", "bar", false, true),
+            ("bar".to_string(), 1)
+        );
+        assert_eq!(
+            replace_text_with_options("Foo", "foo", "bar", true, true),
+            ("Foo".to_string(), 0)
+        );
+
+        let table = TableMeta {
+            primary_key_order: Vec::new(),
+            table_name: "items".to_string(),
+            table_comment: String::new(),
+            columns: vec![
+                column("id", true),
+                column("kind", false),
+                column("note", false),
+            ],
+        };
+        let rows = vec![
+            HashMap::from([
+                ("id".to_string(), "1".to_string()),
+                ("kind".to_string(), "10".to_string()),
+                ("note".to_string(), "10".to_string()),
+            ]),
+            HashMap::from([
+                ("id".to_string(), "2".to_string()),
+                ("kind".to_string(), "100".to_string()),
+                ("note".to_string(), "10".to_string()),
+            ]),
+        ];
+
+        let (matches, cells, occurrences, _) = collect_matches_from_rows_with_options(
+            &table,
+            &rows,
+            "10",
+            false,
+            true,
+            Some("kind"),
+            500,
+        );
+        assert_eq!(cells, 1);
+        assert_eq!(occurrences, 1);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].column_name, "kind");
+        assert_eq!(
+            matches[0].row_identity.get("id"),
+            Some(&Some("1".to_string()))
+        );
+
+        let (patches, replaced) = collect_patches_from_rows_with_options(
+            &table,
+            &rows,
+            "10",
+            "20",
+            false,
+            true,
+            Some("kind"),
+        );
+        assert_eq!(replaced, 1);
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].changes[0].column_name, "kind");
+        assert_eq!(patches[0].changes[0].new_value, Some("20".to_string()));
     }
 }

@@ -86,6 +86,8 @@ const cellTargetComment = computed(() => (
 ));
 const copyFeedback = ref(false);
 let copyFeedbackTimer = 0;
+const copiedStatKey = ref("");
+let copiedStatTimer = 0;
 const canCopyDetail = computed(() => Boolean(
   props.selectedCell && !props.isNull && String(sourceDraft.value ?? "").length > 0,
 ));
@@ -102,6 +104,45 @@ const selectionStatItems = computed(() => (
     ? props.selectionStats.items
     : []
 ));
+const selectionRangeItems = computed(() => (
+  selectionStatItems.value.length > 0 && Array.isArray(props.selectionStats?.rangeItems)
+    ? props.selectionStats.rangeItems
+    : []
+));
+
+async function copyStatValue(item) {
+  const text = String(item?.fullText || item?.text || "");
+  if (!text) return;
+  try {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (typeof clipboard?.writeText === "function") {
+      await clipboard.writeText(text);
+    } else if (globalThis.document?.createElement) {
+      const area = globalThis.document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      globalThis.document.body.appendChild(area);
+      area.select();
+      globalThis.document.execCommand("copy");
+      globalThis.document.body.removeChild(area);
+    }
+    copiedStatKey.value = item.key;
+    if (copiedStatTimer) clearTimeout(copiedStatTimer);
+    copiedStatTimer = setTimeout(() => { copiedStatKey.value = ""; }, 1200);
+  } catch {
+    // Ignore clipboard rejection in restricted contexts.
+  }
+}
+
+function statButtonTitle(item) {
+  const label = t(`selectionStats.${item.key}`);
+  const value = item.fullText || item.text;
+  return copiedStatKey.value === item.key
+    ? `${label} ${value} · ${t("cellDetail.copied")}`
+    : t("selectionStats.copyHint", { label, value });
+}
 
 watch(
   () => [selectedCellKey.value, props.textDraft, props.identityRemap?.id],
@@ -410,6 +451,8 @@ onBeforeUnmount(() => {
   finishResize();
   if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
   copyFeedbackTimer = 0;
+  if (copiedStatTimer) clearTimeout(copiedStatTimer);
+  copiedStatTimer = 0;
 });
 </script>
 
@@ -478,15 +521,30 @@ onBeforeUnmount(() => {
           class="wb-cell-detail-stats"
           :aria-label="t('m_63aec19ea490')"
         >
-          <span
+          <button
             v-for="item in selectionStats.items"
             :key="item.key"
+            type="button"
             class="wb-cell-detail-stat"
-            :title="item.fullText ? `${t(`selectionStats.${item.key}`)} ${item.fullText}` : undefined"
+            :class="{ 'is-copied': copiedStatKey === item.key }"
+            :title="statButtonTitle(item)"
+            @click.stop="copyStatValue(item)"
           >
-            <span class="wb-cell-detail-stat-label">{{ t(`selectionStats.${item.key}`) }}</span>
+            <span class="wb-cell-detail-stat-label">{{ copiedStatKey === item.key ? t('cellDetail.copied') : t(`selectionStats.${item.key}`) }}</span>
             <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
-          </span>
+          </button>
+          <button
+            v-for="item in selectionRangeItems"
+            :key="item.key"
+            type="button"
+            class="wb-cell-detail-stat"
+            :class="{ 'is-copied': copiedStatKey === item.key }"
+            :title="statButtonTitle(item)"
+            @click.stop="copyStatValue(item)"
+          >
+            <span class="wb-cell-detail-stat-label">{{ copiedStatKey === item.key ? t('cellDetail.copied') : t(`selectionStats.${item.key}`) }}</span>
+            <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
+          </button>
         </div>
         <span
           v-if="rowSummary"

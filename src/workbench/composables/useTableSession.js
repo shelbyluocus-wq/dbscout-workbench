@@ -11,6 +11,12 @@ import { markPerf, measureAsync, sampleNextFrame } from "../utils/performanceMar
 import { resetTableTabViewState } from "../utils/tabActivation.js";
 import { DEFAULT_TABLE_FILTER_MODE, normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { normalizeRelationFilter, normalizeRelationOrigin, relationFilterKey } from "../utils/relationFilter.js";
+import {
+  hasActiveColumnFilters,
+  normalizeColumnFilters,
+  removeColumnFilter,
+  upsertColumnFilter,
+} from "../utils/columnFilter.js";
 import { listenWorkbenchEvent } from "../utils/tauriBridge.js";
 
 const SEARCH_RESULT_PAGE_SIZE = 100;
@@ -416,7 +422,13 @@ export function useTableSession(
   }
 
   function usesBackendFilter(tab) {
-    return tab?.hitResultMode === true || tab?.searchResultMode === true || Boolean(normalizeRelationFilter(tab?.relationFilter));
+    return (
+      tab?.hitResultMode === true
+      || tab?.searchResultMode === true
+      || tab?.searchFilterActive === true
+      || Boolean(normalizeRelationFilter(tab?.relationFilter))
+      || hasActiveColumnFilters(tab?.columnFilters)
+    );
   }
 
   function isNormalOpen(initialState) {
@@ -434,6 +446,8 @@ export function useTableSession(
   function resetNormalTableViewState(tab) {
     tab.filter = "";
     tab.searchQuery = "";
+    tab.searchFilterActive = false;
+    tab.columnFilters = [];
     tab.searchResultMode = false;
     tab.searchResultQuery = "";
     tab.searchResultJobId = "";
@@ -460,14 +474,22 @@ export function useTableSession(
   }
 
   function buildBackendFilter(tab) {
-    const query = String(tab?.filter || tab?.searchQuery || "").trim();
     const relation = normalizeRelationFilter(tab?.relationFilter);
-    if (!query && !relation) return null;
+    const columnFilters = normalizeColumnFilters(tab?.columnFilters);
+    const includeQuery = Boolean(
+      tab?.hitResultMode
+      || tab?.searchResultMode
+      || tab?.searchFilterActive
+      || relation,
+    );
+    const query = includeQuery ? String(tab?.filter || tab?.searchQuery || "").trim() : "";
+    if (!query && !relation && !columnFilters.length) return null;
     return {
       query,
       columns: [],
       mode: normalizeTableFilterMode(tab.filterMode),
       ...(relation ? { relation } : {}),
+      ...(columnFilters.length ? { columnFilters } : {}),
     };
   }
 
@@ -1383,6 +1405,38 @@ export function useTableSession(
       : fetchPage(tab, 1);
   }
 
+  async function applySearchFilter(tab) {
+    if (!tab) return { ok: false };
+    if (tab.searchResultMode || tab.searchResultJobId) {
+      await cancelSearchResultPage(tab);
+      tab.searchResultMode = false;
+      tab.searchResultQuery = "";
+    }
+    if (!tab.sessionId) return { ok: true, tab };
+    return fetchPage(tab, 1);
+  }
+
+  async function applyColumnFilter(tab, column, rule) {
+    if (!tab || !column) return { ok: false };
+    if (tab.searchResultMode || tab.searchResultJobId) {
+      await cancelSearchResultPage(tab);
+      tab.searchResultMode = false;
+      tab.searchResultQuery = "";
+    }
+    tab.columnFilters = rule
+      ? upsertColumnFilter(tab.columnFilters, { ...rule, column })
+      : removeColumnFilter(tab.columnFilters, column);
+    if (!tab.sessionId) return { ok: true, tab };
+    return fetchPage(tab, 1);
+  }
+
+  async function clearColumnFilters(tab) {
+    if (!tab || !hasActiveColumnFilters(tab.columnFilters)) return { ok: false };
+    tab.columnFilters = [];
+    if (!tab.sessionId) return { ok: true, tab };
+    return fetchPage(tab, 1);
+  }
+
   return {
     markTabDeferred,
     loadDeferredTab,
@@ -1402,6 +1456,9 @@ export function useTableSession(
     handleSessionsInvalidated,
     toggleSort,
     applySort,
+    applySearchFilter,
+    applyColumnFilter,
+    clearColumnFilters,
     clearRelationFilter,
     dispose,
   };

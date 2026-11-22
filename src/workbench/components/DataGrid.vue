@@ -2,7 +2,8 @@
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, Link2, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, Filter, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { formatColumnFilterChip, getColumnFilter, normalizeColumnFilters } from "../utils/columnFilter.js";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { columnName } from "../utils/normalize.js";
@@ -105,6 +106,7 @@ const props = defineProps({
   insertAwareVisualRowIndex: { type: Function, default: null },
   isColumnSelected: { type: Function, default: () => false },
   engineKind: { type: String, default: "" },
+  fetchDistinctValues: { type: Function, default: null },
 });
 
 const {
@@ -136,6 +138,10 @@ const gridHeightStyle = computed(() => ({
 
 const searchInputValue = ref("");
 const activeTabReadOnly = computed(() => Boolean(props.tab?.readOnly || props.tab?.read_only));
+const activeColumnFilters = computed(() => normalizeColumnFilters(props.tab?.columnFilters));
+function columnFilterFor(name) {
+  return getColumnFilter(activeColumnFilters.value, name);
+}
 const canImport = computed(() => connectionHasCapability(props.engineKind || "mysql", "import") && !activeTabReadOnly.value);
 const canFindReplace = computed(() => connectionHasCapability(props.engineKind || "mysql", "findReplace") && !activeTabReadOnly.value);
 const activeFilterMode = computed(() => normalizeTableFilterMode(props.tab?.filterMode));
@@ -257,6 +263,9 @@ const emit = defineEmits([
   'tab-edit',
   'toggle-sort',
   'apply-sort',
+  'toggle-search-filter',
+  'apply-column-filter',
+  'clear-column-filters',
   'toggle-row-select',
   'row-select-start',
   'row-select-pointer',
@@ -1611,7 +1620,7 @@ function handleTableContextMenu(event) {
     <header ref="tableToolbarRef" class="wb-table-toolbar">
       <div
         class="wb-table-search-field"
-        :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter' }"
+        :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter', 'is-filter-active': Boolean(tab.searchFilterActive) }"
       >
         <Search class="wb-table-search-field-icon" :size="15" aria-hidden="true" />
         <input
@@ -1633,6 +1642,19 @@ function handleTableContextMenu(event) {
           @click="clearTableSearch"
         >
           <X :size="12" :stroke-width="2" aria-hidden="true" />
+        </button>
+        <button
+          v-if="searchInputValue || tab.searchFilterActive"
+          type="button"
+          class="wb-table-search-filter-toggle"
+          :class="{ 'is-active': Boolean(tab.searchFilterActive) }"
+          :aria-pressed="Boolean(tab.searchFilterActive)"
+          :aria-label="tab.searchFilterActive ? t('grid.filterMatchesActive') : t('grid.filterMatchesOnly')"
+          :title="tab.searchFilterActive ? t('grid.filterMatchesActive') : t('grid.filterMatchesOnly')"
+          @mousedown.prevent
+          @click="emit('toggle-search-filter', tab, searchInputValue)"
+        >
+          <ListFilter :size="13" :stroke-width="2" aria-hidden="true" />
         </button>
         <div class="wb-search-aux">
           <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
@@ -1695,6 +1717,27 @@ function handleTableContextMenu(event) {
         <span class="wb-sort-chip-label">{{ tab.sort.columnName }}</span>
         <button type="button" class="wb-sort-chip-clear" :aria-label="t('m_cdf8bcd4bfe2')" @click="emit('apply-sort', tab, tab.sort.columnName, 'none')">×</button>
       </span>
+      <span
+        v-for="rule in activeColumnFilters"
+        :key="`cf:${rule.column}`"
+        class="wb-column-filter-chip"
+        :title="formatColumnFilterChip(rule, t)"
+      >
+        <Filter :size="11" class="wb-column-filter-chip-icon" aria-hidden="true" />
+        <span class="wb-sort-chip-label">{{ formatColumnFilterChip(rule, t) }}</span>
+        <button
+          type="button"
+          class="wb-sort-chip-clear"
+          :aria-label="t('grid.columnFilter.clearOne', { column: rule.column })"
+          @click="emit('apply-column-filter', tab, rule.column, null)"
+        >×</button>
+      </span>
+      <button
+        v-if="activeColumnFilters.length >= 2"
+        type="button"
+        class="wb-column-filter-clear-all"
+        @click="emit('clear-column-filters', tab)"
+      >{{ t('grid.columnFilter.clearAll') }}</button>
       <span v-if="schemaSearchMatches.length" class="wb-schema-search-nav" role="group" :aria-label="t('m_c580b133f2e9')">
         <span>{{ schemaSearchSummary }}</span>
         <button
@@ -1885,7 +1928,10 @@ function handleTableContextMenu(event) {
               <ColumnSortMenu
                 :column="columnMeta.name"
                 :sort="tab.sort"
+                :column-filter="columnFilterFor(columnMeta.name)"
+                :fetch-distinct-values="fetchDistinctValues"
                 @apply-sort="emit('apply-sort', tab, columnMeta.name, $event)"
+                @apply-column-filter="emit('apply-column-filter', tab, columnMeta.name, $event)"
               />
               <span class="wb-col-resize-track">
                 <span

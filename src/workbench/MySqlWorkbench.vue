@@ -400,6 +400,9 @@ const {
   preloadDeferredTabs,
   toggleSort,
   applySort,
+  applySearchFilter,
+  applyColumnFilter,
+  clearColumnFilters,
   clearRelationFilter,
   dispose: disposeTableSessions,
 } = useTableSession(
@@ -5974,6 +5977,9 @@ onBeforeUnmount(() => {
           :cancel-search-result-page="cancelSearchResultPage"
           :toggle-sort="toggleSort"
           :apply-sort="applySort"
+          :apply-search-filter="applySearchFilter"
+          :apply-column-filter="applyColumnFilter"
+          :clear-column-filters="clearColumnFilters"
           @focus-pane="focusPane"
           @split-pane="splitPane"
           @close-pane="closePane"

@@ -39,6 +39,9 @@ const props = defineProps({
   cancelSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
+  applySearchFilter: { type: Function, default: null },
+  applyColumnFilter: { type: Function, default: null },
+  clearColumnFilters: { type: Function, default: null },
   rootPaneCount: { type: Number, default: 0 },
   leftEdge: { type: Boolean, default: true },
   rightEdge: { type: Boolean, default: true },
@@ -222,6 +225,9 @@ onBeforeUnmount(finishResize);
         :cancel-search-result-page="cancelSearchResultPage"
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
+        :apply-search-filter="applySearchFilter"
+        :apply-column-filter="applyColumnFilter"
+        :clear-column-filters="clearColumnFilters"
         :root-pane-count="totalPaneCount"
         :left-edge="leftEdge"
         :right-edge="layout.direction === 'vertical' ? rightEdge : false"
@@ -313,6 +319,9 @@ onBeforeUnmount(finishResize);
         :cancel-search-result-page="cancelSearchResultPage"
         :toggle-sort="toggleSort"
         :apply-sort="applySort"
+        :apply-search-filter="applySearchFilter"
+        :apply-column-filter="applyColumnFilter"
+        :clear-column-filters="clearColumnFilters"
         :root-pane-count="totalPaneCount"
         :left-edge="layout.direction === 'vertical' ? leftEdge : false"
         :right-edge="rightEdge"
@@ -395,6 +404,9 @@ onBeforeUnmount(finishResize);
     :cancel-search-result-page="cancelSearchResultPage"
     :toggle-sort="toggleSort"
     :apply-sort="applySort"
+    :apply-search-filter="applySearchFilter"
+    :apply-column-filter="applyColumnFilter"
+    :clear-column-filters="clearColumnFilters"
     :root-pane-count="totalPaneCount"
     :left-edge="leftEdge"
     :right-edge="rightEdge"

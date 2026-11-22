@@ -10,6 +10,9 @@ import { columnNamesOf, isCustomColumnOrder, moveColumn } from "../utils/columnO
 import { highlightCellResult, displayCellValue } from "../utils/cellDisplay.js";
 import { formatTableRowSummary } from "../utils/tableRowSummary.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
+import { collectLocalDistinctValues, normalizeColumnFilters } from "../utils/columnFilter.js";
+import { normalizeRelationFilter } from "../utils/relationFilter.js";
+import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { createSelectionStatsScan, indexOptimisticValuesForTable } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
 import { insertRowIdFromKey } from "../utils/gridRowIdentity.js";
@@ -74,6 +77,9 @@ const props = defineProps({
   cancelSearchResultPage: { type: Function, default: null },
   toggleSort: { type: Function, required: true },
   applySort: { type: Function, required: true },
+  applySearchFilter: { type: Function, default: null },
+  applyColumnFilter: { type: Function, default: null },
+  clearColumnFilters: { type: Function, default: null },
   rootPaneCount: { type: Number, default: 1 },
   leftEdge: { type: Boolean, default: true },
   rightEdge: { type: Boolean, default: true },
@@ -588,6 +594,7 @@ const {
   loadSearchResultPage: props.loadSearchResultPage,
   loadNextSearchResultPage: props.loadNextSearchResultPage,
   cancelSearchResultPage: props.cancelSearchResultPage,
+  onSearchFilterChange: (tab) => props.applySearchFilter?.(tab),
   selectCellAt,
   statusText,
   isEditing: () => !!editingCell.value,
@@ -1122,6 +1129,74 @@ async function applyGridSort(tab, col, direction) {
   return result;
 }
 
+async function toggleGridSearchFilter(tab, rawQuery) {
+  if (!tab) return;
+  const text = String(rawQuery ?? tab.filter ?? tab.searchQuery ?? "").trim();
+  if (tab.searchFilterActive) {
+    tab.searchFilterActive = false;
+  } else {
+    if (!text) return;
+    tab.filter = text;
+    tab.searchQuery = text;
+    tab.searchFilterActive = true;
+  }
+  resetGridState();
+  const result = await props.applySearchFilter?.(tab);
+  if (result?.ok && tab.filter) {
+    refreshCurrentSearchMatches();
+  }
+}
+
+async function applyGridColumnFilter(tab, col, rule) {
+  resetGridState();
+  const result = await props.applyColumnFilter?.(tab, col, rule);
+  if (result?.ok) await resumeCurrentSearchResults({ select: false });
+  return result;
+}
+
+async function clearGridColumnFilters(tab) {
+  resetGridState();
+  const result = await props.clearColumnFilters?.(tab);
+  if (result?.ok) await resumeCurrentSearchResults({ select: false });
+  return result;
+}
+
+async function fetchGridColumnDistinctValues(column, search = "") {
+  const tab = activeDataTab.value;
+  if (!tab) return { values: [], truncated: false };
+  if (!tab.sessionId) {
+    return collectLocalDistinctValues(tabRows(tab), column, { search, limit: 200 });
+  }
+  const relation = normalizeRelationFilter(tab.relationFilter);
+  const columnFilters = normalizeColumnFilters(tab.columnFilters);
+  const includeQuery = Boolean(
+    tab.hitResultMode || tab.searchResultMode || tab.searchFilterActive || relation,
+  );
+  const query = includeQuery ? String(tab.filter || tab.searchQuery || "").trim() : "";
+  const filter = (query || relation || columnFilters.length)
+    ? {
+      query,
+      columns: [],
+      mode: normalizeTableFilterMode(tab.filterMode),
+      ...(relation ? { relation } : {}),
+      ...(columnFilters.length ? { columnFilters } : {}),
+    }
+    : null;
+  try {
+    return await props.invokeWorkbench("fetch_column_distinct_values", {
+      request: {
+        sessionId: tab.sessionId,
+        columnName: column,
+        search: search || null,
+        limit: 200,
+        filter,
+      },
+    });
+  } catch {
+    return collectLocalDistinctValues(tabRows(tab), column, { search, limit: 200 });
+  }
+}
+
 let loadMoreFrame = 0;
 let pendingLoadMoreTarget = null;
 let pendingPreviousScrollIntent = false;
@@ -1361,10 +1436,10 @@ function focusCurrentSearch() {
 
 // ── 查找替换弹窗（Ctrl+F / Ctrl+H 经 focusedPaneState 调用）──────────────
 // 选区范围的全部替换（含新增行草稿格），数据行与草稿格共享同一个撤销事务。
-async function replaceCellsInSelection({ query, replacement, caseSensitive } = {}) {
+async function replaceCellsInSelection({ query, replacement, caseSensitive, wholeCell = false, columnName = "" } = {}) {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
-  return editor.replaceSelectionCells(tab, range, { query, replacement, caseSensitive });
+  return editor.replaceSelectionCells(tab, range, { query, replacement, caseSensitive, wholeCell, columnName });
 }
 
 function selectionCellValue(tab, entry, column) {
@@ -1515,15 +1590,17 @@ watchEffect(() => {
 }, { flush: "post" });
 
 // 选区范围的命中明细列表（含新增行草稿格），供弹窗结果列表展示与导航。
-function listSelectionMatches({ query, caseSensitive } = {}) {
+function listSelectionMatches({ query, caseSensitive, wholeCell = false, columnName = "" } = {}) {
   const tab = activeDataTab.value;
   const range = selectedRange.value;
   if (!tab || !range || range.tabId !== tab.id || !query) return [];
+  const targetColumn = String(columnName || "").trim();
   const matches = [];
   for (const { entry, column, columnIndex } of editor.selectedGridCells(tab, range)) {
+    if (targetColumn && column !== targetColumn) continue;
     if (entry.type !== "insert" && (entry.type !== "data" || !entry.row)) continue;
     const value = selectionCellValue(tab, entry, column);
-    const occurrences = replaceSearchText(value, query, "", { caseSensitive }).replacedCount;
+    const occurrences = replaceSearchText(value, query, "", { caseSensitive, wholeCell }).replacedCount;
     if (!occurrences) continue;
     matches.push({
       kind: entry.type === "insert" ? "insert" : "data",
@@ -1587,10 +1664,10 @@ async function locateListMatch(match) {
 
 // 替换列表中的当前命中：选区数据行/已加载行走常规提交，新增行草稿走草稿
 // 历史，未加载行直接按行标识 + 旧值守卫提交。返回新值供列表刷新。
-async function replaceListMatch({ match, query, replacement, caseSensitive } = {}) {
+async function replaceListMatch({ match, query, replacement, caseSensitive, wholeCell = false } = {}) {
   const tab = activeDataTab.value;
   if (!tab || !match) return { ok: false, reason: "当前没有打开的数据表" };
-  const next = replaceSearchText(match.value, query, replacement, { caseSensitive });
+  const next = replaceSearchText(match.value, query, replacement, { caseSensitive, wholeCell });
   if (!next.replacedCount) return { ok: true, replaced: 0, newValue: match.value };
   if (match.kind === "insert" && match.insertRow) {
     const result = editor.commitInsertDraftCellValue(tab, match.insertRow.id, match.column, next.text);
@@ -1888,6 +1965,7 @@ onMounted(() => emitPaneState());
       :is-insert-row-saving="isInsertRowSaving"
       :insert-aware-visual-row-index="insertAwareVisualRowIndex"
       :is-column-selected="isColumnSelected"
+      :fetch-distinct-values="fetchGridColumnDistinctValues"
       @grid-ready="setGridWrapElement"
       @search-ready="setSearchInputElement"
       @search-input="runTableSearch"
@@ -1919,6 +1997,9 @@ onMounted(() => emitPaneState());
       @tab-edit="finishEditing(); navigateCell(0, $event ? -1 : 1)"
       @toggle-sort="sortPage"
       @apply-sort="applyGridSort"
+      @toggle-search-filter="toggleGridSearchFilter"
+      @apply-column-filter="applyGridColumnFilter"
+      @clear-column-filters="clearGridColumnFilters"
       @toggle-row-select="selectGridRow"
       @row-select-start="startGridRowDragSelection"
       @row-select-pointer="extendGridRowDragSelection"
