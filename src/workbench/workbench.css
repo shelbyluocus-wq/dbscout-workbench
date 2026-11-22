@@ -2188,10 +2188,10 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-find-replace-body .wb-replace-field select {
   width: 100%;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 30px 0 8px;
   border: 1px solid var(--wb-border);
   border-radius: 6px;
-  background: var(--wb-surface);
+  background-color: var(--wb-surface);
   color: var(--wb-text);
   font-size: var(--wb-fs-body);
 }
@@ -13563,12 +13563,15 @@ label:has(input[type="checkbox"]:disabled) {
   height: 18px;
   min-width: 18px;
   min-height: 18px;
+  margin-right: 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
   color: var(--wb-quiet-text);
   cursor: pointer;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .wb-table-toolbar .wb-table-search-clear:hover {
@@ -16937,12 +16940,16 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-accent-strong);
 }
 
+.wb-table-item.has-locale-pill {
+  grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr) auto;
+}
+
 .wb-table-item.is-locale-variant {
   padding-left: 24px;
 }
 
 .wb-sidebar-locale-pill {
-  margin-left: auto;
+  margin-left: 4px;
 }
 
 .wb-dbhome-search span::before,
@@ -17445,6 +17452,16 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
+}
+
+.wb-dbhome-object-name-text {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Stars stay out of the way until the row is hovered or selected; a

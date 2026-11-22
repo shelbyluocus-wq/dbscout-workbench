@@ -177,9 +177,37 @@ test("relation filter chip truncates cleanly so primary toolbar actions stay vis
   assert.match(styles, /\.wb-relation-chip \.wb-sort-chip-label\s*\{[^}]*text-overflow:\s*ellipsis/s);
 });
 
-test("table search exposes a one-click clear button when a query is present", () => {
+test("table search exposes a visible clickable clear button when a query is present", () => {
   const grid = read("./components/DataGrid.vue");
   const styles = read("./workbench.css");
   assert.match(grid, /class="wb-table-search-clear"[\s\S]*?@click="clearTableSearch"/);
-  assert.match(styles, /\.wb-table-toolbar \.wb-table-search-clear\s*\{/);
+  assert.match(
+    styles,
+    /\.wb-table-toolbar \.wb-table-search-clear\s*\{[^}]*opacity:\s*1[^}]*pointer-events:\s*auto/s,
+  );
+});
+
+test("column sort/filter menu blocks header pointerdown selection and left-aligns when space permits", () => {
+  const menu = read("./components/ColumnSortMenu.vue");
+  assert.match(menu, /class="wb-column-sort"[\s\S]*?@pointerdown\.stop/);
+  assert.match(menu, /triggerRect\.left\s*\+\s*menuWidth\s*<=\s*viewportWidth\s*-\s*margin/);
+});
+
+test("sidebar locale badge stays on one line and home table names ellipsis cleanly before badges", () => {
+  const sidebar = read("./components/WorkbenchSidebar.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const styles = read("./workbench.css");
+  assert.match(sidebar, /'has-locale-pill':\s*sidebarLocaleMeta\(entry\.table\)\?\.kind\s*===\s*'base'/);
+  assert.match(styles, /\.wb-table-item\.has-locale-pill\s*\{[^}]*grid-template-columns:\s*var\(--wb-tree-icon-width\) minmax\(0, 1fr\) auto/s);
+  assert.match(tableList, /class="wb-dbhome-object-name-text"/);
+  assert.match(styles, /\.wb-dbhome-object-name-text\s*\{[^}]*display:\s*block[^}]*text-overflow:\s*ellipsis/s);
+});
+
+test("find and replace column scope select preserves the dropdown chevron", () => {
+  const styles = read("./workbench.css");
+  const match = styles.match(/(?:\r?\n){2}\.wb-find-replace-body \.wb-replace-field select\s*\{([^}]*)\}/s);
+  assert.ok(match, "expected standalone find-replace select rule");
+  assert.match(match[1], /background-color:\s*var\(--wb-surface\)/);
+  assert.doesNotMatch(match[1], /(^|[\s;])background\s*:/);
+  assert.match(match[1], /padding:\s*0 30px 0 8px/);
 });

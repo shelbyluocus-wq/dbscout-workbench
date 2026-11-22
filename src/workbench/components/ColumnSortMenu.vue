@@ -146,11 +146,13 @@ function updateMenuPosition() {
   const belowTop = triggerRect.bottom + gap;
   const aboveTop = triggerRect.top - menuHeight - gap;
 
+  const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+  const left = triggerRect.left + menuWidth <= viewportWidth - margin
+    ? Math.max(margin, triggerRect.left)
+    : Math.min(Math.max(margin, triggerRect.right - menuWidth), maxLeft);
+
   menuPosition.value = {
-    left: Math.min(
-      Math.max(margin, triggerRect.right - menuWidth),
-      Math.max(margin, viewportWidth - menuWidth - margin),
-    ),
+    left,
     top: belowTop + menuHeight <= viewportHeight - margin || aboveTop < margin
       ? Math.min(belowTop, Math.max(margin, viewportHeight - menuHeight - margin))
       : aboveTop,
@@ -296,6 +298,7 @@ onBeforeUnmount(closeMenu);
     :class="{ 'is-open': open, 'is-sorted': isSorted, 'is-filtered': isFiltered }"
     @click.stop
     @mousedown.stop
+    @pointerdown.stop
   >
     <button
       type="button"

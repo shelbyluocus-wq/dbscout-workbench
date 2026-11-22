@@ -996,6 +996,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                           :class="{
                             active: isTableActive(entry.table),
                             'is-selected': tableSelection.isMultiple.value && tableSelection.selectedSet.value.has(entry.table.tableName),
+                            'has-locale-pill': sidebarLocaleMeta(entry.table)?.kind === 'base',
                             'is-locale-variant': sidebarLocaleMeta(entry.table)?.kind === 'variant',
                           }"
                           :aria-current="isTableActive(entry.table) ? 'page' : undefined"

@@ -714,8 +714,7 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
                 :aria-selected="renderedSelectedSet.has(tableName(table)) ? 'true' : 'false'"
                 @contextmenu.prevent.stop="emit('contextmenu', $event, tableName(table))"
                 @keydown="handleRowKeydown(table, $event)"
-                v-html="highlightedTableField(table, 'tableName')"
-              ></button>
+              ><span class="wb-dbhome-object-name-text" v-html="highlightedTableField(table, 'tableName')"></span></button>
               <button
                 v-if="rowLocaleMeta(table)?.kind === 'base'"
                 type="button"
