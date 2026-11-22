@@ -258,3 +258,10 @@ test("dragged tables and folders carry what a folder needs, and nothing else lan
   assert.equal(readFolderDrop(tabDrag), null);
   assert.equal(writeTableDrag({ dataTransfer: dataTransfer() }, { database: "", tableNames: ["a"] }), false);
 });
+
+test("folder table list virtualizes large databases with top/bottom spacers", () => {
+  const source = readFileSync(new URL("./components/TableFolderPage.vue", import.meta.url), "utf8");
+  assert.match(source, /const renderedRows = computed\(\(\) => visibleRows\.value\.slice\(virtualWindow\.value\.start, virtualWindow\.value\.end\)\);/);
+  assert.match(source, /v-for="row in renderedRows"/);
+  assert.match(source, /class="wb-folder-spacer"/);
+});

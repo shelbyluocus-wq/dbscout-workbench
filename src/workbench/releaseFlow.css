@@ -989,7 +989,9 @@
   .wb-rf-body {
     grid-template-columns: 236px minmax(0, 1fr);
   }
+}
 
+@media (max-width: 860px) {
   .wb-rf-nav-item span {
     display: none;
   }

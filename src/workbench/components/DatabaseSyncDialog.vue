@@ -267,7 +267,6 @@ function targetChanged(event) {
       <header class="wb-dialog-header wb-database-sync-header">
         <div>
           <h2 id="wb-database-sync-title">{{ t('m_b9b4628bbb61') }}</h2>
-          <p>{{ t('m_76fd1ad96290') }}</p>
         </div>
         <button type="button" class="wb-dialog-close" :aria-label="t('m_cd671991d690')" :disabled="isBusy" @click="emit('close')">×</button>
       </header>

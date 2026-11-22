@@ -13,6 +13,9 @@ const props = defineProps({
   backup: { type: Object, required: true },
   connections: { type: Array, default: () => [] },
   account: { type: Object, default: null },
+  activeConnectionId: { type: String, default: "" },
+  activeDatabase: { type: String, default: "" },
+  activeTableName: { type: String, default: "" },
 });
 
 const emit = defineEmits(["close"]);
@@ -69,8 +72,26 @@ async function onSwitchAuditMode(mode) {
   await props.backup.setAuditMode(mode);
 }
 
-function switchTab(tab) {
+const autoSeededSnapshotScope = ref(false);
+
+async function switchTab(tab) {
   dialog.value.tab = tab;
+  if (
+    tab === "snapshot"
+    && !autoSeededSnapshotScope.value
+    && !filters.value.connectionId
+    && props.activeConnectionId
+    && props.activeDatabase
+  ) {
+    autoSeededSnapshotScope.value = true;
+    props.backup.setFilters({
+      connectionId: props.activeConnectionId,
+      database: props.activeDatabase,
+      tableName: "",
+    });
+    await props.backup.loadFilterDatabases();
+    await props.backup.loadSnapshots();
+  }
 }
 
 // Refreshing is silent when it works; only failures interrupt with a dialog.
@@ -181,16 +202,6 @@ async function onDatabaseFilterChange() {
               <option value="">{{ t('m_d3ea59fd4532') }}</option>
               <option v-for="database in filterDatabases" :key="database" :value="database">{{ database }}</option>
             </select>
-            <select
-              v-model="filters.tableName"
-              class="wb-backup-select"
-              :aria-label="t('m_1408973f34e3')"
-              :disabled="!filters.connectionId || !filters.database || busy.filterOptions"
-              @change="applyFilters()"
-            >
-              <option value="">{{ t('m_f974e44668ed') }}</option>
-              <option v-for="tableName in filterTables" :key="tableName" :value="tableName">{{ tableName }}</option>
-            </select>
           </div>
           <div class="wb-backup-toolbar-actions">
             <button
@@ -215,6 +226,9 @@ async function onDatabaseFilterChange() {
           :key="auditMode"
           :history="isSharedMode ? backup.sharedHistory : backup.history"
           :connections="connections"
+          :preferred-connection-id="activeConnectionId"
+          :preferred-database="activeDatabase"
+          :preferred-table="activeTableName"
         />
       </div>
 

@@ -135,28 +135,6 @@ onBeforeUnmount(() => {
           </label>
 
           <template v-if="enabled">
-            <ul class="wb-mcp-groups">
-              <li v-for="group in groups" :key="group.key" class="wb-mcp-group">
-                <component :is="group.icon" class="wb-mcp-group-icon" :size="15" :stroke-width="1.8" />
-                <label class="wb-mcp-group-main">
-                  <span class="wb-mcp-group-text">
-                    <span class="wb-mcp-group-name">{{ t(group.titleKey) }}</span>
-                    <span class="wb-mcp-group-hint" :class="{ 'is-warning': group.warning }">{{ t(group.hintKey) }}</span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    class="wb-backup-switch"
-                    role="switch"
-                    :checked="permissions[group.key]"
-                    :disabled="loading"
-                    :aria-label="t(group.titleKey)"
-                    @change="assistant.setExternalMcpPermission(group.key, $event.target.checked)"
-                  />
-                </label>
-              </li>
-            </ul>
-            <p class="wb-mcp-note">{{ t("blackcatMcp.writeNote") }}</p>
-
             <details class="wb-mcp-connect">
               <summary class="wb-mcp-connect-summary">
                 <ChevronDown class="wb-mcp-connect-chevron" :size="13" :stroke-width="2" />
@@ -195,6 +173,28 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </details>
+
+            <ul class="wb-mcp-groups">
+              <li v-for="group in groups" :key="group.key" class="wb-mcp-group">
+                <component :is="group.icon" class="wb-mcp-group-icon" :size="15" :stroke-width="1.8" />
+                <label class="wb-mcp-group-main">
+                  <span class="wb-mcp-group-text">
+                    <span class="wb-mcp-group-name">{{ t(group.titleKey) }}</span>
+                    <span class="wb-mcp-group-hint" :class="{ 'is-warning': group.warning }">{{ t(group.hintKey) }}</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    class="wb-backup-switch"
+                    role="switch"
+                    :checked="permissions[group.key]"
+                    :disabled="loading"
+                    :aria-label="t(group.titleKey)"
+                    @change="assistant.setExternalMcpPermission(group.key, $event.target.checked)"
+                  />
+                </label>
+              </li>
+            </ul>
+            <p class="wb-mcp-note">{{ t("blackcatMcp.writeNote") }}</p>
           </template>
 
           <p v-if="assistant.externalMcpError.value" class="wb-mcp-error" role="alert">

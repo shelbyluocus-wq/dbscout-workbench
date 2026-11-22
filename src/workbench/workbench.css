@@ -12424,6 +12424,14 @@ label:has(input[type="checkbox"]:disabled) {
   text-overflow: ellipsis;
 }
 
+.wb-tab-comment {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-quiet-text);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
 [data-theme="dark"] .wb-tab-db-icon {
   color: var(--wb-tab-database-icon-dark, currentColor);
 }
@@ -12901,6 +12909,28 @@ label:has(input[type="checkbox"]:disabled) {
   margin-top: 3px;
   color: var(--wb-secondary-text);
   font-size: var(--wb-fs-caption);
+}
+
+.wb-home-favorites-quick-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  margin-top: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-home-favorites-quick-add:hover {
+  background: var(--wb-control-hover);
 }
 
 .wb-home-favorites-add {
@@ -13426,6 +13456,27 @@ label:has(input[type="checkbox"]:disabled) {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.wb-table-toolbar .wb-table-search-clear {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  cursor: pointer;
+}
+
+.wb-table-toolbar .wb-table-search-clear:hover {
+  background: var(--wb-list-hover);
+  color: var(--wb-text);
 }
 
 .wb-table-search-field .wb-search-aux {
@@ -25986,6 +26037,13 @@ button.wb-table-mention:active {
   margin: 0;
   padding: 4px 0;
   overflow-y: auto;
+  list-style: none;
+}
+
+.wb-folder-spacer {
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
   list-style: none;
 }
 

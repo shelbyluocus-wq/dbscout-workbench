@@ -861,7 +861,8 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <div>
           <h2 :title="databaseTitle">{{ databaseName }}</h2>
           <p v-if="homeLoading">{{ t('m_133b5069fbfb') }}</p>
-          <p v-else>{{ visibleCount }} / {{ tableCount }} {{ t('m_a2b22d3a5ca3') }}</p>
+          <p v-else-if="controller.query.value.trim()">{{ visibleCount }} / {{ tableCount }} {{ t('m_a2b22d3a5ca3') }}</p>
+          <p v-else>{{ t('dbHome.totalTables', { count: tableCount }) }}</p>
         </div>
       </div>
       <div v-if="readOnly" class="wb-dbhome-summary" :aria-label="t('m_fa9dcb37fdf5')">

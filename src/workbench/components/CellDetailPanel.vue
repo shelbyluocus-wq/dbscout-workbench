@@ -98,7 +98,9 @@ const contentStyle = computed(() => (
 ));
 const toggleLabel = computed(() => (isPanelCollapsed.value ? t("cellDetail.expand") : t("cellDetail.collapse")));
 const selectionStatItems = computed(() => (
-  Array.isArray(props.selectionStats?.items) ? props.selectionStats.items : []
+  (props.selectionStats?.count || 0) >= 2 && Array.isArray(props.selectionStats?.items)
+    ? props.selectionStats.items
+    : []
 ));
 
 watch(
@@ -432,7 +434,6 @@ onBeforeUnmount(() => {
           :title="cellTargetComment ? `${cellTargetLabel} · ${cellTargetComment}` : cellTargetLabel"
         >
           <span class="wb-cell-detail-target-key">{{ cellTargetLabel }}</span>
-          <span v-if="cellTargetComment" class="wb-cell-detail-target-comment">{{ cellTargetComment }}</span>
         </span>
         <span v-else class="wb-cell-detail-idle-hint">{{ t('cellDetail.idleHint') }}</span>
         <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>

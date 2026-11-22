@@ -1403,6 +1403,13 @@ function onTableSearchInput(event) {
   emit('search-input', searchInputValue.value);
 }
 
+function clearTableSearch() {
+  if (!searchInputValue.value) return;
+  searchInputValue.value = "";
+  emit('search-input', "");
+  searchInputRef.value?.focus?.();
+}
+
 // ── Adaptive column width ──────────────────────────────────────────────────
 
 let resizeObserver = null;
@@ -1616,6 +1623,17 @@ function handleTableContextMenu(event) {
           @input="onTableSearchInput"
           @keydown.enter.prevent="emit('search-next')"
         />
+        <button
+          v-if="searchInputValue"
+          type="button"
+          class="wb-table-search-clear"
+          :aria-label="t('m_ee32f25f7050')"
+          :title="t('m_ee32f25f7050')"
+          @mousedown.prevent
+          @click="clearTableSearch"
+        >
+          <X :size="12" :stroke-width="2" aria-hidden="true" />
+        </button>
         <div class="wb-search-aux">
           <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
             <button

@@ -1755,6 +1755,9 @@ function openSqlLibrary(paneId = workspace.focusedPaneId) {
     blockUnsupportedEngine("SQL 控制台");
     return null;
   }
+  if (sqlDocumentStore.documents.value.length === 0) {
+    return openSqlQuery({ paneId });
+  }
   return openSqlLibraryTab(workspace, { paneId, activate: true });
 }
 
@@ -6266,6 +6269,9 @@ onBeforeUnmount(() => {
       :backup="backupCenter"
       :connections="visibleConnections"
       :account="account"
+      :active-connection-id="selectedConnectionId"
+      :active-database="selectedDatabase"
+      :active-table-name="activeDataTab?.tableName || ''"
       @close="backupCenter.close"
     />
 

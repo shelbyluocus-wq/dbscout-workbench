@@ -170,7 +170,7 @@ onMounted(() => {
     <header class="wb-sql-library-header">
       <div>
         <h2>{{ t('m_6369c8800ff1') }}</h2>
-        <p>{{ documents.length }} {{ t('m_17f2688f41dd') }}</p>
+        <p v-if="documents.length">{{ documents.length }} {{ t('m_17f2688f41dd') }}</p>
       </div>
       <div class="wb-sql-library-header-actions">
         <button type="button" :title="t('m_fa8c496e0eb5')" @click="emit('open-file', { path: '' })">
@@ -205,7 +205,7 @@ onMounted(() => {
 
     <div class="wb-sql-library-scroll" :class="{ 'is-scrolled': listScrolled }" @scroll.passive="listScrolled = $event.target.scrollTop > 0">
       <section class="wb-sql-library-section" aria-labelledby="sql-document-heading">
-        <div class="wb-sql-library-section-heading">
+        <div v-if="documents.length" class="wb-sql-library-section-heading">
           <h3 id="sql-document-heading">{{ t('m_815a013f4853') }}</h3>
           <span>{{ filteredDocuments.length }}</span>
         </div>
@@ -263,7 +263,6 @@ onMounted(() => {
         <div v-else class="wb-sql-library-empty">
           <FileCode2 :size="24" aria-hidden="true" />
           <p>{{ query || connectionFilter ? t('m_c526e3c5207b') : t('m_efe148ec41c6') }}</p>
-          <button v-if="!query && !connectionFilter" type="button" @click="emit('new-query', {})"><Plus :size="15" />{{ t('m_342c248eb6b7') }}</button>
         </div>
       </section>
 

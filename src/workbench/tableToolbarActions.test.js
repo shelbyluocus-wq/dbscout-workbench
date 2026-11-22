@@ -176,3 +176,10 @@ test("relation filter chip truncates cleanly so primary toolbar actions stay vis
   assert.match(styles, /\.wb-relation-chip\s*\{[^}]*flex:\s*0 1 auto[^}]*max-width:\s*210px/s);
   assert.match(styles, /\.wb-relation-chip \.wb-sort-chip-label\s*\{[^}]*text-overflow:\s*ellipsis/s);
 });
+
+test("table search exposes a one-click clear button when a query is present", () => {
+  const grid = read("./components/DataGrid.vue");
+  const styles = read("./workbench.css");
+  assert.match(grid, /class="wb-table-search-clear"[\s\S]*?@click="clearTableSearch"/);
+  assert.match(styles, /\.wb-table-toolbar \.wb-table-search-clear\s*\{/);
+});

@@ -2,9 +2,17 @@
 import { language, t } from "../i18n/index.js";
 import { computed, ref, watch, nextTick } from "vue";
 import { ArrowLeft, ChevronDown, History, RotateCcw, Search, Table2, TriangleAlert } from "lucide-vue-next";
+import { useAliases } from "../composables/aliasStore.js";
 import { auditChangeItems, auditChangeSql } from "../utils/auditDisplay.js";
 import { auditTableKey } from "../composables/useAuditHistory.js";
-const props = defineProps({ history: { type: Object, required: true }, connections: { type: Array, default: () => [] } });
+const props = defineProps({
+  history: { type: Object, required: true },
+  connections: { type: Array, default: () => [] },
+  preferredConnectionId: { type: String, default: "" },
+  preferredDatabase: { type: String, default: "" },
+  preferredTable: { type: String, default: "" },
+});
+const { connectionLabel: resolveConnectionAlias } = useAliases();
 const readOnly = computed(() => Boolean(props.history.readOnly));
 const actorLabel = (entry) => {
   const name = entry.displayName || entry.username;
@@ -13,7 +21,27 @@ const actorLabel = (entry) => {
 const s = computed(() => props.history.state);
 const SOURCES = new Set(["import", "grid", "rollback", "ddl", "agent", "sql_console"]);
 const stamp = (value) => new Date(value).toLocaleString(language.intlLocale.value, { hour12: false });
-const connectionLabel = (row) => props.connections.find((c) => c.id === row.connectionId)?.label || row.connectionId;
+const connectionLabel = (row) => {
+  const raw = props.connections.find((c) => c.id === row.connectionId)?.label || row.connectionId;
+  return resolveConnectionAlias(row.connectionId, raw);
+};
+let didAutoSelect = false;
+watch(
+  () => s.value.tables,
+  (tables) => {
+    if (didAutoSelect || s.value.selected || !Array.isArray(tables) || tables.length === 0) return;
+    didAutoSelect = true;
+    const preferred = props.preferredTable
+      ? tables.find((row) => (
+          row.tableName === props.preferredTable
+          && (!props.preferredDatabase || row.database === props.preferredDatabase)
+          && (!props.preferredConnectionId || row.connectionId === props.preferredConnectionId)
+        ))
+      : null;
+    void props.history.selectTable(preferred || tables[0]);
+  },
+  { immediate: true },
+);
 const title = (operation) => t(`backup.history.source.${operation.legacy ? "legacy" : SOURCES.has(operation.source) ? operation.source : "other"}`);
 const opLabel = (operation) => { const key = `backup.op.${operation}`; const label = t(key); return label === key ? operation : label; };
 const isSelected = (table) => Boolean(s.value.selected && auditTableKey(table) === auditTableKey(s.value.selected));

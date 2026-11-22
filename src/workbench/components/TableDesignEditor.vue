@@ -372,18 +372,23 @@ watch(sourceKey, () => {
 
 /* ---------- Column resizing ---------- */
 const defaultColWidths = {
-  select: 36,
-  name: 140,
-  primaryKey: 82,
-  type: 130,
-  length: 80,
-  scale: 70,
-  nullable: 80,
-  defaultMode: 100,
-  defaultValue: 120,
-  comment: 160,
-  actions: 64,
+  select: 34,
+  name: 144,
+  primaryKey: 72,
+  type: 118,
+  length: 66,
+  scale: 58,
+  nullable: 68,
+  defaultMode: 88,
+  defaultValue: 96,
+  comment: 180,
+  actions: 52,
 };
+
+const SCALE_SUPPORTED_TYPES = new Set(["DECIMAL", "NUMERIC", "FLOAT", "DOUBLE"]);
+function typeSupportsScale(typeValue) {
+  return SCALE_SUPPORTED_TYPES.has(String(typeValue || "").trim().toUpperCase());
+}
 
 const colWidths = reactive({ ...defaultColWidths });
 const resizingCol = ref(null);
@@ -746,7 +751,7 @@ const colDefs = [
 
               <!-- 小数位 -->
               <td :style="{ width: colWidths.scale + 'px' }">
-                <input v-model="column.scale" :aria-label="t('m_571bf00dfd42')" inputmode="numeric" />
+                <input v-model="column.scale" :disabled="!typeSupportsScale(column.type)" :aria-label="t('m_571bf00dfd42')" inputmode="numeric" />
                 <small v-if="validationErrors.columns?.[index]?.scale">{{ validationErrors.columns[index].scale }}</small>
               </td>
 
@@ -758,7 +763,7 @@ const colDefs = [
 
               <!-- 默认值模式 -->
               <td :style="{ width: colWidths.defaultMode + 'px' }">
-                <select v-model="column.defaultMode" aria-label="defaultMode">
+                <select v-model="column.defaultMode" :aria-label="t('design.column.defaultMode')">
                   <option value="none">{{ t('m_484d55613910') }}</option>
                   <option value="null">NULL</option>
                   <option value="value">{{ t('m_a92a585d1fbf') }}</option>

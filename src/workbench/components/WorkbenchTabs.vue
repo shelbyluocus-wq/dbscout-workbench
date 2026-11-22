@@ -302,6 +302,21 @@ const tableLikeTabNames = computed(() => (
     .map((item) => tabMenuName(item))
 ));
 
+const isSingleDatabaseTabs = computed(() => {
+  const scopes = new Set();
+  for (const item of previewTabs.value) {
+    if (!isTableLikeTab(item) || !item.database) continue;
+    scopes.add(`${item.connectionId || ""}\u001f${item.database}`);
+    if (scopes.size > 1) return false;
+  }
+  return true;
+});
+
+function tabCommentSubtitle(tab) {
+  if (!isSingleDatabaseTabs.value || tab?.opening || tab?.createMode) return "";
+  return String(tab?.tableComment || "").trim();
+}
+
 function tabMenuNameParts(tab) {
   return splitTabLabel(tabMenuName(tab), tableLikeTabNames.value);
 }
@@ -495,21 +510,24 @@ onBeforeUnmount(() => {
               <span class="wb-tab-opening-spinner" aria-hidden="true"></span>
               <small class="wb-tab-opening-label" aria-live="polite">{{ t('m_48de9f48a703') }}</small>
             </span>
-            <span v-else class="wb-tab-line wb-tab-line-secondary" :style="tabDatabaseDecorationStyle(tab)">
-              <component
-                :is="tabDatabaseIcon(tab)"
-                v-if="tabDatabaseDecoration(tab)"
-                :size="11"
-                :stroke-width="1.65"
-                class="wb-tab-db-icon is-decorated"
-                aria-hidden="true"
-              />
-              <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
-                <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
-                <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
-                <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
-              </svg>
-              <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+            <span v-else class="wb-tab-line wb-tab-line-secondary" :style="tabCommentSubtitle(tab) ? undefined : tabDatabaseDecorationStyle(tab)">
+              <span v-if="tabCommentSubtitle(tab)" class="wb-tab-comment">{{ tabCommentSubtitle(tab) }}</span>
+              <template v-else>
+                <component
+                  :is="tabDatabaseIcon(tab)"
+                  v-if="tabDatabaseDecoration(tab)"
+                  :size="11"
+                  :stroke-width="1.65"
+                  class="wb-tab-db-icon is-decorated"
+                  aria-hidden="true"
+                />
+                <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
+                  <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
+                  <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
+                  <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
+                </svg>
+                <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
+              </template>
               <span
                 v-if="tabMenuTag(tab)"
                 class="wb-tab-status"

@@ -4,6 +4,7 @@ import { Archive, Camera, ChevronDown, Clock, Eraser, FileInput, FolderOpen, Rot
 
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
+import { useAliases } from "../composables/aliasStore.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { formatBackupSize, formatBackupTimestamp } from "../utils/backupDisplay.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
@@ -27,8 +28,11 @@ const filterDatabases = computed(() => props.backup.filterDatabases.value || [])
 
 const scopeOpen = ref(false);
 
+const { connectionLabel: resolveConnectionAlias } = useAliases();
+
 function connectionLabel(connectionId) {
-  return props.connections.find((item) => item.id === connectionId)?.label || connectionId;
+  const raw = props.connections.find((item) => item.id === connectionId)?.label || connectionId;
+  return resolveConnectionAlias(connectionId, raw);
 }
 
 function currentError(fallback) {
@@ -430,7 +434,6 @@ async function onToggleSnapshotEnabled(connectionId, database, enabled) {
     <section class="wb-backup-snapshot-section" :aria-label="t('m_6c534bd7e43f')">
       <div class="wb-backup-list-header">
         <strong>{{ t('m_6c534bd7e43f') }}</strong>
-        <span class="wb-backup-count" :data-empty="!snapshots.length">{{ snapshots.length }}</span>
       </div>
 
       <div class="wb-backup-list wb-backup-snapshots">

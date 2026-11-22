@@ -25,9 +25,16 @@ const props = defineProps({
 const store = useTableFolderStore();
 const context = useTableFolderContext();
 const rootRef = ref(null);
+const listRef = ref(null);
 const menuRef = ref(null);
 const renameInputRef = ref(null);
 const addButtonRef = ref(null);
+const FOLDER_ROW_HEIGHT = 30;
+const FOLDER_OVERSCAN = 8;
+const listScrollTop = ref(0);
+const listViewportHeight = ref(560);
+let listScrollRaf = 0;
+let listResizeObserver = null;
 const tables = ref([]);
 const tablesLoaded = ref(false);
 const tablesLoading = ref(false);
@@ -84,6 +91,22 @@ const folderRows = computed(() => (currentFolder.value?.tableNames || []).map((n
       missing: tablesLoaded.value && !tableByName.value.has(name),
 })));
 const visibleRows = computed(() => currentFolder.value ? folderRows.value : pickRows.value);
+const virtualWindow = computed(() => {
+  const total = visibleRows.value.length;
+  if (total <= 60) {
+    return { start: 0, end: total, topHeight: 0, bottomHeight: 0 };
+  }
+  const height = Math.max(FOLDER_ROW_HEIGHT, listViewportHeight.value || 560);
+  const start = Math.max(0, Math.floor(listScrollTop.value / FOLDER_ROW_HEIGHT) - FOLDER_OVERSCAN);
+  const end = Math.min(total, Math.ceil((listScrollTop.value + height) / FOLDER_ROW_HEIGHT) + FOLDER_OVERSCAN);
+  return {
+    start,
+    end,
+    topHeight: start * FOLDER_ROW_HEIGHT,
+    bottomHeight: Math.max(0, (total - end) * FOLDER_ROW_HEIGHT),
+  };
+});
+const renderedRows = computed(() => visibleRows.value.slice(virtualWindow.value.start, virtualWindow.value.end));
 const rowOrder = computed(() => visibleRows.value.map((row) => row.name));
 const selectedSet = computed(() => new Set(selectedNames.value));
 const pickRows = computed(() => {
@@ -307,6 +330,40 @@ function removeRows(names) {
   if (next) void nextTick(() => rootRef.value?.querySelector?.(`.wb-folder-row[data-table-name="${CSS.escape(next)}"]`)?.focus());
 }
 
+function onListScroll() {
+  if (listScrollRaf) return;
+  const run = () => {
+    listScrollRaf = 0;
+    if (listRef.value) listScrollTop.value = listRef.value.scrollTop;
+  };
+  listScrollRaf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : (run(), 0);
+}
+
+function syncListViewportHeight() {
+  const height = listRef.value?.clientHeight;
+  if (height && height > 0) listViewportHeight.value = height;
+}
+
+function resetListScroll() {
+  listScrollTop.value = 0;
+  if (listRef.value) listRef.value.scrollTop = 0;
+}
+
+function ensureRowIndexVisible(index) {
+  const el = listRef.value;
+  if (!el || index < 0) return;
+  const top = index * FOLDER_ROW_HEIGHT;
+  const bottom = top + FOLDER_ROW_HEIGHT;
+  if (top < el.scrollTop) {
+    el.scrollTop = top;
+    listScrollTop.value = top;
+  } else if (bottom > el.scrollTop + el.clientHeight) {
+    const next = Math.max(0, bottom - el.clientHeight);
+    el.scrollTop = next;
+    listScrollTop.value = next;
+  }
+}
+
 function onRowKeydown(event, row) {
   if (event.key === "Enter") {
     event.preventDefault();
@@ -325,7 +382,10 @@ function onRowKeydown(event, row) {
     const target = rowOrder.value[index];
     if (!target) return;
     onRowClick({ name: target }, event.shiftKey ? { shiftKey: true } : {});
-    rootRef.value?.querySelector?.(`.wb-folder-row[data-table-name="${CSS.escape(target)}"]`)?.focus();
+    ensureRowIndexVisible(index);
+    void nextTick(() => {
+      rootRef.value?.querySelector?.(`.wb-folder-row[data-table-name="${CSS.escape(target)}"]`)?.focus();
+    });
   }
 }
 
@@ -436,10 +496,29 @@ onMounted(() => {
   void loadTables();
   document.addEventListener("pointerdown", onDocumentPointerDown, true);
   document.addEventListener("keydown", onDocumentKeydown, true);
+  if (typeof ResizeObserver === "function") {
+    listResizeObserver = new ResizeObserver(syncListViewportHeight);
+    if (listRef.value) listResizeObserver.observe(listRef.value);
+  }
+  syncListViewportHeight();
+});
+
+watch(listRef, (el, prev) => {
+  if (prev && listResizeObserver) listResizeObserver.unobserve(prev);
+  if (el && listResizeObserver) listResizeObserver.observe(el);
+  syncListViewportHeight();
+});
+
+watch([() => currentFolder.value?.id || "", pickQuery], () => {
+  resetListScroll();
 });
 
 onBeforeUnmount(() => {
   tableLoadVersion += 1;
+  if (listScrollRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(listScrollRaf);
+  listScrollRaf = 0;
+  listResizeObserver?.disconnect();
+  listResizeObserver = null;
   document.removeEventListener("pointerdown", onDocumentPointerDown, true);
   document.removeEventListener("keydown", onDocumentKeydown, true);
 });
@@ -548,9 +627,16 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
             </button>
           </div>
         </header>
-        <ul v-if="visibleRows.length" class="wb-folder-rows">
+        <ul v-if="visibleRows.length" ref="listRef" class="wb-folder-rows" @scroll.passive="onListScroll">
           <li
-            v-for="row in visibleRows"
+            v-if="virtualWindow.topHeight > 0"
+            class="wb-folder-spacer"
+            role="presentation"
+            aria-hidden="true"
+            :style="{ height: `${virtualWindow.topHeight}px` }"
+          ></li>
+          <li
+            v-for="row in renderedRows"
             :key="row.name"
             class="wb-folder-row"
             :class="{ 'is-selected': selectedSet.has(row.name), 'is-missing': row.missing }"
@@ -582,6 +668,13 @@ watch(() => `${scope.value.connectionId}\u001f${scope.value.database}`, () => {
             <span v-else-if="currentFolder" class="wb-folder-comment">{{ row.comment }}</span>
             <span v-else class="wb-folder-comment" v-html="row.commentHtml"></span>
           </li>
+          <li
+            v-if="virtualWindow.bottomHeight > 0"
+            class="wb-folder-spacer"
+            role="presentation"
+            aria-hidden="true"
+            :style="{ height: `${virtualWindow.bottomHeight}px` }"
+          ></li>
         </ul>
         <p v-else-if="tablesLoading" class="wb-folder-empty" role="status">{{ t("tableFolders.loadingTables") }}</p>
         <p v-else class="wb-folder-empty">{{ currentFolder ? t("tableFolders.emptyFolder") : t("m_4034e355eb62") }}</p>

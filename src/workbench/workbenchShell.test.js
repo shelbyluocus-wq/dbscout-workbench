@@ -1509,7 +1509,7 @@ test("backup center settings use scoped number steppers and close after saved fe
   // Refreshed config (e.g. after toggling a database) keeps unsaved edits.
   assert.match(settings, /const edits = previous \? editedFields\(draftConfig\.value, previous\) : \{\};/);
   assert.doesNotMatch(dialog, /^\s*config\.value\s*=/m);
-  assert.match(snapshots, /\/>打开资源管理器<\/button>/);
+  assert.match(snapshots, /\/>打开目录<\/button>/);
   assert.match(settings, /\/>打开<\/button>/);
   assert.match(composable, /async function openBackupPath/);
   assert.match(composable, /invokeWorkbench\(["']open_backup_path["'],\s*\{\s*path:\s*normalized\s*\}/);

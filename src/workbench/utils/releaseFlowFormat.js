@@ -32,9 +32,13 @@ function dateFromIso(iso) {
 }
 
 /** "2026/10/24 (Sat)" style, following the interface language. */
+function spaceCjkWeekday(text) {
+  return String(text || "").replace(/(\d)(周|週)/g, "$1 $2");
+}
+
 function formatIsoDate(iso, options, locale) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return "";
-  return new Intl.DateTimeFormat(locale, options).format(dateFromIso(iso));
+  return spaceCjkWeekday(new Intl.DateTimeFormat(locale, options).format(dateFromIso(iso)));
 }
 
 export function formatReleaseDate(iso, locale = language.locale.value) {
@@ -88,7 +92,7 @@ export function formatDateTime(timestamp, locale = language.locale.value) {
 export function formatDayOf(timestamp, locale = language.locale.value) {
   const value = Number(timestamp);
   if (!Number.isFinite(value) || value <= 0) return "";
-  return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(value));
+  return spaceCjkWeekday(new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(value)));
 }
 
 /** What a platform card or the overview says about one issue of an update. */

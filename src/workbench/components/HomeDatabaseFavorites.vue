@@ -64,6 +64,25 @@ const canAddSelection = computed(() => Boolean(
   pickerConnectionId.value && pickerDatabase.value && !isFavorite(pickerConnectionId.value, pickerDatabase.value),
 ));
 
+const currentDatabaseDisplayLabel = computed(() => (
+  databaseLabel(currentConnectionId.value, currentDatabase.value) || currentDatabase.value
+));
+
+const canQuickFavoriteCurrent = computed(() => Boolean(
+  currentConnectionId.value
+    && currentDatabase.value
+    && isConnected({ connectionId: currentConnectionId.value })
+    && !isFavorite(currentConnectionId.value, currentDatabase.value),
+));
+
+function quickFavoriteCurrent() {
+  if (!canQuickFavoriteCurrent.value) return;
+  context?.addFavorite?.({
+    connectionId: currentConnectionId.value,
+    database: currentDatabase.value,
+  });
+}
+
 const panelStyle = computed(() => ({
   left: `${panelPosition.value.left}px`,
   top: `${panelPosition.value.top}px`,
@@ -398,6 +417,17 @@ defineExpose({ show, hide, toggle, scheduleHide });
         <strong>{{ t('m_6d17ac1d6abe') }}</strong>
         <small>{{ t('m_476bb2e3992e') }}</small>
       </div>
+
+      <button
+        v-if="canQuickFavoriteCurrent"
+        type="button"
+        class="wb-home-favorites-quick-add"
+        role="menuitem"
+        @click="quickFavoriteCurrent"
+      >
+        <Plus :size="15" aria-hidden="true" />
+        <span>{{ t('favorites.addCurrent', { database: currentDatabaseDisplayLabel }) }}</span>
+      </button>
 
       <button type="button" class="wb-home-favorites-add" role="menuitem" @click="openPicker">
         <Plus :size="15" aria-hidden="true" />
