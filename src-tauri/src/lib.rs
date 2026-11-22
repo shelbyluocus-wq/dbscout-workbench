@@ -233,6 +233,7 @@ pub fn run() {
             config_relations::commands::config_relations_graph,
             config_relations::commands::config_relations_row_targets,
             config_relations::commands::config_relations_row_references,
+            config_relations::commands::config_relations_audit_table,
             config_relations::commands::config_relations_review_list,
             config_relations::commands::config_relations_review,
             config_relations::commands::config_relations_refresh,

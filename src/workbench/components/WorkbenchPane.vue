@@ -12,6 +12,8 @@ import { formatTableRowSummary } from "../utils/tableRowSummary.js";
 import { replaceSearchText } from "../utils/searchMatch.js";
 import { collectLocalDistinctValues, normalizeColumnFilters } from "../utils/columnFilter.js";
 import { normalizeRelationFilter } from "../utils/relationFilter.js";
+import { tableDisplayComment, tableDisplayName } from "../utils/configRelations.js";
+import { useConfigRelationContext } from "../composables/configRelationContext.js";
 import { normalizeTableFilterMode } from "../utils/tableFilterMode.js";
 import { createSelectionStatsScan, indexOptimisticValuesForTable } from "../utils/selectionStats.js";
 import { buildRowKey, buildRowIdentity, buildRowKeyFromIdentity } from "../utils/rowIdentity.js";
@@ -610,6 +612,7 @@ watch(viewportHeight, (height, previousHeight) => {
 
 onBeforeUnmount(() => {
   stopSelectionStatsScan();
+  stopCellRelationsLookup();
   captureActiveTableViewState();
   void disposeTableSearch();
 });
@@ -1492,6 +1495,128 @@ const selectedCellContext = computed(() => {
   return { rowNumber, column: cell.column, comment, isFieldComment: false };
 });
 
+// 底部单元格面板的关联道具名内联翻译：仅在当前列存在已识别出边关联时才查询，
+// 并使用独立的 "cell-detail" 通道，不与右侧检查器互抢请求令牌。
+const configRelationContext = useConfigRelationContext();
+const selectedCellRelations = shallowRef([]);
+let cellRelationsToken = 0;
+let cellRelationsTimer = null;
+
+function stopCellRelationsLookup() {
+  cellRelationsToken += 1;
+  if (cellRelationsTimer) {
+    clearTimeout(cellRelationsTimer);
+    cellRelationsTimer = null;
+  }
+}
+
+watch(
+  () => [
+    activeDataTab.value?.id || "",
+    activeDataTab.value?.connectionId || "",
+    activeDataTab.value?.database || "",
+    activeDataTab.value?.tableName || "",
+    selectedCell.value?.rowKey || "",
+    selectedCell.value?.column || "",
+    selectedCell.value?.kind || "",
+    textDraft.value,
+  ],
+  () => {
+    stopCellRelationsLookup();
+    const tab = activeDataTab.value;
+    const cell = selectedCell.value;
+    if (
+      !tab
+      || !cell
+      || cell.tabId !== tab.id
+      || cell.kind === "fieldComment"
+      || isInsertRowKey(cell.rowKey)
+      || !configRelationContext?.relations
+      || !configRelationContext?.relationsSupportedForTab?.(tab)
+    ) {
+      selectedCellRelations.value = [];
+      return;
+    }
+    const token = ++cellRelationsToken;
+    const scope = { connectionId: tab.connectionId, database: tab.database };
+    const tableName = String(tab.tableName || "");
+    const columnLower = String(cell.column || "").toLowerCase();
+    const draftValue = String(textDraft.value ?? "");
+    cellRelationsTimer = setTimeout(async () => {
+      cellRelationsTimer = null;
+      if (token !== cellRelationsToken) return;
+      try {
+        const tableData = await configRelationContext.relations.tableRelations(scope, tableName);
+        if (token !== cellRelationsToken) return;
+        const outgoingForColumn = (tableData?.outgoing || []).filter(
+          (rel) => rel?.status !== "rejected" && String(rel?.sourceColumn || "").toLowerCase() === columnLower,
+        );
+        if (!outgoingForColumn.length) {
+          selectedCellRelations.value = [];
+          return;
+        }
+        const rowIndex = createRowIndex(tab, { buildRowKey }).indexOfKey(cell.rowKey);
+        const row = rowIndex >= 0 ? tabRowAt(tab, rowIndex) : null;
+        if (!row) {
+          selectedCellRelations.value = [];
+          return;
+        }
+        const rowPayload = {};
+        for (const col of activeColumns.value) {
+          const name = columnName(col);
+          if (!name) continue;
+          rowPayload[name] = name === cell.column
+            ? draftValue
+            : displayCellValue(props.editState, tab, row, name);
+        }
+        const res = await configRelationContext.relations.rowTargets(scope, tableName, rowPayload, "cell-detail");
+        if (token !== cellRelationsToken || res?.superseded) return;
+        const byId = new Map((res?.outgoing || []).map((item) => [item.relationId, item]));
+        const tablesMap = tableData?.tables || {};
+        const groups = [];
+        for (const relation of outgoingForColumn) {
+          const resolved = byId.get(relation.id);
+          if (!resolved?.targets?.length) continue;
+          groups.push({
+            relation,
+            targetTable: tableDisplayName(tablesMap, relation.targetTable),
+            targetTableComment: tableDisplayComment(tablesMap, relation.targetTable),
+            targets: resolved.targets,
+          });
+        }
+        selectedCellRelations.value = groups;
+      } catch {
+        if (token === cellRelationsToken) selectedCellRelations.value = [];
+      }
+    }, 80);
+  },
+  { immediate: true },
+);
+
+function openCellRelationTarget(target) {
+  const tab = activeDataTab.value;
+  if (!tab || !target?.relation || !target?.value) return;
+  configRelationContext?.openRelation?.({
+    connectionId: tab.connectionId,
+    database: tab.database,
+    tableName: target.targetTable || target.relation.targetTable,
+    tableComment: target.targetTableComment || "",
+    readOnly: Boolean(tab.readOnly),
+    relationFilter: {
+      column: target.relation.targetColumn,
+      kind: "equals",
+      values: [target.value],
+    },
+    relationOrigin: {
+      direction: "outgoing",
+      sourceTable: target.relation.sourceTable,
+      sourceColumn: target.relation.sourceColumn,
+      targetTable: target.relation.targetTable,
+      targetColumn: target.relation.targetColumn,
+    },
+  });
+}
+
 const SELECTION_STATS_SYNC_CELL_LIMIT = 20_000;
 const SELECTION_STATS_CHUNK_ROWS = 64;
 const SELECTION_STATS_CHUNK_BUDGET_MS = 8;
@@ -2040,11 +2165,13 @@ onMounted(() => emitPaneState());
       :read-only="detailReadOnly"
       :is-null="selectedCellIsNull"
       :selection-stats="selectionStats"
+      :cell-relations="selectedCellRelations"
       @update:text-draft="updateTextDraft"
       @save-text-panel="handleSaveTextPanel"
       @commit-detail-draft="handleCommitDetailDraft"
       @exit-detail="focusGridAfterDetailExit"
       @detail-contextmenu="openDetailContextMenu"
+      @open-relation-target="openCellRelationTarget"
     />
 
     <SqlQueryWorkspace

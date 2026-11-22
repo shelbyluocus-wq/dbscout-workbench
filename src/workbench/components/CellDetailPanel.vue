@@ -1,8 +1,9 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, ChevronDown, ChevronUp, Copy } from "lucide-vue-next";
+import { Check, ChevronDown, ChevronUp, Copy, Link2 } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
+import { buildCellStructuredPreview } from "../utils/cellStructuredPreview.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
@@ -17,9 +18,17 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   isNull: { type: Boolean, default: false },
   selectionStats: { type: Object, default: null },
+  cellRelations: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(["update:textDraft", "save-text-panel", "commit-detail-draft", "detail-contextmenu", "exit-detail"]);
+const emit = defineEmits([
+  "update:textDraft",
+  "save-text-panel",
+  "commit-detail-draft",
+  "detail-contextmenu",
+  "exit-detail",
+  "open-relation-target",
+]);
 
 const DETAIL_DEFAULT_HEIGHT = 160;
 const DETAIL_MIN_HEIGHT = 96;
@@ -62,7 +71,17 @@ const detailPlaceholder = computed(() => {
   return `选中单元格后在这里查看或编辑长文本（${saveHint}）`;
 });
 const isJsonDetail = computed(() => isDetailJson(sourceDraft.value));
-const jsonPretty = computed(() => visibility.state.jsonPretty);
+const cardView = ref(false);
+const jsonPretty = computed(() => !cardView.value && visibility.state.jsonPretty);
+const jsonRaw = computed(() => !cardView.value && !visibility.state.jsonPretty);
+const structuredPreview = computed(() => (
+  props.selectedCell && !isFieldComment.value
+    ? buildCellStructuredPreview(sourceDraft.value, props.cellRelations)
+    : { kind: "none", canCardView: false, cards: [], items: [], inlineTargets: [] }
+));
+const showCardView = computed(() => Boolean(cardView.value && structuredPreview.value.canCardView && !isPanelCollapsed.value));
+const collapsedInlineTargets = computed(() => structuredPreview.value.inlineTargets.slice(0, 2));
+const collapsedInlineExtraCount = computed(() => Math.max(0, structuredPreview.value.inlineTargets.length - 2));
 const detailFormatting = computed(() => highlightDetailValue(viewDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
@@ -213,9 +232,31 @@ function applyJsonView() {
 }
 
 function setJsonPretty(next) {
+  cardView.value = false;
   visibility.setJsonPretty(next);
   applyJsonView();
   nextTick(syncDetailScroll);
+}
+
+function setCardViewMode() {
+  if (!structuredPreview.value.canCardView) return;
+  cardView.value = true;
+}
+
+function openRelationTarget(target) {
+  if (!target?.relation || !target?.value) return;
+  emit("open-relation-target", target);
+}
+
+function relationChipTitle(target) {
+  const tableLabel = target.targetTableComment
+    ? `${target.targetTable}（${target.targetTableComment}）`
+    : target.targetTable;
+  if (target.state === "missing") {
+    return `${tableLabel}.${target.targetColumn} = ${target.value} · ${t("relations.target.missing")}`;
+  }
+  const valueText = target.label ? `${target.value} · ${target.label}` : target.value;
+  return t("relations.target.open", { table: tableLabel || target.targetTable, value: valueText });
 }
 
 function updateDetailDraft(event) {
@@ -481,6 +522,28 @@ onBeforeUnmount(() => {
         <span v-else class="wb-cell-detail-idle-hint">{{ t('cellDetail.idleHint') }}</span>
         <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
         <div
+          v-if="isPanelCollapsed && collapsedInlineTargets.length"
+          class="wb-cell-detail-header-refs"
+          @click.stop
+        >
+          <button
+            v-for="(target, index) in collapsedInlineTargets"
+            :key="`${target.targetTable}:${target.value}:${index}`"
+            type="button"
+            class="wb-cell-detail-ref-chip"
+            :class="`is-${target.state}`"
+            :title="relationChipTitle(target)"
+            :disabled="target.state === 'missing'"
+            @click.stop="openRelationTarget(target)"
+          >
+            <Link2 :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-id">{{ target.value }}</span>
+            <span v-if="target.label" class="wb-cell-detail-ref-name">{{ target.label }}</span>
+            <span v-else-if="target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
+          </button>
+          <span v-if="collapsedInlineExtraCount > 0" class="wb-cell-detail-ref-more">+{{ collapsedInlineExtraCount }}</span>
+        </div>
+        <div
           v-if="showJsonFormatToggle"
           class="wb-cell-detail-format"
           role="group"
@@ -488,8 +551,8 @@ onBeforeUnmount(() => {
         >
           <button
             type="button"
-            :class="{ 'is-active': !jsonPretty }"
-            :aria-pressed="String(!jsonPretty)"
+            :class="{ 'is-active': jsonRaw }"
+            :aria-pressed="String(jsonRaw)"
             :title="t('m_4126e3b37b7a')"
             @click.stop="setJsonPretty(false)"
           >{{ t('m_8cb7c0a54b21') }}</button>
@@ -500,6 +563,14 @@ onBeforeUnmount(() => {
             :title="t('m_9d1a0cae95c8')"
             @click.stop="setJsonPretty(true)"
           >{{ t('m_f69273dbbebf') }}</button>
+          <button
+            v-if="structuredPreview.canCardView"
+            type="button"
+            :class="{ 'is-active': cardView }"
+            :aria-pressed="String(cardView)"
+            :title="t('cellDetail.cardViewHint')"
+            @click.stop="setCardViewMode"
+          >{{ t('cellDetail.cardView') }}</button>
         </div>
         <button
           v-if="canCopyDetail"
@@ -584,7 +655,87 @@ onBeforeUnmount(() => {
         <span class="wb-cell-detail-handle-grip" aria-hidden="true"></span>
       </div>
       <div class="wb-cell-detail-body" :style="detailPanelStyle">
-        <div class="wb-detail-editor" :class="[`is-${detailFormatting.kind}`, { 'has-highlight': hasInlineFormatting }]">
+        <div
+          v-if="!showCardView && structuredPreview.inlineTargets.length"
+          class="wb-cell-detail-refs"
+        >
+          <button
+            v-for="(target, index) in structuredPreview.inlineTargets"
+            :key="`${target.targetTable}:${target.value}:${index}`"
+            type="button"
+            class="wb-cell-detail-ref-chip"
+            :class="`is-${target.state}`"
+            :title="relationChipTitle(target)"
+            :disabled="target.state === 'missing'"
+            @click.stop="openRelationTarget(target)"
+          >
+            <Link2 :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-id">{{ target.value }}</span>
+            <span v-if="target.label" class="wb-cell-detail-ref-name">{{ target.label }}</span>
+            <span v-else-if="target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
+          </button>
+        </div>
+        <div v-if="showCardView" class="wb-detail-cards">
+          <template v-if="structuredPreview.kind === 'json-array-primitives'">
+            <div class="wb-detail-card-primitives">
+              <div
+                v-for="item in structuredPreview.items"
+                :key="item.index"
+                class="wb-detail-primitive-pill"
+              >
+                <span class="wb-detail-card-index">#{{ item.index }}</span>
+                <span class="wb-detail-card-val">{{ item.value }}</span>
+                <button
+                  v-if="item.target"
+                  type="button"
+                  class="wb-cell-detail-ref-chip"
+                  :class="`is-${item.target.state}`"
+                  :title="relationChipTitle(item.target)"
+                  :disabled="item.target.state === 'missing'"
+                  @click.stop="openRelationTarget(item.target)"
+                >
+                  <span v-if="item.target.label" class="wb-cell-detail-ref-name">{{ item.target.label }}</span>
+                  <span v-else-if="item.target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
+                  <span v-else class="wb-cell-detail-ref-id">{{ item.target.targetTable }}</span>
+                </button>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <article
+              v-for="card in structuredPreview.cards"
+              :key="card.index"
+              class="wb-detail-card"
+            >
+              <span v-if="structuredPreview.cards.length > 1" class="wb-detail-card-index">#{{ card.index }}</span>
+              <div class="wb-detail-card-fields">
+                <div
+                  v-for="field in card.entries"
+                  :key="field.key"
+                  class="wb-detail-card-field"
+                >
+                  <span class="wb-detail-card-key">{{ field.key }}</span>
+                  <span class="wb-detail-card-val">{{ field.value }}</span>
+                  <button
+                    v-if="field.target"
+                    type="button"
+                    class="wb-cell-detail-ref-chip"
+                    :class="`is-${field.target.state}`"
+                    :title="relationChipTitle(field.target)"
+                    :disabled="field.target.state === 'missing'"
+                    @click.stop="openRelationTarget(field.target)"
+                  >
+                    <Link2 :size="10" aria-hidden="true" />
+                    <span v-if="field.target.label" class="wb-cell-detail-ref-name">{{ field.target.label }}</span>
+                    <span v-else-if="field.target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
+                    <span v-else class="wb-cell-detail-ref-id">{{ field.target.targetTable }}</span>
+                  </button>
+                </div>
+              </div>
+            </article>
+          </template>
+        </div>
+        <div v-else class="wb-detail-editor" :class="[`is-${detailFormatting.kind}`, { 'has-highlight': hasInlineFormatting }]">
           <pre
             v-if="hasInlineFormatting"
             ref="detailHighlightsRef"

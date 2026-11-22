@@ -2,7 +2,11 @@
 import { t } from "../i18n/index.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
-import { ChevronRight, Server } from "lucide-vue-next";
+import { ChevronRight, Languages, Server } from "lucide-vue-next";
+import {
+  applyLocaleTableFolding,
+  useLocaleTableFoldPreference,
+} from "../utils/localeTableGrouping.js";
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
@@ -308,7 +312,28 @@ const effectiveSchemaSearchResults = computed(() => {
 });
 
 const effectiveSearchState = computed(() => props.sidebarSearchState || fallbackSearchState);
-const filteredTables = computed(() => effectiveSchemaSearchResults.value.map((result) => result.table));
+const rawFilteredTables = computed(() => effectiveSchemaSearchResults.value.map((result) => result.table));
+const { foldLocaleTables, toggleFoldLocaleTables } = useLocaleTableFoldPreference();
+const expandedLocaleBases = ref(new Set());
+const sidebarLocaleFold = computed(() => applyLocaleTableFolding(rawFilteredTables.value, {
+  allTables: props.filteredTables,
+  fold: foldLocaleTables.value,
+  expandedBases: expandedLocaleBases.value,
+  query: props.treeQuery,
+}));
+const filteredTables = computed(() => sidebarLocaleFold.value.rows);
+
+function sidebarLocaleMeta(table) {
+  return sidebarLocaleFold.value.localeMetaByName.get(String(table?.tableName || "")) || null;
+}
+
+function toggleSidebarLocaleGroup(baseLower) {
+  if (!baseLower) return;
+  const next = new Set(expandedLocaleBases.value);
+  if (next.has(baseLower)) next.delete(baseLower);
+  else next.add(baseLower);
+  expandedLocaleBases.value = next;
+}
 
 // 表列表虚拟滚动：只挂载可视区行，展开大库分支不再一次性创建上千个 DOM。
 const {
@@ -331,7 +356,10 @@ const activeTableName = computed(() => (
 ));
 const tableSelection = useSidebarTableSelection({ tables: filteredTables, activeTableName });
 
-watch(() => [props.selectedConnectionId, props.selectedDatabase], () => tableSelection.clear());
+watch(() => [props.selectedConnectionId, props.selectedDatabase], () => {
+  tableSelection.clear();
+  expandedLocaleBases.value = new Set();
+});
 watch(() => props.treeQuery.trim(), (query) => {
   if (query) tableSelection.clear();
 });
@@ -934,6 +962,22 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
 
                   <template v-if="!treeQuery.trim()">
                     <div
+                      v-if="sidebarLocaleFold.totalVariantCount > 0"
+                      class="wb-sidebar-locale-bar"
+                    >
+                      <button
+                        type="button"
+                        class="wb-sidebar-locale-toggle"
+                        :class="{ 'is-active': foldLocaleTables }"
+                        :aria-pressed="foldLocaleTables ? 'true' : 'false'"
+                        :title="t('localeFold.toggleHint', { count: sidebarLocaleFold.totalVariantCount })"
+                        @click="toggleFoldLocaleTables"
+                      >
+                        <Languages :size="12" :stroke-width="2" aria-hidden="true" />
+                        <span>{{ foldLocaleTables ? t('localeFold.foldedCount', { count: sidebarLocaleFold.hiddenVariantCount }) : t('localeFold.foldShort') }}</span>
+                      </button>
+                    </div>
+                    <div
                       v-if="filteredTables.length"
                       :ref="setTableListElement"
                       class="wb-table-vlist"
@@ -952,6 +996,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                           :class="{
                             active: isTableActive(entry.table),
                             'is-selected': tableSelection.isMultiple.value && tableSelection.selectedSet.value.has(entry.table.tableName),
+                            'is-locale-variant': sidebarLocaleMeta(entry.table)?.kind === 'variant',
                           }"
                           :aria-current="isTableActive(entry.table) ? 'page' : undefined"
                           :title="tableTitle(entry.table)"
@@ -965,6 +1010,21 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
                             <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)" :class="{ 'is-middle-ellipsis': Boolean(tableNameParts(entry.table.tableName).tail) }" :aria-label="tableNameParts(entry.table.tableName).tail ? entry.table.tableName : undefined"><span class="wb-middle-ellipsis-head" :aria-hidden="tableNameParts(entry.table.tableName).tail ? 'true' : undefined">{{ tableNameParts(entry.table.tableName).head }}</span><span v-if="tableNameParts(entry.table.tableName).tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ tableNameParts(entry.table.tableName).tail }}</span></span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
+                          </span>
+                          <span
+                            v-if="sidebarLocaleMeta(entry.table)?.kind === 'base'"
+                            role="button"
+                            tabindex="0"
+                            class="wb-locale-group-pill wb-sidebar-locale-pill"
+                            :class="{ 'is-expanded': sidebarLocaleMeta(entry.table).expanded }"
+                            :aria-expanded="sidebarLocaleMeta(entry.table).expanded ? 'true' : 'false'"
+                            :title="t('localeFold.expandGroup', { count: sidebarLocaleMeta(entry.table).variantCount, suffixes: sidebarLocaleMeta(entry.table).suffixes.join(' / ') })"
+                            @click.stop="toggleSidebarLocaleGroup(sidebarLocaleMeta(entry.table).baseLower)"
+                            @dblclick.stop
+                            @keydown.enter.space.prevent.stop="toggleSidebarLocaleGroup(sidebarLocaleMeta(entry.table).baseLower)"
+                          >
+                            <ChevronRight :size="10" :stroke-width="2.2" class="wb-locale-group-chevron" aria-hidden="true" />
+                            <span>+{{ sidebarLocaleMeta(entry.table).variantCount }}</span>
                           </span>
                         </button>
                       </div>

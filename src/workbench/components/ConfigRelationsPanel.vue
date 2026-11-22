@@ -10,6 +10,7 @@ import { coverageGapText } from "../utils/configRelations.js";
 import { loadRelationPanelSections, saveRelationPanelSections } from "../utils/relationPanelPrefs.js";
 import { provideCommentTips } from "../composables/commentTips.js";
 import ConfigRelationRowSection from "./ConfigRelationRowSection.vue";
+import ConfigRelationAuditSection from "./ConfigRelationAuditSection.vue";
 import ConfigRelationTableSection from "./ConfigRelationTableSection.vue";
 import ConfigRelationGraphSection from "./ConfigRelationGraphSection.vue";
 
@@ -176,6 +177,14 @@ function openNamedTable(table) {
           @toggle="sections.row = !sections.row"
           @open-relation="emit('open-relation', $event)"
           @open-table="openNamedTable"
+        />
+
+        <ConfigRelationAuditSection
+          :tab="tab"
+          :scope="scope"
+          :table-name="tableName"
+          :relations="relations"
+          :outgoing-count="outgoingRelations.filter((rel) => rel.status !== 'rejected').length"
         />
 
         <ConfigRelationGraphSection

@@ -211,6 +211,16 @@ export function useConfigRelations({
     return invoke("config_relations_row_references", scopeRequest(entry, { table: String(table || ""), row: row || {}, channel }));
   }
 
+  function auditTable(scope, table, { maxRows, maxIssues } = {}) {
+    const entry = entryFor(scope);
+    if (!entry) return Promise.resolve(null);
+    return invoke("config_relations_audit_table", scopeRequest(entry, {
+      table: String(table || ""),
+      ...(maxRows ? { maxRows } : {}),
+      ...(maxIssues ? { maxIssues } : {}),
+    }));
+  }
+
   async function reviewList(scope) {
     const entry = entryFor(scope);
     if (!entry) return null;
@@ -316,6 +326,7 @@ export function useConfigRelations({
     relationGraph,
     rowTargets,
     rowReferences,
+    auditTable,
     reviewList,
     submitReview,
     refresh,

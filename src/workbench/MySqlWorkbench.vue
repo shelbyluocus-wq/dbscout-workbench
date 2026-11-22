@@ -1159,6 +1159,13 @@ function openConfigRelationTable({ connectionId, database, tableName, tableComme
 
 provide(CONFIG_RELATION_CONTEXT, {
   clearRelationFilter: (tab) => void clearRelationFilter(tab),
+  relations: configRelations,
+  relationsSupportedForTab,
+  openRelation: (request) => void openRelationTab(request),
+  locateAuditCell: async ({ rowIdentity, columnName }) => {
+    if (!columnName) return;
+    await focusedPaneState.locateListMatch?.({ rowIdentity, columnName });
+  },
 });
 
 // A tab offers the relation page only when its own connection is a real

@@ -5,6 +5,7 @@ import {
   ClipboardPaste,
   Copy,
   FolderOpen,
+  Languages,
   MessageSquareText,
   Pencil,
   Plus,
@@ -13,6 +14,10 @@ import {
   TableProperties,
   Trash2,
 } from "lucide-vue-next";
+import {
+  applyLocaleTableFolding,
+  useLocaleTableFoldPreference,
+} from "../utils/localeTableGrouping.js";
 
 import {
   createDatabaseHomeController,
@@ -117,6 +122,29 @@ const menu = reactive({
 });
 controller.setSelection(Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames : []);
 controller.focusedName.value = props.tab.focusedTableName || props.tab.selectedTableNames?.at?.(-1) || "";
+
+const { foldLocaleTables, toggleFoldLocaleTables } = useLocaleTableFoldPreference();
+const expandedLocaleBases = ref(new Set());
+const localeFoldResult = computed(() => applyLocaleTableFolding(controller.filteredTables.value, {
+  allTables: controller.tables.value,
+  fold: foldLocaleTables.value,
+  expandedBases: expandedLocaleBases.value,
+  query: controller.query.value,
+}));
+const displayedTables = computed(() => localeFoldResult.value.rows);
+
+function toggleLocaleGroup(baseLower) {
+  if (!baseLower) return;
+  const next = new Set(expandedLocaleBases.value);
+  if (next.has(baseLower)) next.delete(baseLower);
+  else next.add(baseLower);
+  expandedLocaleBases.value = next;
+}
+
+watch(
+  () => `${props.tab.connectionId}\u001f${props.tab.database}`,
+  () => { expandedLocaleBases.value = new Set(); },
+);
 
 const databaseRealName = computed(() => props.tab.database || t('m_5403ed977fb5'));
 const databaseName = computed(() => (
@@ -862,6 +890,9 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
           <h2 :title="databaseTitle">{{ databaseName }}</h2>
           <p v-if="homeLoading">{{ t('m_133b5069fbfb') }}</p>
           <p v-else-if="controller.query.value.trim()">{{ visibleCount }} / {{ tableCount }} {{ t('m_a2b22d3a5ca3') }}</p>
+          <p v-else-if="localeFoldResult.hiddenVariantCount > 0">
+            {{ t('dbHome.totalTablesFolded', { count: tableCount, folded: localeFoldResult.hiddenVariantCount }) }}
+          </p>
           <p v-else>{{ t('dbHome.totalTables', { count: tableCount }) }}</p>
         </div>
       </div>
@@ -895,6 +926,18 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
           </svg>
         </button>
       </div>
+      <button
+        v-if="localeFoldResult.totalVariantCount > 0"
+        type="button"
+        class="wb-dbhome-locale-fold-toggle"
+        :class="{ 'is-active': foldLocaleTables }"
+        :aria-pressed="foldLocaleTables ? 'true' : 'false'"
+        :title="t('localeFold.toggleHint', { count: localeFoldResult.totalVariantCount })"
+        @click="toggleFoldLocaleTables"
+      >
+        <Languages :size="14" :stroke-width="1.9" aria-hidden="true" />
+        <span>{{ foldLocaleTables ? t('localeFold.foldedShort') : t('localeFold.foldShort') }}</span>
+      </button>
       <div class="wb-dbhome-actions" :aria-label="t('m_e3244d705db7')">
         <div class="wb-toolbar-action-group wb-dbhome-action-group" :aria-label="t('m_813a2915d825')">
           <button
@@ -970,7 +1013,8 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
 
     <DatabaseTableList
       ref="tableListRef"
-      :tables="controller.filteredTables.value"
+      :tables="displayedTables"
+      :locale-meta="localeFoldResult.localeMetaByName"
       :loading="homeLoading"
       :search-query="controller.query.value"
       :typeahead-query="typeahead.query.value"
@@ -1001,6 +1045,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
       @sort-column="sortByColumn"
       @replace-selection="replaceSelection"
       @toggle-favorite="toggleTableFavorite"
+      @toggle-locale-group="toggleLocaleGroup"
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />

@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
-import { ArrowDown, ArrowUp, GripVertical, Star } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Star } from "lucide-vue-next";
 import {
   defaultHomeColumnLayout,
   fittedFillWidth,
@@ -38,6 +38,7 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
+  localeMeta: { type: Object, default: null },
 });
 
 const emit = defineEmits([
@@ -59,8 +60,13 @@ const emit = defineEmits([
   "sort-column",
   "replace-selection",
   "toggle-favorite",
+  "toggle-locale-group",
   "box-selection-complete",
 ]);
+
+function rowLocaleMeta(table) {
+  return props.localeMeta?.get?.(tableName(table)) || null;
+}
 
 const scrollerRef = ref(null);
 const renameInputRef = ref(null);
@@ -661,6 +667,7 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
             'is-selected': renderedSelectedSet.has(tableName(table)),
             'is-box-selected': boxSelectedSet.has(tableName(table)),
             'is-renaming': renamingName === tableName(table),
+            'is-locale-variant': rowLocaleMeta(table)?.kind === 'variant',
           }"
           :style="{ gridTemplateColumns }"
           :data-table-name="tableName(table)"
@@ -709,6 +716,24 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
                 @keydown="handleRowKeydown(table, $event)"
                 v-html="highlightedTableField(table, 'tableName')"
               ></button>
+              <button
+                v-if="rowLocaleMeta(table)?.kind === 'base'"
+                type="button"
+                class="wb-locale-group-pill"
+                :class="{ 'is-expanded': rowLocaleMeta(table).expanded }"
+                :aria-expanded="rowLocaleMeta(table).expanded ? 'true' : 'false'"
+                :title="t('localeFold.expandGroup', { count: rowLocaleMeta(table).variantCount, suffixes: rowLocaleMeta(table).suffixes.join(' / ') })"
+                @pointerdown.stop.prevent
+                @click.stop="emit('toggle-locale-group', rowLocaleMeta(table).baseLower)"
+                @dblclick.stop
+              >
+                <ChevronRight :size="11" :stroke-width="2.2" class="wb-locale-group-chevron" aria-hidden="true" />
+                <span>+{{ rowLocaleMeta(table).variantCount }}</span>
+              </button>
+              <span
+                v-else-if="rowLocaleMeta(table)?.kind === 'variant'"
+                class="wb-locale-variant-badge"
+              >{{ rowLocaleMeta(table).suffix }}</span>
               <button
                 type="button"
                 class="wb-dbhome-favorite-button"

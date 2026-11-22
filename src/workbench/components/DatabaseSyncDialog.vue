@@ -1,9 +1,10 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { ArrowRight, ListFilter, TriangleAlert, X } from "lucide-vue-next";
+import { ArrowRight, Languages, ListFilter, TriangleAlert, X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 import { normalizeTableComment, normalizeTableName } from "../utils/normalize.js";
+import { analyzeLocaleTableGroups, matchWildcardTableNames } from "../utils/localeTableGrouping.js";
 import SyncExclusionTemplates from "./SyncExclusionTemplates.vue";
 
 const props = defineProps({
@@ -70,6 +71,68 @@ function toggleTable(tableName) {
 
 function clearManualExclusions() {
   props.sync.setExcludedTables([]);
+  batchRuleFeedback.value = "";
+}
+
+/* ── Wildcard & search batch exclusion ── */
+const patternInput = ref("");
+const batchRuleFeedback = ref("");
+
+const localeVariantNames = computed(() => {
+  const analysis = analyzeLocaleTableGroups(sourceTables.value, { getName: (item) => item.name });
+  const names = [];
+  for (const bucket of analysis.variantsByBase.values()) {
+    for (const entry of bucket) names.push(entry.name);
+  }
+  return names;
+});
+
+const unexcludedLocaleVariantCount = computed(() => (
+  localeVariantNames.value.filter(
+    (name) => !manualExclusions.value.has(name) && !isTemplateOnly(name),
+  ).length
+));
+
+const unexcludedFilteredCount = computed(() => (
+  filteredTables.value.filter(
+    (row) => !manualExclusions.value.has(row.name) && !isTemplateOnly(row.name),
+  ).length
+));
+
+function batchExcludeNames(names) {
+  if (!Array.isArray(names) || !names.length) {
+    batchRuleFeedback.value = t("sync.batchExcludeNone");
+    return;
+  }
+  const existing = new Set(props.sync.dialog.excludedTables);
+  let added = 0;
+  for (const name of names) {
+    if (!name || existing.has(name) || isTemplateOnly(name)) continue;
+    existing.add(name);
+    added += 1;
+  }
+  if (added > 0) {
+    props.sync.setExcludedTables(Array.from(existing));
+    batchRuleFeedback.value = t("sync.batchExcludeAdded", { count: added });
+  } else {
+    batchRuleFeedback.value = t("sync.batchExcludeAlready");
+  }
+}
+
+function applyPatternExclusion() {
+  const matched = matchWildcardTableNames(
+    sourceTables.value.map((row) => row.name),
+    patternInput.value,
+  );
+  batchExcludeNames(matched);
+}
+
+function excludeFilteredSearchResults() {
+  batchExcludeNames(filteredTables.value.map((row) => row.name));
+}
+
+function excludeAllLocaleVariants() {
+  batchExcludeNames(localeVariantNames.value);
 }
 
 /* ── Catalog search + virtual scroll ── */
@@ -316,7 +379,48 @@ function targetChanged(event) {
                   autocomplete="off"
                   :disabled="isBusy"
                 />
+                <button
+                  v-if="searchQuery.trim() && filteredTables.length"
+                  type="button"
+                  class="wb-database-sync-batch-btn"
+                  :disabled="isBusy || unexcludedFilteredCount === 0"
+                  @click="excludeFilteredSearchResults"
+                >{{ t('sync.excludeFiltered', { count: unexcludedFilteredCount || filteredTables.length }) }}</button>
               </div>
+            </div>
+
+            <div v-if="sourceTables.length" class="wb-database-sync-rule-bar">
+              <div class="wb-database-sync-rule-input-group">
+                <input
+                  v-model="patternInput"
+                  type="text"
+                  class="wb-database-sync-rule-input"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :placeholder="t('sync.rulePlaceholder')"
+                  :aria-label="t('sync.rulePlaceholder')"
+                  :disabled="isBusy"
+                  @keydown.enter.prevent="applyPatternExclusion"
+                />
+                <button
+                  type="button"
+                  class="wb-database-sync-batch-btn"
+                  :disabled="isBusy || !patternInput.trim()"
+                  @click="applyPatternExclusion"
+                >{{ t('sync.excludeByRule') }}</button>
+              </div>
+              <button
+                v-if="localeVariantNames.length"
+                type="button"
+                class="wb-database-sync-locale-btn"
+                :disabled="isBusy || unexcludedLocaleVariantCount === 0"
+                :title="t('sync.excludeLocaleHint', { count: localeVariantNames.length })"
+                @click="excludeAllLocaleVariants"
+              >
+                <Languages :size="12" aria-hidden="true" />
+                <span>{{ t('sync.excludeLocale', { count: unexcludedLocaleVariantCount || localeVariantNames.length }) }}</span>
+              </button>
+              <span v-if="batchRuleFeedback" class="wb-database-sync-rule-feedback" role="status">{{ batchRuleFeedback }}</span>
             </div>
 
             <div v-if="filteredTables.length" class="wb-database-sync-columns">

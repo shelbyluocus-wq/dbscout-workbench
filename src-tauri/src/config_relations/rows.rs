@@ -2,7 +2,7 @@
 //! and how many rows of other tables reference it. Always read from the
 //! current data so edits show up immediately.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 use sqlx::{MySqlPool, Row};
@@ -59,6 +59,38 @@ pub struct RowIncoming {
     pub value: String,
     /// `None` when counting failed.
     pub count: Option<u64>,
+}
+
+const DEFAULT_AUDIT_MAX_ROWS: usize = 20_000;
+const DEFAULT_AUDIT_MAX_ISSUES: usize = 500;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokenReferenceIssue {
+    pub relation_id: String,
+    pub row_index: usize,
+    pub row_identity: BTreeMap<String, Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_label: Option<String>,
+    pub source_column: String,
+    pub target_table: String,
+    pub target_table_comment: String,
+    pub target_column: String,
+    pub missing_value: String,
+    pub cell_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableReferenceAudit {
+    pub table: String,
+    pub scanned_rows: usize,
+    pub checked_relations: usize,
+    pub checked_references: usize,
+    pub broken_count: usize,
+    pub rows_truncated: bool,
+    pub issues_truncated: bool,
+    pub issues: Vec<BrokenReferenceIssue>,
 }
 
 fn cell<'a>(row: &'a HashMap<String, String>, column: &str) -> Option<&'a str> {
@@ -340,6 +372,272 @@ pub async fn count_incoming(
     results
 }
 
+fn truncate_preview(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let prefix = trimmed.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+    format!("{prefix}…")
+}
+
+/// Pure broken-reference detector over in-memory rows and known target key sets.
+/// `existing_by_target` maps `(target_table_lower, target_column_lower)` to the
+/// lowercased set of keys actually found in that target table; targets absent
+/// from the map (e.g. failed lookup) are skipped rather than falsely flagged.
+pub(crate) fn collect_broken_references(
+    table_name: &str,
+    primary_keys: &[String],
+    label_column: Option<&str>,
+    relations: &[RelationView],
+    rows: &[HashMap<String, String>],
+    existing_by_target: &HashMap<(String, String), HashSet<String>>,
+    target_meta: &HashMap<String, (String, String)>,
+    max_issues: usize,
+    rows_truncated: bool,
+) -> TableReferenceAudit {
+    let active_relations = active(relations).collect::<Vec<_>>();
+    let mut checked_references = 0usize;
+    let mut broken_count = 0usize;
+    let mut issues = Vec::new();
+    let mut issues_truncated = false;
+
+    for (row_index, row) in rows.iter().enumerate() {
+        for view in &active_relations {
+            let target_key = (
+                view.key.target_table.to_lowercase(),
+                view.key.target_column.to_lowercase(),
+            );
+            let Some(existing) = existing_by_target.get(&target_key) else {
+                continue;
+            };
+            let values = reference_values(view, row);
+            if values.is_empty() {
+                continue;
+            }
+            for value in values {
+                checked_references += 1;
+                if existing.contains(&value.to_lowercase()) {
+                    continue;
+                }
+                broken_count += 1;
+                if issues.len() >= max_issues {
+                    issues_truncated = true;
+                    continue;
+                }
+                let mut row_identity = BTreeMap::new();
+                for pk in primary_keys {
+                    let pk_val = row
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case(pk))
+                        .map(|(_, v)| v.clone());
+                    row_identity.insert(pk.clone(), pk_val);
+                }
+                let row_label = label_column.and_then(|col| {
+                    cell(row, col)
+                        .filter(|val| !val.is_empty())
+                        .map(|val| truncate_preview(val, 48))
+                });
+                let raw_cell = cell(row, &view.key.source_column).unwrap_or("");
+                let (resolved_target_name, target_table_comment) = target_meta
+                    .get(&view.key.target_table.to_lowercase())
+                    .cloned()
+                    .unwrap_or_else(|| (view.key.target_table.clone(), String::new()));
+                issues.push(BrokenReferenceIssue {
+                    relation_id: view.id.clone(),
+                    row_index,
+                    row_identity,
+                    row_label,
+                    source_column: view.key.source_column.clone(),
+                    target_table: resolved_target_name,
+                    target_table_comment,
+                    target_column: view.key.target_column.clone(),
+                    missing_value: value,
+                    cell_preview: truncate_preview(raw_cell, 80),
+                });
+            }
+        }
+    }
+
+    TableReferenceAudit {
+        table: table_name.to_string(),
+        scanned_rows: rows.len(),
+        checked_relations: active_relations.len(),
+        checked_references,
+        broken_count,
+        rows_truncated,
+        issues_truncated,
+        issues,
+    }
+}
+
+pub async fn audit_table_references(
+    pool: &MySqlPool,
+    database: &str,
+    snapshot: &DbSnapshot,
+    table_name: &str,
+    relations: &[RelationView],
+    max_rows: Option<usize>,
+    max_issues: Option<usize>,
+) -> Result<TableReferenceAudit, String> {
+    let meta = snapshot
+        .table(table_name)
+        .ok_or_else(|| format!("找不到表 {table_name}"))?;
+    let active_relations = active(relations).cloned().collect::<Vec<_>>();
+    if active_relations.is_empty() {
+        return Ok(TableReferenceAudit {
+            table: meta.name.clone(),
+            scanned_rows: 0,
+            checked_relations: 0,
+            checked_references: 0,
+            broken_count: 0,
+            rows_truncated: false,
+            issues_truncated: false,
+            issues: Vec::new(),
+        });
+    }
+
+    let safe_max_rows = max_rows.unwrap_or(DEFAULT_AUDIT_MAX_ROWS).clamp(1, 50_000);
+    let safe_max_issues = max_issues.unwrap_or(DEFAULT_AUDIT_MAX_ISSUES).clamp(1, 2_000);
+
+    // Select only the minimal columns needed: primary keys, optional label column,
+    // relation source columns, and discriminator constraint columns.
+    let mut select_cols: Vec<String> = Vec::new();
+    let mut seen_cols: HashSet<String> = HashSet::new();
+    let mut push_col = |name: &str| {
+        if let Some(col) = meta.column(name) {
+            let lower = col.name.to_lowercase();
+            if seen_cols.insert(lower) {
+                select_cols.push(col.name.clone());
+            }
+        }
+    };
+    for pk in &meta.primary_keys {
+        push_col(pk);
+    }
+    let label_column = meta.label_column().map(str::to_string);
+    if let Some(ref lbl) = label_column {
+        push_col(lbl);
+    }
+    for view in &active_relations {
+        push_col(&view.key.source_column);
+        for constraint in &view.source_constraints {
+            push_col(&constraint.column);
+        }
+    }
+    if select_cols.is_empty() {
+        return Ok(TableReferenceAudit {
+            table: meta.name.clone(),
+            scanned_rows: 0,
+            checked_relations: active_relations.len(),
+            checked_references: 0,
+            broken_count: 0,
+            rows_truncated: false,
+            issues_truncated: false,
+            issues: Vec::new(),
+        });
+    }
+
+    let select_sql = select_cols
+        .iter()
+        .map(|col| format!("CAST(`{0}` AS CHAR) AS `{0}`", escape_ident(col)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let order_sql = if meta.primary_keys.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " ORDER BY {}",
+            meta.primary_keys
+                .iter()
+                .map(|pk| format!("`{}` ASC", escape_ident(pk)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let sql = format!(
+        "SELECT /*+ MAX_EXECUTION_TIME(15000) */ {select_sql} FROM {}{order_sql} LIMIT ?",
+        qualified_table(database, &meta.name)
+    );
+    let raw_rows = sqlx::query(&sql)
+        .bind((safe_max_rows + 1) as i64)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| format!("扫描表引用数据失败: {error}"))?;
+
+    let rows_truncated = raw_rows.len() > safe_max_rows;
+    let rows = raw_rows
+        .into_iter()
+        .take(safe_max_rows)
+        .map(|row| {
+            let mut map = HashMap::with_capacity(select_cols.len());
+            for col in &select_cols {
+                if let Ok(Some(val)) = mysql_text::optional_string(&row, col.as_str()) {
+                    map.insert(col.clone(), val);
+                }
+            }
+            map
+        })
+        .collect::<Vec<_>>();
+
+    // Gather all unique referenced values per (target_table, target_column).
+    let mut wanted: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    let mut wanted_seen: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    let mut target_meta: HashMap<String, (String, String)> = HashMap::new();
+
+    for view in &active_relations {
+        let t_lower = view.key.target_table.to_lowercase();
+        if !target_meta.contains_key(&t_lower) {
+            if let Some(t) = snapshot.table(&view.key.target_table) {
+                target_meta.insert(t_lower.clone(), (t.name.clone(), t.comment.clone()));
+            }
+        }
+        let bucket_key = (t_lower, view.key.target_column.to_lowercase());
+        let seen = wanted_seen.entry(bucket_key.clone()).or_default();
+        let bucket = wanted.entry(bucket_key).or_default();
+        for row in &rows {
+            for val in reference_values(view, row) {
+                if seen.insert(val.to_lowercase()) {
+                    bucket.push(val);
+                }
+            }
+        }
+    }
+
+    // Batch-check target key existence in chunks of MAX_LOOKUP_VALUES (500).
+    let mut existing_by_target: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    for ((target_table, target_column), values) in wanted {
+        let mut found_keys = HashSet::new();
+        let mut lookup_failed = false;
+        for chunk in values.chunks(MAX_LOOKUP_VALUES) {
+            match lookup_targets(pool, database, snapshot, &target_table, &target_column, chunk).await {
+                Ok(labels) => {
+                    found_keys.extend(labels.into_keys());
+                }
+                Err(_) => {
+                    lookup_failed = true;
+                    break;
+                }
+            }
+        }
+        if !lookup_failed {
+            existing_by_target.insert((target_table, target_column), found_keys);
+        }
+    }
+
+    Ok(collect_broken_references(
+        &meta.name,
+        &meta.primary_keys,
+        label_column.as_deref(),
+        &active_relations,
+        &rows,
+        &existing_by_target,
+        &target_meta,
+        safe_max_issues,
+        rows_truncated,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,5 +721,67 @@ mod tests {
             "a key omitted by the lookup cap was never checked");
         assert_eq!(row_target("1".into(), None).state, TargetState::Unknown);
         assert_eq!(row_target("1".into(), Some(&(None, vec!["1".into()]))).state, TargetState::Unknown);
+    }
+
+    #[test]
+    fn collect_broken_references_detects_missing_ids_and_respects_constraints_and_caps() {
+        let mut cond_view = view("Param1", RelationKind::Value);
+        cond_view.source_constraints = vec![super::super::constraints::RowConstraint {
+            column: "Kind".into(),
+            values: vec!["2".into()],
+        }];
+        let mut rejected_view = view("Ignored", RelationKind::Value);
+        rejected_view.status = RelationStatus::Rejected;
+
+        let relations = vec![
+            view("Items", RelationKind::List),
+            cond_view,
+            rejected_view,
+        ];
+        let rows = vec![
+            HashMap::from([
+                ("ID".into(), "10".into()),
+                ("Name".into(), "新春礼盒".into()),
+                ("Kind".into(), "2".into()),
+                ("Param1".into(), "9999".into()),
+                ("Items".into(), r#"[{"ID":61001,"Num":5},{"ID":88888,"Num":1}]"#.into()),
+                ("Ignored".into(), "77777".into()),
+            ]),
+            HashMap::from([
+                ("ID".into(), "11".into()),
+                ("Name".into(), "普通礼包".into()),
+                ("Kind".into(), "1".into()),
+                ("Param1".into(), "9999".into()),
+                ("Items".into(), r#"[{"ID":61001,"Num":1},{"ID":0,"Num":1}]"#.into()),
+            ]),
+        ];
+        let existing = HashMap::from([(
+            ("goodsprop".into(), "id".into()),
+            HashSet::from(["61001".into()]),
+        )]);
+        let meta = HashMap::from([("goodsprop".into(), ("goodsprop".into(), "道具表".into()))]);
+
+        let audit = collect_broken_references(
+            "rewardprop",
+            &["ID".into()],
+            Some("Name"),
+            &relations,
+            &rows,
+            &existing,
+            &meta,
+            1,
+            false,
+        );
+        assert_eq!(audit.scanned_rows, 2);
+        assert_eq!(audit.checked_relations, 2);
+        assert_eq!(audit.checked_references, 4);
+        assert_eq!(audit.broken_count, 2);
+        assert_eq!(audit.issues_truncated, true);
+        assert_eq!(audit.issues.len(), 1);
+        assert_eq!(audit.issues[0].missing_value, "88888");
+        assert_eq!(audit.issues[0].source_column, "Items");
+        assert_eq!(audit.issues[0].row_label.as_deref(), Some("新春礼盒"));
+        assert_eq!(audit.issues[0].target_table_comment, "道具表");
+        assert_eq!(audit.issues[0].row_identity.get("ID"), Some(&Some("10".into())));
     }
 }

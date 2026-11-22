@@ -13,7 +13,7 @@ use super::catalog::DbSnapshot;
 use super::discovery::ClientCandidate;
 use super::engine::{self, Overview};
 use super::model::{RelationKey, RelationStatus, RelationView, TableCoverage};
-use super::rows::{self, RowIncoming, RowOutgoing};
+use super::rows::{self, RowIncoming, RowOutgoing, TableReferenceAudit};
 use super::store::Verdict;
 
 const DEFAULT_CHANNEL: &str = "default";
@@ -31,6 +31,18 @@ pub struct TableRequest {
     pub connection_id: String,
     pub database: String,
     pub table: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableAuditRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub table: String,
+    #[serde(default)]
+    pub max_rows: Option<usize>,
+    #[serde(default)]
+    pub max_issues: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -266,6 +278,30 @@ pub async fn config_relations_row_references(app: AppHandle, request: RowRequest
         revision: engine::revision(&context),
         superseded: !ticket.is_current(),
     })
+}
+
+#[tauri::command]
+pub async fn config_relations_audit_table(
+    app: AppHandle,
+    request: TableAuditRequest,
+) -> Result<TableReferenceAudit, String> {
+    let context = engine::resolve(&app, &request.connection_id, &request.database).await?;
+    let (snapshot, index) = engine::index(&app, &context).await?;
+    let relations = index.outgoing(&request.table);
+    let pool = engine::pool(&app, &context).await?;
+    engine::run_db(&app, &context, WorkClass::Background, async {
+        rows::audit_table_references(
+            &pool,
+            &context.database,
+            &snapshot,
+            &request.table,
+            &relations,
+            request.max_rows,
+            request.max_issues,
+        )
+        .await
+    })
+    .await
 }
 
 #[tauri::command]

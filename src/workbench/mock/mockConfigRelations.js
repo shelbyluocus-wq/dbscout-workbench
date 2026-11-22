@@ -728,6 +728,99 @@ export function createMockConfigRelations({
     return { outgoing, revision: context.revision, superseded: false };
   }
 
+  function auditTable(context, tableName, { maxRows = 20000, maxIssues = 500 } = {}) {
+    const tableLower = String(tableName || "").toLowerCase();
+    const built = buildIndex(context);
+    const meta = built.tables.get(tableLower);
+    const outgoing = activeViews(built.views.filter((view) => view.sourceTable === tableLower));
+    if (!meta || !outgoing.length) {
+      return {
+        table: meta?.table_name || String(tableName || ""),
+        scannedRows: 0,
+        checkedRelations: 0,
+        checkedReferences: 0,
+        brokenCount: 0,
+        rowsTruncated: false,
+        issuesTruncated: false,
+        issues: [],
+      };
+    }
+    const allRows = rowsFor(context.connectionId, context.database, meta.table_name) || [];
+    const safeMaxRows = Math.max(1, Math.min(50000, Number(maxRows) || 20000));
+    const safeMaxIssues = Math.max(1, Math.min(2000, Number(maxIssues) || 500));
+    const rows = allRows.slice(0, safeMaxRows);
+    const primaryKeys = (meta.columns || []).filter((col) => col.is_primary_key).map(columnName);
+    const labelCol = labelColumn(meta);
+    const labelColName = labelCol ? columnName(labelCol) : "";
+
+    const existingCache = new Map();
+    const lookupKeys = (view) => {
+      const cacheKey = `${view.targetTable}\u001f${view.targetColumn.toLowerCase()}`;
+      if (existingCache.has(cacheKey)) return existingCache.get(cacheKey);
+      const target = built.tables.get(view.targetTable);
+      const keys = target && findColumn(target, view.targetColumn)
+        ? targetKeys(context, target, view.targetColumn)
+        : null;
+      existingCache.set(cacheKey, keys);
+      return keys;
+    };
+
+    let checkedReferences = 0;
+    let brokenCount = 0;
+    let issuesTruncated = false;
+    const issues = [];
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      for (const view of outgoing) {
+        const keys = lookupKeys(view);
+        if (!keys) continue;
+        const text = rowCellValue(row, view.sourceColumn);
+        const values = matchesRelationConstraints(row, view.sourceConstraints)
+          ? referenceValuesFromCell(view.kind, text, view.parser)
+          : [];
+        for (const value of values) {
+          checkedReferences += 1;
+          if (keys.has(value.toLowerCase())) continue;
+          brokenCount += 1;
+          if (issues.length >= safeMaxIssues) {
+            issuesTruncated = true;
+            continue;
+          }
+          const rowIdentity = {};
+          for (const pk of primaryKeys) {
+            rowIdentity[pk] = row[pk] == null ? null : String(row[pk]);
+          }
+          const targetMeta = built.tables.get(view.targetTable);
+          const preview = String(text ?? "").trim();
+          issues.push({
+            relationId: view.id,
+            rowIndex,
+            rowIdentity,
+            rowLabel: labelColName && row[labelColName] ? String(row[labelColName]).trim().slice(0, 48) : null,
+            sourceColumn: view.sourceColumn,
+            targetTable: targetMeta?.table_name || view.targetTable,
+            targetTableComment: String(targetMeta?.table_comment || ""),
+            targetColumn: view.targetColumn,
+            missingValue: value,
+            cellPreview: preview.length > 80 ? `${preview.slice(0, 79)}…` : preview,
+          });
+        }
+      }
+    }
+
+    return {
+      table: meta.table_name,
+      scannedRows: rows.length,
+      checkedRelations: outgoing.length,
+      checkedReferences,
+      brokenCount,
+      rowsTruncated: allRows.length > safeMaxRows,
+      issuesTruncated,
+      issues,
+    };
+  }
+
   function rowReferences(context, tableName, row) {
     const table = String(tableName || "").toLowerCase();
     const built = buildIndex(context);
@@ -783,6 +876,8 @@ export function createMockConfigRelations({
         return rowTargets(context, request.table, request.row || {});
       case "config_relations_row_references":
         return rowReferences(context, request.table, request.row || {});
+      case "config_relations_audit_table":
+        return auditTable(context, request.table, { maxRows: request.maxRows, maxIssues: request.maxIssues });
       case "config_relations_review_list":
         return reviewList(context);
       case "config_relations_review":
