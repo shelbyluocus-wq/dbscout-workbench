@@ -267,7 +267,7 @@ export function useGridEditor(
     const start = positionFromIndexes(tab, 0, columnIndex);
     const end = positionFromIndexes(tab, lastRow, columnIndex);
     if (!start || !end) return;
-    selectedCell.value = { tabId: tab.id, rowKey: start.position.rowKey, column: start.position.column };
+    setActiveSelectionPosition(tab, start);
     selectedRange.value = createGridSelection(tab.id, start.position, end.position);
   }
 
@@ -281,6 +281,7 @@ export function useGridEditor(
     if (indices.length === 0) {
       selectedRange.value = null;
       selectedCell.value = null;
+      textDraft.value = "";
       return;
     }
     const lastRow = lastSelectableRowIndex(tab);
@@ -289,7 +290,7 @@ export function useGridEditor(
     const start = positionFromIndexes(tab, 0, left);
     const end = positionFromIndexes(tab, lastRow, right);
     if (!start || !end) return;
-    selectedCell.value = { tabId: tab.id, rowKey: start.position.rowKey, column: start.position.column };
+    setActiveSelectionPosition(tab, start);
     selectedRange.value = createGridSelection(tab.id, start.position, end.position);
   }
 

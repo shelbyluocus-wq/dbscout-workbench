@@ -13,18 +13,36 @@ export function parseNumericCellValue(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-export function formatStatNumber(value) {
+export function formatStatNumber(value, { maxDecimals = null } = {}) {
   if (!Number.isFinite(value)) return "";
   const rounded = Number(value.toPrecision(12));
   if (Object.is(rounded, -0)) return "0";
+  if (
+    Number.isInteger(maxDecimals)
+    && maxDecimals >= 0
+    && Math.abs(rounded) >= 10 ** (-maxDecimals)
+    && Math.abs(rounded) < 1e15
+  ) {
+    const factor = 10 ** maxDecimals;
+    const capped = Math.round(rounded * factor) / factor;
+    if (Object.is(capped, -0)) return "0";
+    return String(capped);
+  }
   return String(rounded);
 }
 
 function statItems(count, numericCount, sum) {
+  const averageItem = (() => {
+    if (numericCount <= 0) return null;
+    const avg = sum / numericCount;
+    const text = formatStatNumber(avg, { maxDecimals: 4 });
+    const fullText = formatStatNumber(avg);
+    return fullText !== text
+      ? { key: "average", label: "平均值", text, fullText }
+      : { key: "average", label: "平均值", text };
+  })();
   return [
-    numericCount > 0
-      ? { key: "average", label: "平均值", text: formatStatNumber(sum / numericCount) }
-      : null,
+    averageItem,
     { key: "count", label: "计数", text: String(count) },
     numericCount > 0
       ? { key: "sum", label: "求和", text: formatStatNumber(sum) }

@@ -816,3 +816,29 @@ test("cancelImport discards the draft", async () => {
   assert.equal(backup.importDraft.database, "");
   backup.dispose();
 });
+
+test("loadSnapshots and loadFilterDatabases exclude MySQL system schemas", async () => {
+  const backup = useBackupCenter({
+    invokeWorkbench(command) {
+      if (command === "list_databases") {
+        return Promise.resolve(["information_schema", "performance_schema", "mysql", "sys", "edota_3cfg"]);
+      }
+      if (command === "list_snapshots") {
+        return Promise.resolve([
+          { path: "/snaps/information_schema/1.sql", database: "information_schema", connectionId: "c1" },
+          { path: "/snaps/performance_schema/1.sql", database: "performance_schema", connectionId: "c1" },
+          { path: "/snaps/edota_3cfg/1.sql", database: "edota_3cfg", connectionId: "c1" },
+        ]);
+      }
+      if (command === "list_audit_tables") return Promise.resolve({ items: [], hasMore: false });
+      if (command === "get_backup_config") return Promise.resolve({});
+      if (command === "list_tables") return Promise.resolve([]);
+      return Promise.resolve([]);
+    },
+    listen: () => () => {},
+  });
+  await backup.open({ connectionId: "c1", database: "edota_3cfg" });
+  assert.deepEqual(backup.filterDatabases.value, ["edota_3cfg"]);
+  assert.deepEqual(backup.snapshots.value.map((item) => item.database), ["edota_3cfg"]);
+  backup.dispose();
+});

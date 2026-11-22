@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { useRowSelection } from "./composables/useRowSelection.js";
 import { useConfirm } from "./composables/useConfirm.js";
 import { language } from "./i18n/index.js";
-import { buildRowKey, rowIdentityLabel } from "./utils/rowIdentity.js";
+import { buildRowKey, formatOrderedRowIdentity, rowIdentityLabel } from "./utils/rowIdentity.js";
 import { getInsertRowKey } from "./utils/gridRowIdentity.js";
 import { createVisualRowModel } from "./utils/visualRows.js";
 
@@ -542,6 +542,27 @@ test("rowIdentityLabel formats primary-key identity for display", () => {
   const long = rowIdentityLabel({ primaryKeys: ["k"] }, { k: "x".repeat(100) });
   assert.ok(long.length <= 60);
   assert.ok(long.endsWith("…"));
+});
+
+test("formatOrderedRowIdentity keeps composite primary keys in schema order regardless of object key order", () => {
+  const columns = [
+    { column_name: "CondID", is_primary_key: true },
+    { column_name: "Idx", is_primary_key: true },
+    { column_name: "ItemTitle", is_primary_key: false },
+  ];
+  assert.equal(
+    formatOrderedRowIdentity({ Idx: "2", CondID: "1" }, { primaryKeys: ["CondID", "Idx"], columns }),
+    "CondID=1 + Idx=2",
+  );
+  assert.equal(
+    formatOrderedRowIdentity({ Idx: "2", CondID: "1" }, { columns }),
+    "CondID=1 + Idx=2",
+  );
+  assert.equal(
+    formatOrderedRowIdentity({ b: "2", a: "1" }),
+    "a=1 + b=2",
+  );
+  assert.equal(formatOrderedRowIdentity({}, { emptyLabel: "（新增行）" }), "（新增行）");
 });
 
 async function inLanguage(locale, run) {

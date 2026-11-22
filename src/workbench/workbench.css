@@ -1047,6 +1047,27 @@ label:has(input[type="checkbox"]:disabled) {
   color: #fff;
 }
 
+.wb-titlebar-button.is-close::after {
+  left: auto;
+  right: 6px;
+  transform: translateY(-2px);
+}
+
+.wb-titlebar-button.is-close:hover::after,
+.wb-titlebar-button.is-close:focus-visible::after {
+  transform: translateY(0);
+}
+
+.wb-titlebar-controls.is-hover-suppressed .wb-titlebar-button:hover,
+.wb-titlebar-controls.is-hover-suppressed .wb-titlebar-button:focus-visible {
+  background: transparent;
+  color: var(--wb-window-control-text);
+}
+
+.wb-titlebar-controls.is-hover-suppressed .wb-titlebar-button::after {
+  opacity: 0;
+}
+
 .wb-window-icon {
   position: relative;
   width: 14px;
@@ -13630,10 +13651,12 @@ label:has(input[type="checkbox"]:disabled) {
 /* Relation filter chip: same pill language as the sort chip, in the hue of
    the relation it follows so it never reads as a warning. */
 .wb-relation-chip {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 210px;
   height: 24px;
   padding: 0 4px 0 8px;
   border: 1px solid var(--wb-relation-out-line);
@@ -13645,12 +13668,21 @@ label:has(input[type="checkbox"]:disabled) {
   white-space: nowrap;
 }
 
+.wb-relation-chip .wb-sort-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-relation-chip-icon {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
 }
 
 .wb-relation-chip .wb-sort-chip-clear {
+  flex: 0 0 auto;
   color: var(--wb-relation-out);
 }
 
@@ -14403,6 +14435,10 @@ label:has(input[type="checkbox"]:disabled) {
   min-width: 136px;
 }
 
+.wb-table-toolbar[data-fit="2"] .wb-relation-chip {
+  max-width: 170px;
+}
+
 .wb-table-toolbar[data-fit="2"] .wb-table-toolbar-actions .wb-toolbar-action-label {
   display: none;
 }
@@ -14422,6 +14458,10 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-table-toolbar[data-fit="3"] .wb-table-search-field {
   flex-basis: 122px;
   min-width: 122px;
+}
+
+.wb-table-toolbar[data-fit="3"] .wb-relation-chip {
+  max-width: 150px;
 }
 
 .wb-table-toolbar[data-fit="3"] .wb-table-toolbar-actions {

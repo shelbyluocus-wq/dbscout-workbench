@@ -34,6 +34,16 @@ test("formatStatNumber keeps integers clean and avoids float noise", () => {
   assert.equal(formatStatNumber(60), "60");
   assert.equal(formatStatNumber(0.1 + 0.2), "0.3");
   assert.equal(formatStatNumber(-0), "0");
+  assert.equal(formatStatNumber(130558 / 565, { maxDecimals: 4 }), "231.0761");
+  assert.equal(formatStatNumber(10 / 3, { maxDecimals: 4 }), "3.3333");
+  assert.equal(formatStatNumber(1e-8, { maxDecimals: 4 }), "1e-8");
+});
+
+test("buildSelectionStats caps long repeating averages to 4 decimals and keeps fullText", () => {
+  const stats = buildSelectionStats([1, 2, 2]);
+  assert.equal(stats.items[0].key, "average");
+  assert.equal(stats.items[0].text, "1.6667");
+  assert.equal(stats.items[0].fullText, "1.66666666667");
 });
 
 test("buildSelectionStats returns null when nothing is selected", () => {

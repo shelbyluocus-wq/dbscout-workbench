@@ -6354,3 +6354,22 @@ test("Escape cancels an in-progress fill without writing", async () => {
   assert.equal(tab.rows[1].level, "12");
   assert.equal(invokeCalls.length, 0);
 });
+
+test("selectColumn syncs textDraft to the first cell so stats and detail panel stay accurate", () => {
+  const { editor, tab } = createEditor();
+  assert.equal(editor.textDraft.value, "");
+
+  editor.selectColumn(tab, "level");
+  assert.equal(editor.selectedCell.value?.column, "level");
+  assert.equal(editor.textDraft.value, "10");
+
+  editor.selectColumn(tab, "name", { ctrlKey: true });
+  assert.equal(editor.selectedCell.value?.column, "name");
+  assert.equal(editor.textDraft.value, "Alice");
+
+  // Ctrl-deselecting every column clears both selection and draft.
+  editor.selectColumn(tab, "name", { ctrlKey: true });
+  editor.selectColumn(tab, "level", { ctrlKey: true });
+  assert.equal(editor.selectedCell.value, null);
+  assert.equal(editor.textDraft.value, "");
+});

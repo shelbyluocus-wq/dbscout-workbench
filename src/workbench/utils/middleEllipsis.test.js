@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { splitMiddleEllipsis } from "./middleEllipsis.js";
+import { splitMiddleEllipsis, splitTabLabel } from "./middleEllipsis.js";
 
 test("splitMiddleEllipsis leaves short names unsplit", () => {
   assert.deepEqual(splitMiddleEllipsis("users"), { head: "users", tail: "" });
@@ -36,4 +36,35 @@ test("splitMiddleEllipsis handles CJK and empty/nullish inputs safely", () => {
   const { head, tail } = splitMiddleEllipsis(cjk);
   assert.equal(head + tail, cjk);
   assert.ok(tail.length > 0);
+});
+
+test("splitTabLabel distinguishes colliding sibling game tables sharing *modelprop suffix", () => {
+  const siblings = [
+    "actbilayerdrawboxencmodelprop",
+    "actartifactdisplacemodelprop",
+    "actbilayerdrawboxmodelprop",
+    "actcontinuercencmodelprop",
+  ];
+  const enc = splitTabLabel("actbilayerdrawboxencmodelprop", siblings);
+  const base = splitTabLabel("actbilayerdrawboxmodelprop", siblings);
+  assert.equal(enc.head + enc.tail, "actbilayerdrawboxencmodelprop");
+  assert.equal(base.head + base.tail, "actbilayerdrawboxmodelprop");
+  assert.equal(enc.tail, "encmodelprop");
+  assert.equal(base.tail, "modelprop");
+  assert.notEqual(enc.tail, base.tail);
+
+  // Non-colliding long tables keep normal end-ellipsis instead of wasting space on `elprop`.
+  assert.deepEqual(
+    splitTabLabel("actartifactdisplacemodelprop", siblings),
+    { head: "actartifactdisplacemodelprop", tail: "" },
+  );
+  assert.deepEqual(
+    splitTabLabel("actcontinuercencmodelprop", siblings),
+    { head: "actcontinuercencmodelprop", tail: "" },
+  );
+
+  // Explicit delimiter suffixes still stay pinned on the right.
+  const tw = splitTabLabel("actcontinuercencmodelprop_tw", siblings);
+  assert.equal(tw.head + tw.tail, "actcontinuercencmodelprop_tw");
+  assert.ok(tw.tail.endsWith("_tw"));
 });

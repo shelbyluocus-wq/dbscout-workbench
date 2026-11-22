@@ -60,3 +60,34 @@ export function rowIdentityLabel(tab, row) {
     ? `${label.slice(0, IDENTITY_LABEL_MAX_LENGTH - 3)}…`
     : label;
 }
+
+// Formats a rowIdentity map in deterministic primary-key / column order so
+// composite primary keys never flip randomly across rows when deserialized
+// from an unordered backend map.
+export function formatOrderedRowIdentity(rowIdentity, { primaryKeys = [], columns = [], emptyLabel = "" } = {}) {
+  const entries = Object.entries(rowIdentity || {});
+  if (!entries.length) return emptyLabel;
+  const order = new Map();
+  const register = (name) => {
+    const key = String(name || "");
+    if (key && !order.has(key)) order.set(key, order.size);
+  };
+  if (Array.isArray(primaryKeys)) {
+    for (const key of primaryKeys) register(key);
+  }
+  if (Array.isArray(columns)) {
+    for (const column of columns) {
+      if (column?.is_primary_key || column?.isPrimaryKey || column?.column_key === "PRI" || column?.columnKey === "PRI") {
+        register(columnName(column));
+      }
+    }
+    for (const column of columns) register(columnName(column));
+  }
+  entries.sort(([left], [right]) => {
+    const leftIndex = order.has(left) ? order.get(left) : Number.MAX_SAFE_INTEGER;
+    const rightIndex = order.has(right) ? order.get(right) : Number.MAX_SAFE_INTEGER;
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+    return left.localeCompare(right);
+  });
+  return entries.map(([key, value]) => `${key}=${value ?? "NULL"}`).join(" + ");
+}

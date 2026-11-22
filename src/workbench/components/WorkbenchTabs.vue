@@ -9,7 +9,7 @@ import { useAliases } from "../composables/aliasStore.js";
 import { DATABASE_TEXT_COLOR_PRESETS, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { useMacosTitlebarDoubleClick } from "../composables/useMacosTitlebar.js";
 import { formatTableTabTitle } from "../utils/tabDisplay.js";
-import { splitMiddleEllipsis } from "../utils/middleEllipsis.js";
+import { splitTabLabel } from "../utils/middleEllipsis.js";
 import { assignTabShortcutHints } from "../utils/tabShortcutHints.js";
 import { ensureContrast } from "../utils/systemAccentTheme.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
@@ -296,8 +296,14 @@ const shortcutHintsByTabId = computed(() => {
   return map;
 });
 
+const tableLikeTabNames = computed(() => (
+  previewTabs.value
+    .filter((item) => isTableLikeTab(item))
+    .map((item) => tabMenuName(item))
+));
+
 function tabMenuNameParts(tab) {
-  return splitMiddleEllipsis(tabMenuName(tab));
+  return splitTabLabel(tabMenuName(tab), tableLikeTabNames.value);
 }
 
 const tabTones = computed(() => {

@@ -1876,6 +1876,7 @@ export default Object.freeze({
   "pageZoom.failed": "Could not zoom the page: {error}",
   "menu.window": "Window",
   "menu.minimize": "Minimize",
+  "titlebar.hideToTray": "Hide to tray",
   "menu.zoom": "Zoom",
   "menu.pinWindow": "Keep Window on Top",
   "menu.bringAllToFront": "Bring All to Front",

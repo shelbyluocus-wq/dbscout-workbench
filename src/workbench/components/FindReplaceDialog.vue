@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { gridSelectionCount } from "../utils/gridCellSelection.js";
+import { formatOrderedRowIdentity } from "../utils/rowIdentity.js";
 import { findSearchRanges, highlightSearchRanges, contiguousSearchPreview } from "../utils/searchMatch.js";
 
 const props = defineProps({
@@ -88,8 +89,8 @@ function columnTooltip(name) {
 
 /* ── 结果列表列宽（可拖拽调整，值列默认占满剩余空间）── */
 const resultsRef = ref(null);
-const identityColWidth = ref(110);
-const nameColWidth = ref(130);
+const identityColWidth = ref(152);
+const nameColWidth = ref(108);
 const valueColWidth = ref(null); // null = 占满剩余空间
 const COUNT_COL_WIDTH = 44;
 const COL_GAP = 10;
@@ -135,9 +136,11 @@ function startColumnResize(which, event) {
 }
 
 function identityLabel(rowIdentity) {
-  const entries = Object.entries(rowIdentity || {});
-  if (!entries.length) return "（新增行）";
-  return entries.map(([key, value]) => `${key}=${value ?? "NULL"}`).join(" + ");
+  return formatOrderedRowIdentity(rowIdentity, {
+    primaryKeys: props.paneState.activeDataTab?.primaryKeys,
+    columns: props.paneState.activeColumns,
+    emptyLabel: "（新增行）",
+  });
 }
 
 function matchPreviewHtml(match) {
@@ -443,10 +446,13 @@ function switchTab(tab) {
 /* ── 非模态窗口拖动与缩放 ── */
 const dialogRef = ref(null);
 useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef, modal: false });
+const DEFAULT_DIALOG_WIDTH = 460;
+const EXPANDED_DIALOG_WIDTH = 580;
 const dialogLeft = ref(0);
 const dialogTop = ref(0);
-const dialogWidth = ref(460);
+const dialogWidth = ref(DEFAULT_DIALOG_WIDTH);
 const dialogHeight = ref(null); // null = 高度随内容自适应；拖拽缩放后固定
+const hasUserResizedDialog = ref(false);
 const positionReady = ref(false);
 const VIEWPORT_INSET = 8;
 const MIN_DIALOG_WIDTH = 440;
@@ -605,6 +611,7 @@ function startDialogResize(event) {
   const maximumHeight = window.innerHeight - anchorTop - VIEWPORT_INSET;
   const minimumHeight = Math.min(measureNaturalDialogHeight() || startHeight, maximumHeight);
   const onMove = (moveEvent) => {
+    hasUserResizedDialog.value = true;
     dialogWidth.value = clamp(
       Math.round(startWidth + moveEvent.clientX - startX),
       MIN_DIALOG_WIDTH,
@@ -652,6 +659,21 @@ async function refreshListNow() {
 function toggleFindAll() {
   listExpanded.value = !listExpanded.value;
   if (listExpanded.value) {
+    if (!hasUserResizedDialog.value) {
+      const targetWidth = Math.min(
+        EXPANDED_DIALOG_WIDTH,
+        Math.max(MIN_DIALOG_WIDTH, window.innerWidth - VIEWPORT_INSET * 2),
+      );
+      if (dialogWidth.value < targetWidth) {
+        const delta = targetWidth - dialogWidth.value;
+        dialogWidth.value = targetWidth;
+        dialogLeft.value = clamp(
+          dialogLeft.value - delta,
+          VIEWPORT_INSET,
+          window.innerWidth - dialogWidth.value - VIEWPORT_INSET,
+        );
+      }
+    }
     // 值列在展开时固化为像素宽度：保证表头与各行严格同宽（否则表头按自身
     // 内容计算 1fr 会比数据行窄，横向滚动时右侧露出空白）。
     if (valueColWidth.value == null) {
@@ -660,6 +682,21 @@ function toggleFindAll() {
       });
     }
     void refreshListNow();
+  } else if (!hasUserResizedDialog.value) {
+    const targetWidth = Math.min(
+      DEFAULT_DIALOG_WIDTH,
+      Math.max(MIN_DIALOG_WIDTH, window.innerWidth - VIEWPORT_INSET * 2),
+    );
+    if (dialogWidth.value > targetWidth) {
+      const delta = dialogWidth.value - targetWidth;
+      dialogWidth.value = targetWidth;
+      dialogLeft.value = clamp(
+        dialogLeft.value + delta,
+        VIEWPORT_INSET,
+        window.innerWidth - dialogWidth.value - VIEWPORT_INSET,
+      );
+    }
+    valueColWidth.value = null;
   }
 }
 

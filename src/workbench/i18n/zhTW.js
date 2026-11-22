@@ -1877,6 +1877,7 @@ export default Object.freeze({
   "pageZoom.failed": "頁面縮放失敗：{error}",
   "menu.window": "視窗",
   "menu.minimize": "最小化",
+  "titlebar.hideToTray": "隱藏到系統匣",
   "menu.zoom": "縮放",
   "menu.pinWindow": "視窗置頂",
   "menu.bringAllToFront": "將所有視窗移到最前",

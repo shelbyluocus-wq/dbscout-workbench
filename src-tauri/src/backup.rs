@@ -478,6 +478,9 @@ pub async fn create_snapshot(
     config: &BackupConfig,
     label: Option<&str>,
 ) -> Result<SnapshotInfo, String> {
+    if is_system_database(database) {
+        return Err(format!("系统内置数据库 `{database}` 不支持创建快照"));
+    }
     let pool = snapshot_pool(mysql_url).await?;
     let result = stream_snapshot(app, &pool, connection_id, database, config, label).await;
     pool.close().await;
@@ -706,6 +709,9 @@ pub async fn restore_snapshot(
     snapshot_path: &str,
     config: &BackupConfig,
 ) -> Result<PathBuf, String> {
+    if is_system_database(database) {
+        return Err(format!("系统内置数据库 `{database}` 不支持还原快照"));
+    }
     // 1. Snapshot current state first (so restore is reversible).
     let pre_label = format!("pre-restore-{}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
     let pre_pool = snapshot_pool(mysql_url).await?;
@@ -1137,12 +1143,15 @@ fn collect_snapshots(
                 Some(name) => name.to_string(),
                 None => continue,
             };
-            if !db_dir.is_dir() {
+            if !db_dir.is_dir() || is_system_database(&db_name) {
                 continue;
             }
             for sql_path in read_dir_files(&db_dir, "sql") {
                 if let Ok(info) = snapshot_to_info(&conn_name, &db_name, &sql_path, None, location)
                 {
+                    if is_system_database(&info.database) {
+                        continue;
+                    }
                     entries.push(info);
                 }
             }
@@ -1868,6 +1877,23 @@ SET FOREIGN_KEY_CHECKS=1;";
         assert!(!is_system_database("game_db"));
         // Leading/trailing whitespace is trimmed before matching.
         assert!(is_system_database("  sys  "));
+    }
+
+    #[test]
+    fn collect_snapshots_skips_system_databases() {
+        let root = std::env::temp_dir().join(format!("dbscout-sys-snap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let conn = root.join("mysql-2");
+        for db in ["information_schema", "performance_schema", "mysql", "sys", "edota_3cfg"] {
+            let dir = conn.join(db);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("20261122-100000.sql"), "-- dummy\n").unwrap();
+        }
+        let mut entries = Vec::new();
+        collect_snapshots(&root, None, None, "current", &mut entries);
+        let dbs: Vec<&str> = entries.iter().map(|e| e.database.as_str()).collect();
+        assert_eq!(dbs, vec!["edota_3cfg"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

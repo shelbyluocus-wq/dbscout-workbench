@@ -2295,7 +2295,43 @@ async function withCurrentWindow(action) {
   }
 }
 
-function minimizeWindow() {
+const titlebarHoverSuppressed = ref(false);
+let titlebarSuppressCoords = null;
+
+function suppressTitlebarHover(target = null, pointerEvent = null) {
+  const active = target instanceof HTMLElement ? target : document.activeElement;
+  if (active instanceof HTMLElement && active.closest?.(".wb-titlebar-controls")) {
+    active.blur();
+  }
+  titlebarHoverSuppressed.value = true;
+  titlebarSuppressCoords = pointerEvent && Number.isFinite(pointerEvent.clientX)
+    ? { x: pointerEvent.clientX, y: pointerEvent.clientY }
+    : null;
+}
+
+function onWindowBlurTitlebarReset() {
+  suppressTitlebarHover();
+}
+
+function onVisibilityTitlebarReset() {
+  if (document.hidden) suppressTitlebarHover();
+}
+
+function onPointerMoveClearTitlebarSuppress(event) {
+  if (!titlebarHoverSuppressed.value) return;
+  if (
+    titlebarSuppressCoords
+    && Math.abs(event.clientX - titlebarSuppressCoords.x) <= 2
+    && Math.abs(event.clientY - titlebarSuppressCoords.y) <= 2
+  ) {
+    return;
+  }
+  titlebarHoverSuppressed.value = false;
+  titlebarSuppressCoords = null;
+}
+
+function minimizeWindow(event) {
+  suppressTitlebarHover(event?.currentTarget, event);
   withCurrentWindow((window) => window.minimize());
 }
 
@@ -2314,7 +2350,8 @@ function handleTitlebarDoubleClick() {
   macosTitlebar.runDoubleClickAction({ minimize: minimizeWindow, zoom: toggleMaximizeWindow });
 }
 
-function closeWindow() {
+function closeWindow(event) {
+  suppressTitlebarHover(event?.currentTarget, event);
   withCurrentWindow((window) => window.close());
 }
 
@@ -5599,6 +5636,9 @@ onMounted(async () => {
   if (!isFolderWindow) void updater.startBackgroundListener();
   void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);
+  window.addEventListener("blur", onWindowBlurTitlebarReset);
+  window.addEventListener("pointermove", onPointerMoveClearTitlebarSuppress, { passive: true });
+  document.addEventListener("visibilitychange", onVisibilityTitlebarReset);
   document.addEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
   window.addEventListener("pagehide", flushWorkspacePersistence);
   window.addEventListener("beforeunload", flushWorkspacePersistence);
@@ -5643,6 +5683,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   flushWorkspacePersistence();
+  window.removeEventListener("blur", onWindowBlurTitlebarReset);
+  window.removeEventListener("pointermove", onPointerMoveClearTitlebarSuppress);
+  document.removeEventListener("visibilitychange", onVisibilityTitlebarReset);
   document.removeEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
   window.removeEventListener("pagehide", flushWorkspacePersistence);
   window.removeEventListener("beforeunload", flushWorkspacePersistence);
@@ -5769,6 +5812,7 @@ onBeforeUnmount(() => {
       <div
         v-if="!usesNativeMacWindowControls"
         class="wb-titlebar-controls"
+        :class="{ 'is-hover-suppressed': titlebarHoverSuppressed }"
         :aria-label="t('m_e7cfeddae1f5')"
       >
         <button
@@ -5792,7 +5836,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="wb-titlebar-button is-close"
-          :aria-label="t('m_1ae6b0a0f826')"
+          :aria-label="isFolderWindow ? t('m_1ae6b0a0f826') : t('titlebar.hideToTray')"
           :title="t('m_3fd47edce45b')"
           @click.stop="closeWindow"
         >

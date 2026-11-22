@@ -170,3 +170,9 @@ test("workbench pane wires table actions and preserves non-data fallback menu", 
   assert.match(pane, /v-else-if="activeDesignTab"[\s\S]*?wb-split-more-btn/);
   assert.match(pane, /v-else[\s\S]*?wb-pane-empty-actions[\s\S]*?wb-split-more-btn/);
 });
+
+test("relation filter chip truncates cleanly so primary toolbar actions stay visible", () => {
+  const styles = read("./workbench.css");
+  assert.match(styles, /\.wb-relation-chip\s*\{[^}]*flex:\s*0 1 auto[^}]*max-width:\s*210px/s);
+  assert.match(styles, /\.wb-relation-chip \.wb-sort-chip-label\s*\{[^}]*text-overflow:\s*ellipsis/s);
+});

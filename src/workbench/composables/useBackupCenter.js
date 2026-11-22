@@ -9,6 +9,11 @@ import {
 
 const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";
 const BACKUP_JOB_EVENT = "backup-job";
+const SYSTEM_DATABASES = new Set(["information_schema", "performance_schema", "mysql", "sys"]);
+
+function isSystemDatabase(name) {
+  return SYSTEM_DATABASES.has(String(name || "").trim().toLowerCase());
+}
 
 function errorMessage(error) {
   return String(error?.message || error || "未知错误");
@@ -145,7 +150,9 @@ export function useBackupCenter(options = {}) {
     try {
       const dbList = await invokeWorkbench("list_databases", { connectionId: filters.connectionId });
       if (token !== filterLoadToken || !dialog.open) return [];
-      const databases = Array.isArray(dbList) ? dbList.map((item) => String(item || "").trim()).filter(Boolean) : [];
+      const databases = Array.isArray(dbList)
+        ? dbList.map((item) => String(item || "").trim()).filter((item) => item && !isSystemDatabase(item))
+        : [];
       filterDatabases.value = ensureSelectedOption(databases, filters.database);
       return filterDatabases.value;
     } catch (error) {
@@ -236,7 +243,10 @@ export function useBackupCenter(options = {}) {
       const request = {};
       if (filters.connectionId) request.connectionId = filters.connectionId;
       if (filters.database) request.database = filters.database;
-      snapshots.value = await invokeWorkbench("list_snapshots", { request });
+      const list = await invokeWorkbench("list_snapshots", { request });
+      snapshots.value = Array.isArray(list)
+        ? list.filter((item) => !isSystemDatabase(item?.database))
+        : [];
       lastError.value = "";
       return true;
     } catch (error) {

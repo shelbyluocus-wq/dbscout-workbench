@@ -481,6 +481,7 @@ onBeforeUnmount(() => {
             v-for="item in selectionStats.items"
             :key="item.key"
             class="wb-cell-detail-stat"
+            :title="item.fullText ? `${t(`selectionStats.${item.key}`)} ${item.fullText}` : undefined"
           >
             <span class="wb-cell-detail-stat-label">{{ t(`selectionStats.${item.key}`) }}</span>
             <strong class="wb-cell-detail-stat-value">{{ item.text }}</strong>
