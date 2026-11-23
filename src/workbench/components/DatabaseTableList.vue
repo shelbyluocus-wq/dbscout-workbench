@@ -3,6 +3,7 @@ import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Star } from "lucide-vue-next";
 import {
+  computeAutoHomeColumnWidths,
   defaultHomeColumnLayout,
   fittedFillWidth,
   formatDataSize,
@@ -103,24 +104,22 @@ const columns = computed(() => columnLayout.value.map((item) => {
   return { ...definition, label: t(({ name: 'm_699c6d62a836', size: 'm_7640eaa08b0c', modified: 'm_257bbcc44c83', comment: 'm_daede9881787' })[item.key]), width: columnWidths.value[item.key] };
 }));
 const columnWidths = computed(() => {
-  const maxName = props.tables.reduce((max, table) => Math.max(max, textWidth(tableName(table), 13)), 0);
-  const maxComment = props.tables.reduce((max, table) => Math.max(max, textWidth(tableComment(table) || t('m_8445d1bad03f'), 12.5)), 0);
-  const automatic = {
-    name: clampWidth(maxName + (props.readOnly ? 126 : 76), 160, 520),
-    size: 116,
-    modified: 176,
-    comment: clampWidth(maxComment + 28, 180, 520),
-  };
+  const automatic = computeAutoHomeColumnWidths(props.tables, {
+    readOnly: props.readOnly,
+    emptyComment: t('m_8445d1bad03f'),
+  });
   const widths = Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
-  // Only an automatically sized fill column adapts to the pane; a width the
-  // user dragged stays exactly as set.
-  const fill = columnLayout.value.find((item) => homeColumnDefinition(item.key).fill && !item.width);
-  if (fill) {
+  // On narrow panes, trim an automatically sized comment column toward its
+  // automatic minimum so the table avoids horizontal scroll; a width the user
+  // dragged always stays exactly as set, and wide panes never stretch it.
+  const autoComment = columnLayout.value.find((item) => item.key === "comment" && !item.width);
+  if (autoComment) {
     const otherColumnsWidth = columnLayout.value
-      .reduce((sum, item) => (item.key === fill.key ? sum : sum + widths[item.key]), 0);
-    widths[fill.key] = fittedFillWidth({
-      preferred: widths[fill.key],
-      minWidth: homeColumnDefinition(fill.key).minWidth,
+      .reduce((sum, item) => (item.key === autoComment.key ? sum : sum + widths[item.key]), 0);
+    const commentDefinition = homeColumnDefinition(autoComment.key);
+    widths[autoComment.key] = fittedFillWidth({
+      preferred: widths[autoComment.key],
+      minWidth: commentDefinition.autoMinWidth ?? commentDefinition.minWidth,
       available: surfaceWidth.value,
       otherColumnsWidth,
     });
@@ -206,10 +205,6 @@ function columnCellTitle(table, key) {
     });
   }
   return columnCellValue(table, key);
-}
-
-function textWidth(value, fontSize = 13) {
-  return String(value || "").length * Math.max(7, fontSize * 0.56);
 }
 
 function clampWidth(value, min, max) {
@@ -320,23 +315,31 @@ function beginColumnResize(column, event) {
     key,
     startX: event.clientX,
     startWidth: renderedWidth || column.width,
+    moved: false,
   };
   window.addEventListener("pointermove", continueColumnResize);
   window.addEventListener("pointerup", finishColumnResize, { once: true });
+  window.addEventListener("pointercancel", finishColumnResize, { once: true });
 }
 
 function continueColumnResize(event) {
   const resize = columnResize.value;
   if (!resize) return;
+  const delta = event.clientX - resize.startX;
+  if (!resize.moved && Math.abs(delta) < 1) return;
+  resize.moved = true;
   const definition = homeColumnDefinition(resize.key);
-  const width = clampWidth(resize.startWidth + event.clientX - resize.startX, definition.minWidth, definition.maxWidth);
+  const width = clampWidth(resize.startWidth + delta, definition.minWidth, definition.maxWidth);
   columnLayout.value = columnLayout.value.map((column) => column.key === resize.key ? { ...column, width } : column);
 }
 
 function finishColumnResize() {
   window.removeEventListener("pointermove", continueColumnResize);
+  window.removeEventListener("pointerup", finishColumnResize);
+  window.removeEventListener("pointercancel", finishColumnResize);
+  const moved = Boolean(columnResize.value?.moved);
   columnResize.value = null;
-  saveHomeColumnLayout(columnLayout.value);
+  if (moved) saveHomeColumnLayout(columnLayout.value);
   window.setTimeout(() => {
     suppressHeaderClick.value = false;
   }, 0);
@@ -542,6 +545,7 @@ function scrollTableIntoView(name, { block = "center" } = {}) {
 function resetView() {
   window.removeEventListener("pointermove", continueColumnResize);
   window.removeEventListener("pointerup", finishColumnResize);
+  window.removeEventListener("pointercancel", finishColumnResize);
   window.removeEventListener("pointermove", updateBoxSelection);
   window.removeEventListener("pointerup", finishBoxSelection);
   columnResize.value = null;
@@ -597,6 +601,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", continueColumnResize);
+  window.removeEventListener("pointerup", finishColumnResize);
+  window.removeEventListener("pointercancel", finishColumnResize);
+  window.removeEventListener("pointermove", updateBoxSelection);
+  window.removeEventListener("pointerup", finishBoxSelection);
   surfaceObserver?.disconnect();
   surfaceObserver = null;
 });
@@ -627,7 +636,12 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
       <span>{{ t('m_ca3e16dc2317') }}</span>
     </div>
     <template v-else>
-      <div class="wb-dbhome-table-header" :style="{ gridTemplateColumns, width: tableWidth }" role="row">
+      <div
+        class="wb-dbhome-table-header"
+        :style="{ gridTemplateColumns, width: tableWidth }"
+        role="row"
+        @contextmenu.prevent.stop="openHeaderMenu"
+      >
         <button
           v-for="column in columns"
           :key="column.key"
@@ -636,6 +650,7 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
           :class="{
             'is-sorted': sortDirection(column.key),
             'is-end': column.align === 'end',
+            'is-resizing': columnResize?.key === column.key,
             'is-drop-before': dropTarget?.key === column.key && dropTarget?.position === 'before',
             'is-drop-after': dropTarget?.key === column.key && dropTarget?.position === 'after',
           }"

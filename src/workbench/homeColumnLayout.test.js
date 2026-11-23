@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  computeAutoHomeColumnWidths,
   defaultHomeColumnLayout,
+  estimateHomeTextWidth,
   fittedFillWidth,
   formatDataSize,
   formatModifiedAtTooltip,
@@ -18,11 +20,33 @@ test("homepage columns default to name size modified comment", () => {
 });
 
 test("homepage column layout validates widths and restores missing columns", () => {
-  const layout = normalizeHomeColumnLayout([{ key: "comment", width: 9999 }, { key: "name", width: 20 }]);
+  const layout = normalizeHomeColumnLayout([
+    { key: "comment", width: 9999 },
+    { key: "name", width: 20 },
+    { key: "size", width: 10 },
+    { key: "modified", width: 10 },
+  ]);
   assert.deepEqual(layout.map((column) => column.key), ["comment", "name", "size", "modified"]);
-  assert.equal(layout[0].width, 520);
-  assert.equal(layout[1].width, 160);
+  assert.equal(layout[0].width, 640);
+  assert.equal(layout[1].width, 120);
+  assert.equal(layout[2].width, 72);
+  assert.equal(layout[3].width, 88);
   assert.deepEqual(loadHomeColumnLayout({ getItem: () => "broken" }), defaultHomeColumnLayout());
+});
+
+test("homepage column layout allows compact manual widths for every column", () => {
+  const layout = normalizeHomeColumnLayout([
+    { key: "name", width: 120 },
+    { key: "comment", width: 80 },
+    { key: "size", width: 72 },
+    { key: "modified", width: 96 },
+  ]);
+  assert.deepEqual(layout, [
+    { key: "name", width: 120 },
+    { key: "comment", width: 80 },
+    { key: "size", width: 72 },
+    { key: "modified", width: 96 },
+  ]);
 });
 
 test("homepage columns reorder without dropping metadata", () => {
@@ -47,23 +71,54 @@ test("data size formatting covers raw bytes through terabytes", () => {
   assert.equal(formatDataSize(1024 ** 3), "1.00 GB");
 });
 
-test("numeric home columns align to the end and the comment column fills spare width", () => {
+test("numeric home columns align to the end and every column keeps an explicit pixel track", () => {
   assert.equal(homeColumnDefinition("size").align, "end");
   assert.equal(homeColumnDefinition("name").align, "start");
   const sized = [
-    { key: "name", width: 240 },
-    { key: "comment", width: 300 },
-    { key: "size", width: 116 },
+    { key: "name", width: 210 },
+    { key: "comment", width: 160 },
+    { key: "size", width: 96 },
+    { key: "modified", width: 160 },
   ];
-  assert.equal(homeGridTemplateColumns(sized), "240px minmax(300px, 1fr) 116px");
-  assert.equal(homeTableWidthCss(sized), "max(100%, 656px)");
+  assert.equal(homeGridTemplateColumns(sized), "210px 160px 96px 160px");
+  assert.equal(homeTableWidthCss(sized), "max(100%, 626px)");
 });
 
-test("an automatic fill column shrinks to fit the pane but keeps its minimum", () => {
-  assert.equal(fittedFillWidth({ preferred: 420, minWidth: 180, available: 900, otherColumnsWidth: 532 }), 368);
-  assert.equal(fittedFillWidth({ preferred: 300, minWidth: 180, available: 1400, otherColumnsWidth: 532 }), 300);
-  assert.equal(fittedFillWidth({ preferred: 420, minWidth: 180, available: 600, otherColumnsWidth: 532 }), 180);
-  assert.equal(fittedFillWidth({ preferred: 420, minWidth: 180, available: 0, otherColumnsWidth: 532 }), 420);
+test("automatic homepage widths stay compact despite long outliers and wide CJK comments", () => {
+  assert.ok(estimateHomeTextWidth("活动配置", 13) > estimateHomeTextWidth("abcd", 13));
+  const tables = [
+    ...Array.from({ length: 18 }, (_, index) => ({
+      tableName: `act${index + 1}shouchong1prop`,
+      tableComment: "H-活动-多轮冲刺任务奖励模板",
+    })),
+    {
+      tableName: "super_long_outlier_cross_server_activity_rank_reward_template_prop",
+      tableComment: "这是一个非常非常非常非常长的异常表格说明备注用于测试自动列宽不会被极端条目撑爆",
+    },
+  ];
+
+  const widths = computeAutoHomeColumnWidths(tables, { emptyComment: "无备注" });
+  assert.ok(widths.name >= 156 && widths.name <= 250, `expected compact name width, got ${widths.name}`);
+  assert.ok(widths.comment >= 120 && widths.comment <= 240, `expected compact comment width, got ${widths.comment}`);
+  assert.equal(widths.size, 96);
+  assert.equal(widths.modified, 160);
+
+  const emptyCommentWidths = computeAutoHomeColumnWidths(
+    [{ tableName: "users", tableComment: "" }, { tableName: "orders", tableComment: "" }],
+    { emptyComment: "无备注" },
+  );
+  assert.equal(emptyCommentWidths.name, 156);
+  assert.equal(emptyCommentWidths.comment, 120);
+
+  const readOnlyWidths = computeAutoHomeColumnWidths(tables, { readOnly: true, emptyComment: "无备注" });
+  assert.ok(readOnlyWidths.name > widths.name, "read-only badge reserves extra width in name column");
+});
+
+test("automatic comment width trims to fit narrow panes without expanding on wide panes", () => {
+  assert.equal(fittedFillWidth({ preferred: 240, minWidth: 120, available: 640, otherColumnsWidth: 466 }), 174);
+  assert.equal(fittedFillWidth({ preferred: 240, minWidth: 120, available: 1400, otherColumnsWidth: 466 }), 240);
+  assert.equal(fittedFillWidth({ preferred: 240, minWidth: 120, available: 520, otherColumnsWidth: 466 }), 120);
+  assert.equal(fittedFillWidth({ preferred: 240, minWidth: 120, available: 0, otherColumnsWidth: 466 }), 240);
 });
 
 test("modified-time tooltip formats source and actor labels cleanly", () => {

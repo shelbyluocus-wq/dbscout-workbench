@@ -1,13 +1,13 @@
 const STORAGE_KEY = "dbscout.home.columns.v1";
 
 // `align: "end"` right-aligns numeric values (and their header) so magnitudes
-// line up; the `fill` column keeps its width as a minimum and absorbs the
-// remaining space so the table never leaves an empty strip on wide panes.
+// line up. Every column keeps an explicit pixel track so none stretches into
+// spare pane width or resists being dragged narrower.
 export const HOME_COLUMN_DEFINITIONS = Object.freeze([
-  { key: "name", label: "表名", minWidth: 160, maxWidth: 520, defaultWidth: 240, align: "start" },
-  { key: "size", label: "数据大小", minWidth: 100, maxWidth: 180, defaultWidth: 116, align: "end" },
-  { key: "modified", label: "修改时间", minWidth: 150, maxWidth: 240, defaultWidth: 176, align: "start" },
-  { key: "comment", label: "备注", minWidth: 180, maxWidth: 520, defaultWidth: 280, align: "start", fill: true },
+  { key: "name", label: "表名", minWidth: 120, maxWidth: 520, defaultWidth: 200, autoMinWidth: 156, autoMaxWidth: 250, align: "start" },
+  { key: "size", label: "数据大小", minWidth: 72, maxWidth: 180, defaultWidth: 96, autoMinWidth: 96, autoMaxWidth: 96, align: "end" },
+  { key: "modified", label: "修改时间", minWidth: 88, maxWidth: 240, defaultWidth: 160, autoMinWidth: 160, autoMaxWidth: 160, align: "start" },
+  { key: "comment", label: "备注", minWidth: 80, maxWidth: 640, defaultWidth: 200, autoMinWidth: 120, autoMaxWidth: 240, align: "start" },
 ]);
 
 const definitionByKey = new Map(HOME_COLUMN_DEFINITIONS.map((column) => [column.key, column]));
@@ -75,19 +75,98 @@ export function homeColumnDefinition(key) {
   return definitionByKey.get(key) || HOME_COLUMN_DEFINITIONS[0];
 }
 
-// grid-template-columns for sized columns ({ key, width }): fixed tracks, except
-// the fill column, which grows from its width into any spare space.
+// grid-template-columns for sized columns ({ key, width }): fixed pixel tracks
+// so every column honors its exact width and can always be dragged narrower.
 export function homeGridTemplateColumns(columns = []) {
   return columns
-    .map((column) => (homeColumnDefinition(column.key).fill
-      ? `minmax(${column.width}px, 1fr)`
-      : `${column.width}px`))
+    .map((column) => `${column.width}px`)
     .join(" ");
 }
 
-// Automatic width for the fill column: shrink toward its minimum so the table
-// fits the visible surface (long comments then truncate instead of forcing a
-// horizontal scroll), never below the minimum and never above its content width.
+function isWideCodePoint(code) {
+  return (code >= 0x2e80 && code <= 0xa4cf)
+    || (code >= 0xac00 && code <= 0xd7af)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0xfe10 && code <= 0xfe6f)
+    || (code >= 0xff00 && code <= 0xff60)
+    || (code >= 0xffe0 && code <= 0xffe6);
+}
+
+export function estimateHomeTextWidth(value, fontSize = 13, maxWidth = Number.POSITIVE_INFINITY) {
+  const text = String(value || "");
+  if (!text) return 0;
+  const narrow = Math.max(7, fontSize * 0.56);
+  const wide = fontSize;
+  let width = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    width += isWideCodePoint(text.charCodeAt(index)) ? wide : narrow;
+    if (width >= maxWidth) return maxWidth;
+  }
+  return width;
+}
+
+function percentileNumber(values, ratio = 0.85) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index];
+}
+
+function clampAutoWidth(value, min, max) {
+  return Math.max(min, Math.min(max, Math.ceil(Number(value) || min)));
+}
+
+// Default widths stay compact by using the 85th percentile of table names and
+// non-empty comments capped at each column's autoMaxWidth, so a few outliers
+// never blow up the whole homepage table.
+export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emptyComment = "" } = {}) {
+  const nameDef = homeColumnDefinition("name");
+  const sizeDef = homeColumnDefinition("size");
+  const modifiedDef = homeColumnDefinition("modified");
+  const commentDef = homeColumnDefinition("comment");
+  const nameOverhead = readOnly ? 132 : 92;
+  const nameAutoMax = nameDef.autoMaxWidth + (readOnly ? 36 : 0);
+  const commentOverhead = 24;
+
+  const list = Array.isArray(tables) ? tables : [];
+  if (!list.length) {
+    return {
+      name: nameDef.defaultWidth,
+      size: sizeDef.defaultWidth,
+      modified: modifiedDef.defaultWidth,
+      comment: commentDef.defaultWidth,
+    };
+  }
+
+  const sampleLimit = 400;
+  const step = list.length > sampleLimit ? list.length / sampleLimit : 1;
+  const nameWidths = [];
+  const commentWidths = [];
+  const count = Math.min(list.length, sampleLimit);
+  for (let i = 0; i < count; i += 1) {
+    const table = list[step === 1 ? i : Math.floor(i * step)];
+    const name = String(table?.tableName || table?.table_name || "").trim();
+    if (name) nameWidths.push(estimateHomeTextWidth(name, 13, nameAutoMax));
+    const comment = String(table?.tableComment || table?.table_comment || "").trim();
+    if (comment) commentWidths.push(estimateHomeTextWidth(comment, 13, commentDef.autoMaxWidth));
+  }
+
+  const targetName = nameWidths.length ? percentileNumber(nameWidths, 0.85) + nameOverhead : nameDef.defaultWidth;
+  const targetComment = commentWidths.length
+    ? percentileNumber(commentWidths, 0.85) + commentOverhead
+    : estimateHomeTextWidth(emptyComment, 13, commentDef.autoMaxWidth) + commentOverhead;
+
+  return {
+    name: clampAutoWidth(targetName, nameDef.autoMinWidth, nameAutoMax),
+    size: sizeDef.defaultWidth,
+    modified: modifiedDef.defaultWidth,
+    comment: clampAutoWidth(targetComment, commentDef.autoMinWidth, commentDef.autoMaxWidth),
+  };
+}
+
+// Automatic width for the comment column on tight panes: trim toward its
+// automatic minimum so the table fits without horizontal scrolling, never
+// expanding past its compact preferred width.
 export function fittedFillWidth({ preferred, minWidth, available, otherColumnsWidth }) {
   if (!(available > 0)) return preferred;
   const room = Math.floor(available - otherColumnsWidth);
