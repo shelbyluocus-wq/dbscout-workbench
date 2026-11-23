@@ -95,7 +95,25 @@ fn push_unique(list: &mut Vec<String>, text: &str) {
     }
 }
 
-fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
+type DirectiveMap = BTreeMap<(String, String), (String, String, comments::CommentDirective)>;
+
+fn collect_comment_directives(snapshot: &DbSnapshot) -> DirectiveMap {
+    let mut directives = DirectiveMap::new();
+    for (table_name, table) in &snapshot.tables {
+        for column in &table.columns {
+            let directive = comments::parse_directive(&column.comment, snapshot);
+            if directive != comments::CommentDirective::None {
+                directives.insert(
+                    (table_name.clone(), column.name.to_lowercase()),
+                    (column.name.clone(), column.comment.trim().to_string(), directive),
+                );
+            }
+        }
+    }
+    directives
+}
+
+fn gather(inputs: &Inputs<'_>, directives: &DirectiveMap) -> BTreeMap<RelationKey, Candidate> {
     let mut candidates: BTreeMap<RelationKey, Candidate> = BTreeMap::new();
     let mut profiles = inputs.formats.clone();
     // Metadata-declared formats work on first paint, before background sampling.
@@ -262,6 +280,71 @@ fn gather(inputs: &Inputs<'_>) -> BTreeMap<RelationKey, Candidate> {
             }
             candidate.source_constraints = rule.constraints;
             candidate.encoded = true;
+        }
+    }
+    if !directives.is_empty() {
+        let mut preserved_code: HashMap<(String, String, String, String), (Vec<Evidence>, BTreeSet<String>)> = HashMap::new();
+        for (key, candidate) in &candidates {
+            let source_id = (key.source_table.clone(), key.source_column.to_lowercase());
+            if directives.contains_key(&source_id) && !candidate.code.is_empty() {
+                let endpoint = (
+                    source_id.0,
+                    source_id.1,
+                    key.target_table.clone(),
+                    key.target_column.to_lowercase(),
+                );
+                let entry = preserved_code.entry(endpoint).or_default();
+                for item in &candidate.code {
+                    if !entry.0.contains(item) {
+                        entry.0.push(item.clone());
+                    }
+                }
+                entry.1.extend(candidate.fingerprints.iter().cloned());
+            }
+        }
+        candidates.retain(|key, _| {
+            !directives.contains_key(&(key.source_table.clone(), key.source_column.to_lowercase()))
+        });
+        for ((source_table, source_col_lower), (source_column, comment_text, directive)) in directives {
+            let comments::CommentDirective::Relations(relations) = directive else {
+                continue;
+            };
+            for rel in relations {
+                let key = RelationKey {
+                    source_table: source_table.clone(),
+                    source_column: source_column.clone(),
+                    target_table: rel.target_table.clone(),
+                    target_column: rel.target_column.clone(),
+                    kind: rel.kind,
+                };
+                let mut candidate = Candidate {
+                    comments: vec![comment_text.clone()],
+                    encoded: true,
+                    parser: rel.parser.clone().or_else(|| {
+                        (rel.kind == RelationKind::List)
+                            .then(|| {
+                                profiles
+                                    .get(source_table)
+                                    .and_then(|profile| profile.columns.get(source_col_lower))
+                                    .filter(|parser| !matches!(parser, ReferenceParser::Unsupported))
+                                    .cloned()
+                            })
+                            .flatten()
+                    }),
+                    ..Candidate::default()
+                };
+                let endpoint = (
+                    source_table.clone(),
+                    source_col_lower.clone(),
+                    rel.target_table.clone(),
+                    rel.target_column.to_lowercase(),
+                );
+                if let Some((code, fingerprints)) = preserved_code.get(&endpoint) {
+                    candidate.code = code.clone();
+                    candidate.fingerprints = fingerprints.clone();
+                }
+                candidates.insert(key, candidate);
+            }
         }
     }
     candidates
@@ -458,7 +541,8 @@ pub struct RelationIndex {
 }
 
 pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
-    let candidates = gather(inputs);
+    let directives = collect_comment_directives(inputs.snapshot);
+    let candidates = gather(inputs, &directives);
     let empty = BTreeMap::new();
     let decisions = inputs.record.map(|record| &record.decisions).unwrap_or(&empty);
     let mut verdicts = Verdicts {
@@ -485,6 +569,9 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
             continue;
         }
         let source = &decision.relation;
+        if directives.contains_key(&(source.source_table.clone(), source.source_column.to_lowercase())) {
+            continue;
+        }
         if super::project_formats::matches_schema(inputs.snapshot) && super::project_relations::suppressed(source) {
             if decision.auto { continue; }
             if let Some(mut view) = verdicts.orphan(id, decision, inputs.snapshot) {
@@ -558,10 +645,13 @@ pub fn assemble(inputs: &Inputs<'_>) -> RelationIndex {
             .filter(|view| view.parser == Some(ReferenceParser::Unsupported))
             .map(|view| view.key.source_column.to_lowercase()).collect::<HashSet<_>>();
         for column in &table.columns {
-            let unsupported = column.name.to_ascii_lowercase().ends_with("func")
-                || inputs.formats.get(name).and_then(|profile| profile.columns.get(&column.name.to_lowercase()))
-                    == Some(&ReferenceParser::Unsupported)
-                || unsupported_relations.contains(&column.name.to_lowercase());
+            let col_lower = column.name.to_lowercase();
+            let has_directive = directives.contains_key(&(name.clone(), col_lower.clone()));
+            let unsupported = (!has_directive
+                && (column.name.to_ascii_lowercase().ends_with("func")
+                    || inputs.formats.get(name).and_then(|profile| profile.columns.get(&col_lower))
+                        == Some(&ReferenceParser::Unsupported)))
+                || unsupported_relations.contains(&col_lower);
             if unsupported { columns.push(column.name.clone()); }
         }
         if !columns.is_empty() { index.unsupported_fields.insert(name.clone(), columns); }
@@ -1006,5 +1096,88 @@ mod tests {
         let heroes = index.coverage("heroprop");
         assert!(matches!(heroes.gaps.as_slice(), [CoverageGap::NotUsedByClient]));
         assert!(index.coverage("rewardprop").complete);
+    }
+
+    #[test]
+    fn explicit_comment_directives_override_fuzzy_code_formats_and_orphans() {
+        let db = snapshot(vec![
+            table("goodsprop", &[("ID", "int", "", true), ("Name", "varchar", "", false)]),
+            table("heroprop", &[("ID", "int", "", true), ("Quality", "int", "", false)]),
+            table(
+                "unionhelpqualityprop",
+                &[
+                    ("Lvl", "int", "", true),
+                    (
+                        "MaxUnitQuality",
+                        "tinyint",
+                        "引用 heroprop.Quality；可选范围为 goodsprop.ID [枚举: 1=N, 2=R, 5=UR]",
+                        false,
+                    ),
+                    ("PlainNum", "int", "对应 heroprop.ID [无关联]", false),
+                    ("ForceGoods", "int", "原本写了 heroprop.ID [关联: goodsprop.ID]", false),
+                    ("ForceList", "json", "道具列表 [列表关联: goodsprop.ID @ ID]", false),
+                ],
+            ),
+        ]);
+        let code_report = report(vec![
+            code(("unionhelpqualityprop", "MaxUnitQuality"), ("heroprop", "Quality"), "c1"),
+            code(("unionhelpqualityprop", "PlainNum"), ("heroprop", "ID"), "c2"),
+            code(("unionhelpqualityprop", "ForceGoods"), ("heroprop", "ID"), "c3"),
+            code(("unionhelpqualityprop", "ForceGoods"), ("goodsprop", "ID"), "c4"),
+        ]);
+        let mut record = ServerRecord::default();
+        let old_key = RelationKey {
+            source_table: "unionhelpqualityprop".into(),
+            source_column: "MaxUnitQuality".into(),
+            target_table: "heroprop".into(),
+            target_column: "Quality".into(),
+            kind: RelationKind::Value,
+        };
+        record.decisions.insert(
+            old_key.id(),
+            Decision {
+                verdict: Verdict::Confirmed,
+                auto: false,
+                code_fingerprints: BTreeSet::from(["c1".to_string()]),
+                overridden_code: BTreeSet::new(),
+                relation: old_key,
+                decided_at: "2026-01-01 10:00".into(),
+            },
+        );
+        let formats = BTreeMap::new();
+        let index = assemble(&Inputs {
+            snapshot: &db,
+            code: &code_report,
+            formats: &formats,
+            formats_pending: false,
+            record: Some(&record),
+            now: "2026-11-23 14:50",
+        });
+
+        let outgoing = index.outgoing("unionhelpqualityprop");
+        assert!(
+            outgoing.iter().all(|view| view.key.source_column != "MaxUnitQuality"),
+            "enum directive must suppress all fuzzy, code and orphan relations"
+        );
+        assert!(
+            outgoing.iter().all(|view| view.key.source_column != "PlainNum"),
+            "no-relation directive must suppress all relations including client code"
+        );
+        let force_goods = outgoing
+            .iter()
+            .filter(|view| view.key.source_column == "ForceGoods")
+            .collect::<Vec<_>>();
+        assert_eq!(force_goods.len(), 1);
+        assert_eq!(force_goods[0].key.target_table, "goodsprop");
+        assert_eq!(force_goods[0].status, RelationStatus::Confirmed);
+        assert_eq!(force_goods[0].reason, StatusReason::MatchesCode, "matching code evidence stays attached");
+
+        let force_list = outgoing
+            .iter()
+            .filter(|view| view.key.source_column == "ForceList")
+            .collect::<Vec<_>>();
+        assert_eq!(force_list.len(), 1);
+        assert_eq!(force_list[0].key.kind, RelationKind::List);
+        assert_eq!(force_list[0].parser, Some(ReferenceParser::json("ID")));
     }
 }

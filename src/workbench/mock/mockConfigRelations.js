@@ -11,6 +11,7 @@ import { isEmptyReferenceValue, referenceValuesFromCell, rowCellValue } from "..
 import { matchesRelationConstraints } from "../utils/relationConstraints.js";
 import { RELATION_LAB_DATABASE, isRelationLabTable, relationLabRelations } from "./mockRelationLab.js";
 import { parseReferenceValues } from "../utils/referenceParser.js";
+import { parseCommentDirective } from "../utils/commentDirectives.js";
 
 const UPDATED_EVENT = "config-relations-updated";
 const COMMAND_PREFIX = "config_relations_";
@@ -285,7 +286,37 @@ export function createMockConfigRelations({
     return cell === undefined ? "" : String(cell).slice(0, FORMAT_SAMPLE_LENGTH);
   }
 
-  function candidatesOf(context, tables, client) {
+  function keyColumnOf(table) {
+    const columns = Array.isArray(table?.columns) ? table.columns : [];
+    const primary = columns.filter((col) => col.is_primary_key || col.isPrimaryKey);
+    if (primary.length === 1) return columnName(primary[0]);
+    const idPrimary = primary.find((col) => columnName(col).toLowerCase() === "id");
+    if (idPrimary) return columnName(idPrimary);
+    if (primary.length > 0) return columnName(primary[0]);
+    const idCol = columns.find((col) => columnName(col).toLowerCase() === "id");
+    return idCol ? columnName(idCol) : "";
+  }
+
+  function collectDirectives(tables) {
+    const directives = new Map();
+    for (const [tableLower, table] of tables) {
+      for (const column of table?.columns || []) {
+        const colName = columnName(column);
+        const comment = String(column?.column_comment || column?.columnComment || "").trim();
+        const directive = parseCommentDirective(comment);
+        if (!directive.hasDirective) continue;
+        directives.set(`${tableLower}.${colName.toLowerCase()}`, {
+          sourceTable: tableLower,
+          sourceColumn: colName,
+          comment,
+          directive,
+        });
+      }
+    }
+    return directives;
+  }
+
+  function candidatesOf(context, tables, client, directives = new Map()) {
     const candidates = new Map();
     for (const def of catalogFor(context.database)) {
       const { key } = def;
@@ -316,6 +347,52 @@ export function createMockConfigRelations({
       }
       if (evidence.length) candidates.set(def.id, { id: def.id, key, evidence });
     }
+    if (directives.size) {
+      const preservedCode = new Map();
+      for (const candidate of candidates.values()) {
+        const sourceId = `${candidate.key.sourceTable}.${candidate.key.sourceColumn.toLowerCase()}`;
+        if (!directives.has(sourceId)) continue;
+        const codeItems = evidenceOf(candidate, "code");
+        if (!codeItems.length) continue;
+        const endpoint = `${sourceId}>${candidate.key.targetTable}.${candidate.key.targetColumn.toLowerCase()}`;
+        const list = preservedCode.get(endpoint) || [];
+        list.push(...codeItems);
+        preservedCode.set(endpoint, list);
+      }
+      for (const [id, candidate] of [...candidates]) {
+        const sourceId = `${candidate.key.sourceTable}.${candidate.key.sourceColumn.toLowerCase()}`;
+        if (directives.has(sourceId)) candidates.delete(id);
+      }
+      for (const [sourceId, entry] of directives) {
+        if (entry.directive.kind !== "relation") continue;
+        for (const rel of entry.directive.relations) {
+          const targetTableLower = rel.targetTable.toLowerCase();
+          const target = tables.get(targetTableLower);
+          if (!target) continue;
+          const targetColObj = rel.targetColumn ? findColumn(target, rel.targetColumn) : null;
+          const targetColumn = targetColObj ? columnName(targetColObj) : (!rel.targetColumn ? keyColumnOf(target) : "");
+          if (!targetColumn) continue;
+          const key = {
+            sourceTable: entry.sourceTable,
+            sourceColumn: entry.sourceColumn,
+            targetTable: targetTableLower,
+            targetColumn,
+            kind: rel.kind === "list" ? "list" : "value",
+          };
+          const id = mockRelationId(key);
+          const evidence = [{ type: "comment", text: entry.comment }];
+          const endpoint = `${sourceId}>${targetTableLower}.${targetColumn.toLowerCase()}`;
+          if (preservedCode.has(endpoint)) evidence.push(...preservedCode.get(endpoint));
+          candidates.set(id, {
+            id,
+            key,
+            evidence,
+            encoded: true,
+            ...(rel.parser ? { parser: rel.parser } : {}),
+          });
+        }
+      }
+    }
     return candidates;
   }
 
@@ -330,7 +407,7 @@ export function createMockConfigRelations({
   // Code reading a comment relation's column from another table while
   // nothing in the code supports the comment's own target.
   function disagreementOf(candidate, candidates) {
-    if (!evidenceOf(candidate, "comment").length || evidenceOf(candidate, "code").length) return null;
+    if (candidate.encoded || !evidenceOf(candidate, "comment").length || evidenceOf(candidate, "code").length) return null;
     let found = null;
     for (const other of candidates.values()) {
       if (other.id === candidate.id || !evidenceOf(other, "code").length) continue;
@@ -406,6 +483,7 @@ export function createMockConfigRelations({
     return {
       id: candidate.id,
       ...candidate.key,
+      ...(candidate.parser ? { parser: candidate.parser } : {}),
       status,
       reason,
       isNew: status === "unconfirmed" && Boolean(state.baseline) && !state.baseline.has(candidate.id),
@@ -435,7 +513,8 @@ export function createMockConfigRelations({
     const state = serverState(context.serverKey);
     const client = context.code === "ready" ? clientFor(state.client?.path) : null;
     const codeReady = Boolean(client);
-    const candidates = candidatesOf(context, tables, client);
+    const directives = collectDirectives(tables);
+    const candidates = candidatesOf(context, tables, client, directives);
     // Kept beside the views, like the backend's unserialized field.
     const disagreements = new Map();
     const views = [...candidates.values()].map((candidate) => {
@@ -445,6 +524,8 @@ export function createMockConfigRelations({
     });
     for (const [id, decision] of state.decisions) {
       if (candidates.has(id)) continue;
+      const sourceId = `${decision.key.sourceTable}.${decision.key.sourceColumn.toLowerCase()}`;
+      if (directives.has(sourceId)) continue;
       const orphan = orphanOf(id, decision, tables, codeReady);
       if (orphan) views.push(orphan);
     }

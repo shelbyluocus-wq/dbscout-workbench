@@ -386,7 +386,17 @@ capabilities:
   drives); client code changes that affect a relation mark it stale or
   conflicting for re-review while unrelated changes stay quiet. Bindings and
   review verdicts stay local in `config-relations.json`, shared by every
-  database on the same server. Available for MySQL connections and the
+  database on the same server. Column comments also support four authoritative
+  explicit directives (`[枚举: 1=N, 2=R]`, `[关联: table.col]`,
+  `[列表关联: table.col @ extractor]`, `[无关联]`, also accepting full-width
+  brackets and English aliases) parsed identically by `comments.rs`,
+  `utils/commentDirectives.js` and `mockConfigRelations.js`: when present, they
+  override fuzzy comments, code scans, formats, project rules and stale orphans
+  for that column; `[枚举: ...]` renders semantic enum pills in
+  `CellDetailPanel.vue`, whose meaning button opens `CommentEditDialog.vue` to
+  edit directives visually, extract legacy comment enums, save directly to the
+  MySQL column comment, or copy the normalized comment / agent summary when
+  read-only. Available for MySQL connections and the
   built-in demo data; ClickHouse and MongoDB are excluded.
 - **Page zoom** uses macOS `Cmd` / Windows `Ctrl` with `+` (or `=`), `-`, and
   `0` (reset), in 10% steps from 50% to 200%, through native WebView zoom.

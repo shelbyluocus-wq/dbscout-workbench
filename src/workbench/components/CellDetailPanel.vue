@@ -1,9 +1,10 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, ChevronDown, ChevronUp, Copy, Link2 } from "lucide-vue-next";
+import { Check, ChevronDown, ChevronUp, Copy, Link2, SlidersHorizontal, Tag } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { buildCellStructuredPreview } from "../utils/cellStructuredPreview.js";
+import { resolveCellEnumPreview } from "../utils/commentDirectives.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
@@ -28,6 +29,7 @@ const emit = defineEmits([
   "detail-contextmenu",
   "exit-detail",
   "open-relation-target",
+  "edit-column-meaning",
 ]);
 
 const DETAIL_DEFAULT_HEIGHT = 160;
@@ -80,8 +82,27 @@ const structuredPreview = computed(() => (
     : { kind: "none", canCardView: false, cards: [], items: [], inlineTargets: [] }
 ));
 const showCardView = computed(() => Boolean(cardView.value && structuredPreview.value.canCardView && !isPanelCollapsed.value));
-const collapsedInlineTargets = computed(() => structuredPreview.value.inlineTargets.slice(0, 2));
-const collapsedInlineExtraCount = computed(() => Math.max(0, structuredPreview.value.inlineTargets.length - 2));
+const cellTargetComment = computed(() => (
+  props.selectedCell && !isFieldComment.value ? String(props.cellContext?.comment || "").trim() : ""
+));
+const cellEnumItems = computed(() => (
+  props.selectedCell && !isFieldComment.value && !props.isNull
+    ? resolveCellEnumPreview(sourceDraft.value, cellTargetComment.value)
+    : []
+));
+const collapsedEnumItems = computed(() => cellEnumItems.value.slice(0, 2));
+const collapsedInlineTargets = computed(() => {
+  const remaining = Math.max(0, 2 - collapsedEnumItems.value.length);
+  return structuredPreview.value.inlineTargets.slice(0, remaining);
+});
+const collapsedInlineExtraCount = computed(() => Math.max(
+  0,
+  cellEnumItems.value.length + structuredPreview.value.inlineTargets.length - 2,
+));
+const hasInlineMeaningChips = computed(() => cellEnumItems.value.length > 0 || structuredPreview.value.inlineTargets.length > 0);
+const canEditColumnMeaning = computed(() => Boolean(
+  props.selectedCell && !isFieldComment.value && (props.cellContext?.column || props.selectedCell?.column),
+));
 const detailFormatting = computed(() => highlightDetailValue(viewDraft.value));
 const hasInlineFormatting = computed(() => props.selectedCell && detailFormatting.value.kind !== "text");
 const detailPanelStyle = computed(() => ({ height: `${detailHeight.value}px` }));
@@ -100,9 +121,6 @@ const cellTargetLabel = computed(() => {
   if (!col) return "";
   return ctx?.rowNumber ? t("cellDetail.rowColumn", { row: ctx.rowNumber, column: col }) : col;
 });
-const cellTargetComment = computed(() => (
-  props.selectedCell && !isFieldComment.value ? String(props.cellContext?.comment || "").trim() : ""
-));
 const copyFeedback = ref(false);
 let copyFeedbackTimer = 0;
 const copiedStatKey = ref("");
@@ -257,6 +275,18 @@ function relationChipTitle(target) {
   }
   const valueText = target.label ? `${target.value} · ${target.label}` : target.value;
   return t("relations.target.open", { table: tableLabel || target.targetTable, value: valueText });
+}
+
+function enumChipTitle(item) {
+  if (item.state === "unmapped") {
+    return t("cellDetail.enumUnmappedTitle", { value: item.value });
+  }
+  return t("cellDetail.enumTitle", { value: item.value, label: item.label });
+}
+
+function emitEditColumnMeaning() {
+  if (!canEditColumnMeaning.value) return;
+  emit("edit-column-meaning");
 }
 
 function updateDetailDraft(event) {
@@ -522,10 +552,22 @@ onBeforeUnmount(() => {
         <span v-else class="wb-cell-detail-idle-hint">{{ t('cellDetail.idleHint') }}</span>
         <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
         <div
-          v-if="isPanelCollapsed && collapsedInlineTargets.length"
+          v-if="isPanelCollapsed && (collapsedEnumItems.length || collapsedInlineTargets.length)"
           class="wb-cell-detail-header-refs"
           @click.stop
         >
+          <span
+            v-for="(entry, index) in collapsedEnumItems"
+            :key="`enum:${entry.value}:${index}`"
+            class="wb-cell-detail-enum-chip"
+            :class="`is-${entry.state}`"
+            :title="enumChipTitle(entry)"
+          >
+            <Tag :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-id">{{ entry.value }}</span>
+            <span v-if="entry.label" class="wb-cell-detail-ref-name">{{ entry.label }}</span>
+            <span v-else class="wb-cell-detail-ref-missing">{{ t('cellDetail.enumUnmapped') }}</span>
+          </span>
           <button
             v-for="(target, index) in collapsedInlineTargets"
             :key="`${target.targetTable}:${target.value}:${index}`"
@@ -584,6 +626,17 @@ onBeforeUnmount(() => {
           <Check v-if="copyFeedback" :size="12" :stroke-width="2.2" aria-hidden="true" />
           <Copy v-else :size="12" :stroke-width="1.8" aria-hidden="true" />
           <span>{{ copyFeedback ? t('cellDetail.copied') : t('cellDetail.copy') }}</span>
+        </button>
+        <button
+          v-if="canEditColumnMeaning"
+          type="button"
+          class="wb-cell-detail-copy-btn wb-cell-detail-meaning-btn"
+          :title="t('cellDetail.editMeaningHint')"
+          :aria-label="t('cellDetail.editMeaning')"
+          @click.stop="emitEditColumnMeaning"
+        >
+          <SlidersHorizontal :size="12" :stroke-width="1.8" aria-hidden="true" />
+          <span>{{ t('cellDetail.editMeaning') }}</span>
         </button>
       </div>
       <div class="wb-cell-detail-header-actions">
@@ -656,9 +709,21 @@ onBeforeUnmount(() => {
       </div>
       <div class="wb-cell-detail-body" :style="detailPanelStyle">
         <div
-          v-if="!showCardView && structuredPreview.inlineTargets.length"
+          v-if="!showCardView && hasInlineMeaningChips"
           class="wb-cell-detail-refs"
         >
+          <span
+            v-for="(entry, index) in cellEnumItems"
+            :key="`enum:${entry.value}:${index}`"
+            class="wb-cell-detail-enum-chip"
+            :class="`is-${entry.state}`"
+            :title="enumChipTitle(entry)"
+          >
+            <Tag :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-id">{{ entry.value }}</span>
+            <span v-if="entry.label" class="wb-cell-detail-ref-name">{{ entry.label }}</span>
+            <span v-else class="wb-cell-detail-ref-missing">{{ t('cellDetail.enumUnmapped') }}</span>
+          </span>
           <button
             v-for="(target, index) in structuredPreview.inlineTargets"
             :key="`${target.targetTable}:${target.value}:${index}`"

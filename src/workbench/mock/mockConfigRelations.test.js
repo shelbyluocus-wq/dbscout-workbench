@@ -315,3 +315,35 @@ test("in-memory row matching follows the backend relation filter", () => {
     "activity.reward_pool[]>item.id",
   );
 });
+
+test("explicit comment directives override mock catalog relations", async () => {
+  const schema = structuredClone(resolveMockSchema("demo", "game_db", { tableCount: 0 }));
+  const rows = fixtureRows();
+  const relations = createMockConfigRelations({
+    connectionFor: (id) => CONNECTIONS[id] || null,
+    schemaFor: () => schema,
+    rowsFor: (_connectionId, _database, table) => rows[table] || [],
+    delayMs: 0,
+    emit: () => {},
+    now: () => NOW,
+  });
+  const call = (command, request = {}) =>
+    relations.invoke(command, { request: { connectionId: "demo", database: "game_db", ...request } });
+  const shop = schema.find((table) => table.table_name === "shop");
+  const itemCol = shop.columns.find((col) => col.column_name === "item_id");
+
+  itemCol.column_comment = "商店商品 [无关联]";
+  let tableRes = await call("config_relations_table", { table: "shop" });
+  assert.equal(tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id").length, 0);
+
+  itemCol.column_comment = "品质档位 [枚举: 1=蓝, 2=紫, 3=橙]";
+  tableRes = await call("config_relations_table", { table: "shop" });
+  assert.equal(tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id").length, 0);
+
+  itemCol.column_comment = "强制指向道具 [关联: item.id]";
+  tableRes = await call("config_relations_table", { table: "shop" });
+  const outgoing = tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id");
+  assert.equal(outgoing.length, 1);
+  assert.equal(outgoing[0].targetTable, "item");
+  assert.equal(outgoing[0].status, "confirmed");
+});

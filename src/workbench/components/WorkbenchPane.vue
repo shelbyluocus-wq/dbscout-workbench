@@ -119,6 +119,7 @@ const emit = defineEmits([
   "paste-home-tables",
   "rename-home-table",
   "edit-home-table-comment",
+  "edit-column-meaning",
   "delete-home-tables",
   "send-home-tables",
   "refresh-home",
@@ -1645,6 +1646,23 @@ function openCellRelationTarget(target) {
   });
 }
 
+function handleEditColumnMeaning() {
+  const tab = activeDataTab.value;
+  const cell = selectedCell.value;
+  if (!tab || !cell || cell.tabId !== tab.id || cell.kind === "fieldComment") return;
+  const column = String(selectedCellContext.value?.column || cell.column || "").trim();
+  if (!column) return;
+  emit("edit-column-meaning", {
+    connectionId: tab.connectionId,
+    database: tab.database,
+    tableName: tab.tableName,
+    readOnly: Boolean(tab.readOnly || tab.read_only),
+    columnName: column,
+    comment: selectedCellContext.value?.comment || "",
+    sampleValue: selectedCellIsNull.value ? "" : String(textDraft.value ?? ""),
+  });
+}
+
 const SELECTION_STATS_SYNC_CELL_LIMIT = 20_000;
 const SELECTION_STATS_CHUNK_ROWS = 64;
 const SELECTION_STATS_CHUNK_BUDGET_MS = 8;
@@ -2200,6 +2218,7 @@ onMounted(() => emitPaneState());
       @exit-detail="focusGridAfterDetailExit"
       @detail-contextmenu="openDetailContextMenu"
       @open-relation-target="openCellRelationTarget"
+      @edit-column-meaning="handleEditColumnMeaning"
     />
 
     <SqlQueryWorkspace

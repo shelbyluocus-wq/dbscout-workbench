@@ -4424,7 +4424,47 @@ const commentEdit = reactive({
   database: "",
   tableName: "",
   value: "",
+  sampleValue: "",
+  readOnly: false,
 });
+const commentEditRemoteTables = ref([]);
+let commentEditTablesToken = 0;
+
+const commentEditTables = computed(() => {
+  if (!commentEdit.open || commentEdit.kind !== "column") return [];
+  const sameScope = String(commentEdit.connectionId || "") === String(selectedConnectionId.value || "")
+    && String(commentEdit.database || "").toLowerCase() === String(selectedDatabase.value || "").toLowerCase();
+  if (sameScope && workspace.schema.length) return workspace.schema;
+  return commentEditRemoteTables.value;
+});
+
+async function preloadCommentEditTables(connectionId, database) {
+  const token = ++commentEditTablesToken;
+  commentEditRemoteTables.value = [];
+  const sameScope = String(connectionId || "") === String(selectedConnectionId.value || "")
+    && String(database || "").toLowerCase() === String(selectedDatabase.value || "").toLowerCase();
+  if ((sameScope && workspace.schema.length) || !connectionId || !database) return;
+  try {
+    const tables = await invokeWorkbench("list_tables", { connectionId, database });
+    if (token !== commentEditTablesToken || !Array.isArray(tables)) return;
+    commentEditRemoteTables.value = tables;
+  } catch {
+    if (token === commentEditTablesToken) commentEditRemoteTables.value = [];
+  }
+}
+
+async function loadCommentEditTableColumns(tableName) {
+  if (!commentEdit.open || !tableName) return [];
+  try {
+    const schema = await ensureTableSchema(tableName, {
+      connectionId: commentEdit.connectionId,
+      database: commentEdit.database,
+    });
+    return Array.isArray(schema?.columns) ? schema.columns : [];
+  } catch {
+    return [];
+  }
+}
 
 const canEditInspectorComment = computed(() => {
   if (contextMenu.surface !== "inspector" || !contextMenu.commentTarget || !contextMenu.tableName) return false;
@@ -4456,6 +4496,34 @@ function openCommentEdit(source, target) {
   commentEdit.database = source.database;
   commentEdit.tableName = source.tableName;
   commentEdit.value = target.comment || "";
+  commentEdit.sampleValue = target.sampleValue || "";
+  commentEdit.readOnly = false;
+  if (target.kind === "column") {
+    void preloadCommentEditTables(source.connectionId, source.database);
+  }
+}
+
+function openColumnMeaningEdit(payload = {}) {
+  if (!payload?.tableName || !payload?.columnName) return;
+  const source = {
+    connectionId: payload.connectionId,
+    database: payload.database,
+    tableName: payload.tableName,
+    readOnly: Boolean(payload.readOnly),
+  };
+  const canWrite = !isReadOnlySource(source) && sourceHasCapability("tableDesign", source);
+  commentEdit.open = true;
+  commentEdit.saving = false;
+  commentEdit.error = "";
+  commentEdit.kind = "column";
+  commentEdit.columnName = payload.columnName;
+  commentEdit.connectionId = source.connectionId;
+  commentEdit.database = source.database;
+  commentEdit.tableName = source.tableName;
+  commentEdit.value = payload.comment || "";
+  commentEdit.sampleValue = payload.sampleValue ?? "";
+  commentEdit.readOnly = !canWrite;
+  void preloadCommentEditTables(source.connectionId, source.database);
 }
 
 function openCommentEditFromMenu() {
@@ -4484,7 +4552,7 @@ function closeCommentEdit() {
 }
 
 async function saveCommentEdit(nextValue) {
-  if (!commentEdit.open || commentEdit.saving) return;
+  if (!commentEdit.open || commentEdit.saving || commentEdit.readOnly) return;
   const source = {
     connectionId: commentEdit.connectionId,
     database: commentEdit.database,
@@ -6020,6 +6088,7 @@ onBeforeUnmount(() => {
           @paste-home-tables="pasteHomeTables"
           @rename-home-table="renameHomeTable"
           @edit-home-table-comment="openHomeTableCommentEdit"
+          @edit-column-meaning="openColumnMeaningEdit"
           @delete-home-tables="deleteHomeTables"
           @send-home-tables="sendHomeTables"
           @refresh-home="refreshHome"
@@ -6169,7 +6238,12 @@ onBeforeUnmount(() => {
       :kind="commentEdit.kind"
       :name="commentEdit.kind === 'table' ? commentEdit.tableName : commentEdit.columnName"
       :table-name="commentEdit.tableName"
+      :database="commentEdit.database"
       :value="commentEdit.value"
+      :sample-value="commentEdit.sampleValue"
+      :read-only="commentEdit.readOnly"
+      :tables="commentEditTables"
+      :load-table-columns="loadCommentEditTableColumns"
       :saving="commentEdit.saving"
       :error="commentEdit.error"
       @close="closeCommentEdit"

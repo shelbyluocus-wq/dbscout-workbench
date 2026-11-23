@@ -112,7 +112,7 @@ fn infer_cell_parser(
     snapshot: &DbSnapshot,
     row: &HashMap<String, String>,
 ) -> Option<ReferenceParser> {
-    if view.parser.is_some() || view.key.kind != RelationKind::Value {
+    if view.parser.is_some() {
         return None;
     }
     let value = cell(row, &view.key.source_column)?;
@@ -619,7 +619,7 @@ pub async fn audit_table_references(
     // from the rows already loaded for this audit so structured cells aren't
     // reported as missing literal keys.
     for view in &mut active_relations {
-        if view.parser.is_some() || view.key.kind != RelationKind::Value {
+        if view.parser.is_some() {
             continue;
         }
         let Some(col) = meta.column(&view.key.source_column).filter(|col| col.is_text()) else {
