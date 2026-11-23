@@ -1140,7 +1140,7 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
   }
   if (token !== relationJumpToken || tab.id !== focusedPaneState.activeDataTab?.id) return;
   if (rowIndex >= 0) {
-    focusedPaneState.selectCellAt?.(tab, rowIndex, 0);
+    focusedPaneState.selectCellAt?.(tab, rowIndex, 0, { alignColumn: "center" });
   } else {
     setStatus(t("relations.incoming.rowMissing"), { tone: "warning" });
   }
@@ -1148,13 +1148,19 @@ async function openRelationTab({ connectionId, database, tableName, tableComment
 
 // A jump to referenced rows lands on the first of them, so the relation page
 // can follow the chain right away. A selection already made in a reused tab
-// stays where the user put it.
+// stays where the user put it while still revealing its column in view.
 function selectFirstRelationRow(tab, filter, token) {
   if (token !== relationJumpToken || tab.id !== focusedPaneState.activeDataTab?.id) return;
-  if (focusedSelectedCell.value?.tabId === tab.id) return;
   const wanted = String(filter?.column || "").toLowerCase();
   const columnIndex = (tab.columns || []).findIndex((column) => columnName(column).toLowerCase() === wanted);
-  focusedPaneState.selectCellAt?.(tab, 0, Math.max(0, columnIndex));
+  if (focusedSelectedCell.value?.tabId === tab.id) {
+    const selectedColumn = String(focusedSelectedCell.value?.column || "").toLowerCase();
+    const selectedColumnIndex = (tab.columns || []).findIndex((column) => columnName(column).toLowerCase() === selectedColumn);
+    const targetColumnIndex = selectedColumnIndex >= 0 ? selectedColumnIndex : Math.max(0, columnIndex);
+    focusedPaneState.scrollColumnIntoView?.(targetColumnIndex, "td", { align: "center" });
+    return;
+  }
+  focusedPaneState.selectCellAt?.(tab, 0, Math.max(0, columnIndex), { alignColumn: "center" });
 }
 
 function openConfigRelationTable({ connectionId, database, tableName, tableComment = "" }) {
@@ -2717,9 +2723,9 @@ async function focusAgentReferenceAction(action) {
   if (action.action === "focus_column") {
     if (columnIndex >= 0) {
       if (targetTab.id === focusedPaneState.activeDataTab?.id) {
-        focusedPaneState.scrollColumnIntoView?.(columnIndex, "td");
+        focusedPaneState.scrollColumnIntoView?.(columnIndex, "td", { align: "center" });
       } else {
-        scrollCellIntoView(Math.max(0, rowIndex), columnIndex);
+        scrollCellIntoView(Math.max(0, rowIndex), columnIndex, { alignColumn: "center" });
       }
       statusText.value = `已定位列：${action.tableName}.${action.columnName}`;
     } else {
@@ -2734,9 +2740,9 @@ async function focusAgentReferenceAction(action) {
   }
   const targetColumnIndex = columnIndex >= 0 ? columnIndex : 0;
   if (targetTab.id === focusedPaneState.activeDataTab?.id && typeof focusedPaneState.selectCellAt === "function") {
-    focusedPaneState.selectCellAt(targetTab, rowIndex, targetColumnIndex);
+    focusedPaneState.selectCellAt(targetTab, rowIndex, targetColumnIndex, { alignColumn: "center" });
   } else {
-    selectCellAt(targetTab, rowIndex, targetColumnIndex);
+    selectCellAt(targetTab, rowIndex, targetColumnIndex, { alignColumn: "center" });
   }
   statusText.value = action.action === "focus_cell" && action.columnName
     ? `已定位单元格：${action.tableName}.${action.columnName}`
@@ -3173,7 +3179,7 @@ async function openSidebarSchemaResult(result) {
   if (!targetColumn) return;
   await nextTick();
   const columnIndex = (tab.columns || []).findIndex((column) => columnName(column) === targetColumn);
-  if (columnIndex >= 0) focusedPaneState.scrollColumnIntoView?.(columnIndex, "th");
+  if (columnIndex >= 0) focusedPaneState.scrollColumnIntoView?.(columnIndex, "th", { align: "center" });
 }
 
 async function openSidebarValueResult(result) {
@@ -4799,14 +4805,14 @@ function exitRowSelectionToCell(tab) {
   return true;
 }
 
-function selectCellAt(tab, rowIndex, columnIndex) {
+function selectCellAt(tab, rowIndex, columnIndex, options = {}) {
   const row = tabRowAt(tab, rowIndex);
   const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
   clearRowSelection(tab);
   clearSelection();
   selectCell(tab, row, columnName(column), rowIndex, columnIndex, { focusGrid: false });
-  scrollCellIntoView(rowIndex, columnIndex);
+  scrollCellIntoView(rowIndex, columnIndex, options);
 }
 
 // 当前选中单元格在数据区里的坐标，用于让搜索优先保留用户当前单元格。

@@ -470,7 +470,7 @@ function commitEditingBeforeSelectionChange() {
   if (editingCell.value) finishEditing({ skipRefocus: true });
 }
 
-function selectCellAt(tab, rowIndex, columnIndex) {
+function selectCellAt(tab, rowIndex, columnIndex, options = {}) {
   const row = tabRowAt(tab, rowIndex);
   const column = tab?.columns?.[columnIndex];
   if (!row || !column) return;
@@ -478,7 +478,7 @@ function selectCellAt(tab, rowIndex, columnIndex) {
   clearRowSelection(tab);
   clearSelection();
   selectCell(tab, row, columnName(column), rowIndex, columnIndex, { focusGrid: false });
-  scrollCellIntoView(rowIndex, columnIndex);
+  scrollCellIntoView(rowIndex, columnIndex, options);
 }
 
 function selectVisualCellAt(tab, visualRowIndex, columnIndex) {
@@ -660,7 +660,7 @@ function focusSchemaSearchMatch(index) {
   const targetColumn = schemaSearchColumnName(matches[nextIndex]);
   const columnIndex = activeColumns.value.findIndex((column) => columnName(column) === targetColumn);
   if (columnIndex >= 0) {
-    nextTick(() => scrollColumnIntoView(columnIndex, "th"));
+    nextTick(() => scrollColumnIntoView(columnIndex, "th", { align: "center" }));
   }
   emitPaneState();
 }
@@ -1811,7 +1811,7 @@ async function locateTableMatch(tab, { rowIdentity, columnName: targetColumn } =
     statusText.value = "未找到对应行（数据可能已变化）";
     return { ok: false, reason: "未找到对应行（数据可能已变化）" };
   }
-  selectCellAt(tab, rowIndex, columnIndex);
+  selectCellAt(tab, rowIndex, columnIndex, { alignColumn: "center" });
   return { ok: true };
 }
 

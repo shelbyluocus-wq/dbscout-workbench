@@ -15,18 +15,34 @@ import { tableScrollRowCount, tableWindowOffset } from "../utils/tableScrollWind
 import { computeColumnWindow, columnWidthsOf } from "./useVirtualColumns.js";
 
 const ROW_INDEX_WIDTH = 38;
+const RIGHT_EDGE_CLEARANCE = 12;
 
-export function columnIntoViewScrollDelta(cellLeft, cellRight, leftBoundary, rightBoundary) {
+export function columnIntoViewScrollDelta(
+  cellLeft,
+  cellRight,
+  leftBoundary,
+  rightBoundary,
+  { align = "nearest", margin = 0 } = {},
+) {
   const visibleWidth = rightBoundary - leftBoundary;
   if (!Number.isFinite(visibleWidth) || visibleWidth <= 0) return 0;
   const cellWidth = cellRight - cellLeft;
   // Wide columns must pin the left edge: field names and remarks live there,
   // and aligning the right edge would scroll the identifier out of view.
-  if (cellWidth >= visibleWidth || cellLeft < leftBoundary) {
+  if (cellWidth >= visibleWidth) {
     return cellLeft - leftBoundary;
   }
-  if (cellRight > rightBoundary) {
-    return cellRight - rightBoundary;
+  if (align === "center") {
+    return cellLeft - (leftBoundary + (visibleWidth - cellWidth) / 2);
+  }
+  const safeMargin = Math.max(0, Math.min(Number(margin) || 0, (visibleWidth - cellWidth) / 2));
+  const paddedLeft = leftBoundary + safeMargin;
+  const paddedRight = rightBoundary - safeMargin;
+  if (cellLeft < paddedLeft) {
+    return cellLeft - paddedLeft;
+  }
+  if (cellRight > paddedRight) {
+    return cellRight - paddedRight;
   }
   return 0;
 }
@@ -201,8 +217,25 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────
+  let columnScrollToken = 0;
+  let columnScrollRafId = 0;
+  let pendingColumnScrollLeft = null;
+
+  function cancelPendingColumnScroll() {
+    columnScrollToken += 1;
+    pendingColumnScrollLeft = null;
+    if (columnScrollRafId && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(columnScrollRafId);
+    }
+    columnScrollRafId = 0;
+  }
+
   function onGridScroll(event) {
-    scrollLeft.value = Math.max(0, event.target.scrollLeft || 0);
+    const nextLeft = Math.max(0, event.target.scrollLeft || 0);
+    if (pendingColumnScrollLeft !== null && Math.abs(nextLeft - pendingColumnScrollLeft) > 2) {
+      cancelPendingColumnScroll();
+    }
+    scrollLeft.value = nextLeft;
     scrollTop.value = Math.max(0, event.target.scrollTop);
     if (viewportHeight.value !== event.target.clientHeight) viewportHeight.value = event.target.clientHeight;
   }
@@ -218,10 +251,22 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     return applied;
   }
 
+  function setScrollLeft(wrap, nextLeft) {
+    const normalized = Math.max(0, Math.round(nextLeft));
+    if (pendingColumnScrollLeft !== null) pendingColumnScrollLeft = normalized;
+    scrollLeft.value = normalized;
+    wrap.scrollLeft = normalized;
+    const applied = Math.max(0, Number(wrap.scrollLeft) || 0);
+    if (applied !== normalized) scrollLeft.value = applied;
+    if (pendingColumnScrollLeft !== null) pendingColumnScrollLeft = applied;
+    return applied;
+  }
+
   function restoreGridScroll({ top = 0, left = 0 } = {}) {
     // Keep the reactive virtual window in sync with the DOM. Setting only the
     // element's scrollTop leaves a stale padTop until the browser emits a
     // scroll event, which can render a large blank band after switching tabs.
+    cancelPendingColumnScroll();
     const normalizedTop = Math.max(0, Number(top) || 0);
     const normalizedLeft = Math.max(0, Number(left) || 0);
     const wrap = gridWrapRef.value;
@@ -291,38 +336,181 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     }
   }
 
-  function scrollColumnIntoView(columnIndex, selectorPrefix = "td") {
-    const wrap = gridWrapRef.value;
-    if (!wrap) return;
-    const window = columnWindow.value;
-    if (viewportWidth.value > 0 && columnIndex >= 0 && columnIndex + 1 < window.offsets.length) {
-      if (columnIndex < window.frozenCount) return;
-      wrap.scrollLeft += columnIntoViewScrollDelta(window.offsets[columnIndex], window.offsets[columnIndex + 1],
-        wrap.scrollLeft + window.frozenWidth, wrap.scrollLeft + wrap.clientWidth - ROW_INDEX_WIDTH);
-      scrollLeft.value = Math.max(0, wrap.scrollLeft);
-      return;
-    }
-    const cell = wrap.querySelector(`${selectorPrefix}[data-column-index="${columnIndex}"], ${selectorPrefix} [data-insert-column-index="${columnIndex}"]`)
-      || wrap.querySelector(`td[data-column-index="${columnIndex}"], th[data-column-index="${columnIndex}"], input[data-insert-column-index="${columnIndex}"]`)?.closest("td, th");
-    if (!cell) return;
-    const wrapRect = wrap.getBoundingClientRect();
-    const cellRect = cell.getBoundingClientRect();
+  function findColumnCell(wrap, columnIndex, selectorPrefix = "td") {
+    if (!wrap || typeof wrap.querySelector !== "function") return null;
+    return wrap.querySelector(`${selectorPrefix}[data-column-index="${columnIndex}"], ${selectorPrefix} [data-insert-column-index="${columnIndex}"]`)
+      || wrap.querySelector(`td[data-column-index="${columnIndex}"], th[data-column-index="${columnIndex}"], input[data-insert-column-index="${columnIndex}"]`)?.closest?.("td, th")
+      || null;
+  }
+
+  function domColumnScrollBoundaries(wrap, wrapRect, frozenCount, fallbackFrozenWidth, align) {
+    const visibleWrapWidth = Number(wrap.clientWidth) > 0
+      ? Number(wrap.clientWidth)
+      : (wrapRect.right - wrapRect.left);
+    const rightEdge = wrapRect.left + visibleWrapWidth;
     // Left boundary must clear both the row-index gutter and the frozen-column
     // band, otherwise the target cell is hidden behind frozen columns.
-    const leftBoundary = wrapRect.left + ROW_INDEX_WIDTH + frozenColsW.value;
-    const rightBoundary = wrapRect.right;
-    wrap.scrollLeft += columnIntoViewScrollDelta(
+    let leftBoundary = wrapRect.left + ROW_INDEX_WIDTH + fallbackFrozenWidth;
+    if (typeof wrap.querySelector === "function") {
+      const edgeElement = frozenCount > 0
+        ? wrap.querySelector("th.frozen-col-edge, td.frozen-col-edge")
+        : wrap.querySelector("th.wb-row-index, td.wb-row-index");
+      const edgeRect = edgeElement?.getBoundingClientRect?.();
+      if (edgeRect && Number.isFinite(edgeRect.right) && edgeRect.right > wrapRect.left) {
+        leftBoundary = edgeRect.right;
+      }
+    }
+    const clearance = align === "center"
+      ? 0
+      : Math.min(RIGHT_EDGE_CLEARANCE, Math.max(0, (rightEdge - leftBoundary) / 6));
+    return {
+      leftBoundary,
+      rightBoundary: rightEdge - clearance,
+    };
+  }
+
+  function applyVirtualColumnScroll(wrap, columnIndex, align, margin) {
+    const window = columnWindow.value;
+    if (!(viewportWidth.value > 0 && columnIndex >= 0 && columnIndex + 1 < window.offsets.length)) {
+      return { usedVirtual: false, frozen: false };
+    }
+    if (columnIndex < window.frozenCount) {
+      return { usedVirtual: true, frozen: true };
+    }
+    const currentLeft = Math.max(0, Number(wrap.scrollLeft) || 0);
+    const clientWidth = Number(wrap.clientWidth) > 0 ? Number(wrap.clientWidth) : viewportWidth.value;
+    const leftBoundary = currentLeft + window.frozenWidth;
+    const rawRightBoundary = currentLeft + clientWidth - ROW_INDEX_WIDTH;
+    const clearance = align === "center"
+      ? 0
+      : Math.min(RIGHT_EDGE_CLEARANCE, Math.max(0, (rawRightBoundary - leftBoundary) / 6));
+    const delta = columnIntoViewScrollDelta(
+      window.offsets[columnIndex],
+      window.offsets[columnIndex + 1],
+      leftBoundary,
+      rawRightBoundary - clearance,
+      { align, margin },
+    );
+    if (Math.abs(delta) > 0.5) {
+      setScrollLeft(wrap, currentLeft + delta);
+    } else {
+      scrollLeft.value = currentLeft;
+    }
+    return { usedVirtual: true, frozen: false };
+  }
+
+  function applyDomColumnScroll(wrap, columnIndex, selectorPrefix, align, margin) {
+    const cell = findColumnCell(wrap, columnIndex, selectorPrefix);
+    if (!cell) return false;
+    const wrapRect = wrap.getBoundingClientRect?.();
+    const cellRect = cell.getBoundingClientRect?.();
+    if (
+      !wrapRect
+      || !cellRect
+      || !Number.isFinite(wrapRect.left)
+      || !Number.isFinite(wrapRect.right)
+      || !Number.isFinite(cellRect.left)
+      || !Number.isFinite(cellRect.right)
+      || cellRect.right <= cellRect.left
+    ) return false;
+    const window = columnWindow.value;
+    const frozenWidth = window.frozenWidth > 0 ? window.frozenWidth : frozenColsW.value;
+    const { leftBoundary, rightBoundary } = domColumnScrollBoundaries(
+      wrap,
+      wrapRect,
+      window.frozenCount,
+      frozenWidth,
+      align,
+    );
+    const delta = columnIntoViewScrollDelta(
       cellRect.left,
       cellRect.right,
       leftBoundary,
       rightBoundary,
+      { align, margin },
     );
+    if (Math.abs(delta) > 1) {
+      setScrollLeft(wrap, (Number(wrap.scrollLeft) || 0) + delta);
+    }
+    return true;
   }
 
-  function scrollCellIntoView(rowIndex, columnIndex) {
-    scrollRowIntoView(rowIndex);
+  function scrollColumnIntoView(columnIndex, selectorPrefix = "td", options = {}) {
+    const wrap = gridWrapRef.value;
+    if (!wrap) return;
+    const resolvedPrefix = typeof selectorPrefix === "string" ? selectorPrefix : "td";
+    const resolvedOptions = (selectorPrefix && typeof selectorPrefix === "object" ? selectorPrefix : options) || {};
+    const align = resolvedOptions.align === "center" ? "center" : "nearest";
+    const margin = Number.isFinite(Number(resolvedOptions.margin))
+      ? Math.max(0, Number(resolvedOptions.margin))
+      : 0;
+
+    cancelPendingColumnScroll();
+    const token = columnScrollToken;
+    const targetTabId = activeTab.value?.id;
+    const virtual = applyVirtualColumnScroll(wrap, columnIndex, align, margin);
+    if (virtual.frozen) return;
+    if (!virtual.usedVirtual) {
+      applyDomColumnScroll(wrap, columnIndex, resolvedPrefix, align, margin);
+      return;
+    }
+
+    // Virtual column offsets are an estimate: after Vue paints the target
+    // column (and after any next-frame auto-fit completes), reconcile against
+    // the actual rendered cell geometry so wide tables never clip the cell.
+    pendingColumnScrollLeft = Math.max(0, Number(wrap.scrollLeft) || 0);
+    const isStillActive = () => (
+      token === columnScrollToken
+      && gridWrapRef.value === wrap
+      && activeTab.value?.id === targetTabId
+      && (pendingColumnScrollLeft === null || Math.abs((Number(wrap.scrollLeft) || 0) - pendingColumnScrollLeft) <= 2)
+    );
+    const reconcileRenderedCell = (allowVirtualRetry) => {
+      if (!isStillActive()) return;
+      const matched = applyDomColumnScroll(wrap, columnIndex, resolvedPrefix, align, margin);
+      if (!matched && allowVirtualRetry) {
+        const retry = applyVirtualColumnScroll(wrap, columnIndex, align, margin);
+        if (retry.frozen) {
+          pendingColumnScrollLeft = null;
+          return;
+        }
+        pendingColumnScrollLeft = Math.max(0, Number(wrap.scrollLeft) || 0);
+        nextTick(() => {
+          if (!isStillActive()) return;
+          applyDomColumnScroll(wrap, columnIndex, resolvedPrefix, align, margin);
+          pendingColumnScrollLeft = Math.max(0, Number(wrap.scrollLeft) || 0);
+        });
+        return;
+      }
+      pendingColumnScrollLeft = Math.max(0, Number(wrap.scrollLeft) || 0);
+    };
+
     nextTick(() => {
-      scrollColumnIntoView(columnIndex);
+      reconcileRenderedCell(true);
+      if (!isStillActive() || typeof requestAnimationFrame !== "function") {
+        if (token === columnScrollToken) pendingColumnScrollLeft = null;
+        return;
+      }
+      if (align === "center") {
+        columnScrollRafId = requestAnimationFrame(() => {
+          columnScrollRafId = 0;
+          nextTick(() => {
+            reconcileRenderedCell(true);
+            if (token === columnScrollToken) pendingColumnScrollLeft = null;
+          });
+        });
+      } else {
+        pendingColumnScrollLeft = null;
+      }
+    });
+  }
+
+  function scrollCellIntoView(rowIndex, columnIndex, options = {}) {
+    scrollRowIntoView(rowIndex);
+    const align = options?.alignColumn || options?.align;
+    const columnOptions = align ? { align } : undefined;
+    nextTick(() => {
+      scrollColumnIntoView(columnIndex, "td", columnOptions);
     });
   }
 
@@ -367,6 +555,7 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
 
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
+      cancelPendingColumnScroll();
       if (resizeObserver) resizeObserver.disconnect();
     });
   }

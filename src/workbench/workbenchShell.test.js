@@ -1883,7 +1883,7 @@ test("table search cell selection resolves columns from the searched tab", () =>
   const selectCellAtBody = pane.match(/function\s+selectCellAt\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
 
   assert.match(selectCellAtBody, /tab\?\.columns\?\.\[columnIndex\]/);
-  assert.match(selectCellAtBody, /scrollCellIntoView\(rowIndex,\s*columnIndex\)/);
+  assert.match(selectCellAtBody, /scrollCellIntoView\(rowIndex,\s*columnIndex(?:,\s*options)?\)/);
   assert.match(selectCellAtBody, /focusGrid:\s*false/);
   assert.doesNotMatch(selectCellAtBody, /activeColumns\.value\[columnIndex\]/);
 });
@@ -3901,4 +3901,12 @@ test("restored table tabs are deferred shells that load visible tabs first", () 
   assert.match(restore, /applySavedTableTabState\(restoredTab, savedTab\)/);
   assert.match(restore, /void loadVisibleDeferredTabs\(\)/);
   assert.match(orchestrator, /scheduleIdleStartupWork\(\(\) => \{ void preloadDeferredTabs\(\); \}/);
+});
+
+test("relation jumps center the target column in the viewport for fresh and reused tabs", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const selectFirst = orchestrator.match(/function\s+selectFirstRelationRow\([^)]*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+
+  assert.match(selectFirst, /selectCellAt\?\.\(tab,\s*0,\s*Math\.max\(0,\s*columnIndex\),\s*\{\s*alignColumn:\s*"center"\s*\}\)/);
+  assert.match(selectFirst, /scrollColumnIntoView\?\.\(targetColumnIndex,\s*"td",\s*\{\s*align:\s*"center"\s*\}\)/);
 });

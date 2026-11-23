@@ -497,4 +497,183 @@ test("columnIntoViewScrollDelta keeps wide columns pinned to the field-name edge
   // A 600px autofit column in a 362px viewport must not align its right edge,
   // or the left-aligned field name (e.g. Dsc) disappears and only the remark tail remains.
   assert.equal(columnIntoViewScrollDelta(120, 720, 38, 400), 82);
+  // Center alignment places normal columns in the middle of the visible area
+  // while still pinning oversized columns to the left boundary.
+  assert.equal(columnIntoViewScrollDelta(1430, 1520, 0, 987, { align: "center" }), 981.5);
+  assert.equal(columnIntoViewScrollDelta(120, 720, 38, 400, { align: "center" }), 82);
+});
+
+test("scrollColumnIntoView centers jumped columns and reconciles DOM offset drift", async () => {
+  stubResizeObserver();
+  const columns = Array.from({ length: 16 }, (_, index) => ({ column_name: `col_${index}` }));
+  const widths = Object.fromEntries(columns.map((column, index) => [column.column_name, index === 4 || index === 5 ? 220 : 100]));
+  const tab = reactive({
+    id: "tab-jump",
+    columns,
+    rows: [Object.fromEntries(columns.map((column) => [column.column_name, "5"]))],
+    primaryKeys: ["col_0"],
+    columnWidthState: { widths, manual: {}, availableWidth: 987 },
+  });
+  const virtual = useVirtualGrid(computed(() => tab), {});
+  // Simulate rendered table cells drifting +40px wider than estimated offsets
+  // (e.g. auto table layout / borders / padding on preceding wide columns).
+  const DOM_DRIFT_PX = 40;
+  const maxScrollLeft = 2400;
+  const wrap = {
+    _scrollLeft: 0,
+    scrollTop: 0,
+    clientWidth: 1025,
+    clientHeight: 400,
+    get scrollLeft() {
+      return this._scrollLeft;
+    },
+    set scrollLeft(value) {
+      this._scrollLeft = Math.max(0, Math.min(maxScrollLeft, value));
+    },
+    getBoundingClientRect() {
+      return { left: 0, right: 1025, top: 0, bottom: 400 };
+    },
+    querySelector(selector) {
+      if (selector.includes("wb-row-index")) {
+        return { getBoundingClientRect: () => ({ left: 0, right: 38 }) };
+      }
+      if (selector.includes('data-column-index="11"')) {
+        const estimatedLeft = virtual.columnWindow.value.offsets[11];
+        const estimatedRight = virtual.columnWindow.value.offsets[12];
+        return {
+          getBoundingClientRect: () => ({
+            left: 38 + estimatedLeft + DOM_DRIFT_PX - wrap.scrollLeft,
+            right: 38 + estimatedRight + DOM_DRIFT_PX - wrap.scrollLeft,
+          }),
+        };
+      }
+      return null;
+    },
+  };
+  virtual.gridWrapRef.value = wrap;
+  virtual.viewportWidth.value = 1025;
+
+  virtual.scrollCellIntoView(0, 11, { alignColumn: "center" });
+  await nextTick();
+  await nextTick();
+
+  const finalCellRect = wrap.querySelector('td[data-column-index="11"]').getBoundingClientRect();
+  const visibleCenter = 38 + (1025 - 38) / 2;
+  const cellCenter = (finalCellRect.left + finalCellRect.right) / 2;
+  assert.ok(finalCellRect.left >= 38, "jumped cell clears row-index gutter");
+  assert.ok(finalCellRect.right <= 1025, "jumped cell is fully inside the right edge");
+  assert.ok(Math.abs(cellCenter - visibleCenter) <= 2, `expected centered cell (~${visibleCenter}), got ${cellCenter}`);
+});
+
+test("scrollColumnIntoView re-centers after next-frame auto-fit widens earlier columns", async () => {
+  stubResizeObserver();
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCancelRaf = globalThis.cancelAnimationFrame;
+  const rafQueue = [];
+  globalThis.requestAnimationFrame = (cb) => {
+    rafQueue.push(cb);
+    return rafQueue.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+  try {
+    const columns = Array.from({ length: 14 }, (_, index) => ({ column_name: `col_${index}` }));
+    const tab = reactive({
+      id: "tab-autofit",
+      columns,
+      rows: [Object.fromEntries(columns.map((column) => [column.column_name, "5"]))],
+      primaryKeys: ["col_0"],
+      columnWidthState: { widths: {}, manual: {}, availableWidth: 0 },
+    });
+    const virtual = useVirtualGrid(computed(() => tab), {});
+    const wrap = {
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 1025,
+      clientHeight: 400,
+      getBoundingClientRect: () => ({ left: 0, right: 1025, top: 0, bottom: 400 }),
+      querySelector(selector) {
+        if (selector.includes("wb-row-index")) {
+          return { getBoundingClientRect: () => ({ left: 0, right: 38 }) };
+        }
+        if (selector.includes('data-column-index="11"')) {
+          const left = virtual.columnWindow.value.offsets[11];
+          const right = virtual.columnWindow.value.offsets[12];
+          return {
+            getBoundingClientRect: () => ({
+              left: 38 + left - wrap.scrollLeft,
+              right: 38 + right - wrap.scrollLeft,
+            }),
+          };
+        }
+        return null;
+      },
+    };
+    virtual.gridWrapRef.value = wrap;
+    virtual.viewportWidth.value = 1025;
+
+    virtual.scrollColumnIntoView(11, "td", { align: "center" });
+    await nextTick();
+    // Simulate DataGrid auto-fit widening long-description columns before the
+    // animation frame settles.
+    for (const column of columns) {
+      tab.columnWidthState.widths[column.column_name] = column.column_name === "col_4" || column.column_name === "col_5" ? 240 : 100;
+    }
+    while (rafQueue.length) rafQueue.shift()();
+    await nextTick();
+
+    const finalCellRect = wrap.querySelector('td[data-column-index="11"]').getBoundingClientRect();
+    const visibleCenter = 38 + (1025 - 38) / 2;
+    const cellCenter = (finalCellRect.left + finalCellRect.right) / 2;
+    assert.ok(Math.abs(cellCenter - visibleCenter) <= 2, `expected post-autofit centered cell (~${visibleCenter}), got ${cellCenter}`);
+  } finally {
+    globalThis.requestAnimationFrame = originalRaf;
+    globalThis.cancelAnimationFrame = originalCancelRaf;
+  }
+});
+
+test("scrollColumnIntoView stops reconciling if the user scrolls horizontally", async () => {
+  stubResizeObserver();
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCancelRaf = globalThis.cancelAnimationFrame;
+  const rafQueue = [];
+  globalThis.requestAnimationFrame = (cb) => {
+    rafQueue.push(cb);
+    return rafQueue.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+  try {
+    const columns = Array.from({ length: 14 }, (_, index) => ({ column_name: `col_${index}` }));
+    const widths = Object.fromEntries(columns.map((column) => [column.column_name, 120]));
+    const tab = reactive({
+      id: "tab-manual-scroll",
+      columns,
+      rows: [Object.fromEntries(columns.map((column) => [column.column_name, "5"]))],
+      primaryKeys: ["col_0"],
+      columnWidthState: { widths, manual: {}, availableWidth: 987 },
+    });
+    const virtual = useVirtualGrid(computed(() => tab), {});
+    const wrap = {
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 1025,
+      clientHeight: 400,
+      getBoundingClientRect: () => ({ left: 0, right: 1025, top: 0, bottom: 400 }),
+      querySelector: () => null,
+    };
+    virtual.gridWrapRef.value = wrap;
+    virtual.viewportWidth.value = 1025;
+
+    virtual.scrollColumnIntoView(11, "td", { align: "center" });
+    await nextTick();
+    // User manually scrolls away before the next animation frame.
+    wrap.scrollLeft = 120;
+    virtual.onGridScroll({ target: wrap });
+    while (rafQueue.length) rafQueue.shift()();
+    await nextTick();
+
+    assert.equal(wrap.scrollLeft, 120);
+  } finally {
+    globalThis.requestAnimationFrame = originalRaf;
+    globalThis.cancelAnimationFrame = originalCancelRaf;
+  }
 });
