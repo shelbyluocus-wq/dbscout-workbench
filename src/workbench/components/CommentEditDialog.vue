@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, CircleAlert, Copy, Plus, Sparkles, Tag, Trash2, X } from "lucide-vue-next";
+import { Check, CircleAlert, Copy, ListOrdered, Plus, Sparkles, Tag, Trash2, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { isImeKeyEvent } from "../utils/imeInput.js";
@@ -14,8 +14,10 @@ import {
   parseCommentDirective,
   parseListExtractor,
   resolveCellEnumPreview,
+  resolveCellSlotPreview,
   stripCommentDirectives,
   suggestEnumEntriesFromComment,
+  suggestSlotLabelsFromComment,
 } from "../utils/commentDirectives.js";
 
 const props = defineProps({
@@ -36,7 +38,7 @@ const props = defineProps({
 const emit = defineEmits(["close", "save"]);
 
 const IDENT_RE = /^[A-Za-z0-9_]+$/;
-const MODES = Object.freeze(["none", "enum", "value", "list", "noRelation"]);
+const MODES = Object.freeze(["none", "enum", "slots", "value", "list", "noRelation"]);
 
 const uid = Math.random().toString(36).slice(2, 9);
 const tableListId = `wb-comment-tables-${uid}`;
@@ -45,6 +47,7 @@ const columnListId = `wb-comment-columns-${uid}`;
 const draft = ref("");
 const mode = ref("none");
 const enumEntries = ref([]);
+const slotLabels = ref([]);
 const targetTable = ref("");
 const targetColumn = ref("");
 const listFormat = ref("auto");
@@ -101,6 +104,9 @@ const targetTableColumns = computed(() => {
 const suggestedEnumEntries = computed(() => (
   isColumnKind.value ? suggestEnumEntriesFromComment(draft.value) : []
 ));
+const suggestedSlotLabels = computed(() => (
+  isColumnKind.value ? suggestSlotLabelsFromComment(draft.value) : []
+));
 
 const effectiveListExtractor = computed(() => {
   if (mode.value !== "list") return "";
@@ -120,6 +126,12 @@ const directiveSpec = computed(() => {
       entries: enumEntries.value
         .map((entry) => ({ key: String(entry.key ?? "").trim(), label: String(entry.label ?? "").trim() }))
         .filter((entry) => entry.key && entry.label),
+    };
+  }
+  if (mode.value === "slots") {
+    return {
+      kind: "slots",
+      slots: slotLabels.value.map((item) => String(item ?? "").trim()).filter(Boolean),
     };
   }
   return {
@@ -142,6 +154,8 @@ const validationError = computed(() => {
   if (!isColumnKind.value) return "";
   if (mode.value === "enum") {
     if (!directiveSpec.value.entries.length) return t("commentEdit.enumEmptyError");
+  } else if (mode.value === "slots") {
+    if (!directiveSpec.value.slots.length) return t("commentEdit.slotsEmptyError");
   } else if (mode.value === "value" || mode.value === "list") {
     const tbl = targetTable.value.trim();
     const col = targetColumn.value.trim();
@@ -168,6 +182,13 @@ const sampleEnumPreview = computed(() => {
   return resolveCellEnumPreview(sample, directiveTag.value);
 });
 
+const sampleSlotPreview = computed(() => {
+  if (!isColumnKind.value || mode.value !== "slots" || !directiveTag.value) return [];
+  const sample = String(props.sampleValue ?? "").trim();
+  if (!sample) return [];
+  return resolveCellSlotPreview(sample, directiveTag.value);
+});
+
 useEscClose(
   () => props.open,
   () => {
@@ -188,6 +209,7 @@ function initFromValue(rawValue) {
   const parsed = parseCommentDirective(text);
   draft.value = parsed.hasDirective ? stripCommentDirectives(text) : text;
   enumEntries.value = [];
+  slotLabels.value = [];
   targetTable.value = "";
   targetColumn.value = "";
   listFormat.value = "auto";
@@ -200,6 +222,9 @@ function initFromValue(rawValue) {
   } else if (parsed.kind === "enum") {
     mode.value = "enum";
     enumEntries.value = parsed.entries.map((entry) => ({ key: entry.key, label: entry.label }));
+  } else if (parsed.kind === "slots") {
+    mode.value = "slots";
+    slotLabels.value = [...parsed.slots];
   } else if (parsed.kind === "relation" && parsed.relations.length) {
     const first = parsed.relations[0];
     mode.value = first.kind === "list" ? "list" : "value";
@@ -277,7 +302,30 @@ function selectMode(nextMode) {
         enumEntries.value = [{ key: "", label: "" }, { key: "", label: "" }];
       }
     }
+  } else if (nextMode === "slots") {
+    const hasFilled = slotLabels.value.some((item) => String(item || "").trim());
+    if (!hasFilled) {
+      if (suggestedSlotLabels.value.length) {
+        slotLabels.value = [...suggestedSlotLabels.value];
+      } else {
+        slotLabels.value = ["", ""];
+      }
+    }
   }
+}
+
+function addSlotRow() {
+  slotLabels.value = [...slotLabels.value, ""];
+}
+
+function removeSlotRow(index) {
+  const next = slotLabels.value.filter((_, idx) => idx !== index);
+  slotLabels.value = next.length ? next : [""];
+}
+
+function applySuggestedSlots() {
+  if (!suggestedSlotLabels.value.length) return;
+  slotLabels.value = [...suggestedSlotLabels.value];
 }
 
 function addEnumRow() {
@@ -474,6 +522,59 @@ onBeforeUnmount(() => {
                   <span v-else class="wb-cell-detail-ref-missing">{{ t('cellDetail.enumUnmapped') }}</span>
                 </span>
               </div>
+            </div>
+          </div>
+
+          <div v-else-if="mode === 'slots'" class="wb-comment-enum-editor">
+            <div class="wb-comment-enum-rows">
+              <div v-for="(_, index) in slotLabels" :key="index" class="wb-comment-slot-row">
+                <span class="wb-comment-slot-index">#{{ index + 1 }}</span>
+                <input
+                  v-model="slotLabels[index]"
+                  type="text"
+                  class="wb-comment-enum-val"
+                  :placeholder="t('commentEdit.slotLabelPlaceholder', { index: index + 1 })"
+                  :disabled="saving"
+                  spellcheck="false"
+                />
+                <button
+                  type="button"
+                  class="wb-comment-enum-del"
+                  :title="t('commentEdit.enumRemove')"
+                  :aria-label="t('commentEdit.enumRemove')"
+                  :disabled="saving"
+                  @click="removeSlotRow(index)"
+                ><Trash2 :size="13" aria-hidden="true" /></button>
+              </div>
+            </div>
+            <div class="wb-comment-enum-tools">
+              <button type="button" class="wb-comment-inline-btn" :disabled="saving" @click="addSlotRow">
+                <Plus :size="12" aria-hidden="true" />
+                <span>{{ t('commentEdit.slotAdd') }}</span>
+              </button>
+              <button
+                v-if="suggestedSlotLabels.length"
+                type="button"
+                class="wb-comment-inline-btn is-accent"
+                :disabled="saving"
+                @click="applySuggestedSlots"
+              >
+                <Sparkles :size="12" aria-hidden="true" />
+                <span>{{ t('commentEdit.enumExtract', { count: suggestedSlotLabels.length }) }}</span>
+              </button>
+            </div>
+            <div v-if="sampleSlotPreview.length" class="wb-comment-sample-preview-row">
+              <span class="wb-comment-sample-label">{{ t('commentEdit.samplePreview', { value: sampleValue }) }}</span>
+              <span
+                v-for="slot in sampleSlotPreview"
+                :key="slot.index"
+                class="wb-cell-detail-enum-chip"
+                :class="`is-${slot.state}`"
+              >
+                <ListOrdered :size="10" aria-hidden="true" />
+                <span class="wb-cell-detail-ref-name">{{ slot.label || `#${slot.index}` }}</span>
+                <span class="wb-cell-detail-ref-id">{{ slot.value }}</span>
+              </span>
             </div>
           </div>
 

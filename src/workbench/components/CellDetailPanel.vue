@@ -1,10 +1,10 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, ChevronDown, ChevronUp, Copy, Link2, SlidersHorizontal, Tag } from "lucide-vue-next";
+import { Check, ChevronDown, ChevronUp, Copy, Link2, ListOrdered, SlidersHorizontal, Tag } from "lucide-vue-next";
 import { highlightDetailValue, isDetailJson, resolveDetailCopyText, resolveDetailEditorView } from "../utils/cellDisplay.js";
 import { buildCellStructuredPreview } from "../utils/cellStructuredPreview.js";
-import { resolveCellEnumPreview } from "../utils/commentDirectives.js";
+import { resolveCellEnumPreview, resolveCellSlotPreview } from "../utils/commentDirectives.js";
 import { createCellDetailVisibility } from "../cellDetailVisibility.js";
 import { useCellDetailAmbient } from "../composables/useCellDetailAmbient.js";
 import { useShortcuts } from "../composables/useShortcuts.js";
@@ -90,16 +90,27 @@ const cellEnumItems = computed(() => (
     ? resolveCellEnumPreview(sourceDraft.value, cellTargetComment.value)
     : []
 ));
+const cellSlotItems = computed(() => (
+  props.selectedCell && !isFieldComment.value && !props.isNull
+    ? resolveCellSlotPreview(sourceDraft.value, cellTargetComment.value)
+    : []
+));
 const collapsedEnumItems = computed(() => cellEnumItems.value.slice(0, 2));
-const collapsedInlineTargets = computed(() => {
+const collapsedSlotItems = computed(() => {
   const remaining = Math.max(0, 2 - collapsedEnumItems.value.length);
+  return cellSlotItems.value.slice(0, remaining);
+});
+const collapsedInlineTargets = computed(() => {
+  const remaining = Math.max(0, 2 - collapsedEnumItems.value.length - collapsedSlotItems.value.length);
   return structuredPreview.value.inlineTargets.slice(0, remaining);
 });
 const collapsedInlineExtraCount = computed(() => Math.max(
   0,
-  cellEnumItems.value.length + structuredPreview.value.inlineTargets.length - 2,
+  cellEnumItems.value.length + cellSlotItems.value.length + structuredPreview.value.inlineTargets.length - 2,
 ));
-const hasInlineMeaningChips = computed(() => cellEnumItems.value.length > 0 || structuredPreview.value.inlineTargets.length > 0);
+const hasInlineMeaningChips = computed(() => (
+  cellEnumItems.value.length > 0 || cellSlotItems.value.length > 0 || structuredPreview.value.inlineTargets.length > 0
+));
 const canEditColumnMeaning = computed(() => Boolean(
   props.selectedCell && !isFieldComment.value && (props.cellContext?.column || props.selectedCell?.column),
 ));
@@ -277,11 +288,23 @@ function relationChipTitle(target) {
   return t("relations.target.open", { table: tableLabel || target.targetTable, value: valueText });
 }
 
-function enumChipTitle(item) {
-  if (item.state === "unmapped") {
-    return t("cellDetail.enumUnmappedTitle", { value: item.value });
+function enumChipTitle(entry) {
+  if (entry.state === "unmapped") {
+    return t("cellDetail.enumUnmappedTitle", { value: entry.value });
   }
-  return t("cellDetail.enumTitle", { value: item.value, label: item.label });
+  return t("cellDetail.enumTitle", { value: entry.value, label: entry.label });
+}
+
+function slotChipTitle(slot) {
+  if (slot.state === "unmapped") {
+    return t("cellDetail.slotUnmappedTitle", { index: slot.index, value: slot.value });
+  }
+  return t("cellDetail.slotTitle", { index: slot.index, label: slot.label, value: slot.value });
+}
+
+function cardPrimitiveIndexLabel(index) {
+  const slot = cellSlotItems.value[index - 1];
+  return slot?.label ? `#${index} · ${slot.label}` : `#${index}`;
 }
 
 function emitEditColumnMeaning() {
@@ -552,7 +575,7 @@ onBeforeUnmount(() => {
         <span v-else class="wb-cell-detail-idle-hint">{{ t('cellDetail.idleHint') }}</span>
         <span v-if="isNull && !isFieldComment" class="wb-cell-detail-null-state">{{ t('m_05dac0ecc1ae') }}</span>
         <div
-          v-if="isPanelCollapsed && (collapsedEnumItems.length || collapsedInlineTargets.length)"
+          v-if="isPanelCollapsed && (collapsedEnumItems.length || collapsedSlotItems.length || collapsedInlineTargets.length)"
           class="wb-cell-detail-header-refs"
           @click.stop
         >
@@ -567,6 +590,17 @@ onBeforeUnmount(() => {
             <span class="wb-cell-detail-ref-id">{{ entry.value }}</span>
             <span v-if="entry.label" class="wb-cell-detail-ref-name">{{ entry.label }}</span>
             <span v-else class="wb-cell-detail-ref-missing">{{ t('cellDetail.enumUnmapped') }}</span>
+          </span>
+          <span
+            v-for="slot in collapsedSlotItems"
+            :key="`slot:${slot.index}`"
+            class="wb-cell-detail-enum-chip"
+            :class="`is-${slot.state}`"
+            :title="slotChipTitle(slot)"
+          >
+            <ListOrdered :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-name">{{ slot.label || `#${slot.index}` }}</span>
+            <span class="wb-cell-detail-ref-id">{{ slot.value }}</span>
           </span>
           <button
             v-for="(target, index) in collapsedInlineTargets"
@@ -724,6 +758,17 @@ onBeforeUnmount(() => {
             <span v-if="entry.label" class="wb-cell-detail-ref-name">{{ entry.label }}</span>
             <span v-else class="wb-cell-detail-ref-missing">{{ t('cellDetail.enumUnmapped') }}</span>
           </span>
+          <span
+            v-for="slot in cellSlotItems"
+            :key="`slot:${slot.index}`"
+            class="wb-cell-detail-enum-chip"
+            :class="`is-${slot.state}`"
+            :title="slotChipTitle(slot)"
+          >
+            <ListOrdered :size="10" aria-hidden="true" />
+            <span class="wb-cell-detail-ref-name">{{ slot.label || `#${slot.index}` }}</span>
+            <span class="wb-cell-detail-ref-id">{{ slot.value }}</span>
+          </span>
           <button
             v-for="(target, index) in structuredPreview.inlineTargets"
             :key="`${target.targetTable}:${target.value}:${index}`"
@@ -748,7 +793,7 @@ onBeforeUnmount(() => {
                 :key="item.index"
                 class="wb-detail-primitive-pill"
               >
-                <span class="wb-detail-card-index">#{{ item.index }}</span>
+                <span class="wb-detail-card-index">{{ cardPrimitiveIndexLabel(item.index) }}</span>
                 <span class="wb-detail-card-val">{{ item.value }}</span>
                 <button
                   v-if="item.target"

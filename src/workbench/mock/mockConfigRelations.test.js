@@ -340,6 +340,10 @@ test("explicit comment directives override mock catalog relations", async () => 
   tableRes = await call("config_relations_table", { table: "shop" });
   assert.equal(tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id").length, 0);
 
+  itemCol.column_comment = "援助次数 [数组位: N魂石数量, R魂石数量]";
+  tableRes = await call("config_relations_table", { table: "shop" });
+  assert.equal(tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id").length, 0);
+
   itemCol.column_comment = "强制指向道具 [关联: item.id]";
   tableRes = await call("config_relations_table", { table: "shop" });
   const outgoing = tableRes.outgoing.filter((rel) => rel.sourceColumn === "item_id");

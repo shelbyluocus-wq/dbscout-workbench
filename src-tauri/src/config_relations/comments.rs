@@ -1,7 +1,7 @@
 //! Relations declared in database column comments, e.g. `奖励物品ID，对应
 //! goodsprop.ID`, `奖励模板ID actprayerencmodelprop`, or explicit directives
-//! such as `[枚举: 1=N, 2=R]`, `[关联: goodsprop.ID]`, `[列表关联: goodsprop.ID @ ID]`,
-//! and `[无关联]`.
+//! such as `[枚举: 1=N, 2=R]`, `[数组位: N, R, SR]`, `[关联: goodsprop.ID]`,
+//! `[列表关联: goodsprop.ID @ ID]`, and `[无关联]`.
 
 use super::catalog::{DbSnapshot, DbTable};
 use super::model::RelationKind;
@@ -33,6 +33,8 @@ pub enum CommentDirective {
     NoRelation,
     /// Explicit `[枚举: k=v, ...]` / `[enum: ...]`: enum meaning, no foreign-key relations.
     Enum(Vec<(String, String)>),
+    /// Explicit `[数组位: a, b, ...]` / `[slots: ...]`: positional array labels, no foreign-key relations.
+    Slots(Vec<String>),
     /// Explicit `[关联: ...]` / `[列表关联: ...]`: authoritative relation list.
     Relations(Vec<ExplicitRelation>),
 }
@@ -49,6 +51,7 @@ struct RawRelationSpec {
 enum ParsedTag {
     NoRelation,
     Enum(Vec<(String, String)>),
+    Slots(Vec<String>),
     Relations(Vec<RawRelationSpec>),
 }
 
@@ -220,6 +223,38 @@ fn parse_list_specs(body: &str) -> Vec<RawRelationSpec> {
     specs
 }
 
+fn parse_slot_labels(body: &str) -> Vec<String> {
+    let mut labels = Vec::new();
+    for raw_item in body.split([',', '，', ';', '；', '、', '\n', '\r']) {
+        let mut item = raw_item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        // Accept optional 1-based explicit index prefixes such as "1=N" or "#1:N".
+        let stripped = item.strip_prefix('#').unwrap_or(item);
+        let digit_len = stripped.bytes().take_while(u8::is_ascii_digit).count();
+        if digit_len > 0 {
+            let rest = stripped[digit_len..].trim_start();
+            if let Some(after) = rest
+                .strip_prefix("->")
+                .or_else(|| rest.strip_prefix('→'))
+                .or_else(|| rest.strip_prefix('='))
+                .or_else(|| rest.strip_prefix(':'))
+                .or_else(|| rest.strip_prefix('：'))
+            {
+                let after = after.trim();
+                if !after.is_empty() {
+                    item = after;
+                }
+            }
+        }
+        if !item.is_empty() {
+            labels.push(item.to_string());
+        }
+    }
+    labels
+}
+
 fn parse_tag(inner: &str) -> Option<ParsedTag> {
     let trimmed = inner.trim();
     if trimmed.is_empty() {
@@ -235,6 +270,13 @@ fn parse_tag(inner: &str) -> Option<ParsedTag> {
     if header == "枚举" || header.eq_ignore_ascii_case("enum") {
         let entries = parse_enum_entries(body);
         return (!entries.is_empty()).then_some(ParsedTag::Enum(entries));
+    }
+    if matches!(header, "数组位" | "位置")
+        || header.eq_ignore_ascii_case("slots")
+        || header.eq_ignore_ascii_case("tuple")
+    {
+        let labels = parse_slot_labels(body);
+        return (!labels.is_empty()).then_some(ParsedTag::Slots(labels));
     }
     if header == "关联" || header.eq_ignore_ascii_case("ref") {
         let specs = parse_ref_specs(body);
@@ -277,6 +319,15 @@ pub fn parse_directive(comment: &str, snapshot: &DbSnapshot) -> CommentDirective
     }
     if !enum_entries.is_empty() {
         return CommentDirective::Enum(enum_entries);
+    }
+    let mut slot_labels = Vec::new();
+    for tag in &tags {
+        if let ParsedTag::Slots(labels) = tag {
+            slot_labels.extend(labels.iter().cloned());
+        }
+    }
+    if !slot_labels.is_empty() {
+        return CommentDirective::Slots(slot_labels);
     }
     let mut relations = Vec::new();
     for tag in tags {
@@ -618,6 +669,21 @@ mod tests {
         assert_eq!(
             parse_directive("示例 [2, 4, 6, 8] 对应 goodsprop.ID", &db),
             CommentDirective::None
+        );
+
+        let slots_comment = "各稀有度魂石援助次数，下标对应 heroprop.Quality-1 [数组位: N魂石数量, R魂石数量, SR魂石数量, SSR魂石数量, UR魂石数量, SUR魂石数量]";
+        assert!(has_explicit_directive(slots_comment));
+        assert!(parse(slots_comment, "unionhelpqualityprop", "NeedHelpNums", &db).is_empty());
+        assert_eq!(
+            parse_directive(slots_comment, &db),
+            CommentDirective::Slots(vec![
+                "N魂石数量".into(),
+                "R魂石数量".into(),
+                "SR魂石数量".into(),
+                "SSR魂石数量".into(),
+                "UR魂石数量".into(),
+                "SUR魂石数量".into(),
+            ])
         );
     }
 }

@@ -1113,6 +1113,12 @@ mod tests {
                         "引用 heroprop.Quality；可选范围为 goodsprop.ID [枚举: 1=N, 2=R, 5=UR]",
                         false,
                     ),
+                    (
+                        "NeedHelpNums",
+                        "json",
+                        "下标对应 heroprop.Quality-1 [数组位: N魂石数量, R魂石数量, SR魂石数量]",
+                        false,
+                    ),
                     ("PlainNum", "int", "对应 heroprop.ID [无关联]", false),
                     ("ForceGoods", "int", "原本写了 heroprop.ID [关联: goodsprop.ID]", false),
                     ("ForceList", "json", "道具列表 [列表关联: goodsprop.ID @ ID]", false),
@@ -1158,6 +1164,10 @@ mod tests {
         assert!(
             outgoing.iter().all(|view| view.key.source_column != "MaxUnitQuality"),
             "enum directive must suppress all fuzzy, code and orphan relations"
+        );
+        assert!(
+            outgoing.iter().all(|view| view.key.source_column != "NeedHelpNums"),
+            "slots directive must suppress fuzzy comment relations"
         );
         assert!(
             outgoing.iter().all(|view| view.key.source_column != "PlainNum"),

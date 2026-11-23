@@ -166,6 +166,20 @@ function parseListSpecs(body) {
   return specs;
 }
 
+function parseSlotLabels(body) {
+  const labels = [];
+  for (const rawItem of String(body || "").split(/[,，;；、\r\n]/)) {
+    let item = rawItem.trim();
+    if (!item) continue;
+    const prefixed = /^#?\d+\s*(?:->|→|=|[:：])\s*(.+)$/.exec(item);
+    if (prefixed && prefixed[1].trim()) {
+      item = prefixed[1].trim();
+    }
+    if (item) labels.push(item);
+  }
+  return labels;
+}
+
 function parseTag(inner) {
   const trimmed = String(inner || "").trim();
   if (!trimmed) return null;
@@ -183,6 +197,10 @@ function parseTag(inner) {
   if (header === "枚举" || headerLower === "enum") {
     const entries = parseEnumEntries(body);
     return entries.length ? { kind: "enum", entries } : null;
+  }
+  if (header === "数组位" || header === "位置" || headerLower === "slots" || headerLower === "tuple") {
+    const slots = parseSlotLabels(body);
+    return slots.length ? { kind: "slots", slots } : null;
   }
   if (header === "关联" || headerLower === "ref") {
     const relations = parseRefSpecs(body);
@@ -206,17 +224,24 @@ export function parseCommentDirective(comment) {
     tags.push({ start: block.start, end: block.end, raw: block.raw });
   }
   if (!parsed.length) {
-    return { hasDirective: false, kind: "none", entries: [], relations: [], tags: [] };
+    return { hasDirective: false, kind: "none", entries: [], slots: [], relations: [], tags: [] };
   }
   if (parsed.some((item) => item.kind === "noRelation")) {
-    return { hasDirective: true, kind: "noRelation", entries: [], relations: [], tags };
+    return { hasDirective: true, kind: "noRelation", entries: [], slots: [], relations: [], tags };
   }
   const entries = [];
   for (const item of parsed) {
     if (item.kind === "enum") entries.push(...item.entries);
   }
   if (entries.length) {
-    return { hasDirective: true, kind: "enum", entries, relations: [], tags };
+    return { hasDirective: true, kind: "enum", entries, slots: [], relations: [], tags };
+  }
+  const slots = [];
+  for (const item of parsed) {
+    if (item.kind === "slots") slots.push(...item.slots);
+  }
+  if (slots.length) {
+    return { hasDirective: true, kind: "slots", entries: [], slots, relations: [], tags };
   }
   const relations = [];
   const seen = new Set();
@@ -229,7 +254,7 @@ export function parseCommentDirective(comment) {
       relations.push(rel);
     }
   }
-  return { hasDirective: true, kind: "relation", entries: [], relations, tags };
+  return { hasDirective: true, kind: "relation", entries: [], slots: [], relations, tags };
 }
 
 export function stripCommentDirectives(comment) {
@@ -262,6 +287,13 @@ export function formatCommentDirective(spec) {
       .filter((entry) => entry.key && entry.label);
     if (!valid.length) return "";
     return `[枚举: ${valid.map((entry) => `${entry.key}=${entry.label}`).join(", ")}]`;
+  }
+  if (spec.kind === "slots") {
+    const valid = (Array.isArray(spec.slots) ? spec.slots : [])
+      .map((label) => String(label ?? "").trim())
+      .filter(Boolean);
+    if (!valid.length) return "";
+    return `[数组位: ${valid.join(", ")}]`;
   }
   if (spec.kind === "value" || spec.kind === "list") {
     const table = String(spec.targetTable ?? "").trim();
@@ -318,6 +350,79 @@ export function resolveCellEnumPreview(rawValue, comment) {
   }
   const single = mapScalar(raw);
   return single ? [single] : [];
+}
+
+function formatSlotScalar(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value).trim();
+}
+
+export function resolveCellSlotPreview(rawValue, comment) {
+  const directive = parseCommentDirective(comment);
+  if (directive.kind !== "slots" || !directive.slots.length) return [];
+  const raw = String(rawValue ?? "").trim();
+  if (!raw || raw === "null" || raw === "NULL" || raw === "[]") return [];
+
+  let items = null;
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (parsed.every((item) => item === null || typeof item !== "object")) {
+          items = parsed.map(formatSlotScalar);
+        }
+      }
+    } catch {
+      items = null;
+    }
+  } else if (raw.includes("|")) {
+    items = raw.split("|").map((part) => part.trim());
+  } else if (raw.includes(",")) {
+    items = raw.split(",").map((part) => part.trim());
+  }
+  if (!items || !items.length) return [];
+  return items.map((value, index) => {
+    const label = directive.slots[index] || "";
+    return {
+      index: index + 1,
+      label,
+      value,
+      state: label ? "slot" : "unmapped",
+    };
+  });
+}
+
+// Extract candidate ordered slot labels from legacy prose comments such as
+// "依次对应N/R/SR/SSR/UR/SUR" or "依次为生命、攻击、防御".
+export function suggestSlotLabelsFromComment(comment) {
+  const prose = stripCommentDirectives(comment);
+  if (!prose) return [];
+
+  const cueMatch = /(?:依次对应|依次为|依次代表|分别为|顺序为|按顺序|各位对应|各位为)[：:\s]*([^；;。.)）\n]+)/.exec(prose);
+  if (cueMatch) {
+    const body = cueMatch[1].trim();
+    const parts = body
+      .split(/[\/、,，|]+/)
+      .map((part) => part.trim())
+      .filter((part) => part && part.length <= 24);
+    if (parts.length >= 2) return parts;
+  }
+
+  for (const match of prose.matchAll(/([\u4e00-\u9fa5A-Za-z0-9_]{1,16}(?:\/[\u4e00-\u9fa5A-Za-z0-9_]{1,16}){1,15})/g)) {
+    const parts = match[1].split("/").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts;
+  }
+
+  const enums = suggestEnumEntriesFromComment(prose);
+  if (enums.length >= 2) return enums.map((entry) => entry.label);
+  return [];
 }
 
 // Extract candidate enum key/label pairs from legacy free-text comments such as

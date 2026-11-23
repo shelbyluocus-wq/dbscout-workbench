@@ -2056,7 +2056,24 @@ label:has(input[type="checkbox"]:disabled) {
   gap: 6px;
 }
 
+.wb-comment-slot-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-comment-slot-index {
+  color: var(--wb-quiet-text);
+  font-family: var(--wb-font-mono);
+  font-size: var(--wb-fs-caption);
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .wb-comment-enum-row input,
+.wb-comment-slot-row input,
 .wb-comment-rel-field input,
 .wb-comment-rel-field select {
   height: 28px;
@@ -2070,6 +2087,7 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-comment-enum-row input:focus,
+.wb-comment-slot-row input:focus,
 .wb-comment-rel-field input:focus,
 .wb-comment-rel-field select:focus {
   border-color: var(--wb-accent-strong);
@@ -2148,6 +2166,13 @@ label:has(input[type="checkbox"]:disabled) {
   align-items: center;
   gap: 6px;
   margin-inline-start: auto;
+}
+
+.wb-comment-sample-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 6px;
 }
 
 .wb-comment-sample-label {

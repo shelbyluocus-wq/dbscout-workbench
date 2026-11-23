@@ -9,8 +9,10 @@ import {
   formatCommentDirective,
   parseCommentDirective,
   resolveCellEnumPreview,
+  resolveCellSlotPreview,
   stripCommentDirectives,
   suggestEnumEntriesFromComment,
+  suggestSlotLabelsFromComment,
 } from "./commentDirectives.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +58,13 @@ test("parseCommentDirective parses enum, ref, list and noRelation directives", (
   const ordinary = parseCommentDirective("次数数组 [2, 4, 6, 8]");
   assert.equal(ordinary.hasDirective, false);
   assert.equal(ordinary.kind, "none");
+
+  const slots = parseCommentDirective(
+    "援助次数 [数组位: N魂石数量, R魂石数量, SR魂石数量, SSR魂石数量, UR魂石数量, SUR魂石数量]",
+  );
+  assert.equal(slots.hasDirective, true);
+  assert.equal(slots.kind, "slots");
+  assert.deepEqual(slots.slots, ["N魂石数量", "R魂石数量", "SR魂石数量", "SSR魂石数量", "UR魂石数量", "SUR魂石数量"]);
 });
 
 test("stripCommentDirectives and composeCommentWithDirective preserve prose cleanly", () => {
@@ -88,6 +97,36 @@ test("resolveCellEnumPreview resolves scalar, JSON array and unmapped values", (
     { value: "5", label: "UR", state: "enum" },
   ]);
   assert.deepEqual(resolveCellEnumPreview("5", "普通备注没有枚举标记"), []);
+});
+
+test("resolveCellSlotPreview and suggestSlotLabelsFromComment handle NeedHelpNums style arrays", () => {
+  const comment = "各稀有度魂石完成单次委托所需的援助次数（第1项为N级，依次对应N/R/SR/SSR/UR/SUR） [数组位: N魂石数量, R魂石数量, SR魂石数量, SSR魂石数量, UR魂石数量, SUR魂石数量]";
+  assert.deepEqual(resolveCellSlotPreview("[2, 4, 6, 8, 10]", comment), [
+    { index: 1, label: "N魂石数量", value: "2", state: "slot" },
+    { index: 2, label: "R魂石数量", value: "4", state: "slot" },
+    { index: 3, label: "SR魂石数量", value: "6", state: "slot" },
+    { index: 4, label: "SSR魂石数量", value: "8", state: "slot" },
+    { index: 5, label: "UR魂石数量", value: "10", state: "slot" },
+  ]);
+  assert.deepEqual(resolveCellSlotPreview("[2, 4]", "数组 [数组位: N]"), [
+    { index: 1, label: "N", value: "2", state: "slot" },
+    { index: 2, label: "", value: "4", state: "unmapped" },
+  ]);
+  assert.deepEqual(resolveCellSlotPreview("10,20,30", "属性 [数组位: 生命, 攻击, 防御]"), [
+    { index: 1, label: "生命", value: "10", state: "slot" },
+    { index: 2, label: "攻击", value: "20", state: "slot" },
+    { index: 3, label: "防御", value: "30", state: "slot" },
+  ]);
+  assert.deepEqual(
+    suggestSlotLabelsFromComment(
+      "各稀有度魂石完成单次委托所需的援助次数一维非空数组，长度等于MaxUnitQuality，下标对应heroprop.Quality-1（第1项为N级，依次对应N/R/SR/SSR/UR/SUR）；每次援助进度+1",
+    ),
+    ["N", "R", "SR", "SSR", "UR", "SUR"],
+  );
+  assert.equal(
+    formatCommentDirective({ kind: "slots", slots: ["N魂石数量", "R魂石数量"] }),
+    "[数组位: N魂石数量, R魂石数量]",
+  );
 });
 
 test("suggestEnumEntriesFromComment extracts legacy Chinese game-config enums", () => {
