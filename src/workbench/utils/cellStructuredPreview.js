@@ -14,6 +14,7 @@ export function buildCellTargetLookup(cellRelations) {
       const entry = {
         value,
         label: target?.label ? String(target.label).trim() : "",
+        matchCount: Number(target?.matchCount) || 0,
         state: String(target?.state || "unknown"),
         targetTable,
         targetTableComment,

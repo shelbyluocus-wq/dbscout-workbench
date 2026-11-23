@@ -2051,6 +2051,7 @@ export default Object.freeze({
   "commentEdit.copyComment": "Copy comment",
   "commentEdit.copied": "Copied",
   "relations.audit.title": "Reference check",
+  "relations.target.matchCount": "{count} rows",
   "relations.audit.run": "Check links",
   "relations.audit.rerun": "Re-check",
   "relations.audit.scanning": "Scanning…",

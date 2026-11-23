@@ -268,10 +268,19 @@ function targetStateLabel(target) {
   return "";
 }
 
+function targetDisplayLabel(target) {
+  if (target?.label) return target.label;
+  const count = Number(target?.matchCount) || 0;
+  return count > 1 ? t("relations.target.matchCount", { count }) : "";
+}
+
 function targetTitle(target, relation) {
   const state = targetStateLabel(target);
   if (state) return `${targetTableName(relation)}.${relation.targetColumn} = ${target.value} · ${state}`;
-  return t("relations.target.open", { table: targetTableName(relation), value: target.label ? `${target.value} · ${target.label}` : target.value });
+  const count = Number(target.matchCount) || 0;
+  const countText = count > 1 ? t("relations.target.matchCount", { count }) : "";
+  const valueText = [target.value, target.label || "", countText].filter(Boolean).join(" · ");
+  return t("relations.target.open", { table: targetTableName(relation), value: valueText });
 }
 </script>
 
@@ -335,7 +344,7 @@ function targetTitle(target, relation) {
                   @click="jumpToTargets(entry.relation, [target.value])"
                 >
                   <span class="wb-relation-target-value">{{ target.value }}</span>
-                  <span v-if="target.label" class="wb-relation-target-label">{{ target.label }}</span>
+                  <span v-if="targetDisplayLabel(target)" class="wb-relation-target-label">{{ targetDisplayLabel(target) }}</span>
                   <span v-if="targetStateLabel(target)" class="wb-relation-target-state">{{ targetStateLabel(target) }}</span>
                 </button>
                 <span v-if="entry.result.truncated" class="wb-relations-note">{{ t('relations.target.truncated', { count: entry.result.targets.length }) }}</span>

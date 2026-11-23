@@ -277,6 +277,12 @@ function openRelationTarget(target) {
   emit("open-relation-target", target);
 }
 
+function relationChipLabel(target) {
+  if (target?.label) return target.label;
+  const count = Number(target?.matchCount) || 0;
+  return count > 1 ? t("relations.target.matchCount", { count }) : "";
+}
+
 function relationChipTitle(target) {
   const tableLabel = target.targetTableComment
     ? `${target.targetTable}（${target.targetTableComment}）`
@@ -284,7 +290,9 @@ function relationChipTitle(target) {
   if (target.state === "missing") {
     return `${tableLabel}.${target.targetColumn} = ${target.value} · ${t("relations.target.missing")}`;
   }
-  const valueText = target.label ? `${target.value} · ${target.label}` : target.value;
+  const count = Number(target.matchCount) || 0;
+  const countText = count > 1 ? t("relations.target.matchCount", { count }) : "";
+  const valueText = [target.value, target.label || "", countText].filter(Boolean).join(" · ");
   return t("relations.target.open", { table: tableLabel || target.targetTable, value: valueText });
 }
 
@@ -614,7 +622,7 @@ onBeforeUnmount(() => {
           >
             <Link2 :size="10" aria-hidden="true" />
             <span class="wb-cell-detail-ref-id">{{ target.value }}</span>
-            <span v-if="target.label" class="wb-cell-detail-ref-name">{{ target.label }}</span>
+            <span v-if="relationChipLabel(target)" class="wb-cell-detail-ref-name">{{ relationChipLabel(target) }}</span>
             <span v-else-if="target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
           </button>
           <span v-if="collapsedInlineExtraCount > 0" class="wb-cell-detail-ref-more">+{{ collapsedInlineExtraCount }}</span>
@@ -781,7 +789,7 @@ onBeforeUnmount(() => {
           >
             <Link2 :size="10" aria-hidden="true" />
             <span class="wb-cell-detail-ref-id">{{ target.value }}</span>
-            <span v-if="target.label" class="wb-cell-detail-ref-name">{{ target.label }}</span>
+            <span v-if="relationChipLabel(target)" class="wb-cell-detail-ref-name">{{ relationChipLabel(target) }}</span>
             <span v-else-if="target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
           </button>
         </div>
@@ -804,7 +812,7 @@ onBeforeUnmount(() => {
                   :disabled="item.target.state === 'missing'"
                   @click.stop="openRelationTarget(item.target)"
                 >
-                  <span v-if="item.target.label" class="wb-cell-detail-ref-name">{{ item.target.label }}</span>
+                  <span v-if="relationChipLabel(item.target)" class="wb-cell-detail-ref-name">{{ relationChipLabel(item.target) }}</span>
                   <span v-else-if="item.target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
                   <span v-else class="wb-cell-detail-ref-id">{{ item.target.targetTable }}</span>
                 </button>
@@ -836,7 +844,7 @@ onBeforeUnmount(() => {
                     @click.stop="openRelationTarget(field.target)"
                   >
                     <Link2 :size="10" aria-hidden="true" />
-                    <span v-if="field.target.label" class="wb-cell-detail-ref-name">{{ field.target.label }}</span>
+                    <span v-if="relationChipLabel(field.target)" class="wb-cell-detail-ref-name">{{ relationChipLabel(field.target) }}</span>
                     <span v-else-if="field.target.state === 'missing'" class="wb-cell-detail-ref-missing">{{ t('relations.target.missing') }}</span>
                     <span v-else class="wb-cell-detail-ref-id">{{ field.target.targetTable }}</span>
                   </button>

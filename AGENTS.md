@@ -396,7 +396,11 @@ capabilities:
   semantic pills (and labeled primitive cards) in `CellDetailPanel.vue`, whose
   meaning button opens `CommentEditDialog.vue` to edit directives visually,
   extract legacy comment enums/slots, save directly to the MySQL column comment,
-  or copy the normalized comment / agent summary when read-only. Available for
+  or copy the normalized comment / agent summary when read-only. When an
+  outgoing relation targets a non-primary-key column, row lookups inherit enum
+  labels from that target column's comment (explicit `[枚举: ...]` or prose
+  fallback) and report multi-row `matchCount` instead of picking an arbitrary
+  first row's name. Available for
   MySQL connections and the built-in demo data; ClickHouse and MongoDB are
   excluded.
 - **Page zoom** uses macOS `Cmd` / Windows `Ctrl` with `+` (or `=`), `-`, and

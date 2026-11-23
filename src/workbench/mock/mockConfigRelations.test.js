@@ -351,3 +351,46 @@ test("explicit comment directives override mock catalog relations", async () => 
   assert.equal(outgoing[0].targetTable, "item");
   assert.equal(outgoing[0].status, "confirmed");
 });
+
+test("non-primary-key relation targets inherit target column enums or report multi-row counts", async () => {
+  const schema = structuredClone(resolveMockSchema("demo", "game_db", { tableCount: 0 }));
+  const hero = schema.find((table) => table.table_name === "hero");
+  const rarityCol = hero.columns.find((col) => col.column_name === "rarity");
+  rarityCol.column_comment = "稀有度(1N，2R,3SR，4SSR，5UR，6SUR）";
+  const quest = schema.find((table) => table.table_name === "quest");
+  const typeCol = quest.columns.find((col) => col.column_name === "type");
+  typeCol.column_comment = "最大稀有度 [关联: hero.rarity]";
+  const chapterCol = quest.columns.find((col) => col.column_name === "chapter");
+  chapterCol.column_comment = "所属元素 [关联: hero.element]";
+
+  const rows = {
+    hero: [
+      { id: "1", name: "丁香(幼年)", rarity: "4", element: "fire" },
+      { id: "2", name: "炽天使", rarity: "4", element: "fire" },
+      { id: "3", name: "冰霜法师", rarity: "5", element: "ice" },
+    ],
+  };
+  const relations = createMockConfigRelations({
+    connectionFor: (id) => CONNECTIONS[id] || null,
+    schemaFor: () => schema,
+    rowsFor: (_connectionId, _database, table) => rows[table] || [],
+    delayMs: 0,
+    emit: () => {},
+    now: () => NOW,
+  });
+  const targets = await relations.invoke("config_relations_row_targets", {
+    request: {
+      connectionId: "demo",
+      database: "game_db",
+      table: "quest",
+      row: { id: "1", type: "4", chapter: "fire" },
+    },
+  });
+  const byIdMap = new Map(targets.outgoing.map((item) => [item.relationId, item.targets]));
+  assert.deepEqual(byIdMap.get("quest.type>hero.rarity"), [
+    { value: "4", state: "found", label: "SSR", matchCount: 2 },
+  ]);
+  assert.deepEqual(byIdMap.get("quest.chapter>hero.element"), [
+    { value: "fire", state: "found", matchCount: 2 },
+  ]);
+});

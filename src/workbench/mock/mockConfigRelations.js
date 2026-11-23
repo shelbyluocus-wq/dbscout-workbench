@@ -11,7 +11,7 @@ import { isEmptyReferenceValue, referenceValuesFromCell, rowCellValue } from "..
 import { matchesRelationConstraints } from "../utils/relationConstraints.js";
 import { RELATION_LAB_DATABASE, isRelationLabTable, relationLabRelations } from "./mockRelationLab.js";
 import { parseReferenceValues } from "../utils/referenceParser.js";
-import { parseCommentDirective } from "../utils/commentDirectives.js";
+import { parseCommentDirective, suggestEnumEntriesFromComment } from "../utils/commentDirectives.js";
 
 const UPDATED_EVENT = "config-relations-updated";
 const COMMAND_PREFIX = "config_relations_";
@@ -774,17 +774,62 @@ export function createMockConfigRelations({
     return views.filter((view) => view.status !== "rejected");
   }
 
-  // Lowercase key -> label (or "") for every row of the target table.
+  function targetEnumMap(table, column, isSinglePk) {
+    const colObj = findColumn(table, column);
+    const comment = String(colObj?.column_comment || colObj?.columnComment || "").trim();
+    if (!comment) return new Map();
+    const map = new Map();
+    const directive = parseCommentDirective(comment);
+    if (directive.kind === "enum" && directive.entries.length) {
+      for (const entry of directive.entries) {
+        const folded = entry.key.toLowerCase();
+        if (!map.has(folded)) map.set(folded, entry.label);
+      }
+      return map;
+    }
+    if (!isSinglePk) {
+      for (const entry of suggestEnumEntriesFromComment(comment)) {
+        const folded = entry.key.toLowerCase();
+        if (!map.has(folded)) map.set(folded, entry.label);
+      }
+    }
+    return map;
+  }
+
+  // Lowercase key -> { label, matchCount } for every distinct value in target column.
   function targetKeys(context, table, column) {
-    const keyName = columnName(findColumn(table, column));
+    const colObj = findColumn(table, column);
+    const keyName = columnName(colObj);
+    const primaryCols = (table?.columns || []).filter((col) => col.is_primary_key || col.isPrimaryKey);
+    const isSinglePk = primaryCols.length === 1 && columnName(primaryCols[0]).toLowerCase() === keyName.toLowerCase();
+    const enums = targetEnumMap(table, column, isSinglePk);
     const label = labelColumn(table);
     const labelName = label ? columnName(label) : "";
-    const keys = new Map();
+    const grouped = new Map();
     for (const row of rowsFor(context.connectionId, context.database, table.table_name) || []) {
       const value = row[keyName];
       if (value === null || value === undefined) continue;
       const key = String(value).trim().toLowerCase();
-      if (!keys.has(key)) keys.set(key, labelName ? String(row[labelName] ?? "").trim() : "");
+      const rowLabel = labelName ? String(row[labelName] ?? "").trim() : "";
+      const bucket = grouped.get(key);
+      if (bucket) {
+        bucket.count += 1;
+        if (!bucket.label && rowLabel) bucket.label = rowLabel;
+      } else {
+        grouped.set(key, { count: 1, label: rowLabel });
+      }
+    }
+    const keys = new Map();
+    for (const [key, bucket] of grouped) {
+      const multiCount = !isSinglePk && bucket.count > 1 ? bucket.count : 0;
+      const enumLabel = enums.get(key);
+      if (enumLabel) {
+        keys.set(key, { label: enumLabel, matchCount: multiCount });
+      } else if (multiCount) {
+        keys.set(key, { label: "", matchCount: multiCount });
+      } else {
+        keys.set(key, { label: bucket.label, matchCount: 0 });
+      }
     }
     return keys;
   }
@@ -800,9 +845,14 @@ export function createMockConfigRelations({
       const keys = target && findColumn(target, view.targetColumn) ? targetKeys(context, target, view.targetColumn) : null;
       const targets = values.slice(0, MAX_VALUES_PER_RELATION).map((value) => {
         if (!keys) return { value, state: "unknown" };
-        const label = keys.get(value.toLowerCase());
-        if (label === undefined) return { value, state: "missing" };
-        return label ? { value, state: "found", label } : { value, state: "found" };
+        const resolved = keys.get(value.toLowerCase());
+        if (resolved === undefined) return { value, state: "missing" };
+        return {
+          value,
+          state: "found",
+          ...(resolved.label ? { label: resolved.label } : {}),
+          ...(resolved.matchCount > 1 ? { matchCount: resolved.matchCount } : {}),
+        };
       });
       return { relationId: view.id, targets, truncated: values.length > MAX_VALUES_PER_RELATION, ...(unparsed ? { unparsed: true } : {}) };
     });

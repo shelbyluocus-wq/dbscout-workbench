@@ -3,6 +3,8 @@
 //! such as `[枚举: 1=N, 2=R]`, `[数组位: N, R, SR]`, `[关联: goodsprop.ID]`,
 //! `[列表关联: goodsprop.ID @ ID]`, and `[无关联]`.
 
+use std::collections::HashMap;
+
 use super::catalog::{DbSnapshot, DbTable};
 use super::model::RelationKind;
 use super::parser::{valid_json_path, ReferenceParser};
@@ -298,6 +300,156 @@ fn parse_raw_tags(comment: &str) -> Vec<ParsedTag> {
 
 pub fn has_explicit_directive(comment: &str) -> bool {
     !parse_raw_tags(comment).is_empty()
+}
+
+fn is_prose_enum_boundary(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '(' | '（' | ':' | '：' | ',' | '，' | ';' | '；' | '、' | '/')
+}
+
+fn is_compact_label_char(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_' || ('\u{4E00}'..='\u{9FFF}').contains(&ch)
+}
+
+fn parse_signed_digits(text: &str) -> Option<(String, usize)> {
+    let bytes = text.as_bytes();
+    let mut idx = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let start = idx;
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    (idx > start).then(|| (text[..idx].to_string(), idx))
+}
+
+fn extract_separated_prose_enums(text: &str) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    let mut prev: Option<char> = None;
+    for (byte_idx, ch) in text.char_indices() {
+        let at_boundary = prev.is_none_or(is_prose_enum_boundary);
+        prev = Some(ch);
+        if !at_boundary || !(ch.is_ascii_digit() || matches!(ch, '+' | '-')) {
+            continue;
+        }
+        let rest = &text[byte_idx..];
+        let Some((key, key_len)) = parse_signed_digits(rest) else {
+            continue;
+        };
+        let after_key = rest[key_len..].trim_start();
+        let after_sep = after_key
+            .strip_prefix("->")
+            .or_else(|| after_key.strip_prefix('→'))
+            .or_else(|| after_key.strip_prefix('='))
+            .or_else(|| after_key.strip_prefix(':'))
+            .or_else(|| after_key.strip_prefix('：'))
+            .or_else(|| after_key.strip_prefix('-'));
+        let Some(after_sep) = after_sep else {
+            continue;
+        };
+        let label_raw = after_sep.trim_start();
+        let label_end = label_raw
+            .find(|c: char| {
+                c.is_whitespace()
+                    || matches!(c, ',' | '，' | ';' | '；' | '、' | ')' | '）' | '(' | '（' | '。')
+            })
+            .unwrap_or(label_raw.len());
+        let label = label_raw[..label_end].trim();
+        if !label.is_empty() && !label.chars().all(|c| c.is_ascii_digit()) {
+            entries.push((key, label.to_string()));
+        }
+    }
+    dedupe_enum_pairs(entries)
+}
+
+fn extract_compact_prose_enums(text: &str) -> Vec<(String, String)> {
+    let mut best: Vec<(String, String)> = Vec::new();
+    let mut prev: Option<char> = None;
+    for (byte_idx, ch) in text.char_indices() {
+        let at_boundary = prev.is_none_or(is_prose_enum_boundary);
+        prev = Some(ch);
+        if !at_boundary || !(ch.is_ascii_digit() || matches!(ch, '+' | '-')) {
+            continue;
+        }
+        let mut cursor = byte_idx;
+        let mut run: Vec<(String, String)> = Vec::new();
+        while cursor < text.len() {
+            let slice = &text[cursor..];
+            let Some((key, key_len)) = parse_signed_digits(slice) else {
+                break;
+            };
+            let after_key = &slice[key_len..];
+            let ws_len = after_key.len() - after_key.trim_start().len();
+            let label_slice = &after_key[ws_len..];
+            let mut label_bytes = 0;
+            let mut label_chars = 0;
+            for (idx, c) in label_slice.char_indices() {
+                if !is_compact_label_char(c) || label_chars >= 12 {
+                    break;
+                }
+                label_bytes = idx + c.len_utf8();
+                label_chars += 1;
+            }
+            if label_bytes == 0 {
+                break;
+            }
+            let label = &label_slice[..label_bytes];
+            run.push((key, label.to_string()));
+            cursor += key_len + ws_len + label_bytes;
+
+            // Advance across optional separators between compact enum pairs.
+            let mut sep_advance = 0;
+            for (idx, c) in text[cursor..].char_indices() {
+                if c.is_whitespace() || matches!(c, ',' | '，' | '、' | ';' | '；' | '/') {
+                    sep_advance = idx + c.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            cursor += sep_advance;
+        }
+        let clean = dedupe_enum_pairs(run);
+        if clean.len() >= 2 && clean.len() > best.len() {
+            best = clean;
+        }
+    }
+    best
+}
+
+fn dedupe_enum_pairs(items: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (key, label) in items {
+        if seen.insert(key.to_ascii_lowercase()) {
+            out.push((key, label));
+        }
+    }
+    out
+}
+
+/// Extract a lowercase `key -> label` enum map from a column comment.
+/// Explicit `[枚举: ...]` directives are always honored; legacy prose patterns
+/// such as `(1N，2R,3SR，4SSR，5UR，6SUR）` are only parsed when
+/// `allow_prose_fallback` is true (e.g. for non-primary-key target columns).
+pub fn extract_enum_map(comment: &str, allow_prose_fallback: bool) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for tag in parse_raw_tags(comment) {
+        if let ParsedTag::Enum(entries) = tag {
+            for (key, label) in entries {
+                map.entry(key.trim().to_ascii_lowercase()).or_insert(label);
+            }
+        }
+    }
+    if !map.is_empty() || !allow_prose_fallback {
+        return map;
+    }
+    let separated = extract_separated_prose_enums(comment);
+    let pairs = if separated.len() >= 2 {
+        separated
+    } else {
+        extract_compact_prose_enums(comment)
+    };
+    for (key, label) in pairs {
+        map.entry(key.trim().to_ascii_lowercase()).or_insert(label);
+    }
+    map
 }
 
 /// Parse an explicit structured directive in a column comment. When present,
@@ -685,5 +837,36 @@ mod tests {
                 "SUR魂石数量".into(),
             ])
         );
+    }
+
+    #[test]
+    fn extract_enum_map_reads_explicit_and_non_pk_prose_without_false_positives() {
+        let hero_quality = "英雄/祭灵/坐骑/战宠稀有度(1N，2R,3SR，4SSR，5UR，6SUR）";
+        assert!(extract_enum_map(hero_quality, false).is_empty());
+        let map = extract_enum_map(hero_quality, true);
+        assert_eq!(map.get("1").map(String::as_str), Some("N"));
+        assert_eq!(map.get("4").map(String::as_str), Some("SSR"));
+        assert_eq!(map.get("5").map(String::as_str), Some("UR"));
+        assert_eq!(map.get("6").map(String::as_str), Some("SUR"));
+
+        let slot_quality = "格位品质表现（非英雄品质）：1蓝、2紫、3橙；用于卡片描边";
+        let qmap = extract_enum_map(slot_quality, true);
+        assert_eq!(qmap.get("1").map(String::as_str), Some("蓝"));
+        assert_eq!(qmap.get("2").map(String::as_str), Some("紫"));
+        assert_eq!(qmap.get("3").map(String::as_str), Some("橙"));
+
+        let status = "状态(0正常1封禁)";
+        let smap = extract_enum_map(status, true);
+        assert_eq!(smap.get("0").map(String::as_str), Some("正常"));
+        assert_eq!(smap.get("1").map(String::as_str), Some("封禁"));
+
+        let explicit = "品质 [枚举: 4=自定义SSR]";
+        assert_eq!(extract_enum_map(explicit, false).get("4").map(String::as_str), Some("自定义SSR"));
+
+        // Non-enum comments must stay empty.
+        assert!(extract_enum_map("道具id", true).is_empty());
+        assert!(extract_enum_map("等级范围1-10", true).is_empty());
+        assert!(extract_enum_map("第1次奖励，第2次奖励", true).is_empty());
+        assert!(extract_enum_map("最大等级100级", true).is_empty());
     }
 }

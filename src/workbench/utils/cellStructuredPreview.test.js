@@ -42,12 +42,13 @@ test("buildCellStructuredPreview supports plain ID cells with outgoing relations
     {
       relation: { id: "r1", targetTable: "goodsprop", targetColumn: "ID" },
       targetTable: "goodsprop",
-      targets: [{ value: "61001", state: "found", label: "英雄招募券" }],
+      targets: [{ value: "61001", state: "found", label: "英雄招募券", matchCount: 1 }],
     },
   ]);
   assert.equal(refOnly.kind, "refs");
   assert.equal(refOnly.canCardView, false);
   assert.equal(refOnly.inlineTargets[0].label, "英雄招募券");
+  assert.equal(refOnly.inlineTargets[0].matchCount, 1);
 
   const obj = buildCellStructuredPreview('{"ItemID": 1001, "Count": 5}', []);
   assert.equal(obj.kind, "json-object");

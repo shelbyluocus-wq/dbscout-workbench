@@ -2052,6 +2052,7 @@ export default Object.freeze({
   "commentEdit.copyComment": "複製規範備註",
   "commentEdit.copied": "已複製",
   "relations.audit.title": "引用體檢",
+  "relations.target.matchCount": "共 {count} 筆",
   "relations.audit.run": "檢查斷鏈",
   "relations.audit.rerun": "重新檢查",
   "relations.audit.scanning": "正在掃描…",

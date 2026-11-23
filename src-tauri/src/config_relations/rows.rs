@@ -37,6 +37,9 @@ pub struct RowTarget {
     pub state: TargetState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Number of matching rows when the target column is non-unique and matched multiple rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -174,19 +177,57 @@ fn active(relations: &[RelationView]) -> impl Iterator<Item = &RelationView> {
         .filter(|view| view.status != RelationStatus::Rejected)
 }
 
-type Labels = HashMap<String, Option<String>>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedTarget {
+    label: Option<String>,
+    match_count: Option<u64>,
+}
+
+type Labels = HashMap<String, ResolvedTarget>;
+
+fn resolve_target_display(
+    key: &str,
+    count: u64,
+    min_label: Option<String>,
+    is_single_pk: bool,
+    target_enums: &HashMap<String, String>,
+) -> ResolvedTarget {
+    let folded = key.trim().to_ascii_lowercase();
+    let multi_count = (!is_single_pk && count > 1).then_some(count);
+    if let Some(enum_label) = target_enums.get(&folded) {
+        return ResolvedTarget {
+            label: Some(enum_label.clone()),
+            match_count: multi_count,
+        };
+    }
+    if multi_count.is_some() {
+        return ResolvedTarget {
+            label: None,
+            match_count: multi_count,
+        };
+    }
+    ResolvedTarget {
+        label: min_label,
+        match_count: None,
+    }
+}
 
 fn row_target(value: String, fetched: Option<&(Option<Labels>, Vec<String>)>) -> RowTarget {
     let found = fetched
         .filter(|(_, queried)| queried.contains(&value))
         .and_then(|(labels, _)| labels.as_ref())
         .map(|labels| labels.get(&value.to_lowercase()).cloned());
-    let (state, label) = match found {
-        None => (TargetState::Unknown, None),
-        Some(None) => (TargetState::Missing, None),
-        Some(Some(label)) => (TargetState::Found, label),
+    let (state, label, match_count) = match found {
+        None => (TargetState::Unknown, None, None),
+        Some(None) => (TargetState::Missing, None, None),
+        Some(Some(resolved)) => (TargetState::Found, resolved.label, resolved.match_count),
     };
-    RowTarget { value, state, label }
+    RowTarget {
+        value,
+        state,
+        label,
+        match_count,
+    }
 }
 
 async fn lookup_targets(
@@ -200,6 +241,12 @@ async fn lookup_targets(
     let meta = snapshot
         .table(table)
         .ok_or_else(|| format!("找不到表 {table}"))?;
+    let is_single_pk =
+        meta.primary_keys.len() == 1 && meta.primary_keys[0].eq_ignore_ascii_case(column);
+    let target_enums = meta
+        .column(column)
+        .map(|col| super::comments::extract_enum_map(&col.comment, !is_single_pk))
+        .unwrap_or_default();
     let label_sql = meta
         .label_column()
         .map(|label| format!(", MIN(CAST(`{}` AS CHAR)) AS relation_label", escape_ident(label)))
@@ -207,10 +254,11 @@ async fn lookup_targets(
     let placeholders = vec!["?"; values.len()].join(", ");
     // Comparing the bare column keeps its index usable; keys are matched
     // back as text below, so loose numeric conversions cannot leak through.
-    // Grouping keeps non-unique key columns (part of a composite key) to one
-    // row per key.
+    // Grouping keeps non-unique key columns to one row per key while reporting
+    // how many rows matched so multi-row groups don't masquerade as one row.
     let sql = format!(
-        "SELECT /*+ MAX_EXECUTION_TIME(10000) */ CAST(`{column}` AS CHAR) AS relation_key{label_sql} \
+        "SELECT /*+ MAX_EXECUTION_TIME(10000) */ CAST(`{column}` AS CHAR) AS relation_key, \
+         COUNT(*) AS relation_count{label_sql} \
          FROM {table_ref} WHERE `{column}` IN ({placeholders}) GROUP BY `{column}`",
         column = escape_ident(column),
         table_ref = qualified_table(database, &meta.name),
@@ -226,7 +274,12 @@ async fn lookup_targets(
     let mut labels = Labels::new();
     for row in rows {
         let key = mysql_text::string(&row, "relation_key").unwrap_or_default();
-        let label = if label_sql.is_empty() {
+        let count = row
+            .try_get::<i64, _>("relation_count")
+            .ok()
+            .map(|value| value.max(1) as u64)
+            .unwrap_or(1);
+        let min_label = if label_sql.is_empty() {
             None
         } else {
             mysql_text::optional_string(&row, "relation_label")
@@ -234,7 +287,8 @@ async fn lookup_targets(
                 .flatten()
                 .filter(|label| !label.trim().is_empty())
         };
-        labels.entry(key.trim().to_lowercase()).or_insert(label);
+        let resolved = resolve_target_display(&key, count, min_label, is_single_pk, &target_enums);
+        labels.entry(key.trim().to_lowercase()).or_insert(resolved);
     }
     Ok(labels)
 }
@@ -768,7 +822,13 @@ mod tests {
     #[test]
     fn only_successfully_queried_keys_can_be_missing() {
         let fetched = (
-            Some(HashMap::from([("1".into(), Some("Gold".into()))])),
+            Some(HashMap::from([(
+                "1".into(),
+                ResolvedTarget {
+                    label: Some("Gold".into()),
+                    match_count: None,
+                },
+            )])),
             vec!["1".into(), "2".into()],
         );
         assert_eq!(row_target("1".into(), Some(&fetched)).state, TargetState::Found);
@@ -777,6 +837,33 @@ mod tests {
             "a key omitted by the lookup cap was never checked");
         assert_eq!(row_target("1".into(), None).state, TargetState::Unknown);
         assert_eq!(row_target("1".into(), Some(&(None, vec!["1".into()]))).state, TargetState::Unknown);
+    }
+
+    #[test]
+    fn non_pk_targets_inherit_enum_labels_and_avoid_picking_arbitrary_first_row_name() {
+        let hero_enums = super::super::comments::extract_enum_map(
+            "英雄/祭灵/坐骑/战宠稀有度(1N，2R,3SR，4SSR，5UR，6SUR）",
+            true,
+        );
+        // Non-PK enum column: shows enum meaning + multi-row count, never "丁香(幼年)".
+        let ssr = resolve_target_display("4", 38, Some("丁香(幼年)".into()), false, &hero_enums);
+        assert_eq!(ssr.label.as_deref(), Some("SSR"));
+        assert_eq!(ssr.match_count, Some(38));
+
+        // Non-PK non-enum column with multiple matches: reports count, no arbitrary row name.
+        let empty = HashMap::new();
+        let multi = resolve_target_display("3", 15, Some("第一章任务".into()), false, &empty);
+        assert_eq!(multi.label, None);
+        assert_eq!(multi.match_count, Some(15));
+
+        // Non-PK column with single match or single-PK column: keeps the unique row name.
+        let single = resolve_target_display("9", 1, Some("唯一Boss".into()), false, &empty);
+        assert_eq!(single.label.as_deref(), Some("唯一Boss"));
+        assert_eq!(single.match_count, None);
+
+        let pk = resolve_target_display("21077", 1, Some("英雄魂石".into()), true, &empty);
+        assert_eq!(pk.label.as_deref(), Some("英雄魂石"));
+        assert_eq!(pk.match_count, None);
     }
 
     #[test]
