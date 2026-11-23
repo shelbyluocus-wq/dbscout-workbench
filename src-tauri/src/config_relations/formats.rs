@@ -149,7 +149,7 @@ impl TableFormats {
     }
 }
 
-fn infer_parser(values: &[&str], comment: &str) -> Option<ReferenceParser> {
+pub(super) fn infer_parser(values: &[&str], comment: &str) -> Option<ReferenceParser> {
     let sample = values.first().copied().unwrap_or("");
     if sample.starts_with('[') {
         if let Ok(Value::Array(items)) = serde_json::from_str::<Value>(sample) {

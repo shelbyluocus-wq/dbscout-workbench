@@ -101,18 +101,46 @@ fn cell<'a>(row: &'a HashMap<String, String>, column: &str) -> Option<&'a str> {
 
 /// Config tables use 0 / -1 / empty for "no reference".
 fn is_empty_reference(value: &str) -> bool {
-    matches!(value.trim(), "" | "0" | "-1" | "null" | "NULL" | "[]")
+    matches!(value.trim(), "" | "0" | "-1" | "null" | "NULL" | "[]" | "{}")
 }
 
-/// Keys the row references through one relation, in cell order.
-pub fn reference_values(view: &RelationView, row: &HashMap<String, String>) -> Vec<String> {
+/// Before background format sampling finishes (or when the sampled prefix was
+/// empty), infer a parser directly from the live cell value so structured
+/// arrays/lists aren't queried as one raw literal key.
+fn infer_cell_parser(
+    view: &RelationView,
+    snapshot: &DbSnapshot,
+    row: &HashMap<String, String>,
+) -> Option<ReferenceParser> {
+    if view.parser.is_some() || view.key.kind != RelationKind::Value {
+        return None;
+    }
+    let value = cell(row, &view.key.source_column)?;
+    if super::parser::empty(value) {
+        return None;
+    }
+    let column = snapshot
+        .table(&view.key.source_table)
+        .and_then(|table| table.column(&view.key.source_column));
+    if column.is_some_and(|col| !col.is_text()) {
+        return None;
+    }
+    let comment = column.map(|col| col.comment.as_str()).unwrap_or("");
+    super::formats::infer_parser(&[value], comment)
+}
+
+fn reference_values_with_parser(
+    view: &RelationView,
+    row: &HashMap<String, String>,
+    parser: Option<&ReferenceParser>,
+) -> Vec<String> {
     if !super::constraints::matches(&view.source_constraints, row) {
         return Vec::new();
     }
     let Some(value) = cell(row, &view.key.source_column) else {
         return Vec::new();
     };
-    if let Some(parser) = &view.parser {
+    if let Some(parser) = parser {
         return parser.values(value).unwrap_or_default();
     }
     let values = match view.key.kind {
@@ -126,6 +154,11 @@ pub fn reference_values(view: &RelationView, row: &HashMap<String, String>) -> V
         }
     }
     unique
+}
+
+/// Keys the row references through one relation, in cell order.
+pub fn reference_values(view: &RelationView, row: &HashMap<String, String>) -> Vec<String> {
+    reference_values_with_parser(view, row, view.parser.as_ref())
 }
 
 /// The key of the row that incoming relations point at.
@@ -219,10 +252,12 @@ pub async fn resolve_outgoing(
     let mut wanted: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     let mut plans = Vec::new();
     for view in active(relations) {
-        let unparsed = super::constraints::matches(&view.source_constraints, row) && view.parser.as_ref().is_some_and(|parser| {
+        let inferred = infer_cell_parser(view, snapshot, row);
+        let parser = view.parser.as_ref().or(inferred.as_ref());
+        let unparsed = super::constraints::matches(&view.source_constraints, row) && parser.is_some_and(|parser| {
             cell(row, &view.key.source_column).is_some_and(|value| parser.values(value).is_none())
         });
-        let mut values = reference_values(view, row);
+        let mut values = reference_values_with_parser(view, row, parser);
         let truncated = values.len() > MAX_VALUES_PER_RELATION;
         values.truncate(MAX_VALUES_PER_RELATION);
         let target = (view.key.target_table.clone(), view.key.target_column.clone());
@@ -483,7 +518,7 @@ pub async fn audit_table_references(
     let meta = snapshot
         .table(table_name)
         .ok_or_else(|| format!("找不到表 {table_name}"))?;
-    let active_relations = active(relations).cloned().collect::<Vec<_>>();
+    let mut active_relations = active(relations).cloned().collect::<Vec<_>>();
     if active_relations.is_empty() {
         return Ok(TableReferenceAudit {
             table: meta.name.clone(),
@@ -579,6 +614,27 @@ pub async fn audit_table_references(
             map
         })
         .collect::<Vec<_>>();
+
+    // If background format sampling has not finished yet, infer missing parsers
+    // from the rows already loaded for this audit so structured cells aren't
+    // reported as missing literal keys.
+    for view in &mut active_relations {
+        if view.parser.is_some() || view.key.kind != RelationKind::Value {
+            continue;
+        }
+        let Some(col) = meta.column(&view.key.source_column).filter(|col| col.is_text()) else {
+            continue;
+        };
+        let filled = rows
+            .iter()
+            .filter_map(|row| cell(row, &view.key.source_column))
+            .filter(|value| !super::parser::empty(value))
+            .take(200)
+            .collect::<Vec<_>>();
+        if !filled.is_empty() {
+            view.parser = super::formats::infer_parser(&filled, &col.comment);
+        }
+    }
 
     // Gather all unique referenced values per (target_table, target_column).
     let mut wanted: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
@@ -783,5 +839,58 @@ mod tests {
         assert_eq!(audit.issues[0].row_label.as_deref(), Some("新春礼盒"));
         assert_eq!(audit.issues[0].target_table_comment, "道具表");
         assert_eq!(audit.issues[0].row_identity.get("ID"), Some(&Some("10".into())));
+    }
+
+    #[tokio::test]
+    async fn resolve_outgoing_infers_json_and_unsupported_parsers_before_format_sampling() {
+        use crate::config_relations::catalog::test_support::{snapshot, table};
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect_lazy("mysql://localhost/test")
+            .unwrap();
+        let schema = snapshot(vec![
+            table(
+                "rewardprop",
+                &[
+                    ("ID", "int", "", true),
+                    ("GoodsIDs", "json", "引用goodsprop.ID", false),
+                    ("Items", "text", "引用goodsprop.ID", false),
+                    ("Dynamic", "text", "引用goodsprop.ID", false),
+                    ("SingleID", "int", "引用goodsprop.ID", false),
+                ],
+            ),
+            table("goodsprop", &[("ID", "int", "", true)]),
+        ]);
+        let relations = vec![
+            view("GoodsIDs", RelationKind::Value),
+            view("Items", RelationKind::Value),
+            view("Dynamic", RelationKind::Value),
+            view("SingleID", RelationKind::Value),
+        ];
+        let row = HashMap::from([
+            ("GoodsIDs".into(), "[21001, 21002, 21003]".into()),
+            ("Items".into(), r#"[{"ID": 61001, "Num": 2}]"#.into()),
+            ("Dynamic".into(), "function(lv) { return lv; }".into()),
+            ("SingleID".into(), "1001".into()),
+        ]);
+
+        // Cancel DB queries immediately via is_current=false; we still get the
+        // extracted target values and unparsed flags produced before lookup.
+        let result = resolve_outgoing(&pool, "test", &schema, &relations, &row, &|| false).await;
+        assert_eq!(result.len(), 4);
+
+        let goods_ids: Vec<&str> = result[0].targets.iter().map(|t| t.value.as_str()).collect();
+        assert_eq!(goods_ids, vec!["21001", "21002", "21003"]);
+        assert!(!result[0].unparsed);
+
+        let items: Vec<&str> = result[1].targets.iter().map(|t| t.value.as_str()).collect();
+        assert_eq!(items, vec!["61001"]);
+        assert!(!result[1].unparsed);
+
+        assert!(result[2].targets.is_empty());
+        assert!(result[2].unparsed);
+
+        let single: Vec<&str> = result[3].targets.iter().map(|t| t.value.as_str()).collect();
+        assert_eq!(single, vec!["1001"]);
+        assert!(!result[3].unparsed);
     }
 }

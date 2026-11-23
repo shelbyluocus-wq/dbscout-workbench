@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildCellStructuredPreview } from "./cellStructuredPreview.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("buildCellStructuredPreview turns reward JSON arrays into cards with inline item names", () => {
   const raw = JSON.stringify([
@@ -48,4 +53,17 @@ test("buildCellStructuredPreview supports plain ID cells with outgoing relations
   assert.equal(obj.kind, "json-object");
   assert.equal(obj.canCardView, true);
   assert.equal(obj.cards[0].entries.length, 2);
+});
+
+test("cell detail relation lookup watches relation revision and clips long chip values", () => {
+  const pane = fs.readFileSync(path.join(__dirname, "../components/WorkbenchPane.vue"), "utf8");
+  assert.match(pane, /const cellRelationsRevision = computed\(/);
+  assert.match(pane, /cellRelationsRevision\.value/);
+
+  const css = fs.readFileSync(path.join(__dirname, "../workbench.css"), "utf8");
+  const chipBlock = css.match(/\.wb-cell-detail-ref-chip\s*\{[^}]*\}/)?.[0] || "";
+  assert.match(chipBlock, /overflow:\s*hidden/);
+  const idBlock = css.match(/\.wb-cell-detail-ref-id\s*\{[^}]*\}/)?.[0] || "";
+  assert.match(idBlock, /overflow:\s*hidden/);
+  assert.match(idBlock, /text-overflow:\s*ellipsis/);
 });

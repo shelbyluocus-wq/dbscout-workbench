@@ -535,6 +535,7 @@ function targetTitle(target, relation) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   max-width: 100%;
   min-height: 24px;
   height: 24px;
@@ -544,6 +545,7 @@ function targetTitle(target, relation) {
   background: var(--wb-relation-out-soft);
   color: var(--wb-text);
   font-size: var(--wb-fs-caption);
+  overflow: hidden;
 }
 
 .wb-relation-target:hover:not(:disabled) {
@@ -553,6 +555,10 @@ function targetTitle(target, relation) {
 
 .wb-relation-target-value {
   flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--wb-relation-out);
   font-variant-numeric: tabular-nums;
   font-weight: 650;

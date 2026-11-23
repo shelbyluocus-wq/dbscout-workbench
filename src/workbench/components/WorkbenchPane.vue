@@ -1499,8 +1499,21 @@ const selectedCellContext = computed(() => {
 // 并使用独立的 "cell-detail" 通道，不与右侧检查器互抢请求令牌。
 const configRelationContext = useConfigRelationContext();
 const selectedCellRelations = shallowRef([]);
+const cellRelationsRevision = computed(() => {
+  const tab = activeDataTab.value;
+  if (!tab || !configRelationContext?.relations || !configRelationContext?.relationsSupportedForTab?.(tab)) {
+    return 0;
+  }
+  return Number(
+    configRelationContext.relations.entryFor?.({
+      connectionId: tab.connectionId,
+      database: tab.database,
+    })?.revision,
+  ) || 0;
+});
 let cellRelationsToken = 0;
 let cellRelationsTimer = null;
+let lastCellRelationsTargetKey = "";
 
 function stopCellRelationsLookup() {
   cellRelationsToken += 1;
@@ -1520,6 +1533,7 @@ watch(
     selectedCell.value?.column || "",
     selectedCell.value?.kind || "",
     textDraft.value,
+    cellRelationsRevision.value,
   ],
   () => {
     stopCellRelationsLookup();
@@ -1534,8 +1548,22 @@ watch(
       || !configRelationContext?.relations
       || !configRelationContext?.relationsSupportedForTab?.(tab)
     ) {
+      lastCellRelationsTargetKey = "";
       selectedCellRelations.value = [];
       return;
+    }
+    const targetKey = [
+      tab.id,
+      tab.connectionId,
+      tab.database,
+      tab.tableName,
+      cell.rowKey,
+      cell.column,
+      cell.kind || "data",
+    ].join("\u001f");
+    if (targetKey !== lastCellRelationsTargetKey) {
+      lastCellRelationsTargetKey = targetKey;
+      selectedCellRelations.value = [];
     }
     const token = ++cellRelationsToken;
     const scope = { connectionId: tab.connectionId, database: tab.database };
