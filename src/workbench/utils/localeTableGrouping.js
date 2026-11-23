@@ -190,11 +190,14 @@ export function matchWildcardTableNames(tableNames, patternInput) {
   return matched;
 }
 
-function readStoredFoldPreference() {
+export function readStoredFoldPreference(storage = globalThis.localStorage) {
   try {
-    return globalThis.localStorage?.getItem?.(FOLD_LOCALE_TABLES_STORAGE_KEY) === "1";
+    const stored = storage?.getItem?.(FOLD_LOCALE_TABLES_STORAGE_KEY);
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 

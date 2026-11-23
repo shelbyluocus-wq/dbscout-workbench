@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  FOLD_LOCALE_TABLES_STORAGE_KEY,
   analyzeLocaleTableGroups,
   applyLocaleTableFolding,
   matchWildcardTableNames,
+  readStoredFoldPreference,
   splitLocaleTableName,
+  useLocaleTableFoldPreference,
 } from "./localeTableGrouping.js";
 
 test("splitLocaleTableName recognizes localized game-config suffixes", () => {
@@ -80,4 +83,28 @@ test("matchWildcardTableNames matches multiple glob and substring rules case-ins
     matchWildcardTableNames(names, "_kr"),
     ["heroprop_kr"],
   );
+});
+
+test("readStoredFoldPreference defaults to folded unless explicitly disabled", () => {
+  const emptyStorage = { getItem: () => null };
+  const enabledStorage = { getItem: (key) => (key === FOLD_LOCALE_TABLES_STORAGE_KEY ? "1" : null) };
+  const disabledStorage = { getItem: (key) => (key === FOLD_LOCALE_TABLES_STORAGE_KEY ? "0" : null) };
+  const throwingStorage = { getItem: () => { throw new Error("blocked"); } };
+
+  assert.equal(readStoredFoldPreference(undefined), true);
+  assert.equal(readStoredFoldPreference(emptyStorage), true);
+  assert.equal(readStoredFoldPreference(enabledStorage), true);
+  assert.equal(readStoredFoldPreference(disabledStorage), false);
+  assert.equal(readStoredFoldPreference(throwingStorage), true);
+});
+
+test("useLocaleTableFoldPreference starts folded by default and persists toggles", () => {
+  const pref = useLocaleTableFoldPreference();
+  assert.equal(pref.foldLocaleTables.value, true);
+
+  pref.toggleFoldLocaleTables();
+  assert.equal(pref.foldLocaleTables.value, false);
+
+  pref.setFoldLocaleTables(true);
+  assert.equal(pref.foldLocaleTables.value, true);
 });
