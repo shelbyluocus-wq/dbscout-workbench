@@ -211,3 +211,22 @@ test("find and replace column scope select preserves the dropdown chevron", () =
   assert.doesNotMatch(match[1], /(^|[\s;])background\s*:/);
   assert.match(match[1], /padding:\s*0 30px 0 8px/);
 });
+
+test("table search inline action icons use legible glyphs and 24px hit targets", () => {
+  const grid = read("./components/DataGrid.vue");
+  const comparison = read("./components/BatchImportComparison.vue");
+  const styles = read("./workbench.css");
+
+  assert.match(grid, /class="wb-table-search-clear"[\s\S]*?<X :size="16"/);
+  assert.match(grid, /class="wb-table-search-filter-toggle"[\s\S]*?<ListFilter :size="16"/);
+  assert.match(grid, /class="wb-search-nav-icon"[\s\S]*?<ChevronUp :size="18"/);
+  assert.match(grid, /class="wb-search-nav-icon"[\s\S]*?<ChevronDown :size="18"/);
+  assert.match(comparison, /class="wb-search-nav-icon"[\s\S]*?<ChevronUp :size="18"/);
+  assert.match(comparison, /class="wb-search-nav-icon"[\s\S]*?<ChevronDown :size="18"/);
+  assert.match(styles, /\.wb-table-toolbar \.wb-table-search-clear\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/s);
+  assert.match(styles, /\.wb-table-toolbar \.wb-table-search-filter-toggle\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/s);
+  assert.match(
+    styles,
+    /\.wb-table-search-field \.wb-search-aux \.wb-search-nav-inline \.wb-search-nav-icon\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/s,
+  );
+});

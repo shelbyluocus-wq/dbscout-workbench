@@ -629,7 +629,7 @@ onBeforeUnmount(() => {
             'is-mode-open': searchModeMenuOpen,
           }"
         >
-          <Search class="wb-table-search-field-icon" :size="14" aria-hidden="true" />
+          <Search class="wb-table-search-field-icon" :size="15" aria-hidden="true" />
           <input
             ref="searchInputRef"
             v-model="query"
@@ -651,7 +651,7 @@ onBeforeUnmount(() => {
                 :title="t('m_64d57ad378df')"
                 @click="goToPreviousSearchMatch"
               >
-                <ChevronUp :size="13" aria-hidden="true" />
+                <ChevronUp :size="18" :stroke-width="2" aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -660,7 +660,7 @@ onBeforeUnmount(() => {
                 :title="t('m_84cb6a31b9f5')"
                 @click="goToNextSearchMatch"
               >
-                <ChevronDown :size="13" aria-hidden="true" />
+                <ChevronDown :size="18" :stroke-width="2" aria-hidden="true" />
               </button>
             </span>
             <span

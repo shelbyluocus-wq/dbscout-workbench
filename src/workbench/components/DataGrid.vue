@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, Filter, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, ChevronDown, ChevronUp, Filter, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
 import { formatColumnFilterChip, getColumnFilter, normalizeColumnFilters } from "../utils/columnFilter.js";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
@@ -1641,7 +1641,7 @@ function handleTableContextMenu(event) {
           @mousedown.prevent
           @click="clearTableSearch"
         >
-          <X :size="12" :stroke-width="2" aria-hidden="true" />
+          <X :size="16" :stroke-width="2" aria-hidden="true" />
         </button>
         <button
           v-if="searchInputValue || tab.searchFilterActive"
@@ -1654,7 +1654,7 @@ function handleTableContextMenu(event) {
           @mousedown.prevent
           @click="emit('toggle-search-filter', tab, searchInputValue)"
         >
-          <ListFilter :size="13" :stroke-width="2" aria-hidden="true" />
+          <ListFilter :size="16" :stroke-width="2" aria-hidden="true" />
         </button>
         <div class="wb-search-aux">
           <span v-if="hasSearchMatches" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
@@ -1665,9 +1665,7 @@ function handleTableContextMenu(event) {
               :title="t('m_64d57ad378df')"
               @click="emit('search-previous')"
             >
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="3,9 7,5 11,9" />
-              </svg>
+              <ChevronUp :size="18" :stroke-width="2" aria-hidden="true" />
             </button>
             <button
               class="wb-search-nav-icon"
@@ -1676,9 +1674,7 @@ function handleTableContextMenu(event) {
               :title="t('m_84cb6a31b9f5')"
               @click="emit('search-next')"
             >
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="3,5 7,9 11,5" />
-              </svg>
+              <ChevronDown :size="18" :stroke-width="2" aria-hidden="true" />
             </button>
           </span>
           <span
@@ -1747,9 +1743,7 @@ function handleTableContextMenu(event) {
           :title="t('m_203b7b74375d')"
           @click="emit('schema-search-previous')"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3,9 7,5 11,9" />
-          </svg>
+          <ChevronUp :size="18" :stroke-width="2" aria-hidden="true" />
         </button>
         <button
           class="wb-search-nav-icon"
@@ -1758,9 +1752,7 @@ function handleTableContextMenu(event) {
           :title="t('m_5664cc626e5c')"
           @click="emit('schema-search-next')"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3,5 7,9 11,5" />
-          </svg>
+          <ChevronDown :size="18" :stroke-width="2" aria-hidden="true" />
         </button>
       </span>
       <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" :aria-label="t('m_e3244d705db7')">
