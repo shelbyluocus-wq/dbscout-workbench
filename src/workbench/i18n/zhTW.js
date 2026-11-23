@@ -2064,6 +2064,11 @@ export default Object.freeze({
   "relations.audit.jumpHint": "點擊定位到該報錯儲存格",
   "relations.audit.rowNumber": "第 {row} 列",
   "relations.audit.truncated": "已顯示前 {shown} / {total} 處斷鏈（共掃描 {rows} 列）",
+  "home.modifiedEmpty": "暫無修改記錄",
+  "home.modifiedSource.blackcat": "黑貓修改",
+  "home.modifiedSource.shared": "團隊同步",
+  "home.modifiedSource.database": "資料庫記錄",
+  "home.modifiedSource.external": "偵測到外部變動",
   ...releaseFlowZhTW,
   ...wallpaperZhTW,
 });

@@ -119,7 +119,7 @@ pub async fn run(app: &AppHandle, func: &str, args: Value) -> Result<Value, Stri
             target_database: required_string(&args, "targetDatabase")?,
             mode: args.get("mode").and_then(Value::as_str).unwrap_or("copy").into(),
         };
-        return serialize(commands::copy_tables(request, PerfContext::default(), state).await?);
+        return serialize(commands::copy_tables(request, PerfContext::default(), app.clone(), state).await?);
     }
     let connection_id = required_string(&args, "connectionId")?;
     let database = required_string(&args, "database")?;

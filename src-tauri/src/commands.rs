@@ -13,9 +13,9 @@ use crate::clickhouse;
 use crate::mongodb;
 use crate::db::{
     connect_database, connect_table_count_database, escape_ident, list_tables_from_db,
-    read_db_page_with_perf_in_database, read_db_search_scan_page_with_perf,
-    read_db_table_count_with_perf, read_schemas_for_tables, read_table_design,
-    search_value_matches_in_database, test_database_connection,
+    observe_tables_from_db, read_db_page_with_perf_in_database,
+    read_db_search_scan_page_with_perf, read_db_table_count_with_perf, read_schemas_for_tables,
+    read_table_design, search_value_matches_in_database, test_database_connection,
 };
 use crate::demo::{
     count_stress_or_materialized_rows, materialize_stress_rows, read_stress_or_materialized_page,
@@ -139,6 +139,8 @@ fn schema_table_options(
             column_count: None,
             data_size_bytes: None,
             modified_at: None,
+            modified_source: None,
+            modified_actor: None,
         })
         .collect()
 }
@@ -1216,6 +1218,22 @@ pub async fn sync_database_overwrite(
             .schema_cache
             .invalidate_database(&connection_id, &target_database);
         invalidate_database_count(&state, &connection_id, &target_database);
+        crate::table_modified::record_local_change_owned(
+            &app,
+            &state,
+            &connection_id,
+            &target_database,
+            &result.copied_tables,
+        )
+        .await;
+        crate::table_modified::record_tables_dropped(
+            &app,
+            &state,
+            &connection_id,
+            &target_database,
+            &result.dropped_tables,
+        )
+        .await;
         return Ok(result);
     }
     if !matches!(demo_profile, Some(DemoProfile::Stress)) {
@@ -1278,6 +1296,7 @@ pub fn cancel_database_sync(
 pub async fn copy_tables(
     request: CopyTablesRequest,
     perf_context: PerfContext,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CopyTablesResponse, String> {
     let (kind, target_kind, source_is_real, target_is_real) = {
@@ -1315,6 +1334,11 @@ pub async fn copy_tables(
                 real_connection_pool(&request.target_connection_id, &state, &perf_context).await?;
             table_copy::copy_tables_cross_server(&source_pool, &target_pool, &request).await?
         };
+        let copied_names: Vec<String> = result
+            .copied
+            .iter()
+            .map(|table| table.target_name.clone())
+            .collect();
         for table in &result.copied {
             invalidate_table_schema(
                 &state,
@@ -1329,6 +1353,14 @@ pub async fn copy_tables(
                 &table.target_name,
             );
         }
+        crate::table_modified::record_local_change_owned(
+            &app,
+            &state,
+            &request.target_connection_id,
+            &request.target_database,
+            &copied_names,
+        )
+        .await;
         return Ok(result);
     }
     if source_is_real != target_is_real {
@@ -1497,6 +1529,15 @@ pub async fn rename_table(
                     &new_name,
                 );
                 invalidate_renamed_count(&state, &connection_id, &database, &table_name, &new_name);
+                crate::table_modified::record_table_renamed(
+                    &app,
+                    &state,
+                    &connection_id,
+                    &database,
+                    &table_name,
+                    &new_name,
+                )
+                .await;
                 return Ok(RenameTableResponse {
                     renamed: true,
                     from: table_name,
@@ -1611,6 +1652,11 @@ pub async fn drop_tables(
         let pool = real_connection_pool(&request.connection_id, &state, &perf_context).await?;
         let result =
             drop_tables_mysql(&pool, &request, &table_names, &app, &state, &perf_context).await?;
+        let dropped_names: Vec<String> = result
+            .dropped
+            .iter()
+            .map(|table| table.table_name.clone())
+            .collect();
         for table in &result.dropped {
             invalidate_table_schema(
                 &state,
@@ -1625,6 +1671,14 @@ pub async fn drop_tables(
                 &table.table_name,
             );
         }
+        crate::table_modified::record_tables_dropped(
+            &app,
+            &state,
+            &request.connection_id,
+            &request.database,
+            &dropped_names,
+        )
+        .await;
         return Ok(result);
     }
 
@@ -1825,17 +1879,128 @@ fn select_demo_database(
             column_count: Some(table.columns.len() as u64),
             data_size_bytes: None,
             modified_at: None,
+            modified_source: None,
+            modified_actor: None,
         })
         .collect()
+}
+
+async fn enrich_mysql_tables(
+    app: &AppHandle,
+    state: &AppState,
+    server_key: &str,
+    connection_id: &str,
+    database: &str,
+    observation: crate::db::MysqlDatabaseObservation,
+    fetch_shared_inline: bool,
+) -> Vec<TableOption> {
+    let shared_updates = if fetch_shared_inline {
+        state
+            .table_modified
+            .claim_shared_fetch(server_key, database, true);
+        crate::audit_sync::fetch_shared_table_latest(
+            app,
+            state,
+            server_key,
+            connection_id,
+            database,
+        )
+        .await
+    } else {
+        Vec::new()
+    };
+
+    let fallback: Vec<TableOption> = observation
+        .tables
+        .iter()
+        .map(|item| item.option.clone())
+        .collect();
+
+    let tables = match audit::ensure_audit_pool(app, state).await {
+        Ok(audit_pool) => crate::table_modified::reconcile_mysql_observation(
+            &audit_pool,
+            server_key,
+            connection_id,
+            database,
+            observation,
+            &shared_updates,
+            crate::table_modified::now_ms(),
+        )
+        .await
+        .unwrap_or(fallback),
+        Err(_) => fallback,
+    };
+
+    if !fetch_shared_inline {
+        crate::table_modified::spawn_background_shared_refresh(
+            app.clone(),
+            connection_id.to_string(),
+            database.to_string(),
+            server_key.to_string(),
+        );
+    }
+    tables
+}
+
+async fn enrich_generic_tables(
+    app: &AppHandle,
+    state: &AppState,
+    server_key: &str,
+    connection_id: &str,
+    database: &str,
+    tables: Vec<TableOption>,
+    fetch_shared_inline: bool,
+) -> Vec<TableOption> {
+    let shared_updates = if fetch_shared_inline {
+        state
+            .table_modified
+            .claim_shared_fetch(server_key, database, true);
+        crate::audit_sync::fetch_shared_table_latest(
+            app,
+            state,
+            server_key,
+            connection_id,
+            database,
+        )
+        .await
+    } else {
+        Vec::new()
+    };
+
+    let enriched = match audit::ensure_audit_pool(app, state).await {
+        Ok(audit_pool) => crate::table_modified::reconcile_generic_tables(
+            &audit_pool,
+            server_key,
+            connection_id,
+            database,
+            tables.clone(),
+            &shared_updates,
+            crate::table_modified::now_ms(),
+        )
+        .await
+        .unwrap_or(tables),
+        Err(_) => tables,
+    };
+
+    if !fetch_shared_inline {
+        crate::table_modified::spawn_background_shared_refresh(
+            app.clone(),
+            connection_id.to_string(),
+            database.to_string(),
+            server_key.to_string(),
+        );
+    }
+    enriched
 }
 
 #[tauri::command]
 pub async fn select_database(
     connection_id: Option<String>,
     database: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SelectDatabaseResponse, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, mongodb_url) = {
+    let (connection_id, kind, server_key, mysql_url, clickhouse_url, mongodb_url) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
@@ -1845,13 +2010,24 @@ pub async fn select_database(
         (
             connection_id,
             connection.kind,
+            crate::table_modified::server_key_for_connection(connection),
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
             connection.mongodb_url.clone(),
         )
     };
     let tables = if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        let tables = clickhouse::list_tables(&url, &database).await?;
+        let raw_tables = clickhouse::list_tables(&url, &database).await?;
+        let tables = enrich_generic_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            raw_tables,
+            false,
+        )
+        .await;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -1869,7 +2045,17 @@ pub async fn select_database(
             .collect();
         tables
     } else if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
-        let tables = mongodb::list_tables(&url, &database).await?;
+        let raw_tables = mongodb::list_tables(&url, &database).await?;
+        let tables = enrich_generic_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            raw_tables,
+            false,
+        )
+        .await;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -1889,14 +2075,24 @@ pub async fn select_database(
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        let tables = run_pool_work(
+        let observation = run_pool_work(
             &state.work_scheduler,
             &PoolKey::new(&connection_id, &database),
             WorkClass::Foreground,
             FOREGROUND_DB_TIMEOUT,
-            list_tables_from_db(&pool, &database),
+            observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
         )
         .await?;
+        let tables = enrich_mysql_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            observation,
+            false,
+        )
+        .await;
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -1947,12 +2143,15 @@ pub async fn list_tables(
     connection_id: Option<String>,
     database: Option<String>,
     priority: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<TableOption>, String> {
     let (work_class, work_timeout) = table_list_work(priority.as_deref());
+    let is_background = work_class == WorkClass::Background;
     let (
         connection_id,
         kind,
+        server_key,
         mysql_url,
         clickhouse_url,
         mongodb_url,
@@ -1970,6 +2169,7 @@ pub async fn list_tables(
         (
             connection_id,
             connection.kind,
+            crate::table_modified::server_key_for_connection(connection),
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
             connection.mongodb_url.clone(),
@@ -1984,20 +2184,50 @@ pub async fn list_tables(
     };
     let database = database.unwrap_or(selected_database);
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        clickhouse::list_tables(&url, &database).await
+        let raw_tables = clickhouse::list_tables(&url, &database).await?;
+        Ok(enrich_generic_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            raw_tables,
+            is_background,
+        )
+        .await)
     } else if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
-        mongodb::list_tables(&url, &database).await
+        let raw_tables = mongodb::list_tables(&url, &database).await?;
+        Ok(enrich_generic_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            raw_tables,
+            is_background,
+        )
+        .await)
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        run_pool_work(
+        let observation = run_pool_work(
             &state.work_scheduler,
             &PoolKey::new(&connection_id, &database),
             work_class,
             work_timeout,
-            list_tables_from_db(&pool, &database),
+            observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
         )
-        .await
+        .await?;
+        Ok(enrich_mysql_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            observation,
+            is_background,
+        )
+        .await)
     } else {
         Ok(
             demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)
@@ -2008,6 +2238,8 @@ pub async fn list_tables(
                     column_count: Some(table.columns.len() as u64),
                     data_size_bytes: None,
                     modified_at: None,
+                    modified_source: None,
+                    modified_actor: None,
                 })
                 .collect(),
         )
@@ -3045,6 +3277,14 @@ pub async fn apply_table_design_change(
                 &request.database,
                 &request.table_name,
             );
+            crate::table_modified::record_local_change(
+                &app,
+                &state,
+                &request.connection_id,
+                &request.database,
+                &[request.table_name.as_str()],
+            )
+            .await;
         }
         return Ok(ApplyTableDesignResult {
             applied: preview.has_changes,
@@ -3932,6 +4172,14 @@ async fn update_cells_impl(
                 &session.database,
                 &session.table_name,
             );
+            crate::table_modified::record_local_change(
+                app,
+                state,
+                &session.connection_id,
+                &session.database,
+                &[session.table_name.as_str()],
+            )
+            .await;
         }
         return Ok(result);
     }
@@ -4134,6 +4382,14 @@ async fn update_cells_impl(
             &session.database,
             &session.table_name,
         );
+        crate::table_modified::record_local_change(
+            app,
+            state,
+            &session.connection_id,
+            &session.database,
+            &[session.table_name.as_str()],
+        )
+        .await;
         return Ok(UpdateCellsResult {
             updated: plans.len() as u64,
             conflict: false,
@@ -4594,6 +4850,14 @@ pub async fn insert_row(
             &session.database,
             &session.table_name,
         );
+        crate::table_modified::record_local_change(
+            &app,
+            &state,
+            &session.connection_id,
+            &session.database,
+            &[session.table_name.as_str()],
+        )
+        .await;
         return Ok(result);
     }
     let draft = request.draft;
@@ -4755,6 +5019,14 @@ pub async fn insert_row(
                     &session.database,
                     &session.table_name,
                 );
+                crate::table_modified::record_local_change(
+                    &app,
+                    &state,
+                    &session.connection_id,
+                    &session.database,
+                    &[session.table_name.as_str()],
+                )
+                .await;
                 return Ok(InsertRowResult {
                     affected,
                     row,
@@ -5409,6 +5681,14 @@ pub async fn import_rows(
                 &session.database,
                 &session.table_name,
             );
+            crate::table_modified::record_local_change(
+                &app,
+                &state,
+                &session.connection_id,
+                &session.database,
+                &[session.table_name.as_str()],
+            )
+            .await;
         }
         return Ok(result);
     }
@@ -6013,6 +6293,14 @@ pub async fn replace_table_rows(
                 &session.database,
                 &session.table_name,
             );
+            crate::table_modified::record_local_change(
+                &app,
+                &state,
+                &session.connection_id,
+                &session.database,
+                &[session.table_name.as_str()],
+            )
+            .await;
         }
         return Ok(result);
     }
@@ -6334,6 +6622,14 @@ pub async fn delete_rows(
                 &session.database,
                 &session.table_name,
             );
+            crate::table_modified::record_local_change(
+                &app,
+                &state,
+                &session.connection_id,
+                &session.database,
+                &[session.table_name.as_str()],
+            )
+            .await;
         }
         return Ok(result);
     }
@@ -6493,6 +6789,14 @@ pub async fn delete_rows(
                         &session.database,
                         &session.table_name,
                     );
+                    crate::table_modified::record_local_change(
+                        &app,
+                        &state,
+                        &session.connection_id,
+                        &session.database,
+                        &[session.table_name.as_str()],
+                    )
+                    .await;
                 }
                 return Ok(RowMutationResult { affected });
             }
@@ -6920,6 +7224,8 @@ pub async fn search_values(
                 column_count: Some(table.columns.len() as u64),
                 data_size_bytes: None,
                 modified_at: None,
+                modified_source: None,
+                modified_actor: None,
             })
             .collect(),
         &request.included_tables,
@@ -7139,6 +7445,8 @@ mod tests {
             column_count: None,
             data_size_bytes: None,
             modified_at: None,
+            modified_source: None,
+            modified_actor: None,
         }
     }
 
@@ -9260,6 +9568,14 @@ pub async fn rollback_audit_entry(
                 &entry.database,
                 &entry.table_name,
             );
+            crate::table_modified::record_local_change(
+                &app,
+                &state,
+                &entry.connection_id,
+                &entry.database,
+                &[entry.table_name.as_str()],
+            )
+            .await;
         }
         Err(error) => {
             tx.rollback().await.ok();

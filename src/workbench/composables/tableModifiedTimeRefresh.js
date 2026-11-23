@@ -1,6 +1,7 @@
 import { normalizeTableName } from "../utils/normalize.js";
 
 export const TABLE_MODIFIED_TIME_REFRESH_INTERVAL_MS = 60_000;
+export const TABLE_MODIFIED_TIMES_UPDATED_EVENT = "table-modified-times-updated";
 
 const NO_MODIFIED_TIME = Symbol("no-modified-time");
 
@@ -10,25 +11,66 @@ function modifiedTimeOf(table) {
   return NO_MODIFIED_TIME;
 }
 
+function modifiedSourceOf(table) {
+  if (Object.hasOwn(table || {}, "modified_source")) return table.modified_source ?? null;
+  if (Object.hasOwn(table || {}, "modifiedSource")) return table.modifiedSource ?? null;
+  return undefined;
+}
+
+function modifiedActorOf(table) {
+  if (Object.hasOwn(table || {}, "modified_actor")) return table.modified_actor ?? null;
+  if (Object.hasOwn(table || {}, "modifiedActor")) return table.modifiedActor ?? null;
+  return undefined;
+}
+
 export function mergeTableModifiedTimes(currentTables = [], latestTables = []) {
   const latestByName = new Map(
     (Array.isArray(latestTables) ? latestTables : [])
-      .map((table) => [normalizeTableName(table), modifiedTimeOf(table)])
-      .filter(([name, modifiedAt]) => name && modifiedAt !== NO_MODIFIED_TIME),
+      .map((table) => [
+        normalizeTableName(table),
+        {
+          modifiedAt: modifiedTimeOf(table),
+          modifiedSource: modifiedSourceOf(table),
+          modifiedActor: modifiedActorOf(table),
+        },
+      ])
+      .filter(([name, info]) => name && info.modifiedAt !== NO_MODIFIED_TIME),
   );
   let updatedCount = 0;
   const nextTables = (Array.isArray(currentTables) ? currentTables : []).map((table) => {
     const name = normalizeTableName(table);
     if (!latestByName.has(name)) return table;
-    const modifiedAt = latestByName.get(name);
+    const latest = latestByName.get(name);
     const currentModifiedAt = modifiedTimeOf(table);
-    if (currentModifiedAt !== NO_MODIFIED_TIME && currentModifiedAt === modifiedAt) return table;
+    const nextModifiedAt = latest.modifiedAt || (currentModifiedAt !== NO_MODIFIED_TIME ? currentModifiedAt : latest.modifiedAt);
+    const currentSource = modifiedSourceOf(table) ?? null;
+    const nextSource = latest.modifiedSource !== undefined ? latest.modifiedSource : currentSource;
+    const currentActor = modifiedActorOf(table) ?? null;
+    const nextActor = latest.modifiedActor !== undefined ? latest.modifiedActor : currentActor;
+
+    if (
+      currentModifiedAt !== NO_MODIFIED_TIME
+      && currentModifiedAt === nextModifiedAt
+      && currentSource === nextSource
+      && currentActor === nextActor
+    ) {
+      return table;
+    }
     updatedCount += 1;
-    return {
+    const next = {
       ...table,
-      modified_at: modifiedAt,
-      modifiedAt,
+      modified_at: nextModifiedAt,
+      modifiedAt: nextModifiedAt,
     };
+    if (latest.modifiedSource !== undefined || currentSource !== null) {
+      next.modified_source = nextSource;
+      next.modifiedSource = nextSource;
+    }
+    if (latest.modifiedActor !== undefined || currentActor !== null) {
+      next.modified_actor = nextActor;
+      next.modifiedActor = nextActor;
+    }
+    return next;
   });
   return {
     tables: updatedCount > 0 ? nextTables : currentTables,

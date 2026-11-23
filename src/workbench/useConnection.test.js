@@ -1186,6 +1186,42 @@ test("silent modified-time refresh drops a response after the active database ch
   assert.equal(workspace.schema[0].modified_at, "2026-07-15 10:00:00");
 });
 
+test("live modified-time update event patches active database tables immediately and ignores other databases", () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState({ connectionId: "mysql-2", database: "newsg_4cfg" });
+  workspace.tables = [{ table_name: "goodsprop", modified_at: null }];
+  workspace.schema = [{ ...workspace.tables[0], columns: [] }];
+  const conn = useConnection(workspace, async () => ({}));
+
+  assert.deepEqual(
+    conn.applyTableModifiedUpdates({
+      connectionId: "mysql-2",
+      database: "other_db",
+      updates: [{ tableName: "goodsprop", modifiedAt: "2026-11-23 17:30:00", modifiedSource: "blackcat" }],
+    }),
+    { updatedCount: 0 },
+  );
+  assert.equal(workspace.tables[0].modified_at, null);
+
+  assert.deepEqual(
+    conn.applyTableModifiedUpdates({
+      connectionId: "mysql-2",
+      database: "NEWSG_4CFG",
+      updates: [{
+        tableName: "goodsprop",
+        modifiedAt: "2026-11-23 17:30:00",
+        modifiedSource: "blackcat",
+        modifiedActor: "Alice",
+      }],
+    }),
+    { updatedCount: 1 },
+  );
+  assert.equal(workspace.tables[0].modified_at, "2026-11-23 17:30:00");
+  assert.equal(workspace.tables[0].modified_source, "blackcat");
+  assert.equal(workspace.tables[0].modified_actor, "Alice");
+  assert.equal(workspace.schema[0].modified_at, "2026-11-23 17:30:00");
+});
+
 test("selecting a large database does not republish the visible schema for every background table schema", async () => {
   installLocalStorage();
   const workspace = reactive(createWorkspaceState());

@@ -4,6 +4,7 @@ import {
   defaultHomeColumnLayout,
   fittedFillWidth,
   formatDataSize,
+  formatModifiedAtTooltip,
   homeColumnDefinition,
   homeGridTemplateColumns,
   homeTableWidthCss,
@@ -63,4 +64,27 @@ test("an automatic fill column shrinks to fit the pane but keeps its minimum", (
   assert.equal(fittedFillWidth({ preferred: 300, minWidth: 180, available: 1400, otherColumnsWidth: 532 }), 300);
   assert.equal(fittedFillWidth({ preferred: 420, minWidth: 180, available: 600, otherColumnsWidth: 532 }), 180);
   assert.equal(fittedFillWidth({ preferred: 420, minWidth: 180, available: 0, otherColumnsWidth: 532 }), 420);
+});
+
+test("modified-time tooltip formats source and actor labels cleanly", () => {
+  const labels = {
+    empty: "暂无修改记录",
+    blackcat: "黑猫修改",
+    shared: "团队同步",
+    database: "数据库记录",
+    external: "检测到外部变动",
+  };
+  assert.equal(formatModifiedAtTooltip({ modified_at: null }, labels), "暂无修改记录");
+  assert.equal(
+    formatModifiedAtTooltip({ modified_at: "2026-11-23 17:15:40", modified_source: "blackcat", modified_actor: "张三" }, labels),
+    "2026-11-23 17:15:40 · 黑猫修改（张三）",
+  );
+  assert.equal(
+    formatModifiedAtTooltip({ modified_at: "2026-11-23 17:15:40", modified_source: "shared", modified_actor: "Alice" }, labels),
+    "2026-11-23 17:15:40 · 团队同步（Alice）",
+  );
+  assert.equal(
+    formatModifiedAtTooltip({ modified_at: "2026-11-23 17:15:40", modified_source: "external" }, labels),
+    "2026-11-23 17:15:40 · 检测到外部变动",
+  );
 });

@@ -28,6 +28,7 @@ cargo run -p dbscout-server
 | GET  | `/audit` | Bearer | 全员可见全部变更日志，支持 `connectionId/database/tableName/userId/fromTs/toTs/limit/offset` 查询参数 |
 | POST | `/audit` | Bearer | 批量推送审计摘要，按 `clientId` 幂等去重，返回 `{accepted, skipped}` |
 | GET  | `/audit/since` | Bearer | 增量拉取（同 `/audit` 查询参数） |
+| GET  | `/audit/table-latest` | Bearer | 按表聚合最新修改时间，支持 `database` + `serverKey` / `connectionId`（跨电脑不同本地连接 ID 也能按服务器匹配） |
 
 ## 安全说明
 

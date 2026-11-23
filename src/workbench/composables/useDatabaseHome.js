@@ -67,6 +67,8 @@ function normalizeTable(table, index) {
     dataSizeBytes: tableDataSizeOf(table),
     modifiedAt: modified.text,
     modifiedTimestamp: modified.timestamp,
+    modifiedSource: table?.modifiedSource ?? table?.modified_source ?? null,
+    modifiedActor: table?.modifiedActor ?? table?.modified_actor ?? null,
     originalIndex: index,
   };
 }

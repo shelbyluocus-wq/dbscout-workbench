@@ -62,6 +62,20 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await
         .map_err(|e| format!("创建中心服务表失败: {e}"))?;
+    if let Err(error) = sqlx::query("ALTER TABLE audit_log ADD COLUMN server_key TEXT")
+        .execute(&pool)
+        .await
+    {
+        if !error.to_string().contains("duplicate column name") {
+            return Err(format!("迁移中心服务 server_key 列失败: {error}"));
+        }
+    }
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS ix_audit_server_db_ts ON audit_log(server_key, database, ts DESC)",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("创建中心服务 server_key 索引失败: {e}"))?;
     Ok(pool)
 }
 

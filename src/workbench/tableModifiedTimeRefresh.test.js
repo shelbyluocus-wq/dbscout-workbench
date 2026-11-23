@@ -117,3 +117,34 @@ test("workbench starts and stops the silent refresh with its mounted lifetime", 
   assert.match(workbench, /onMounted\(async \(\) => \{[\s\S]*?tableModifiedTimeAutoRefresh\.start\(\)/);
   assert.match(workbench, /onBeforeUnmount\(\(\) => \{[\s\S]*?tableModifiedTimeAutoRefresh\.stop\(\)/);
 });
+
+test("modified-time merge retains existing timestamps against empty polls and updates source/actor metadata", () => {
+  const current = [
+    {
+      table_name: "goodsprop",
+      modified_at: "2026-11-23 17:00:00",
+      modified_source: "database",
+      modified_actor: null,
+    },
+  ];
+  const emptyPoll = mergeTableModifiedTimes(current, [
+    { table_name: "goodsprop", modified_at: null },
+  ]);
+  assert.equal(emptyPoll.updatedCount, 0);
+  assert.strictEqual(emptyPoll.tables, current);
+
+  const synced = mergeTableModifiedTimes(current, [
+    {
+      tableName: "goodsprop",
+      modifiedAt: "2026-11-23 17:05:00",
+      modifiedSource: "shared",
+      modifiedActor: "Alice",
+    },
+  ]);
+  assert.equal(synced.updatedCount, 1);
+  assert.equal(synced.tables[0].modified_at, "2026-11-23 17:05:00");
+  assert.equal(synced.tables[0].modified_source, "shared");
+  assert.equal(synced.tables[0].modifiedSource, "shared");
+  assert.equal(synced.tables[0].modified_actor, "Alice");
+  assert.equal(synced.tables[0].modifiedActor, "Alice");
+});

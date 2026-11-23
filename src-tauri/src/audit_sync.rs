@@ -10,13 +10,15 @@
 //! and the background task retries on the next tick. Local edits and rollbacks
 //! are never blocked by sync state.
 
-use std::{future::Future, sync::atomic::Ordering, time::Duration};
+use std::{collections::HashMap, future::Future, sync::atomic::Ordering, time::Duration};
 
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::account::{current_session, server_url};
+use crate::table_modified::{parse_timestamp_ms, server_key_for_connection, SharedTableLatest};
 use crate::types::{AppState, AuditSyncSignal};
 
 /// One audit summary pushed to the server. Mirrors the server's
@@ -40,6 +42,8 @@ struct AuditPushItem {
     is_rollback: bool,
     rollback_of_client_id: Option<String>,
     host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +74,7 @@ fn hostname() -> Option<String> {
 async fn collect_outbox(
     pool: &SqlitePool,
     session: &crate::types::UserSession,
+    server_keys: &HashMap<String, String>,
     batch: i64,
 ) -> Result<Vec<(i64, AuditPushItem)>, String> {
     let host = hostname();
@@ -93,6 +98,8 @@ async fn collect_outbox(
             Some(cid) if !cid.is_empty() => cid,
             _ => continue,
         };
+        let connection_id: String = row.try_get("connection_id").unwrap_or_default();
+        let server_key = server_keys.get(&connection_id).cloned();
         items.push((
             id,
             AuditPushItem {
@@ -100,7 +107,7 @@ async fn collect_outbox(
                 ts: row.try_get("ts").unwrap_or_default(),
                 user_id: session.user_id.clone(),
                 username: session.username.clone(),
-                connection_id: row.try_get("connection_id").unwrap_or_default(),
+                connection_id,
                 database: row.try_get("database").unwrap_or_default(),
                 table_name: row.try_get("table_name").unwrap_or_default(),
                 operation: row.try_get("operation").unwrap_or_default(),
@@ -112,6 +119,7 @@ async fn collect_outbox(
                 is_rollback: row.try_get::<i64, _>("is_rollback").unwrap_or(0) != 0,
                 rollback_of_client_id: None,
                 host: host.clone(),
+                server_key,
             },
         ));
     }
@@ -161,8 +169,15 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
         });
     };
 
+    let server_keys: HashMap<String, String> = {
+        let rt = state.runtime.lock().await;
+        rt.connections
+            .iter()
+            .map(|(id, conn)| (id.clone(), server_key_for_connection(conn)))
+            .collect()
+    };
     let pool = crate::audit::ensure_audit_pool(app, state).await?;
-    let batch = collect_outbox(&pool, &session, 500).await?;
+    let batch = collect_outbox(&pool, &session, &server_keys, 500).await?;
     if batch.is_empty() {
         return Ok(AuditPushResult {
             accepted: 0,
@@ -270,6 +285,80 @@ pub fn trigger_immediate_sync(app: &AppHandle) {
         .audit_sync
         .signal_tx
         .try_send(AuditSyncSignal::Push);
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedTableLatestWire {
+    table_name: String,
+    ts: String,
+    username: String,
+    display_name: String,
+}
+
+/// Best-effort fetch of per-table latest modification timestamps from the
+/// central server. Offline-first: returns empty when logged out, unconfigured,
+/// unreachable, or when talking to an older server without `/audit/table-latest`.
+pub async fn fetch_shared_table_latest(
+    app: &AppHandle,
+    state: &AppState,
+    server_key: &str,
+    connection_id: &str,
+    database: &str,
+) -> Vec<SharedTableLatest> {
+    let _ = crate::account::ensure_loaded(app, state).await;
+    let Some(session) = current_session(state).await else {
+        return Vec::new();
+    };
+    let Some(base_url) = server_url(state).await else {
+        return Vec::new();
+    };
+    let endpoint = format!("{base_url}/audit/table-latest");
+    let Ok(url) = Url::parse_with_params(
+        &endpoint,
+        &[
+            ("database", database),
+            ("serverKey", server_key),
+            ("connectionId", connection_id),
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    let Ok(resp) = state
+        .account
+        .http
+        .get(url)
+        .bearer_auth(&session.token)
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(rows) = resp.json::<Vec<SharedTableLatestWire>>().await else {
+        return Vec::new();
+    };
+    rows.into_iter()
+        .filter_map(|row| {
+            let ts_ms = parse_timestamp_ms(&row.ts)?;
+            let actor = if !row.display_name.trim().is_empty() {
+                Some(row.display_name)
+            } else if !row.username.trim().is_empty() {
+                Some(row.username)
+            } else {
+                None
+            };
+            Some(SharedTableLatest {
+                table_name: row.table_name,
+                ts_ms,
+                actor,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

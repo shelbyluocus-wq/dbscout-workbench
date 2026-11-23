@@ -292,6 +292,15 @@ pub async fn create_table(
         if let Err(error) = audit::mark_committed_required(&audit_pool, audit_id).await {
             warnings.push(format!("表已创建，但审计状态保存失败：{error}；请勿重复创建，审计记录 {audit_id}"));
         }
+        crate::audit_sync::trigger_immediate_sync(&app);
+        crate::table_modified::record_local_change(
+            &app,
+            &state,
+            &definition.connection_id,
+            &definition.database,
+            &[definition.table_name.as_str()],
+        )
+        .await;
         match crate::db::read_table_design(
             &pool, &definition.database, &definition.table_name, &definition.connection_id,
         ).await {

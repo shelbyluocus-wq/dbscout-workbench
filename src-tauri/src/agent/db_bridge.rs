@@ -665,10 +665,19 @@ async fn run_write_query(
         _ => "REPLACE",
     };
     let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
+    let resolved_target = crate::table_modified::resolve_sql_target_table(database, trimmed);
+    let audit_database = resolved_target
+        .as_ref()
+        .map(|(db, _)| db.clone())
+        .unwrap_or_else(|| database.to_string());
+    let audit_table = resolved_target
+        .as_ref()
+        .map(|(_, table)| table.clone())
+        .unwrap_or_else(|| "(agent)".to_string());
     let ctx = audit::AuditContext {
         connection_id: connection_id.to_string(),
-        database: database.to_string(),
-        table_name: "(agent)".to_string(),
+        database: audit_database,
+        table_name: audit_table,
         session_id: None,
         source: audit::SOURCE_AGENT,
         actor,
@@ -712,6 +721,16 @@ async fn run_write_query(
             }
             let count_pool_key = PoolKey::new(connection_id, database);
             state.table_counts.invalidate_database(&count_pool_key);
+            if let Some((target_db, target_table)) = resolved_target {
+                crate::table_modified::record_local_change(
+                    app,
+                    state,
+                    connection_id,
+                    &target_db,
+                    &[target_table.as_str()],
+                )
+                .await;
+            }
             Ok(serde_json::json!({
                 "affectedRows": result.rows_affected(),
                 "lastInsertId": result.last_insert_id(),

@@ -76,6 +76,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             column_count: None,
                             data_size_bytes: None,
                             modified_at: None,
+                            modified_source: None,
+                            modified_actor: None,
                         },
                         TableOption {
                             table_name: "orders".into(),
@@ -83,6 +85,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             column_count: None,
                             data_size_bytes: None,
                             modified_at: None,
+                            modified_source: None,
+                            modified_actor: None,
                         },
                         TableOption {
                             table_name: "user_view".into(),
@@ -90,6 +94,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             column_count: None,
                             data_size_bytes: None,
                             modified_at: None,
+                            modified_source: None,
+                            modified_actor: None,
                         },
                         TableOption {
                             table_name: "missing".into(),
@@ -97,6 +103,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                             column_count: None,
                             data_size_bytes: None,
                             modified_at: None,
+                            modified_source: None,
+                            modified_actor: None,
                         },
                     ],
                 )
@@ -114,6 +122,8 @@ fn batch_schema_query_preserves_table_comments_order_and_column_ownership() {
                         column_count: None,
                         data_size_bytes: None,
                         modified_at: None,
+                        modified_source: None,
+                        modified_actor: None,
                     },
                 ]).await?;
                 assert_eq!(serde_json::to_value(&single[0]).unwrap(), serde_json::to_value(&schemas[1]).unwrap());

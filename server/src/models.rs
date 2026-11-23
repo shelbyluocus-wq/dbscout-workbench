@@ -49,6 +49,8 @@ pub struct AuditPushItem {
     pub is_rollback: bool,
     pub rollback_of_client_id: Option<String>,
     pub host: Option<String>,
+    #[serde(default)]
+    pub server_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,6 +88,8 @@ pub struct SharedAuditLogEntry {
     pub is_rollback: bool,
     pub rollback_of_client_id: Option<String>,
     pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -99,4 +103,23 @@ pub struct AuditQuery {
     pub to_ts: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableLatestQuery {
+    pub database: String,
+    pub server_key: Option<String>,
+    pub connection_id: Option<String>,
+}
+
+/// Latest committed/rolled-back change timestamp per table in one database.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedTableLatestModified {
+    pub table_name: String,
+    pub ts: String,
+    pub username: String,
+    pub display_name: String,
+    pub source: String,
 }

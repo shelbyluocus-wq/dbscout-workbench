@@ -143,6 +143,8 @@ pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, 
             column_count: None,
             data_size_bytes: None,
             modified_at: None,
+            modified_source: None,
+            modified_actor: None,
         })
         .collect())
 }

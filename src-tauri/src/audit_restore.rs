@@ -615,6 +615,7 @@ pub async fn restore_audit_table(
         ));
     }
     crate::commands::invalidate_table_count(&state, c, d, t);
+    crate::table_modified::record_local_change(&app, &state, c, d, &[t]).await;
     let _ = app.emit(
         audit::BACKUP_JOB_EVENT,
         serde_json::json!({"kind":"restore","connectionId":c,"database":d,"table":t}),

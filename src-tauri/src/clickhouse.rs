@@ -298,6 +298,8 @@ fn parse_table_options(
             let table_name = json_cell_to_string(row.get("name"));
             TableOption {
                 modified_at: modified_by_table.get(&table_name).cloned(),
+                modified_source: None,
+                modified_actor: None,
                 table_name,
                 table_comment: json_cell_to_string(row.get("comment")),
                 column_count: None,

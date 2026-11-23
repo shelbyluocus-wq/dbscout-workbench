@@ -118,6 +118,10 @@ pub struct TableOption {
     pub data_size_bytes: Option<u64>,
     #[serde(default)]
     pub modified_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_actor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1102,6 +1106,7 @@ pub struct AppState {
     pub cocos_build: crate::cocos_build::CocosBuildJobs,
     pub release_client_sync: crate::release_flow::ReleaseClientSyncJobs,
     pub config_relations: crate::config_relations::engine::ConfigRelationsState,
+    pub table_modified: crate::table_modified::TableModifiedState,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1668,6 +1673,7 @@ impl AppState {
             cocos_build: crate::cocos_build::CocosBuildJobs::default(),
             release_client_sync: crate::release_flow::ReleaseClientSyncJobs::default(),
             config_relations: crate::config_relations::engine::ConfigRelationsState::default(),
+            table_modified: crate::table_modified::TableModifiedState::default(),
         }
     }
 }
@@ -1830,6 +1836,8 @@ mod tests {
                 column_count: None,
                 data_size_bytes: Some(1024),
                 modified_at: Some("2026-07-13 12:00:00".into()),
+                modified_source: None,
+                modified_actor: None,
             }],
         };
         let value = serde_json::to_value(response).unwrap();

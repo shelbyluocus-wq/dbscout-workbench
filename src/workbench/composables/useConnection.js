@@ -820,6 +820,24 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return { updatedCount, stale: false };
   }
 
+  function applyTableModifiedUpdates(payload = {}) {
+    const connectionId = String(payload?.connectionId || "").trim();
+    const database = String(payload?.database || "").trim();
+    const updates = Array.isArray(payload?.updates) ? payload.updates : [];
+    if (!connectionId || !database || !updates.length) return { updatedCount: 0 };
+    if (
+      String(workspace.connectionId || "").trim() !== connectionId
+      || String(workspace.database || "").trim().toLowerCase() !== database.toLowerCase()
+    ) {
+      return { updatedCount: 0 };
+    }
+    const tableMerge = mergeTableModifiedTimes(workspace.tables, updates);
+    const schemaMerge = mergeTableModifiedTimes(workspace.schema, updates);
+    if (tableMerge.updatedCount > 0) workspace.tables = tableMerge.tables;
+    if (schemaMerge.updatedCount > 0) workspace.schema = schemaMerge.tables;
+    return { updatedCount: Math.max(tableMerge.updatedCount, schemaMerge.updatedCount) };
+  }
+
   function publishTables(tables, { connectionId, database, token }) {
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = Array.isArray(tables) ? tables : [];
@@ -1156,6 +1174,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     refreshDatabases,
     loadTables,
     refreshTableModifiedTimes,
+    applyTableModifiedUpdates,
     ensureTableSchema,
     buildConnectionUrl,
     isReadOnlyConnection,

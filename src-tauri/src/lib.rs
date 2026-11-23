@@ -44,6 +44,7 @@ mod table_copy;
 mod table_create;
 pub mod table_count;
 mod table_design_validation;
+mod table_modified;
 mod table_replace;
 pub mod table_search;
 mod table_sessions;

@@ -178,7 +178,10 @@ import { connectionHasCapability } from "./utils/connectionKinds.js";
 import { createDatabaseSwitchGlow, resolveSwitchGlow } from "./composables/useDatabaseSwitchGlow.js";
 import { databaseTextColorCss } from "./composables/databaseDecorationStore.js";
 import DatabaseGlowOverlay from "./components/DatabaseGlowOverlay.vue";
-import { createTableModifiedTimeAutoRefresh } from "./composables/tableModifiedTimeRefresh.js";
+import {
+  TABLE_MODIFIED_TIMES_UPDATED_EVENT,
+  createTableModifiedTimeAutoRefresh,
+} from "./composables/tableModifiedTimeRefresh.js";
 import { useTableSession } from "./composables/useTableSession.js";
 import { useTableSearch } from "./composables/useTableSearch.js";
 import { useVirtualGrid } from "./composables/useVirtualGrid.js";
@@ -337,6 +340,7 @@ const {
   reorderDatabases,
   loadTables,
   refreshTableModifiedTimes,
+  applyTableModifiedUpdates,
   ensureTableSchema,
   isReadOnlyConnection,
   connectionCapability,
@@ -939,6 +943,11 @@ async function resumeSearchAfterTableRefresh(tab) {
 let unlistenValueSearchProgress = null;
 let unlistenSqlExecution = null;
 let unlistenTableCreated = null;
+let unlistenTableModifiedTimes = null;
+
+function handleTableModifiedTimesEvent(event) {
+  applyTableModifiedUpdates(event?.payload || event || {});
+}
 
 function handleTableCreatedEvent(event) {
   const source = event?.payload || event || {};
@@ -962,6 +971,10 @@ async function ensureSqlExecutionListener() {
   if (!unlistenTableCreated) {
     const unlisten = await listenWorkbenchEvent("table-created", handleTableCreatedEvent);
     unlistenTableCreated = typeof unlisten === "function" ? unlisten : null;
+  }
+  if (!unlistenTableModifiedTimes) {
+    const unlisten = await listenWorkbenchEvent(TABLE_MODIFIED_TIMES_UPDATED_EVENT, handleTableModifiedTimesEvent);
+    unlistenTableModifiedTimes = typeof unlisten === "function" ? unlisten : null;
   }
   if (unlistenSqlExecution) return;
   const unlisten = await listenWorkbenchEvent("sql-execution-event", handleSqlExecutionEvent);
@@ -5792,6 +5805,8 @@ onBeforeUnmount(() => {
   unlistenSqlExecution = null;
   unlistenTableCreated?.();
   unlistenTableCreated = null;
+  unlistenTableModifiedTimes?.();
+  unlistenTableModifiedTimes = null;
 });
 </script>
 

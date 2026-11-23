@@ -238,6 +238,7 @@ pub(crate) async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
             .await
             .map_err(|error| format!("创建审计索引失败: {error}"))?;
     }
+    crate::table_modified::ensure_schema(pool).await?;
     Ok(())
 }
 

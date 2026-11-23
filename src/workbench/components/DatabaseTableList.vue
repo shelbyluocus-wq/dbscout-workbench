@@ -7,6 +7,7 @@ import {
   fittedFillWidth,
   formatDataSize,
   formatModifiedAt,
+  formatModifiedAtTooltip,
   homeColumnDefinition,
   homeGridTemplateColumns,
   homeTableWidthCss,
@@ -192,6 +193,19 @@ function columnCellValue(table, key) {
   if (key === "modified") return formatModifiedAt(table?.modifiedAt ?? table?.modified_at);
   if (key === "comment") return tableComment(table) || t('m_8445d1bad03f');
   return tableName(table);
+}
+
+function columnCellTitle(table, key) {
+  if (key === "modified") {
+    return formatModifiedAtTooltip(table, {
+      empty: t("home.modifiedEmpty"),
+      blackcat: t("home.modifiedSource.blackcat"),
+      shared: t("home.modifiedSource.shared"),
+      database: t("home.modifiedSource.database"),
+      external: t("home.modifiedSource.external"),
+    });
+  }
+  return columnCellValue(table, key);
 }
 
 function textWidth(value, fontSize = 13) {
@@ -685,7 +699,7 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
               'wb-dbhome-object-cell': column.key !== 'name',
               'is-end': column.align === 'end',
             }"
-            :title="columnCellValue(table, column.key)"
+            :title="columnCellTitle(table, column.key)"
           >
             <template v-if="column.key === 'name'">
               <component :is="tableIcon" :size="15" class="wb-tree-kind-icon wb-dbhome-table-icon" aria-hidden="true" />

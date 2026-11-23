@@ -1248,6 +1248,21 @@ pub async fn read_table_design(
     Ok(design)
 }
 
+#[derive(Debug, Clone)]
+pub struct MysqlTableObservation {
+    pub option: TableOption,
+    pub update_time_ms: Option<i64>,
+    pub create_time: Option<String>,
+    pub create_time_ms: Option<i64>,
+    pub write_count: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MysqlDatabaseObservation {
+    pub tables: Vec<MysqlTableObservation>,
+    pub server_boot_epoch_secs: Option<i64>,
+}
+
 fn list_tables_sql() -> &'static str {
     "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT, \
      CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR) AS DATA_SIZE_BYTES, \
@@ -1255,8 +1270,175 @@ fn list_tables_sql() -> &'static str {
      FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
 }
 
+fn observe_tables_sql() -> &'static str {
+    "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT, \
+     CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR) AS DATA_SIZE_BYTES, \
+     DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s') AS MODIFIED_AT, \
+     CAST(UNIX_TIMESTAMP(UPDATE_TIME) AS CHAR) AS UPDATE_TIME_UNIX, \
+     DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s') AS CREATED_AT, \
+     CAST(UNIX_TIMESTAMP(CREATE_TIME) AS CHAR) AS CREATE_TIME_UNIX \
+     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
+}
+
+fn observe_perf_writes_sql() -> &'static str {
+    "SELECT 'u' AS KIND, '' AS OBJECT_NAME, CAST(VARIABLE_VALUE AS CHAR) AS VAL \
+     FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Uptime' \
+     UNION ALL \
+     SELECT 't' AS KIND, OBJECT_NAME, CAST(SUM(COUNT_WRITE) AS CHAR) AS VAL \
+     FROM performance_schema.table_io_waits_summary_by_table \
+     WHERE OBJECT_TYPE = 'TABLE' AND OBJECT_SCHEMA = ? \
+     GROUP BY OBJECT_NAME"
+}
+
 fn parse_mysql_data_size(value: &str) -> Option<u64> {
     value.trim().parse::<u64>().ok()
+}
+
+fn parse_mysql_unix_ms(unix_text: Option<&str>, formatted: Option<&str>) -> Option<i64> {
+    if let Some(secs) = unix_text
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .filter(|secs| *secs > 0)
+    {
+        return Some(secs.saturating_mul(1000));
+    }
+    formatted.and_then(crate::table_modified::parse_timestamp_ms)
+}
+
+pub async fn observe_tables_from_db(
+    pool: &MySqlPool,
+    database: &str,
+    server_key: &str,
+    tracker: &crate::table_modified::TableModifiedState,
+) -> Result<MysqlDatabaseObservation, String> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("读取表列表失败: {error}"))?;
+    let caps = tracker.capabilities_for(server_key);
+    let mut stats_expiry_disabled = false;
+    if caps.stats_expiry_supported != Some(false) {
+        match sqlx::query("SET SESSION information_schema_stats_expiry = 0")
+            .execute(&mut *conn)
+            .await
+        {
+            Ok(_) => {
+                stats_expiry_disabled = true;
+                if caps.stats_expiry_supported.is_none() {
+                    tracker.set_stats_expiry_supported(server_key, true);
+                }
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if message.contains("1193") || message.contains("Unknown system variable") {
+                    tracker.set_stats_expiry_supported(server_key, false);
+                }
+            }
+        }
+    }
+
+    let rows_result = sqlx::query(observe_tables_sql())
+        .bind(database)
+        .fetch_all(&mut *conn)
+        .await;
+    if stats_expiry_disabled {
+        let _ = sqlx::query("SET SESSION information_schema_stats_expiry = DEFAULT")
+            .execute(&mut *conn)
+            .await;
+    }
+    let rows = rows_result.map_err(|error| format!("读取表列表失败: {error}"))?;
+
+    let mut tables = rows
+        .into_iter()
+        .map(|row| {
+            let modified_at = mysql_text::optional_string(&row, "MODIFIED_AT").unwrap_or(None);
+            let update_unix = mysql_text::optional_string(&row, "UPDATE_TIME_UNIX").unwrap_or(None);
+            let create_time = mysql_text::optional_string(&row, "CREATED_AT").unwrap_or(None);
+            let create_unix = mysql_text::optional_string(&row, "CREATE_TIME_UNIX").unwrap_or(None);
+            let update_time_ms =
+                parse_mysql_unix_ms(update_unix.as_deref(), modified_at.as_deref());
+            let create_time_ms =
+                parse_mysql_unix_ms(create_unix.as_deref(), create_time.as_deref());
+            MysqlTableObservation {
+                option: TableOption {
+                    table_name: mysql_text::string(&row, "TABLE_NAME").unwrap_or_default(),
+                    table_comment: mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
+                    column_count: None,
+                    data_size_bytes: mysql_text::string(&row, "DATA_SIZE_BYTES")
+                        .ok()
+                        .and_then(|value| parse_mysql_data_size(&value)),
+                    modified_at,
+                    modified_source: None,
+                    modified_actor: None,
+                },
+                update_time_ms,
+                create_time,
+                create_time_ms,
+                write_count: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut server_boot_epoch_secs = None;
+    if caps.perf_schema_supported != Some(false) {
+        let perf_query = tokio::time::timeout(
+            Duration::from_millis(800),
+            sqlx::query(observe_perf_writes_sql())
+                .bind(database)
+                .fetch_all(&mut *conn),
+        )
+        .await;
+        match perf_query {
+            Ok(Ok(perf_rows)) => {
+                let mut uptime_secs: Option<i64> = None;
+                let mut write_counts: HashMap<String, i64> = HashMap::new();
+                for row in perf_rows {
+                    let kind = mysql_text::string(&row, "KIND").unwrap_or_default();
+                    let val = mysql_text::optional_string(&row, "VAL")
+                        .unwrap_or(None)
+                        .and_then(|raw| raw.trim().parse::<i64>().ok());
+                    if kind == "u" {
+                        uptime_secs = val;
+                    } else if kind == "t" {
+                        let name = mysql_text::string(&row, "OBJECT_NAME")
+                            .unwrap_or_default()
+                            .to_lowercase();
+                        if !name.is_empty() {
+                            if let Some(count) = val {
+                                write_counts.insert(name, count);
+                            }
+                        }
+                    }
+                }
+                if let Some(uptime) = uptime_secs {
+                    if caps.perf_schema_supported.is_none() {
+                        tracker.set_perf_schema_supported(server_key, true);
+                    }
+                    server_boot_epoch_secs =
+                        Some(chrono::Utc::now().timestamp().saturating_sub(uptime));
+                    for table in &mut tables {
+                        let key = table.option.table_name.to_lowercase();
+                        table.write_count = Some(write_counts.get(&key).copied().unwrap_or(0));
+                    }
+                }
+            }
+            Ok(Err(error)) => {
+                let message = error.to_string();
+                if message.contains("1142")
+                    || message.contains("1146")
+                    || message.contains("denied")
+                    || message.contains("doesn't exist")
+                {
+                    tracker.set_perf_schema_supported(server_key, false);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    Ok(MysqlDatabaseObservation {
+        tables,
+        server_boot_epoch_secs,
+    })
 }
 
 pub async fn list_tables_from_db(
@@ -1279,6 +1461,8 @@ pub async fn list_tables_from_db(
                 .ok()
                 .and_then(|value| parse_mysql_data_size(&value)),
             modified_at: mysql_text::optional_string(&row, "MODIFIED_AT").unwrap_or(None),
+            modified_source: None,
+            modified_actor: None,
         })
         .collect())
 }

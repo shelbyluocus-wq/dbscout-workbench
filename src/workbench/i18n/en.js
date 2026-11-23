@@ -2063,6 +2063,11 @@ export default Object.freeze({
   "relations.audit.jumpHint": "Jump to this cell in the grid",
   "relations.audit.rowNumber": "Row {row}",
   "relations.audit.truncated": "Showing first {shown} of {total} broken links ({rows} rows scanned)",
+  "home.modifiedEmpty": "No recorded changes yet",
+  "home.modifiedSource.blackcat": "Edited in Blackcat",
+  "home.modifiedSource.shared": "Synced from team",
+  "home.modifiedSource.database": "Reported by database",
+  "home.modifiedSource.external": "External change detected",
   ...releaseFlowEn,
   ...wallpaperEn,
 });

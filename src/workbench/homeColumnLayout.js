@@ -119,3 +119,16 @@ export function formatModifiedAt(value) {
   const text = String(value || "").trim();
   return text || "—";
 }
+
+export function formatModifiedAtTooltip(table, labels = {}) {
+  const timeText = String(table?.modifiedAt ?? table?.modified_at ?? "").trim();
+  if (!timeText) return labels.empty || "—";
+  const source = String(table?.modifiedSource ?? table?.modified_source ?? "").trim();
+  const actor = String(table?.modifiedActor ?? table?.modified_actor ?? "").trim();
+  const sourceLabel = source ? labels[source] || "" : "";
+  if (!sourceLabel) return timeText;
+  if (actor && (source === "blackcat" || source === "shared")) {
+    return `${timeText} · ${sourceLabel}（${actor}）`;
+  }
+  return `${timeText} · ${sourceLabel}`;
+}

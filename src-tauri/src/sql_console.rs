@@ -48,6 +48,7 @@ struct SqlTransactionSession {
     query_tab_id: String,
     connection: Mutex<Option<sqlx::pool::PoolConnection<MySql>>>,
     audit_ids: Mutex<Vec<i64>>,
+    touched_tables: Mutex<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -422,6 +423,7 @@ pub async fn begin_sql_transaction(
             query_tab_id: request.query_tab_id,
             connection: Mutex::new(connection_handle),
             audit_ids: Mutex::new(Vec::new()),
+            touched_tables: Mutex::new(Vec::new()),
         }),
     );
     Ok(BeginSqlTransactionResponse { session_id })
@@ -513,6 +515,23 @@ async fn finish_transaction(
         }
         if !ids.is_empty() {
             crate::audit_sync::trigger_immediate_sync(app);
+        }
+        let touched = session.touched_tables.lock().await.clone();
+        if !touched.is_empty() {
+            let mut by_db: HashMap<String, Vec<String>> = HashMap::new();
+            for (db, table) in touched {
+                by_db.entry(db).or_default().push(table);
+            }
+            for (db, tables) in by_db {
+                crate::table_modified::record_local_change_owned(
+                    app,
+                    state,
+                    &session.connection_id,
+                    &db,
+                    &tables,
+                )
+                .await;
+            }
         }
     } else {
         if let Some(connection) = connection.as_mut() {
@@ -783,9 +802,17 @@ async fn run_mysql_statements(
         match outcome {
             Ok((row_count, affected_rows, truncated, plan)) => {
                 let mut should_sync_audit = false;
+                let touched_target = if class.category == StatementCategory::Write {
+                    crate::table_modified::resolve_sql_target_table(&request.database, statement)
+                } else {
+                    None
+                };
                 if let Some((pool, id)) = audit_row.as_ref() {
                     if let Some(transaction) = transaction {
                         transaction.audit_ids.lock().await.push(*id);
+                        if let Some(target) = touched_target.clone() {
+                            transaction.touched_tables.lock().await.push(target);
+                        }
                     } else {
                         if let Err(error) = audit::mark_committed_required(pool, *id).await {
                             if local_transaction {
@@ -827,6 +854,16 @@ async fn run_mysql_statements(
                 }
                 if should_sync_audit {
                     crate::audit_sync::trigger_immediate_sync(app);
+                    if let Some((target_db, target_table)) = touched_target {
+                        crate::table_modified::record_local_change(
+                            app,
+                            state,
+                            &request.connection_id,
+                            &target_db,
+                            &[target_table.as_str()],
+                        )
+                        .await;
+                    }
                 }
                 let duration = started.elapsed().as_millis() as u64;
                 let message = if class.category == StatementCategory::Read {
@@ -1441,7 +1478,7 @@ fn operation_name(keyword: &str) -> &'static str {
     }
 }
 
-fn affected_object(sql: &str) -> String {
+pub(crate) fn affected_object(sql: &str) -> String {
     let masked = mask_sql(sql);
     let tokens = top_level_words(&masked);
     let operation_offset = operation_token(&tokens)

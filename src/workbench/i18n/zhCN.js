@@ -2063,6 +2063,11 @@ export default Object.freeze({
   "relations.audit.jumpHint": "点击定位到该报错单元格",
   "relations.audit.rowNumber": "第 {row} 行",
   "relations.audit.truncated": "已展示前 {shown} / {total} 处断链（共扫描 {rows} 行）",
+  "home.modifiedEmpty": "暂无修改记录",
+  "home.modifiedSource.blackcat": "黑猫修改",
+  "home.modifiedSource.shared": "团队同步",
+  "home.modifiedSource.database": "数据库记录",
+  "home.modifiedSource.external": "检测到外部变动",
   ...releaseFlowZhCN,
   ...wallpaperZhCN,
 });

@@ -58,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(handlers::list_audit).post(handlers::push_audit),
         )
         .route("/audit/since", get(handlers::list_audit))
+        .route("/audit/table-latest", get(handlers::table_latest))
         .layer(middleware::from_fn_with_state(
             pool.clone(),
             auth::require_auth,
