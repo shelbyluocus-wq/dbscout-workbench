@@ -26,6 +26,7 @@ function errorMessage(error) {
 export function useAccount(options = {}) {
   const invokeWorkbench = options.invokeWorkbench || defaultInvokeWorkbench;
   const onSessionChanged = options.onSessionChanged || (() => {});
+  const onSynced = options.onSynced || (() => {});
 
   // The backend AccountView: { serverUrl, session: { userId, username,
   // displayName, token } | null }. Held in a shallowRef and replaced wholesale.
@@ -137,6 +138,7 @@ export function useAccount(options = {}) {
     try {
       const result = await invokeWorkbench("sync_audit_now", {});
       lastError.value = "";
+      onSynced();
       return { accepted: Number(result?.accepted || 0), skipped: Number(result?.skipped || 0) };
     } catch (error) {
       lastError.value = errorMessage(error);

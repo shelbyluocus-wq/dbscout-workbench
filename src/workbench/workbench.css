@@ -25018,6 +25018,33 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
   justify-content: flex-end;
 }
 
+.wb-dbhome-modified-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.wb-dbhome-modified-time {
+  flex: 0 0 auto;
+}
+
+.wb-dbhome-modified-sep {
+  flex: 0 0 auto;
+  color: var(--wb-quiet-text);
+}
+
+.wb-dbhome-modified-actor {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wb-text);
+  font-weight: 500;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-dbhome-header-cell,
   .wb-dbhome-object-row,

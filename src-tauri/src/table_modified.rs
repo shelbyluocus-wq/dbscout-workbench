@@ -137,6 +137,7 @@ struct SavedRow {
     observed_write_count: Option<i64>,
     observed_create_time: Option<String>,
     observed_server_boot: Option<i64>,
+    last_shared_ts_ms: Option<i64>,
 }
 
 impl SavedRow {
@@ -151,6 +152,7 @@ impl SavedRow {
             observed_write_count: None,
             observed_create_time: None,
             observed_server_boot: None,
+            last_shared_ts_ms: None,
         }
     }
 }
@@ -259,6 +261,7 @@ pub(crate) async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
             observed_write_count INTEGER,\
             observed_create_time TEXT,\
             observed_server_boot INTEGER,\
+            last_shared_ts_ms INTEGER,\
             updated_at_ms INTEGER NOT NULL,\
             PRIMARY KEY (server_key, database_key, table_key)\
         )",
@@ -276,6 +279,15 @@ pub(crate) async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
             .execute(pool)
             .await
             .map_err(|error| format!("创建表修改时间记录表失败: {error}"))?;
+    }
+    if let Err(error) =
+        sqlx::query("ALTER TABLE table_modified_state ADD COLUMN last_shared_ts_ms INTEGER")
+            .execute(pool)
+            .await
+    {
+        if !error.to_string().contains("duplicate column name") {
+            return Err(format!("迁移表修改时间共享时间戳列失败: {error}"));
+        }
     }
     Ok(())
 }
@@ -335,7 +347,8 @@ async fn load_saved_rows(
 ) -> Result<HashMap<String, SavedRow>, String> {
     let rows = sqlx::query(
         "SELECT table_key, table_name, modified_at_ms, modified_source, modified_actor, \
-                pending_local_write_ms, observed_write_count, observed_create_time, observed_server_boot \
+                pending_local_write_ms, observed_write_count, observed_create_time, \
+                observed_server_boot, last_shared_ts_ms \
          FROM table_modified_state \
          WHERE server_key = ? AND database_key = ?",
     )
@@ -363,6 +376,7 @@ async fn load_saved_rows(
                 observed_write_count: row.try_get("observed_write_count").ok().flatten(),
                 observed_create_time: row.try_get("observed_create_time").ok().flatten(),
                 observed_server_boot: row.try_get("observed_server_boot").ok().flatten(),
+                last_shared_ts_ms: row.try_get("last_shared_ts_ms").ok().flatten(),
             },
         );
     }
@@ -380,8 +394,9 @@ async fn upsert_saved_row(
         "INSERT INTO table_modified_state (\
              server_key, database_key, table_key, table_name, \
              modified_at_ms, modified_source, modified_actor, pending_local_write_ms, \
-             observed_write_count, observed_create_time, observed_server_boot, updated_at_ms\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             observed_write_count, observed_create_time, observed_server_boot, \
+             last_shared_ts_ms, updated_at_ms\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(server_key, database_key, table_key) DO UPDATE SET \
              table_name = excluded.table_name, \
              modified_at_ms = excluded.modified_at_ms, \
@@ -391,6 +406,7 @@ async fn upsert_saved_row(
              observed_write_count = excluded.observed_write_count, \
              observed_create_time = excluded.observed_create_time, \
              observed_server_boot = excluded.observed_server_boot, \
+             last_shared_ts_ms = excluded.last_shared_ts_ms, \
              updated_at_ms = excluded.updated_at_ms",
     )
     .bind(server_key)
@@ -404,6 +420,7 @@ async fn upsert_saved_row(
     .bind(row.observed_write_count)
     .bind(&row.observed_create_time)
     .bind(row.observed_server_boot)
+    .bind(row.last_shared_ts_ms)
     .bind(updated_at_ms)
     .execute(&mut **tx)
     .await
@@ -481,6 +498,13 @@ async fn fold_local_audit_backfill(
 }
 
 fn apply_shared_to_row(state: &mut SavedRow, shared: &SharedTableLatest) -> bool {
+    if state
+        .last_shared_ts_ms
+        .is_some_and(|seen_ms| shared.ts_ms <= seen_ms)
+    {
+        return false;
+    }
+    state.last_shared_ts_ms = Some(shared.ts_ms);
     match state.modified_at_ms {
         None => {
             state.modified_at_ms = Some(shared.ts_ms);
@@ -489,10 +513,13 @@ fn apply_shared_to_row(state: &mut SavedRow, shared: &SharedTableLatest) -> bool
             true
         }
         Some(current_ms) => {
-            if state.modified_source.as_deref() == Some(SOURCE_EXTERNAL) {
-                // Upgrade an approximate external detection timestamp to the
-                // exact shared Blackcat timestamp when it falls inside the same
-                // observation window (or is newer).
+            if matches!(
+                state.modified_source.as_deref(),
+                Some(SOURCE_EXTERNAL | SOURCE_DATABASE)
+            ) {
+                // Attach the exact teammate actor when a brand-new shared record
+                // arrives shortly after we observed MySQL's UPDATE_TIME or write
+                // count (covering push latency and minor server/PC clock skew).
                 if shared.ts_ms >= current_ms - CLOCK_SKEW_GRACE_MS {
                     state.modified_at_ms = Some(shared.ts_ms);
                     state.modified_source = Some(SOURCE_SHARED.into());
@@ -1366,6 +1393,7 @@ mod tests {
                 observed_write_count: Some(10),
                 observed_create_time: None,
                 observed_server_boot: Some(boot),
+                last_shared_ts_ms: None,
             },
             t1,
         )
@@ -1405,5 +1433,102 @@ mod tests {
         );
         assert_eq!(normalize_sql_target("newsg_4cfg", "(sql_console)"), None);
         assert_eq!(normalize_sql_target("newsg_4cfg", "IF"), None);
+    }
+
+    #[tokio::test]
+    async fn shared_actor_attaches_after_database_observation_and_does_not_clobber_later_external_edit() {
+        let pool = memory_pool().await;
+        let boot = 1_760_000_000_i64;
+        let alice_ts = 1_760_020_000_000_i64;
+        // MySQL server clock is 15s ahead of Alice's workstation clock.
+        let db_ts = alice_ts + 15_000;
+
+        // 1) Person B sees MySQL UPDATE_TIME first before Alice's central push lands.
+        let first = reconcile_mysql_observation(
+            &pool,
+            "mysql://10.0.0.1:3306",
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![mysql_obs("goodsprop", Some(db_ts), None, None, Some(11))],
+                server_boot_epoch_secs: Some(boot),
+            },
+            &[],
+            db_ts + 2_000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first[0].modified_source.as_deref(), Some(SOURCE_DATABASE));
+        assert_eq!(first[0].modified_actor, None);
+
+        // 2) Alice's shared record arrives: upgrades SOURCE_DATABASE -> SOURCE_SHARED with actor "张三".
+        let attached = reconcile_mysql_observation(
+            &pool,
+            "mysql://10.0.0.1:3306",
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![mysql_obs("goodsprop", Some(db_ts), None, None, Some(11))],
+                server_boot_epoch_secs: Some(boot),
+            },
+            &[SharedTableLatest {
+                table_name: "goodsprop".into(),
+                ts_ms: alice_ts,
+                actor: Some("张三".into()),
+            }],
+            db_ts + 10_000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(attached[0].modified_at, Some(format_local_ms(alice_ts)));
+        assert_eq!(attached[0].modified_source.as_deref(), Some(SOURCE_SHARED));
+        assert_eq!(attached[0].modified_actor.as_deref(), Some("张三"));
+
+        // 3) Later, someone edits the table in Navicat (write_count 11 -> 12, UPDATE_TIME advances).
+        let navicat_ts = db_ts + 25_000;
+        let external = reconcile_mysql_observation(
+            &pool,
+            "mysql://10.0.0.1:3306",
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![mysql_obs("goodsprop", Some(navicat_ts), None, None, Some(12))],
+                server_boot_epoch_secs: Some(boot),
+            },
+            &[SharedTableLatest {
+                table_name: "goodsprop".into(),
+                ts_ms: alice_ts,
+                actor: Some("张三".into()),
+            }],
+            navicat_ts + 5_000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(external[0].modified_at, Some(format_local_ms(navicat_ts)));
+        assert_eq!(external[0].modified_source.as_deref(), Some(SOURCE_DATABASE));
+        assert_eq!(external[0].modified_actor, None);
+
+        // 4) Next poll still sees Alice's older shared record; must NOT overwrite Navicat's edit back to "张三".
+        let steady = reconcile_mysql_observation(
+            &pool,
+            "mysql://10.0.0.1:3306",
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![mysql_obs("goodsprop", Some(navicat_ts), None, None, Some(12))],
+                server_boot_epoch_secs: Some(boot),
+            },
+            &[SharedTableLatest {
+                table_name: "goodsprop".into(),
+                ts_ms: alice_ts,
+                actor: Some("张三".into()),
+            }],
+            navicat_ts + 60_000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(steady[0].modified_at, Some(format_local_ms(navicat_ts)));
+        assert_eq!(steady[0].modified_source.as_deref(), Some(SOURCE_DATABASE));
+        assert_eq!(steady[0].modified_actor, None);
     }
 }

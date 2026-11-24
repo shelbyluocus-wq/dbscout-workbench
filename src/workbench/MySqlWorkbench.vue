@@ -1204,6 +1204,14 @@ const account = useAccount({
         await backupCenter.loadAuditLogs();
       }
     }
+    if (account.isLoggedIn.value && selectedConnectionId.value && selectedDatabase.value) {
+      void refreshTableModifiedTimes().catch(() => {});
+    }
+  },
+  onSynced: () => {
+    if (account.isLoggedIn.value && selectedConnectionId.value && selectedDatabase.value) {
+      void refreshTableModifiedTimes().catch(() => {});
+    }
   },
 });
 

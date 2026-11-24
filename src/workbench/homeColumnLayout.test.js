@@ -7,6 +7,7 @@ import {
   fittedFillWidth,
   formatDataSize,
   formatModifiedAtTooltip,
+  formatModifiedDisplayParts,
   homeColumnDefinition,
   homeGridTemplateColumns,
   homeTableWidthCss,
@@ -142,4 +143,41 @@ test("modified-time tooltip formats source and actor labels cleanly", () => {
     formatModifiedAtTooltip({ modified_at: "2026-11-23 17:15:40", modified_source: "external" }, labels),
     "2026-11-23 17:15:40 · 检测到外部变动",
   );
+  assert.equal(
+    formatModifiedAtTooltip({ modified_at: "2026-11-23 17:15:40", modified_source: "blackcat" }, { ...labels, self: "我" }),
+    "2026-11-23 17:15:40 · 黑猫修改（我）",
+  );
+});
+
+test("modified display combines compact minute timestamp with modifier name and adapts column width", () => {
+  assert.deepEqual(
+    formatModifiedDisplayParts({ modified_at: null }, { selfLabel: "我" }),
+    { time: "—", actor: "", text: "—" },
+  );
+  assert.deepEqual(
+    formatModifiedDisplayParts({ modified_at: "2026-11-23 10:46:39", modified_source: "database" }, { selfLabel: "我" }),
+    { time: "2026-11-23 10:46:39", actor: "", text: "2026-11-23 10:46:39" },
+  );
+  assert.deepEqual(
+    formatModifiedDisplayParts({
+      modified_at: "2026-11-23 10:46:39",
+      modified_source: "shared",
+      modified_actor: "张三",
+    }, { selfLabel: "我" }),
+    { time: "2026-11-23 10:46", actor: "张三", text: "2026-11-23 10:46 · 张三" },
+  );
+  assert.deepEqual(
+    formatModifiedDisplayParts({
+      modified_at: "2026-11-23 10:46:39",
+      modified_source: "blackcat",
+      modified_actor: null,
+    }, { selfLabel: "我" }),
+    { time: "2026-11-23 10:46", actor: "我", text: "2026-11-23 10:46 · 我" },
+  );
+
+  const withActors = computeAutoHomeColumnWidths([
+    { tableName: "goodsprop", tableComment: "道具", modified_at: "2026-11-23 10:46:39", modified_source: "shared", modified_actor: "张三" },
+    { tableName: "heroprop", tableComment: "英雄", modified_at: "2026-11-23 10:55:02", modified_source: "shared", modified_actor: "欧阳明" },
+  ], { emptyComment: "无备注", selfLabel: "我" });
+  assert.ok(withActors.modified > 160 && withActors.modified <= 240, `expected expanded modified width, got ${withActors.modified}`);
 });

@@ -7,8 +7,8 @@ import {
   defaultHomeColumnLayout,
   fittedFillWidth,
   formatDataSize,
-  formatModifiedAt,
   formatModifiedAtTooltip,
+  formatModifiedDisplayParts,
   homeColumnDefinition,
   homeGridTemplateColumns,
   homeTableWidthCss,
@@ -107,6 +107,7 @@ const columnWidths = computed(() => {
   const automatic = computeAutoHomeColumnWidths(props.tables, {
     readOnly: props.readOnly,
     emptyComment: t('m_8445d1bad03f'),
+    selfLabel: t('home.modifiedSelf'),
   });
   const widths = Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
   // On narrow panes, trim an automatically sized comment column toward its
@@ -187,9 +188,13 @@ function highlightedTableField(table, kind) {
   return highlightSearchRanges(value, ranges);
 }
 
+function modifiedCellParts(table) {
+  return formatModifiedDisplayParts(table, { selfLabel: t("home.modifiedSelf") });
+}
+
 function columnCellValue(table, key) {
   if (key === "size") return formatDataSize(table?.dataSizeBytes ?? table?.data_size_bytes);
-  if (key === "modified") return formatModifiedAt(table?.modifiedAt ?? table?.modified_at);
+  if (key === "modified") return modifiedCellParts(table).text;
   if (key === "comment") return tableComment(table) || t('m_8445d1bad03f');
   return tableName(table);
 }
@@ -198,6 +203,7 @@ function columnCellTitle(table, key) {
   if (key === "modified") {
     return formatModifiedAtTooltip(table, {
       empty: t("home.modifiedEmpty"),
+      self: t("home.modifiedSelf"),
       blackcat: t("home.modifiedSource.blackcat"),
       shared: t("home.modifiedSource.shared"),
       database: t("home.modifiedSource.database"),
@@ -786,6 +792,13 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
               <span v-if="renamingName === tableName(table) && renameError" :id="renameErrorId" class="wb-dbhome-rename-error" role="alert" :title="renameError">{{ renameError }}</span>
               <span v-else-if="renamingName === tableName(table) && renamePending" class="wb-dbhome-rename-pending" role="status">{{ t('m_f5dee69cca2b') }}</span>
               <span v-else class="wb-dbhome-object-comment-text" v-html="highlightedTableField(table, 'tableComment')"></span>
+            </template>
+            <template v-else-if="column.key === 'modified'">
+              <span class="wb-dbhome-modified-cell">
+                <span class="wb-dbhome-modified-time">{{ modifiedCellParts(table).time }}</span>
+                <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-sep" aria-hidden="true">·</span>
+                <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-actor">{{ modifiedCellParts(table).actor }}</span>
+              </span>
             </template>
             <span v-else>{{ columnCellValue(table, column.key) }}</span>
           </span>

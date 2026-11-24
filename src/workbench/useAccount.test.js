@@ -170,10 +170,12 @@ test("setServer updates the server url", async () => {
 
 test("syncNow promotes local rows into the shared list attributed to the user", async () => {
   const backend = createBackend();
-  const account = useAccount({ ...backend });
+  let syncedCalls = 0;
+  const account = useAccount({ ...backend, onSynced: () => { syncedCalls += 1; } });
   await account.register("eve", "Eve");
   const result = await account.syncNow();
   assert.equal(result.accepted, 1);
+  assert.equal(syncedCalls, 1);
   assert.equal(backend.sharedAudit.length, 1);
   assert.equal(backend.sharedAudit[0].username, "eve");
   assert.equal(backend.sharedAudit[0].displayName, "Eve");
@@ -182,4 +184,5 @@ test("syncNow promotes local rows into the shared list attributed to the user", 
   const result2 = await account.syncNow();
   assert.equal(result2.accepted, 0);
   assert.equal(result2.skipped, 1);
+  assert.equal(syncedCalls, 2);
 });

@@ -2079,6 +2079,7 @@ export default Object.freeze({
   "relations.audit.rowNumber": "第 {row} 列",
   "relations.audit.truncated": "已顯示前 {shown} / {total} 處斷鏈（共掃描 {rows} 列）",
   "home.modifiedEmpty": "暫無修改記錄",
+  "home.modifiedSelf": "我",
   "home.modifiedSource.blackcat": "黑貓修改",
   "home.modifiedSource.shared": "團隊同步",
   "home.modifiedSource.database": "資料庫記錄",

@@ -6,7 +6,7 @@ const STORAGE_KEY = "dbscout.home.columns.v1";
 export const HOME_COLUMN_DEFINITIONS = Object.freeze([
   { key: "name", label: "表名", minWidth: 120, maxWidth: 520, defaultWidth: 200, autoMinWidth: 156, autoMaxWidth: 250, align: "start" },
   { key: "size", label: "数据大小", minWidth: 72, maxWidth: 180, defaultWidth: 96, autoMinWidth: 96, autoMaxWidth: 96, align: "end" },
-  { key: "modified", label: "修改时间", minWidth: 88, maxWidth: 240, defaultWidth: 160, autoMinWidth: 160, autoMaxWidth: 160, align: "start" },
+  { key: "modified", label: "修改时间", minWidth: 88, maxWidth: 320, defaultWidth: 160, autoMinWidth: 160, autoMaxWidth: 240, align: "start" },
   { key: "comment", label: "备注", minWidth: 80, maxWidth: 640, defaultWidth: 200, autoMinWidth: 120, autoMaxWidth: 240, align: "start" },
 ]);
 
@@ -119,13 +119,14 @@ function clampAutoWidth(value, min, max) {
 // Default widths stay compact by using the 85th percentile of table names and
 // non-empty comments capped at each column's autoMaxWidth, so a few outliers
 // never blow up the whole homepage table.
-export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emptyComment = "" } = {}) {
+export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emptyComment = "", selfLabel = "" } = {}) {
   const nameDef = homeColumnDefinition("name");
   const sizeDef = homeColumnDefinition("size");
   const modifiedDef = homeColumnDefinition("modified");
   const commentDef = homeColumnDefinition("comment");
   const nameOverhead = readOnly ? 132 : 92;
   const nameAutoMax = nameDef.autoMaxWidth + (readOnly ? 36 : 0);
+  const modifiedOverhead = 24;
   const commentOverhead = 24;
 
   const list = Array.isArray(tables) ? tables : [];
@@ -141,17 +142,25 @@ export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emp
   const sampleLimit = 400;
   const step = list.length > sampleLimit ? list.length / sampleLimit : 1;
   const nameWidths = [];
+  const modifiedActorWidths = [];
   const commentWidths = [];
   const count = Math.min(list.length, sampleLimit);
   for (let i = 0; i < count; i += 1) {
     const table = list[step === 1 ? i : Math.floor(i * step)];
     const name = String(table?.tableName || table?.table_name || "").trim();
     if (name) nameWidths.push(estimateHomeTextWidth(name, 13, nameAutoMax));
+    const modifiedParts = formatModifiedDisplayParts(table, { selfLabel });
+    if (modifiedParts.actor) {
+      modifiedActorWidths.push(estimateHomeTextWidth(modifiedParts.text, 13, modifiedDef.autoMaxWidth));
+    }
     const comment = String(table?.tableComment || table?.table_comment || "").trim();
     if (comment) commentWidths.push(estimateHomeTextWidth(comment, 13, commentDef.autoMaxWidth));
   }
 
   const targetName = nameWidths.length ? percentileNumber(nameWidths, 0.85) + nameOverhead : nameDef.defaultWidth;
+  const targetModified = modifiedActorWidths.length
+    ? percentileNumber(modifiedActorWidths, 0.85) + modifiedOverhead
+    : modifiedDef.defaultWidth;
   const targetComment = commentWidths.length
     ? percentileNumber(commentWidths, 0.85) + commentOverhead
     : estimateHomeTextWidth(emptyComment, 13, commentDef.autoMaxWidth) + commentOverhead;
@@ -159,7 +168,7 @@ export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emp
   return {
     name: clampAutoWidth(targetName, nameDef.autoMinWidth, nameAutoMax),
     size: sizeDef.defaultWidth,
-    modified: modifiedDef.defaultWidth,
+    modified: clampAutoWidth(targetModified, modifiedDef.autoMinWidth, modifiedDef.autoMaxWidth),
     comment: clampAutoWidth(targetComment, commentDef.autoMinWidth, commentDef.autoMaxWidth),
   };
 }
@@ -199,11 +208,29 @@ export function formatModifiedAt(value) {
   return text || "—";
 }
 
+function compactModifiedMinute(timeText) {
+  return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(timeText)
+    ? timeText.slice(0, 16)
+    : timeText;
+}
+
+export function formatModifiedDisplayParts(table, { selfLabel = "" } = {}) {
+  const timeText = String(table?.modifiedAt ?? table?.modified_at ?? "").trim();
+  if (!timeText) return { time: "—", actor: "", text: "—" };
+  const source = String(table?.modifiedSource ?? table?.modified_source ?? "").trim();
+  const rawActor = String(table?.modifiedActor ?? table?.modified_actor ?? "").trim();
+  const actor = rawActor || (source === "blackcat" ? String(selfLabel || "").trim() : "");
+  if (!actor) return { time: timeText, actor: "", text: timeText };
+  const time = compactModifiedMinute(timeText);
+  return { time, actor, text: `${time} · ${actor}` };
+}
+
 export function formatModifiedAtTooltip(table, labels = {}) {
   const timeText = String(table?.modifiedAt ?? table?.modified_at ?? "").trim();
   if (!timeText) return labels.empty || "—";
   const source = String(table?.modifiedSource ?? table?.modified_source ?? "").trim();
-  const actor = String(table?.modifiedActor ?? table?.modified_actor ?? "").trim();
+  const rawActor = String(table?.modifiedActor ?? table?.modified_actor ?? "").trim();
+  const actor = rawActor || (source === "blackcat" ? String(labels.self || "").trim() : "");
   const sourceLabel = source ? labels[source] || "" : "";
   if (!sourceLabel) return timeText;
   if (actor && (source === "blackcat" || source === "shared")) {
