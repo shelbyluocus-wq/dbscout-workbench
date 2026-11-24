@@ -99,12 +99,16 @@ pub async fn push_audit(
     for item in &req.items {
         // INSERT OR IGNORE => idempotent on client_id. Repeated pushes of the
         // same outbox row are safe no-ops.
+        let row_identity_json = item
+            .row_identity
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok());
         let res = sqlx::query(
             "INSERT OR IGNORE INTO audit_log \
              (client_id, ts, user_id, username, connection_id, database, table_name, \
-              operation, column_name, old_value, new_value, source, status, is_rollback, \
-              rollback_of_client_id, host, synced_at, server_key) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              operation, row_identity, column_name, old_value, new_value, source, status, \
+              is_rollback, rollback_of_client_id, host, synced_at, server_key) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&item.client_id)
         .bind(&item.ts)
@@ -114,6 +118,7 @@ pub async fn push_audit(
         .bind(&item.database)
         .bind(&item.table_name)
         .bind(&item.operation)
+        .bind(&row_identity_json)
         .bind(&item.column_name)
         .bind(&item.old_value)
         .bind(&item.new_value)
@@ -150,7 +155,7 @@ pub async fn list_audit(
 
     let mut sql = String::from(
         "SELECT a.client_id, a.ts, a.user_id, a.username, u.display_name, \
-         a.connection_id, a.database, a.table_name, a.operation, a.column_name, \
+         a.connection_id, a.database, a.table_name, a.operation, a.row_identity, a.column_name, \
          a.old_value, a.new_value, a.source, a.status, a.is_rollback, \
          a.rollback_of_client_id, a.host, a.server_key \
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id",
@@ -219,6 +224,11 @@ pub async fn list_audit(
             database: r.try_get("database").unwrap_or_default(),
             table_name: r.try_get("table_name").unwrap_or_default(),
             operation: r.try_get("operation").unwrap_or_default(),
+            row_identity: r
+                .try_get::<Option<String>, _>("row_identity")
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str(&raw).ok()),
             column_name: r.try_get("column_name").ok().flatten(),
             old_value: r.try_get("old_value").ok().flatten(),
             new_value: r.try_get("new_value").ok().flatten(),
@@ -330,6 +340,7 @@ mod tests {
             database: "newsg_4cfg".into(),
             table_name: table_name.into(),
             operation: "UPDATE".into(),
+            row_identity: Some(serde_json::json!({"id": "1001"})),
             column_name: Some("Name".into()),
             old_value: Some("old".into()),
             new_value: Some("new".into()),
@@ -425,5 +436,63 @@ mod tests {
         assert_eq!(items[0].display_name, "Alice");
         assert_eq!(items[1].table_name, "heroprop");
         assert_eq!(items[1].ts, "2026-11-23T08:30:00Z");
+    }
+
+    #[tokio::test]
+    async fn push_and_list_audit_round_trips_row_identity_and_preserves_legacy_nulls() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok", "2026-11-23T00:00:00Z")
+            .await
+            .unwrap();
+
+        let mut with_identity = push_item(
+            "c-with-id",
+            "2026-11-24T10:00:00Z",
+            "mysql-1",
+            Some("mysql://10.0.0.1:3306"),
+            "goodsprop",
+            "committed",
+        );
+        with_identity.row_identity = Some(serde_json::json!({"ID": "2048", "SubID": "3"}));
+
+        let mut legacy_without_identity = push_item(
+            "c-legacy",
+            "2026-11-24T09:00:00Z",
+            "mysql-1",
+            Some("mysql://10.0.0.1:3306"),
+            "goodsprop",
+            "committed",
+        );
+        legacy_without_identity.row_identity = None;
+
+        let Json(resp) = push_audit(
+            State(pool.clone()),
+            Json(AuditPushRequest {
+                items: vec![with_identity, legacy_without_identity],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.accepted, 2);
+
+        let Json(entries) = list_audit(
+            State(pool),
+            Query(AuditQuery {
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("goodsprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].client_id, "c-with-id");
+        assert_eq!(
+            entries[0].row_identity,
+            Some(serde_json::json!({"ID": "2048", "SubID": "3"}))
+        );
+        assert_eq!(entries[1].client_id, "c-legacy");
+        assert_eq!(entries[1].row_identity, None);
     }
 }

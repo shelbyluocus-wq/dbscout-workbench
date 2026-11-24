@@ -1381,6 +1381,8 @@ pub struct SharedAuditLogEntry {
     pub database: String,
     pub table_name: String,
     pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_identity: Option<serde_json::Value>,
     pub column_name: Option<String>,
     pub old_value: Option<String>,
     pub new_value: Option<String>,
@@ -1389,6 +1391,8 @@ pub struct SharedAuditLogEntry {
     pub is_rollback: bool,
     pub rollback_of_client_id: Option<String>,
     pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

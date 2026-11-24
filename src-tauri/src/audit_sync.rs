@@ -34,6 +34,8 @@ struct AuditPushItem {
     database: String,
     table_name: String,
     operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    row_identity: Option<serde_json::Value>,
     column_name: Option<String>,
     old_value: Option<String>,
     new_value: Option<String>,
@@ -79,7 +81,7 @@ async fn collect_outbox(
 ) -> Result<Vec<(i64, AuditPushItem)>, String> {
     let host = hostname();
     let rows = sqlx::query(
-        "SELECT id, ts, connection_id, database, table_name, operation, column_name, \
+        "SELECT id, ts, connection_id, database, table_name, operation, row_identity, column_name, \
          old_value, new_value, source, status, is_rollback, client_id, actor \
          FROM audit_log WHERE synced = 0 ORDER BY id ASC LIMIT ?",
     )
@@ -100,6 +102,11 @@ async fn collect_outbox(
         };
         let connection_id: String = row.try_get("connection_id").unwrap_or_default();
         let server_key = server_keys.get(&connection_id).cloned();
+        let row_identity = row
+            .try_get::<Option<String>, _>("row_identity")
+            .ok()
+            .flatten()
+            .and_then(|raw| serde_json::from_str(&raw).ok());
         items.push((
             id,
             AuditPushItem {
@@ -111,6 +118,7 @@ async fn collect_outbox(
                 database: row.try_get("database").unwrap_or_default(),
                 table_name: row.try_get("table_name").unwrap_or_default(),
                 operation: row.try_get("operation").unwrap_or_default(),
+                row_identity,
                 column_name: row.try_get("column_name").ok().flatten(),
                 old_value: row.try_get("old_value").ok().flatten(),
                 new_value: row.try_get("new_value").ok().flatten(),

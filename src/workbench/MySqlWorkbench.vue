@@ -1262,6 +1262,47 @@ function handleStartupAccountAuthenticated() {
   }
 }
 
+provide("tableHistoryContext", {
+  isLoggedIn: computed(() => account.isLoggedIn.value),
+  canOpenBackupCenter: computed(() => !isFolderWindow),
+  openBackupCenter: openBackupCenterForTable,
+});
+
+async function openHomeTableHistory(payload = {}) {
+  const connectionId = String(payload?.connectionId || selectedConnectionId.value || "").trim();
+  const database = String(payload?.database || selectedDatabase.value || "").trim();
+  const tableName = String(payload?.tableName || "").trim();
+  if (!database || !tableName) return;
+  if (!account.account.value?.serverUrl && !account.isLoggedIn.value) {
+    void account.loadAccount();
+  }
+  focusedPaneState.captureActiveTableViewState?.();
+  const paneId = String(payload?.paneId || workspace.focusedPaneId || "");
+  const tab = await openTable(
+    {
+      connectionId,
+      database,
+      tableName,
+      tableComment: payload?.tableComment || "",
+    },
+    { paneId, activate: true, viewMode: "history" },
+  );
+  if (tab) {
+    tab.viewMode = "history";
+    rememberOpenedHomeTable(tableName);
+  }
+}
+
+function openBackupCenterForTable(target = {}) {
+  backupCenter.setFilters({
+    connectionId: target.connectionId || "",
+    database: target.database || "",
+    tableName: target.tableName || "",
+  });
+  backupCenter.open({ tab: "audit" });
+  void account.loadAccount();
+}
+
 // 黑猫 MCP：管理外部 AI（Codex、Claude Code 等）的连接与权限分组。
 const blackcatMcpOpen = ref(false);
 
@@ -6183,6 +6224,7 @@ onBeforeUnmount(() => {
           @refresh-home="refreshHome"
           @home-visible-tables="loadVisibleHomeTableCounts"
           @focus-home-table="focusHomeTable"
+          @view-home-table-history="openHomeTableHistory"
           @open-sql-library="openSqlLibrary"
           @new-sql-query="newSqlQuery"
           @open-sql-document="openSqlDocument"

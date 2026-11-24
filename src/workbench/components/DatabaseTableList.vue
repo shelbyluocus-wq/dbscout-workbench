@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
-import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Star } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, ChevronRight, GripVertical, History, Star } from "lucide-vue-next";
 import {
   computeAutoHomeColumnWidths,
   defaultHomeColumnLayout,
@@ -63,6 +63,7 @@ const emit = defineEmits([
   "replace-selection",
   "toggle-favorite",
   "toggle-locale-group",
+  "view-change-history",
   "box-selection-complete",
 ]);
 
@@ -251,6 +252,11 @@ function select(table, event) {
 function toggleFavorite(table) {
   const name = tableName(table);
   if (name) emit("toggle-favorite", name);
+}
+
+function openChangeHistory(table) {
+  const name = tableName(table);
+  if (name) emit("view-change-history", name);
 }
 
 function selectForAction(table) {
@@ -822,9 +828,22 @@ defineExpose({ focusList, pageRowCount, resetView, rowElement, scrollTableIntoVi
             </template>
             <template v-else-if="column.key === 'modified'">
               <span class="wb-dbhome-modified-cell">
-                <span class="wb-dbhome-modified-time">{{ modifiedCellParts(table).time }}</span>
-                <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-sep" aria-hidden="true">·</span>
-                <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-actor">{{ modifiedCellParts(table).actor }}</span>
+                <span class="wb-dbhome-modified-main">
+                  <span class="wb-dbhome-modified-time">{{ modifiedCellParts(table).time }}</span>
+                  <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-sep" aria-hidden="true">·</span>
+                  <span v-if="modifiedCellParts(table).actor" class="wb-dbhome-modified-actor">{{ modifiedCellParts(table).actor }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="wb-dbhome-history-button"
+                  :title="t('home.viewChangeHistory', { table: tableName(table) })"
+                  :aria-label="t('home.viewChangeHistory', { table: tableName(table) })"
+                  @pointerdown.stop.prevent
+                  @click.stop="openChangeHistory(table)"
+                  @dblclick.stop
+                >
+                  <History :size="14" :stroke-width="1.8" aria-hidden="true" />
+                </button>
               </span>
             </template>
             <span v-else>{{ columnCellValue(table, column.key) }}</span>

@@ -5,6 +5,7 @@ import {
   ClipboardPaste,
   Copy,
   FolderOpen,
+  History,
   Languages,
   MessageSquareText,
   Pencil,
@@ -79,6 +80,7 @@ const emit = defineEmits([
   "split-pane",
   "close-pane",
   "open-sql-library",
+  "view-change-history",
 ]);
 
 const clipboardRef = computed({
@@ -139,6 +141,18 @@ function toggleLocaleGroup(baseLower) {
   if (next.has(baseLower)) next.delete(baseLower);
   else next.add(baseLower);
   expandedLocaleBases.value = next;
+}
+
+function viewTableChangeHistory(tableName) {
+  const name = String(tableName || "").trim();
+  if (!name) return;
+  const matched = controller.tables.value.find((item) => (item?.tableName || item?.table_name) === name) || null;
+  emit("view-change-history", {
+    ...tableSourceContext.value,
+    tableName: name,
+    tableComment: matched?.tableComment || matched?.table_comment || "",
+    tableMeta: matched,
+  });
 }
 
 watch(
@@ -1046,6 +1060,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
       @replace-selection="replaceSelection"
       @toggle-favorite="toggleTableFavorite"
       @toggle-locale-group="toggleLocaleGroup"
+      @view-change-history="viewTableChangeHistory"
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
     />
@@ -1082,6 +1097,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <button type="button" role="menuitem" :disabled="busy || !canTableDesign || !tab.database" @click="emit('create-table', tableSourceContext); closeMenu()"><Plus :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('createTable.title') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
+        <button v-if="!menu.blank" type="button" role="menuitem" @click="viewTableChangeHistory(menu.tableName); closeMenu()"><History :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.contextViewHistory') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="editTableComment(menu.tableName)"><MessageSquareText :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.editTableComment') }}<kbd v-if="menuShortcuts.editTableComment" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.editTableComment }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableCopy || !menu.selectedNames.length" @click="sendSelection"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>

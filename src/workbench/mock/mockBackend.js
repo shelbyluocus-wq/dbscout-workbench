@@ -3143,6 +3143,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         database: row.database,
         tableName: row.tableName,
         operation: row.operation,
+        rowIdentity: row.rowIdentity || null,
         columnName: row.columnName || null,
         oldValue: row.oldValue || null,
         newValue: row.newValue || null,

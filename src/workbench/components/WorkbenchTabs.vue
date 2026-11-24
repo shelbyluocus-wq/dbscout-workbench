@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { useTabReorderMotion } from "../composables/useTabReorderMotion.js";
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { ChevronDown, House, Link2, PencilRuler } from "lucide-vue-next";
+import { ChevronDown, History, House, Link2, PencilRuler } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
 import { useAliases } from "../composables/aliasStore.js";
@@ -504,6 +504,14 @@ onBeforeUnmount(() => {
                 :aria-label="tabMenuNameParts(tab).tail ? tabMenuName(tab) : undefined"
               >
                 <span class="wb-middle-ellipsis-head" :aria-hidden="tabMenuNameParts(tab).tail ? 'true' : undefined">{{ tabMenuNameParts(tab).head }}</span><span v-if="tabMenuNameParts(tab).tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ tabMenuNameParts(tab).tail }}</span>
+              </span>
+              <span
+                v-if="tabKind(tab) === 'data' && tab.viewMode === 'history'"
+                class="wb-tab-history-pill"
+                :title="t('tableHistory.viewHistory')"
+              >
+                <History :size="11" :stroke-width="2" aria-hidden="true" />
+                <span>{{ t('tableHistory.tabPill') }}</span>
               </span>
             </span>
             <span v-if="tab.opening" class="wb-tab-line wb-tab-line-secondary">

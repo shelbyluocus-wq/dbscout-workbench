@@ -102,7 +102,7 @@ test("automatic homepage widths stay compact despite long outliers and wide CJK 
   assert.ok(widths.name >= 156 && widths.name <= 250, `expected compact name width, got ${widths.name}`);
   assert.ok(widths.comment >= 120 && widths.comment <= 240, `expected compact comment width, got ${widths.comment}`);
   assert.equal(widths.size, 96);
-  assert.equal(widths.modified, 160);
+  assert.equal(widths.modified, 188);
 
   const emptyCommentWidths = computeAutoHomeColumnWidths(
     [{ tableName: "users", tableComment: "" }, { tableName: "orders", tableComment: "" }],
@@ -179,5 +179,5 @@ test("modified display combines compact minute timestamp with modifier name and 
     { tableName: "goodsprop", tableComment: "道具", modified_at: "2026-11-23 10:46:39", modified_source: "shared", modified_actor: "张三" },
     { tableName: "heroprop", tableComment: "英雄", modified_at: "2026-11-23 10:55:02", modified_source: "shared", modified_actor: "欧阳明" },
   ], { emptyComment: "无备注", selfLabel: "我" });
-  assert.ok(withActors.modified > 160 && withActors.modified <= 240, `expected expanded modified width, got ${withActors.modified}`);
+  assert.ok(withActors.modified > 188 && withActors.modified <= 268, `expected expanded modified width, got ${withActors.modified}`);
 });

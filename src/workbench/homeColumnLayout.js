@@ -6,7 +6,7 @@ const STORAGE_KEY = "dbscout.home.columns.v1";
 export const HOME_COLUMN_DEFINITIONS = Object.freeze([
   { key: "name", label: "表名", minWidth: 120, maxWidth: 520, defaultWidth: 200, autoMinWidth: 156, autoMaxWidth: 250, align: "start" },
   { key: "size", label: "数据大小", minWidth: 72, maxWidth: 180, defaultWidth: 96, autoMinWidth: 96, autoMaxWidth: 96, align: "end" },
-  { key: "modified", label: "修改时间", minWidth: 88, maxWidth: 320, defaultWidth: 160, autoMinWidth: 160, autoMaxWidth: 240, align: "start" },
+  { key: "modified", label: "修改时间", minWidth: 88, maxWidth: 340, defaultWidth: 188, autoMinWidth: 188, autoMaxWidth: 268, align: "start" },
   { key: "comment", label: "备注", minWidth: 80, maxWidth: 640, defaultWidth: 200, autoMinWidth: 120, autoMaxWidth: 240, align: "start" },
 ]);
 
@@ -126,7 +126,7 @@ export function computeAutoHomeColumnWidths(tables = [], { readOnly = false, emp
   const commentDef = homeColumnDefinition("comment");
   const nameOverhead = readOnly ? 132 : 92;
   const nameAutoMax = nameDef.autoMaxWidth + (readOnly ? 36 : 0);
-  const modifiedOverhead = 24;
+  const modifiedOverhead = 52;
   const commentOverhead = 24;
 
   const list = Array.isArray(tables) ? tables : [];

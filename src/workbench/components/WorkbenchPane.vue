@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { gridSelectionActualBounds, gridSelectionToggleMap, isGridCellSelected } from "../utils/gridCellSelection.js";
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch, watchEffect } from "vue";
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch, watchEffect } from "vue";
 
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
 import { applyTabColumnSearch, commitTabColumnOrder, resetTabColumnOrder } from "../workspaceState.js";
@@ -51,6 +51,7 @@ import DatabaseHome from "./DatabaseHome.vue";
 const SqlQueryWorkspace = defineAsyncComponent(() => import("./SqlQueryWorkspace.vue"));
 const SqlQueryLibrary = defineAsyncComponent(() => import("./SqlQueryLibrary.vue"));
 const TableFolderPage = defineAsyncComponent(() => import("./TableFolderPage.vue"));
+const TableChangeHistoryView = defineAsyncComponent(() => import("./TableChangeHistoryView.vue"));
 
 const props = defineProps({
   pane: { type: Object, required: true },
@@ -125,6 +126,7 @@ const emit = defineEmits([
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
+  "view-home-table-history",
   "sql-schema-changed",
   "open-sql-library",
   "new-sql-query",
@@ -140,6 +142,40 @@ const activeDataTab = computed(() => {
   const tab = props.activeTab;
   return tab && (tab.kind || "data") === "data" ? tab : null;
 });
+const tableHistoryContext = inject("tableHistoryContext", null);
+const isActiveDataTabHistory = computed(() => Boolean(activeDataTab.value && activeDataTab.value.viewMode === "history"));
+const tableHistoryIsLoggedIn = computed(() => Boolean(tableHistoryContext?.isLoggedIn?.value));
+const tableHistoryCanOpenBackupCenter = computed(() => Boolean(tableHistoryContext?.canOpenBackupCenter?.value ?? true));
+const activeDataTabMeta = computed(() => {
+  const tab = activeDataTab.value;
+  if (!tab?.tableName) return null;
+  const target = String(tab.tableName).toLowerCase();
+  const findIn = (list) => (Array.isArray(list) ? list : []).find(
+    (item) => String(item?.tableName || item?.table_name || "").toLowerCase() === target,
+  );
+  return findIn(props.homeTables) || findIn(props.schema) || null;
+});
+
+function switchActiveDataTabView(mode) {
+  const tab = activeDataTab.value;
+  if (!tab) return;
+  const nextMode = mode === "history" ? "history" : "data";
+  if ((tab.viewMode || "data") === nextMode) return;
+  if (nextMode === "history") {
+    captureActiveTableViewState(tab);
+    tab.viewMode = "history";
+  } else {
+    tab.viewMode = "data";
+    nextTick(() => {
+      restoreActiveTableViewState(tab);
+      reclaimDataGridFocus(tab.id);
+    });
+  }
+}
+
+function openTableHistoryBackupCenter(target) {
+  tableHistoryContext?.openBackupCenter?.(target);
+}
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
 const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
@@ -2093,8 +2129,24 @@ onMounted(() => emitPaneState());
       />
     </header>
 
+    <TableChangeHistoryView
+      v-if="isActiveDataTabHistory"
+      :key="`history:${activeDataTab.id}`"
+      :connection-id="activeDataTab.connectionId"
+      :database="activeDataTab.database"
+      :table-name="activeDataTab.tableName"
+      :table-comment="activeDataTab.tableComment"
+      :table-meta="activeDataTabMeta"
+      :invoke-workbench="invokeWorkbench"
+      :is-logged-in="tableHistoryIsLoggedIn"
+      :can-open-backup-center="tableHistoryCanOpenBackupCenter"
+      @switch-view="switchActiveDataTabView"
+      @open-backup-center="openTableHistoryBackupCenter"
+    />
+
     <DataGrid
       v-if="activeDataTab"
+      v-show="!isActiveDataTabHistory"
       :tab="activeDataTab"
       :schema="schema"
       :engine-kind="activeEngineKind"
@@ -2199,10 +2251,12 @@ onMounted(() => emitPaneState());
       @retry-load="retryGridLoad"
       @jump-boundary="jumpGridBoundary"
       @open-table="emit('open-table', $event)"
+      @switch-view="switchActiveDataTabView"
     />
 
     <CellDetailPanel
       v-if="activeDataTab"
+      v-show="!isActiveDataTabHistory"
       :selected-cell="selectedCell"
       :cell-context="selectedCellContext"
       :row-summary="dataTabRowSummary"
@@ -2280,6 +2334,7 @@ onMounted(() => emitPaneState());
       @batch-export="emit('batch-export', $event)"
       @batch-import="emit('batch-import', $event)"
       @focus-table="emit('focus-home-table', $event, pane.id)"
+      @view-change-history="emit('view-home-table-history', { ...$event, paneId: pane.id })"
       @split-pane="emit('split-pane', pane.id, $event)"
       @close-pane="emit('close-pane', pane.id)"
       @open-sql-library="emit('open-sql-library', pane.id)"

@@ -705,9 +705,10 @@ export function useTableSession(
     return request;
   }
 
-  async function openTable(table, { activate = true, paneId = "", duplicate = false, initialState = null } = {}) {
+  async function openTable(table, { activate = true, paneId = "", duplicate = false, initialState = null, viewMode = "" } = {}) {
     const tableName = normalizeTableName(table);
     if (!tableName) return;
+    const targetViewMode = viewMode === "history" ? "history" : "data";
     const connectionId = String(table?.connectionId || table?.connection_id || workspace.connectionId || "");
     const database = String(table?.database || workspace.database || "");
     const readOnly = Boolean(table?.readOnly || table?.read_only);
@@ -724,15 +725,18 @@ export function useTableSession(
     }
     if (existingTab) {
       if (existingTab.opening) {
+        existingTab.viewMode = targetViewMode;
         const openingRequest = openingRequestsByTab.get(existingTab.id);
         const loadedTab = openingRequest ? await openingRequest : existingTab;
         if (!loadedTab) {
           releaseActivationIntent(targetPaneId, activationIntent);
           return null;
         }
+        loadedTab.viewMode = targetViewMode;
         activateForIntent(loadedTab, targetPaneId, activationIntent);
         return loadedTab;
       }
+      existingTab.viewMode = targetViewMode;
       activateForIntent(existingTab, targetPaneId, activationIntent);
       if (isNormalOpen(initialState) && (existingTab.deferredLoad || firstPageLoadsByTab.has(existingTab.id))) {
         // A restored/deferred tab keeps its saved sort and filter: load it as-is.
@@ -767,6 +771,7 @@ export function useTableSession(
       relationOrigin: initialState?.relationOrigin ?? null,
     }, { activate: false, paneId: targetPaneId });
     tab.readOnly = readOnly;
+    tab.viewMode = targetViewMode;
     if (initialState) {
       tab.filter = String(initialState.filter ?? tab.filter ?? "");
       tab.searchQuery = String(initialState.searchQuery ?? initialState.filter ?? tab.searchQuery ?? "");

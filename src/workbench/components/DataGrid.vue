@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, ChevronDown, ChevronUp, Filter, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, ChevronDown, ChevronUp, Filter, History, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, Table2, X } from "lucide-vue-next";
 import { formatColumnFilterChip, getColumnFilter, normalizeColumnFilters } from "../utils/columnFilter.js";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";
@@ -300,6 +300,7 @@ const emit = defineEmits([
   'retry-load',
   'jump-boundary',
   'open-table',
+  'switch-view',
 ]);
 
 const {
@@ -1634,6 +1635,27 @@ function handleTableContextMenu(event) {
 <template>
   <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu="handleTableContextMenu">
     <header ref="tableToolbarRef" class="wb-table-toolbar">
+      <div class="wb-table-view-switch" role="tablist" :aria-label="t('tableHistory.viewSwitchAria')">
+        <button
+          type="button"
+          role="tab"
+          aria-selected="true"
+          class="wb-table-view-switch-btn is-active"
+        >
+          <Table2 :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewData') }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected="false"
+          class="wb-table-view-switch-btn"
+          @click="emit('switch-view', 'history')"
+        >
+          <History :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewHistory') }}</span>
+        </button>
+      </div>
       <div
         class="wb-table-search-field"
         :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter', 'is-filter-active': Boolean(tab.searchFilterActive) }"

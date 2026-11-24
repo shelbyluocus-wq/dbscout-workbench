@@ -86,6 +86,7 @@ const emit = defineEmits([
   "refresh-home",
   "home-visible-tables",
   "focus-home-table",
+  "view-home-table-history",
   "sql-schema-changed",
   "open-sql-library",
   "new-sql-query",
@@ -271,6 +272,7 @@ onBeforeUnmount(finishResize);
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+        @view-home-table-history="emit('view-home-table-history', $event)"
         @sql-schema-changed="emit('sql-schema-changed', $event)"
         @open-sql-library="emit('open-sql-library', $event)"
         @new-sql-query="(...args) => emit('new-sql-query', ...args)"
@@ -366,6 +368,7 @@ onBeforeUnmount(finishResize);
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
         @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+        @view-home-table-history="emit('view-home-table-history', $event)"
         @sql-schema-changed="emit('sql-schema-changed', $event)"
         @open-sql-library="emit('open-sql-library', $event)"
         @new-sql-query="(...args) => emit('new-sql-query', ...args)"
@@ -451,6 +454,7 @@ onBeforeUnmount(finishResize);
     @refresh-home="emit('refresh-home', $event)"
     @home-visible-tables="emit('home-visible-tables', $event)"
     @focus-home-table="(...args) => emit('focus-home-table', ...args)"
+    @view-home-table-history="emit('view-home-table-history', $event)"
     @sql-schema-changed="emit('sql-schema-changed', $event)"
     @open-sql-library="emit('open-sql-library', $event)"
     @new-sql-query="(...args) => emit('new-sql-query', ...args)"

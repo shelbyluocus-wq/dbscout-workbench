@@ -86,6 +86,7 @@ function ensureTabIdentity(tab, kind, sourceKey) {
 function createEmptyTab({ id, connectionId = "", database = "", tableName, tableComment = "", readOnly = false }) {
   const tab = {
     ...createBaseTab({ id, kind: "data", connectionId, database, tableName, tableComment, readOnly }),
+    viewMode: "data",
     sessionId: "",
     columns: [],
     rows: [],
