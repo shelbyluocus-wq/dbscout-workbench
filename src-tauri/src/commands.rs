@@ -1885,6 +1885,88 @@ fn select_demo_database(
         .collect()
 }
 
+async fn overlay_mysql_tables_fast(
+    app: &AppHandle,
+    state: &AppState,
+    server_key: &str,
+    database: &str,
+    tables: Vec<TableOption>,
+) -> Vec<TableOption> {
+    match audit::ensure_audit_pool(app, state).await {
+        Ok(audit_pool) => crate::table_modified::overlay_saved_modified_times(
+            &audit_pool,
+            server_key,
+            database,
+            tables.clone(),
+        )
+        .await
+        .unwrap_or(tables),
+        Err(_) => tables,
+    }
+}
+
+fn spawn_background_mysql_observation(
+    app: AppHandle,
+    connection_id: String,
+    database: String,
+    server_key: String,
+    baseline: Vec<TableOption>,
+    force: bool,
+) {
+    let state = app.state::<AppState>();
+    if !state
+        .table_modified
+        .claim_db_observe(&server_key, &database, force)
+    {
+        crate::table_modified::spawn_background_shared_refresh(
+            app,
+            connection_id,
+            database,
+            server_key,
+        );
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let Ok(pool) =
+            real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await
+        else {
+            return;
+        };
+        let Ok(observation) = run_pool_work(
+            &state.work_scheduler,
+            &PoolKey::new(&connection_id, &database),
+            WorkClass::Background,
+            BACKGROUND_SCHEMA_TIMEOUT,
+            observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
+        )
+        .await
+        else {
+            return;
+        };
+        let fetch_shared = state
+            .table_modified
+            .claim_shared_fetch(&server_key, &database, force);
+        let enriched = enrich_mysql_tables(
+            &app,
+            &state,
+            &server_key,
+            &connection_id,
+            &database,
+            observation,
+            fetch_shared,
+        )
+        .await;
+        crate::table_modified::emit_table_option_updates(
+            &app,
+            &connection_id,
+            &database,
+            &baseline,
+            &enriched,
+        );
+    });
+}
+
 async fn enrich_mysql_tables(
     app: &AppHandle,
     state: &AppState,
@@ -2075,24 +2157,30 @@ pub async fn select_database(
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        let observation = run_pool_work(
+        let raw_tables = run_pool_work(
             &state.work_scheduler,
             &PoolKey::new(&connection_id, &database),
             WorkClass::Foreground,
             FOREGROUND_DB_TIMEOUT,
-            observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
+            list_tables_from_db(&pool, &database),
         )
         .await?;
-        let tables = enrich_mysql_tables(
+        let tables = overlay_mysql_tables_fast(
             &app,
             &state,
             &server_key,
-            &connection_id,
             &database,
-            observation,
-            false,
+            raw_tables,
         )
         .await;
+        spawn_background_mysql_observation(
+            app.clone(),
+            connection_id.clone(),
+            database.clone(),
+            server_key.clone(),
+            tables.clone(),
+            false,
+        );
         let mut rt = state.runtime.lock().await;
         rt.selected_connection_id = connection_id.clone();
         rt.selected_database = database.clone();
@@ -2210,24 +2298,52 @@ pub async fn list_tables(
     } else if mysql_url.is_some() {
         let pool =
             real_database_pool(&connection_id, &database, &state, &PerfContext::default()).await?;
-        let observation = run_pool_work(
-            &state.work_scheduler,
-            &PoolKey::new(&connection_id, &database),
-            work_class,
-            work_timeout,
-            observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
-        )
-        .await?;
-        Ok(enrich_mysql_tables(
-            &app,
-            &state,
-            &server_key,
-            &connection_id,
-            &database,
-            observation,
-            is_background,
-        )
-        .await)
+        if is_background {
+            let observation = run_pool_work(
+                &state.work_scheduler,
+                &PoolKey::new(&connection_id, &database),
+                work_class,
+                work_timeout,
+                observe_tables_from_db(&pool, &database, &server_key, &state.table_modified),
+            )
+            .await?;
+            Ok(enrich_mysql_tables(
+                &app,
+                &state,
+                &server_key,
+                &connection_id,
+                &database,
+                observation,
+                true,
+            )
+            .await)
+        } else {
+            let raw_tables = run_pool_work(
+                &state.work_scheduler,
+                &PoolKey::new(&connection_id, &database),
+                work_class,
+                work_timeout,
+                list_tables_from_db(&pool, &database),
+            )
+            .await?;
+            let tables = overlay_mysql_tables_fast(
+                &app,
+                &state,
+                &server_key,
+                &database,
+                raw_tables,
+            )
+            .await;
+            spawn_background_mysql_observation(
+                app.clone(),
+                connection_id.clone(),
+                database.clone(),
+                server_key.clone(),
+                tables.clone(),
+                true,
+            );
+            Ok(tables)
+        }
     } else {
         Ok(
             demo_schema_for_runtime(&overrides, demo_profile, &database, &database, &schema)

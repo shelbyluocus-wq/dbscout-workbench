@@ -141,7 +141,7 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
     if (event?.target !== event?.currentTarget) {
       return;
     }
-    if (event?.propertyName !== "--wb-sidebar-slot-width") {
+    if (event?.propertyName !== "width" && event?.propertyName !== "--wb-sidebar-slot-width") {
       return;
     }
     if (!sidebarPaneAnimating.value) {
@@ -152,15 +152,19 @@ export function usePaneResize({ initialCollapsed = true, viewportWidth = ref(0) 
 
   // Unitless px counts: the stylesheet registers these as <number> (see the
   // @property note in workbench.css) and multiplies them by 1px.
-  const sidebarLayoutVars = computed(() => ({
-    "--wb-sidebar-slot-width": sidebarCollapsed.value
+  const sidebarLayoutVars = computed(() => {
+    const slotWidth = sidebarCollapsed.value
       ? "0"
-      : String(sidebarWidth.value),
-    "--wb-sidebar-titlebar-width": sidebarCollapsed.value
-      ? String(SIDEBAR_TITLEBAR_COLLAPSED_WIDTH)
-      : String(ACTIVITY_RAIL_WIDTH + sidebarWidth.value),
-    "--wb-sidebar-content-width": String(sidebarWidth.value),
-  }));
+      : String(sidebarWidth.value);
+    return {
+      "--wb-sidebar-slot-width": slotWidth,
+      "--wb-sidebar-slot-target": slotWidth,
+      "--wb-sidebar-titlebar-width": sidebarCollapsed.value
+        ? String(SIDEBAR_TITLEBAR_COLLAPSED_WIDTH)
+        : String(ACTIVITY_RAIL_WIDTH + sidebarWidth.value),
+      "--wb-sidebar-content-width": String(sidebarWidth.value),
+    };
+  });
 
   const sidebarSlotStyle = computed(() => ({
     width: `${sidebarLayoutVars.value["--wb-sidebar-slot-width"]}px`,

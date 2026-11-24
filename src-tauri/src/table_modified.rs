@@ -42,6 +42,7 @@ const CLOCK_SKEW_GRACE_MS: i64 = 120_000;
 const SELF_ECHO_GRACE_MS: i64 = 5_000;
 const SERVER_BOOT_TOLERANCE_SECS: i64 = 120;
 const SHARED_REFRESH_DEBOUNCE: Duration = Duration::from_secs(15);
+const DB_OBSERVE_DEBOUNCE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MysqlServerCapabilities {
@@ -53,6 +54,7 @@ pub struct MysqlServerCapabilities {
 pub struct TableModifiedState {
     capabilities: Mutex<HashMap<String, MysqlServerCapabilities>>,
     last_shared_fetch: Mutex<HashMap<(String, String), Instant>>,
+    last_db_observe: Mutex<HashMap<(String, String), Instant>>,
 }
 
 impl TableModifiedState {
@@ -106,6 +108,24 @@ impl TableModifiedState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+    }
+
+    pub fn claim_db_observe(&self, server_key: &str, database: &str, force: bool) -> bool {
+        let mut guard = self
+            .last_db_observe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (server_key.to_string(), database.to_lowercase());
+        let now = Instant::now();
+        if !force {
+            if let Some(last) = guard.get(&key) {
+                if now.duration_since(*last) < DB_OBSERVE_DEBOUNCE {
+                    return false;
+                }
+            }
+        }
+        guard.insert(key, now);
+        true
     }
 }
 
@@ -712,6 +732,93 @@ fn apply_state_to_option(option: &mut TableOption, state: &SavedRow) {
         option.modified_source = state.modified_source.clone();
         option.modified_actor = state.modified_actor.clone();
     }
+}
+
+/// Fast, read-only local SQLite overlay for foreground table-list loads.
+/// Merges already-persisted modification times without blocking on write
+/// transactions, audit-log backfills, `information_schema_stats_expiry = 0`,
+/// or `performance_schema` queries.
+pub async fn overlay_saved_modified_times(
+    pool: &SqlitePool,
+    server_key: &str,
+    database: &str,
+    mut tables: Vec<TableOption>,
+) -> Result<Vec<TableOption>, String> {
+    let database_key = database.to_lowercase();
+    let saved = load_saved_rows(pool, server_key, &database_key).await?;
+    for option in &mut tables {
+        let key = option.table_name.to_lowercase();
+        let db_ms = option.modified_at.as_deref().and_then(parse_timestamp_ms);
+        if let Some(state) = saved.get(&key) {
+            let grace_ms = match state.modified_source.as_deref() {
+                Some(SOURCE_BLACKCAT | SOURCE_SHARED) => CLOCK_SKEW_GRACE_MS,
+                _ => 0,
+            };
+            let db_is_newer = match (db_ms, state.modified_at_ms) {
+                (Some(db), Some(saved_ms)) => db > saved_ms.saturating_add(grace_ms),
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if db_is_newer {
+                option.modified_source = Some(SOURCE_DATABASE.into());
+                option.modified_actor = None;
+            } else {
+                apply_state_to_option(option, state);
+            }
+        } else if option.modified_at.is_some() {
+            option.modified_source = Some(SOURCE_DATABASE.into());
+        }
+    }
+    Ok(tables)
+}
+
+pub fn emit_table_option_updates(
+    app: &AppHandle,
+    connection_id: &str,
+    database: &str,
+    previous: &[TableOption],
+    next: &[TableOption],
+) {
+    let previous_by_key: HashMap<String, (&Option<String>, &Option<String>, &Option<String>)> =
+        previous
+            .iter()
+            .map(|item| {
+                (
+                    item.table_name.to_lowercase(),
+                    (
+                        &item.modified_at,
+                        &item.modified_source,
+                        &item.modified_actor,
+                    ),
+                )
+            })
+            .collect();
+
+    let mut updates = Vec::new();
+    for item in next {
+        let Some(modified_at) = item.modified_at.as_ref() else {
+            continue;
+        };
+        let key = item.table_name.to_lowercase();
+        let unchanged = previous_by_key.get(&key).is_some_and(|(prev_at, prev_src, prev_actor)| {
+            *prev_at == &item.modified_at
+                && *prev_src == &item.modified_source
+                && *prev_actor == &item.modified_actor
+        });
+        if unchanged {
+            continue;
+        }
+        updates.push(TableModifiedUpdateItem {
+            table_name: item.table_name.clone(),
+            modified_at: modified_at.clone(),
+            modified_source: item
+                .modified_source
+                .clone()
+                .unwrap_or_else(|| SOURCE_DATABASE.into()),
+            modified_actor: item.modified_actor.clone(),
+        });
+    }
+    emit_updates(app, connection_id, database, updates);
 }
 
 pub async fn reconcile_mysql_observation(
@@ -1469,6 +1576,69 @@ mod tests {
         );
         assert_eq!(normalize_sql_target("newsg_4cfg", "(sql_console)"), None);
         assert_eq!(normalize_sql_target("newsg_4cfg", "IF"), None);
+    }
+
+    #[tokio::test]
+    async fn fast_overlay_merges_persisted_timestamps_without_overwriting_newer_db_time() {
+        let pool = memory_pool().await;
+        let t1 = 1_760_010_000_000_i64;
+        let t2 = t1 + 600_000;
+        let mut tx = pool.begin().await.unwrap();
+        upsert_saved_row(
+            &mut tx,
+            "mysql://10.0.0.1:3306",
+            "newsg_4cfg",
+            &SavedRow {
+                table_key: "goodsprop".into(),
+                table_name: "goodsprop".into(),
+                modified_at_ms: Some(t1),
+                modified_source: Some(SOURCE_BLACKCAT.into()),
+                modified_actor: Some("Alice".into()),
+                pending_local_write_ms: None,
+                observed_write_count: None,
+                observed_create_time: None,
+                observed_server_boot: None,
+                last_shared_ts_ms: None,
+            },
+            t1,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let tables = overlay_saved_modified_times(
+            &pool,
+            "mysql://10.0.0.1:3306",
+            "newsg_4cfg",
+            vec![
+                TableOption {
+                    table_name: "goodsprop".into(),
+                    table_comment: String::new(),
+                    column_count: None,
+                    data_size_bytes: None,
+                    modified_at: None,
+                    modified_source: None,
+                    modified_actor: None,
+                },
+                TableOption {
+                    table_name: "heroprop".into(),
+                    table_comment: String::new(),
+                    column_count: None,
+                    data_size_bytes: None,
+                    modified_at: Some(format_local_ms(t2)),
+                    modified_source: None,
+                    modified_actor: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tables[0].modified_at, Some(format_local_ms(t1)));
+        assert_eq!(tables[0].modified_source.as_deref(), Some(SOURCE_BLACKCAT));
+        assert_eq!(tables[0].modified_actor.as_deref(), Some("Alice"));
+        assert_eq!(tables[1].modified_at, Some(format_local_ms(t2)));
+        assert_eq!(tables[1].modified_source.as_deref(), Some(SOURCE_DATABASE));
     }
 
     #[tokio::test]

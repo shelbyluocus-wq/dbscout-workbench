@@ -1,4 +1,6 @@
 const TRAILING_TOKEN_PATTERN = /[_.-][a-zA-Z0-9]{1,8}$/;
+const DEFAULT_MIDDLE_ELLIPSIS_CACHE = new Map();
+const MAX_CACHE_ENTRIES = 2000;
 
 /**
  * Splits a long identifier into `{ head, tail }` for pure-CSS middle ellipsis
@@ -9,28 +11,40 @@ const TRAILING_TOKEN_PATTERN = /[_.-][a-zA-Z0-9]{1,8}$/;
  */
 export function splitMiddleEllipsis(text, { minLength = 14, tailLength = 6 } = {}) {
   const value = String(text ?? "");
+  const useCache = minLength === 14 && tailLength === 6;
+  if (useCache) {
+    const cached = DEFAULT_MIDDLE_ELLIPSIS_CACHE.get(value);
+    if (cached) return cached;
+  }
+
   const chars = Array.from(value);
+  let result;
   if (chars.length <= minLength) {
-    return { head: value, tail: "" };
+    result = { head: value, tail: "" };
+  } else {
+    const maxTail = Math.max(1, Math.min(10, Math.floor(chars.length * 0.4)));
+    let keepTail = Math.min(tailLength, maxTail);
+    const suffixMatch = value.match(TRAILING_TOKEN_PATTERN);
+    if (suffixMatch) {
+      const suffixChars = Array.from(suffixMatch[0]).length;
+      keepTail = Math.min(maxTail, Math.max(keepTail, suffixChars));
+    }
+
+    const splitAt = chars.length - keepTail;
+    result = splitAt <= 4
+      ? { head: value, tail: "" }
+      : {
+          head: chars.slice(0, splitAt).join(""),
+          tail: chars.slice(splitAt).join(""),
+        };
   }
 
-  const maxTail = Math.max(1, Math.min(10, Math.floor(chars.length * 0.4)));
-  let keepTail = Math.min(tailLength, maxTail);
-  const suffixMatch = value.match(TRAILING_TOKEN_PATTERN);
-  if (suffixMatch) {
-    const suffixChars = Array.from(suffixMatch[0]).length;
-    keepTail = Math.min(maxTail, Math.max(keepTail, suffixChars));
+  if (useCache) {
+    if (DEFAULT_MIDDLE_ELLIPSIS_CACHE.size >= MAX_CACHE_ENTRIES) DEFAULT_MIDDLE_ELLIPSIS_CACHE.clear();
+    DEFAULT_MIDDLE_ELLIPSIS_CACHE.set(value, Object.freeze(result));
+    return DEFAULT_MIDDLE_ELLIPSIS_CACHE.get(value);
   }
-
-  const splitAt = chars.length - keepTail;
-  if (splitAt <= 4) {
-    return { head: value, tail: "" };
-  }
-
-  return {
-    head: chars.slice(0, splitAt).join(""),
-    tail: chars.slice(splitAt).join(""),
-  };
+  return result;
 }
 
 function commonPrefixLength(a, b) {

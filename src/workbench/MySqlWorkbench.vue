@@ -525,6 +525,19 @@ const focusedInspectorTab = computed(() => {
   }
   return activeTab.value || null;
 });
+const sidebarTableList = computed(() => {
+  const source = workspace.tables.length ? workspace.tables : workspace.schema;
+  return source.map((table) => ({
+    tableName: normalizeTableName(table),
+    tableComment: normalizeTableComment(table),
+    columns: [],
+    raw: {
+      ...table,
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+    },
+  }));
+});
 const schemaSearchSource = computed(() =>
   workspace.schema.map((table) => ({
     tableName: normalizeTableName(table),
@@ -537,9 +550,12 @@ const schemaSearchSource = computed(() =>
     },
   })),
 );
-const schemaSearchResults = computed(() =>
-  buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value),
-);
+const schemaSearchResults = computed(() => {
+  if (!treeQuery.value.trim()) {
+    return buildSchemaSearchResults(sidebarTableList.value, "");
+  }
+  return buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value);
+});
 const quickOpenSchemaSearchResults = computed(() =>
   buildSchemaSearchResults(schemaSearchSource.value, quickOpenQuery.value),
 );
@@ -3125,12 +3141,24 @@ function togglePinnedDatabaseFromPalette({ connectionId, database }) {
   pinnedDatabases.value = togglePinnedInStore(connectionId, database, pinnedDatabases.value);
 }
 
-async function loadFavoriteDatabaseOptions() {
+async function loadFavoriteDatabaseOptions({ priorityConnectionId = "" } = {}) {
   const targets = visibleConnections.value.filter((connection) => {
     const kind = String(connection?.kind || "mysql").toLowerCase();
     return connection?.connected === true && (kind === "mysql" || kind === "clickhouse" || kind === "mongodb");
   });
-  await Promise.allSettled(targets.map((connection) => fetchDatabasesForConnection(connection.id)));
+  const priorityId = String(priorityConnectionId || selectedConnectionId.value || "");
+  const primary = targets.find((connection) => String(connection.id) === priorityId) || targets[0] || null;
+  const rest = targets.filter((connection) => connection !== primary);
+  if (primary) {
+    if (!Array.isArray(databasesByConnection[primary.id])) {
+      await fetchDatabasesForConnection(primary.id);
+    } else {
+      void fetchDatabasesForConnection(primary.id);
+    }
+  }
+  if (rest.length) {
+    void Promise.allSettled(rest.map((connection) => fetchDatabasesForConnection(connection.id)));
+  }
 }
 
 function favoriteDatabaseDisplayName({ connectionId, database } = {}) {
@@ -5873,7 +5901,6 @@ onBeforeUnmount(() => {
       '--wb-wallpaper-veil': `${wallpaperVeil * 100}%`,
       '--wb-wallpaper-tab-opacity': wallpaperTabOpacity,
     } : null]"
-    @transitionend="onSidebarLayoutTransitionEnd"
     @click="closeAllContextMenus"
     @keydown="handleWorkbenchKeydown"
     @contextmenu.prevent="openGeneralContextMenu"
@@ -6027,6 +6054,7 @@ onBeforeUnmount(() => {
           'is-pane-animating': sidebarPaneAnimating,
           'is-expanding': sidebarPanePhase === 'expanding',
         }"
+        @transitionend="onSidebarLayoutTransitionEnd"
       >
         <WorkbenchSidebar
           ref="sidebarRef"

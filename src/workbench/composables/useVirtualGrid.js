@@ -1,4 +1,4 @@
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, getCurrentInstance, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   GRID_BOUNDARY_OVERLAY_CLEARANCE,
   GRID_FIELD_COMMENT_COLLAPSED_HEIGHT,
@@ -536,7 +536,9 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
   }
 
   // ── ResizeObserver (lifecycle-tied via watch on the ref) ─────────────
+  const suspendPaneResize = getCurrentInstance() ? inject("suspendGridAutoFit", null) : null;
   let resizeObserver = null;
+  let pendingViewportSync = false;
 
   watch(gridWrapRef, (el) => {
     if (resizeObserver) resizeObserver.disconnect();
@@ -546,12 +548,35 @@ export function useVirtualGrid(activeTab, _editState, freezePanes = null) {
     viewportWidth.value = el.clientWidth || 0;
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        viewportHeight.value = entry.contentRect.height;
-        viewportWidth.value = el.clientWidth || entry.contentRect.width || 0;
+        const nextHeight = entry.contentRect.height;
+        const nextWidth = el.clientWidth || entry.contentRect.width || 0;
+        if (nextHeight !== viewportHeight.value) viewportHeight.value = nextHeight;
+        // While the sidebar is expanding, the grid shrinks; already-rendered
+        // columns cover the narrowing viewport, so deferring column-window
+        // teardown until the slide finishes prevents mid-animation DOM churn.
+        if (suspendPaneResize?.value && nextWidth < viewportWidth.value) {
+          pendingViewportSync = true;
+          continue;
+        }
+        if (nextWidth !== viewportWidth.value) viewportWidth.value = nextWidth;
       }
     });
     resizeObserver.observe(el);
   });
+
+  if (suspendPaneResize) {
+    watch(
+      () => Boolean(suspendPaneResize.value),
+      (suspended) => {
+        if (suspended || !pendingViewportSync) return;
+        pendingViewportSync = false;
+        const el = gridWrapRef.value;
+        if (!el) return;
+        viewportHeight.value = el.clientHeight;
+        viewportWidth.value = el.clientWidth || 0;
+      },
+    );
+  }
 
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {

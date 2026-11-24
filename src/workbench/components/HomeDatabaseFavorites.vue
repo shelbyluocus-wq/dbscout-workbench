@@ -193,7 +193,7 @@ async function openPicker() {
   pickerConnectionId.value = String(preferred?.id || connectedConnections.value[0]?.id || "");
   pickerLoading.value = true;
   try {
-    await context?.loadDatabases?.();
+    await context?.loadDatabases?.({ priorityConnectionId: pickerConnectionId.value });
   } finally {
     pickerLoading.value = false;
     ensurePickerSelection();
@@ -221,6 +221,9 @@ function selectPickerConnection(connectionId) {
   pickerQuery.value = "";
   pickerDatabase.value = "";
   ensurePickerSelection();
+  if (pickerConnectionId.value && !Array.isArray(databasesByConnection.value?.[pickerConnectionId.value])) {
+    void context?.loadDatabases?.({ priorityConnectionId: pickerConnectionId.value });
+  }
   nextTick(() => pickerSearchRef.value?.focus?.());
 }
 

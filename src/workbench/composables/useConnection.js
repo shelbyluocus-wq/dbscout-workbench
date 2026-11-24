@@ -341,6 +341,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   function reorderDatabases(sourceDatabase, targetDatabase, { connectionId = selectedConnectionId.value, position = "before" } = {}) {
     databases.value = moveItem(databases.value, sourceDatabase, targetDatabase, (database) => database, position);
+    if (connectionId) databasesByConnection[connectionId] = [...databases.value];
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
     orderMap[databaseOrderKey(connectionId)] = [...databases.value];
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
@@ -371,6 +372,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     );
     const ordered = applyDatabaseOrder(resolvedConnectionId, Array.isArray(dbList) ? dbList : []);
     databases.value = ordered;
+    databasesByConnection[resolvedConnectionId] = ordered;
     pruneStoredDatabaseOrder(resolvedConnectionId, ordered);
     aliases.pruneDatabaseAliases(resolvedConnectionId, ordered);
     databaseDecorations.pruneDatabaseDecorations(resolvedConnectionId, ordered);
@@ -546,6 +548,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
             { connectionId: selectedConnection.id },
           ),
       );
+      databasesByConnection[selectedConnection.id] = databases.value;
       markPerf("database.loaded", { connectionId: selectedConnection.id, count: databases.value.length });
     } catch (error) {
       databases.value = [];
@@ -665,7 +668,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       selectedConnectionId.value = connectionId;
       selectedDatabase.value = "";
-      databases.value = [];
+      const cachedDatabases = Array.isArray(databasesByConnection[connectionId])
+        ? applyDatabaseOrder(connectionId, databasesByConnection[connectionId])
+        : [];
+      databases.value = cachedDatabases;
       workspace.connectionId = connectionId || "";
       workspace.database = "";
       workspace.tables = [];
@@ -681,6 +687,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       );
       if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       databases.value = nextDatabases;
+      databasesByConnection[connectionId] = nextDatabases;
       markPerf("database.loaded", { connectionId, count: databases.value.length });
       const requestedDatabase = databases.value.find((database) => (
         String(database) === String(preferredDatabase || "")
@@ -1052,6 +1059,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     removeSavedConnection(connection);
     aliases.removeConnectionAliases(connectionId);
     databaseDecorations.removeConnectionDecorations(connectionId);
+    delete databasesByConnection[connectionId];
+    delete databaseFetchErrors[connectionId];
     connections.value = connections.value.filter((item) => item.id !== connectionId);
     writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
@@ -1098,7 +1107,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         connections.value.find((connection) => !previousIds.has(connection.id)) ||
         connections.value[connections.value.length - 1];
       if (newConnection) selectedConnectionId.value = newConnection.id;
-      databases.value = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, dbList);
+      const orderedNewDatabases = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, dbList);
+      databases.value = orderedNewDatabases;
+      if (newConnection?.id) databasesByConnection[newConnection.id] = orderedNewDatabases;
       connDialog.open = false;
       if (newConnection) {
         applySavedMetadata(newConnection, {

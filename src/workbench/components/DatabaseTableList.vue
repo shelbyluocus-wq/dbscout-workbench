@@ -1,6 +1,6 @@
 <script setup>
 import { t } from "../i18n/index.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { ArrowDown, ArrowUp, ChevronRight, GripVertical, Star } from "lucide-vue-next";
 import {
   computeAutoHomeColumnWidths,
@@ -103,12 +103,13 @@ const columns = computed(() => columnLayout.value.map((item) => {
   const definition = homeColumnDefinition(item.key);
   return { ...definition, label: t(({ name: 'm_699c6d62a836', size: 'm_7640eaa08b0c', modified: 'm_257bbcc44c83', comment: 'm_daede9881787' })[item.key]), width: columnWidths.value[item.key] };
 }));
+const automaticColumnWidths = computed(() => computeAutoHomeColumnWidths(props.tables, {
+  readOnly: props.readOnly,
+  emptyComment: t('m_8445d1bad03f'),
+  selfLabel: t('home.modifiedSelf'),
+}));
 const columnWidths = computed(() => {
-  const automatic = computeAutoHomeColumnWidths(props.tables, {
-    readOnly: props.readOnly,
-    emptyComment: t('m_8445d1bad03f'),
-    selfLabel: t('home.modifiedSelf'),
-  });
+  const automatic = automaticColumnWidths.value;
   const widths = Object.fromEntries(columnLayout.value.map((item) => [item.key, item.width || automatic[item.key]]));
   // On narrow panes, trim an automatically sized comment column toward its
   // automatic minimum so the table avoids horizontal scroll; a width the user
@@ -594,14 +595,40 @@ watch(
   },
 );
 
+const suspendPaneResize = inject("suspendGridAutoFit", null);
 let surfaceObserver = null;
+let pendingSurfaceMeasure = false;
+
+function syncSurfaceMetrics() {
+  const surface = scrollerRef.value;
+  if (!surface) return;
+  const nextWidth = surface.clientWidth;
+  const nextHeight = surface.clientHeight;
+  if (Math.abs(nextWidth - surfaceWidth.value) >= 1) surfaceWidth.value = nextWidth;
+  if (nextHeight && Math.abs(nextHeight - viewportHeight.value) >= 1) viewportHeight.value = nextHeight;
+}
+
+watch(
+  () => Boolean(suspendPaneResize?.value),
+  (suspended) => {
+    if (suspended || !pendingSurfaceMeasure) return;
+    pendingSurfaceMeasure = false;
+    nextTick(syncSurfaceMetrics);
+  },
+);
 
 onMounted(() => {
   const surface = scrollerRef.value;
   if (!surface || typeof ResizeObserver !== "function") return;
+  syncSurfaceMetrics();
   surfaceObserver = new ResizeObserver(() => {
-    surfaceWidth.value = surface.clientWidth;
-    viewportHeight.value = surface.clientHeight || viewportHeight.value;
+    if (suspendPaneResize?.value) {
+      pendingSurfaceMeasure = true;
+      const nextHeight = surface.clientHeight;
+      if (nextHeight && Math.abs(nextHeight - viewportHeight.value) >= 1) viewportHeight.value = nextHeight;
+      return;
+    }
+    syncSurfaceMetrics();
   });
   surfaceObserver.observe(surface);
 });

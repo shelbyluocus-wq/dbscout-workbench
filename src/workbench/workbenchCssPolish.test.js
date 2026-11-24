@@ -994,6 +994,9 @@ test("collapsed sidebar titlebar shows only the expand toggle and clears pane ta
   assert.match(css, /--wb-sidebar-tab-clearance:\s*var\(--wb-activity-rail-width\)/);
   assert.doesNotMatch(ruleBody(":root"), /--wb-sidebar-tab-offset/);
   assert.match(workbenchRule, /--wb-sidebar-tab-offset:\s*max\(0px, calc\(var\(--wb-sidebar-tab-clearance\) - var\(--wb-activity-rail-width\) - var\(--wb-sidebar-slot-width\) \* 1px\)\)/);
+  assert.doesNotMatch(workbenchRule, /transition\s*:[^;]*--wb-sidebar-slot-width/);
+  assert.doesNotMatch(ruleBody(".wb-tree-row"), /transform\s*:\s*translateZ\(0\)/);
+  assert.match(css, /\.wb-sidebar\.is-pane-animating \.wb-current-db-halo-head\s*\{[^}]*animation-play-state:\s*paused/s);
 });
 
 test("registered custom properties never hold lengths, so page zoom applies once", () => {

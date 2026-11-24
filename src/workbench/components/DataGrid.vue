@@ -1421,7 +1421,9 @@ function clearTableSearch() {
 
 // ── Adaptive column width ──────────────────────────────────────────────────
 
+const suspendPaneResize = inject("suspendGridAutoFit", null);
 let resizeObserver = null;
+let pendingFillOverlayRefresh = false;
 
 function performAutoFit() {
   const tab = props.tab;
@@ -1471,7 +1473,12 @@ function setupResizeObserver() {
   if (!gridWrapRef.value) return;
   gridViewportHeight.value = gridWrapRef.value.clientHeight;
   resizeObserver = new ResizeObserver(() => {
-    gridViewportHeight.value = gridWrapRef.value?.clientHeight || 0;
+    const nextHeight = gridWrapRef.value?.clientHeight || 0;
+    if (nextHeight !== gridViewportHeight.value) gridViewportHeight.value = nextHeight;
+    if (suspendPaneResize?.value) {
+      pendingFillOverlayRefresh = true;
+      return;
+    }
     nextTick(updateFillOverlayPosition);
   });
   resizeObserver.observe(gridWrapRef.value);
@@ -1479,6 +1486,15 @@ function setupResizeObserver() {
     resizeObserver.observe(element);
   }
 }
+
+watch(
+  () => Boolean(suspendPaneResize?.value),
+  (suspended) => {
+    if (suspended || !pendingFillOverlayRefresh) return;
+    pendingFillOverlayRefresh = false;
+    nextTick(updateFillOverlayPosition);
+  },
+);
 
 watch(
   () => [props.tab?.frozenRowStart, props.tab?.frozenRowCount, gridViewportHeight.value],

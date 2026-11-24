@@ -1625,3 +1625,41 @@ test("status writes are journaled so repeats and same-tick overwrites stay visib
   assert.equal(conn.statusText.value, "已打开表：hero");
   assert.equal(conn.statusRevision.value >= 4, true);
 });
+
+test("revisiting a connection displays its cached database list while refreshing live", async () => {
+  installLocalStorage();
+  const workspace = createWorkspaceState();
+  const pendingRefresh = deferred();
+  let mainListCalls = 0;
+  const invoke = async (command, payload = {}) => {
+    if (command === "list_databases") {
+      if (payload.connectionId === "mysql-main") {
+        mainListCalls += 1;
+        if (mainListCalls === 1) return ["game_db", "analytics"];
+        return pendingRefresh.promise;
+      }
+      return ["other_db"];
+    }
+    if (command === "select_database") return { tables: [] };
+    return {};
+  };
+  const conn = useConnection(workspace, invoke);
+  conn.connections.value = [
+    { id: "mysql-main", label: "Main", connected: true },
+    { id: "mysql-other", label: "Other", connected: true },
+  ];
+
+  await conn.selectConnection("mysql-main");
+  assert.deepEqual(conn.databases.value, ["game_db", "analytics"]);
+
+  await conn.selectConnection("mysql-other");
+  assert.deepEqual(conn.databases.value, ["other_db"]);
+
+  const switchingBack = conn.selectConnection("mysql-main");
+  await flushAsync();
+  assert.deepEqual(conn.databases.value, ["game_db", "analytics"]);
+
+  pendingRefresh.resolve(["game_db", "analytics", "events"]);
+  assert.equal(await switchingBack, SOURCE_SELECTION.selected);
+  assert.deepEqual(conn.databases.value, ["game_db", "analytics", "events"]);
+});

@@ -623,9 +623,6 @@ label:has(input[type="checkbox"]:disabled) {
   overflow: hidden;
   background: var(--wb-chrome-surface);
   color: var(--wb-text);
-  transition:
-    --wb-sidebar-slot-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease),
-    --wb-sidebar-titlebar-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
 .mysql-workbench.is-native-macos {
@@ -701,6 +698,15 @@ label:has(input[type="checkbox"]:disabled) {
   syntax: "<number>";
   inherits: true;
   initial-value: 292;
+}
+
+/* Scoped, non-inherited copy for the left-edge tabbar so macOS traffic-light
+   clearance animates in lockstep with `.wb-sidebar-slot` without triggering
+   root-level inherited style invalidation across the whole workbench DOM. */
+@property --wb-tab-sidebar-slot-width {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
 }
 
 .wb-titlebar-sidebar {
@@ -9069,7 +9075,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-pane-tabbar.is-left-edge-pane .wb-object-tabs {
+  --wb-tab-sidebar-slot-width: var(--wb-sidebar-slot-target, 0);
+  --wb-sidebar-tab-offset: max(0px, calc(var(--wb-sidebar-tab-clearance) - var(--wb-activity-rail-width) - var(--wb-tab-sidebar-slot-width) * 1px));
   transform: translateX(var(--wb-sidebar-tab-offset));
+}
+
+.mysql-workbench.is-native-macos:not(.is-fullscreen) .wb-pane-tabbar.is-left-edge-pane .wb-object-tabs {
+  transition: --wb-tab-sidebar-slot-width var(--wb-pane-collapse-duration) var(--wb-pane-collapse-ease);
 }
 
 .wb-pane-tabbar.is-right-edge-pane .wb-object-tabs {
@@ -11185,7 +11197,6 @@ label:has(input[type="checkbox"]:disabled) {
   color: var(--wb-tree-text);
   font-size: var(--wb-fs-body);
   text-align: left;
-  transform: translateZ(0);
   transition:
     background 0.16s ease,
     border-color 0.16s ease,
@@ -11407,6 +11418,13 @@ label:has(input[type="checkbox"]:disabled) {
 .wb-current-db-halo-trail,
 .wb-current-db-halo-head {
   animation: 3.2s cubic-bezier(0.25, 0.5, 0.55, 0.85) infinite;
+}
+
+.wb-sidebar.is-collapsed .wb-current-db-halo-trail,
+.wb-sidebar.is-collapsed .wb-current-db-halo-head,
+.wb-sidebar.is-pane-animating .wb-current-db-halo-trail,
+.wb-sidebar.is-pane-animating .wb-current-db-halo-head {
+  animation-play-state: paused;
 }
 
 .wb-current-db-halo-trail {
