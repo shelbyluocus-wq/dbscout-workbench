@@ -147,6 +147,55 @@ fn parse_table_column(spec: &str) -> Option<(String, Option<String>)> {
     is_ident(spec).then(|| (spec.to_string(), None))
 }
 
+fn is_prefix_atom(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 32
+        && text
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "_-.:".contains(ch))
+}
+
+fn parse_token_extractor(extractor: &str) -> Option<ReferenceParser> {
+    let (delimiter, rest) = if let Some(rest) = extractor.strip_prefix(',').or_else(|| extractor.strip_prefix('，')) {
+        (",", rest.trim())
+    } else if let Some(rest) = extractor.strip_prefix('|') {
+        ("|", rest.trim())
+    } else {
+        return None;
+    };
+    let rest = rest.strip_prefix('#')?;
+    let (index_part, prefix_part) = match rest.find([':', '：']) {
+        Some(pos) => {
+            let sep_len = rest[pos..].chars().next()?.len_utf8();
+            (rest[..pos].trim(), Some(rest[pos + sep_len..].trim()))
+        }
+        None => (rest.trim(), None),
+    };
+    if index_part.is_empty() || !index_part.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let one_based: usize = index_part.parse().ok()?;
+    if one_based == 0 || one_based > 65 {
+        return None;
+    }
+    let index = one_based - 1;
+    if let Some(raw_prefix) = prefix_part {
+        let prefix = raw_prefix.strip_suffix('*').unwrap_or(raw_prefix).trim();
+        if !is_prefix_atom(prefix) {
+            return None;
+        }
+        return Some(ReferenceParser::Prefixed {
+            prefix: prefix.to_string(),
+            delimiter: Some(delimiter.to_string()),
+            index: Some(index),
+        });
+    }
+    Some(ReferenceParser::Token {
+        delimiter: delimiter.to_string(),
+        index,
+    })
+}
+
 fn parse_list_extractor(extractor: &str) -> Option<ReferenceParser> {
     let extractor = extractor.trim();
     if extractor.is_empty() {
@@ -174,10 +223,24 @@ fn parse_list_extractor(extractor: &str) -> Option<ReferenceParser> {
             exclude: Vec::new(),
         });
     }
+    if let Some(parsed) = parse_token_extractor(extractor) {
+        return Some(parsed);
+    }
+    if let Some(prefix) = extractor.strip_suffix('*') {
+        let prefix = prefix.trim();
+        return is_prefix_atom(prefix).then(|| ReferenceParser::Prefixed {
+            prefix: prefix.to_string(),
+            delimiter: None,
+            index: None,
+        });
+    }
     is_ident(extractor).then(|| ReferenceParser::json(extractor))
 }
 
 fn parse_ref_specs(body: &str) -> Vec<RawRelationSpec> {
+    if body.contains('@') {
+        return parse_list_specs_with_kind(body, RelationKind::Value);
+    }
     let mut specs = Vec::new();
     for item in body.split([',', '，', ';', '；']) {
         if let Some((target_table, target_column)) = parse_table_column(item) {
@@ -193,6 +256,10 @@ fn parse_ref_specs(body: &str) -> Vec<RawRelationSpec> {
 }
 
 fn parse_list_specs(body: &str) -> Vec<RawRelationSpec> {
+    parse_list_specs_with_kind(body, RelationKind::List)
+}
+
+fn parse_list_specs_with_kind(body: &str, kind: RelationKind) -> Vec<RawRelationSpec> {
     let mut specs = Vec::new();
     for item in body.split([';', '；']) {
         let item = item.trim();
@@ -218,7 +285,7 @@ fn parse_list_specs(body: &str) -> Vec<RawRelationSpec> {
         specs.push(RawRelationSpec {
             target_table,
             target_column,
-            kind: RelationKind::List,
+            kind,
             parser,
         });
     }
@@ -814,6 +881,65 @@ mod tests {
                 target_column: "ID".into(),
                 kind: RelationKind::List,
                 parser: None,
+            }])
+        );
+
+        let list_prefix = "立绘表现参数 [列表关联: heroprop.ID @ npc_*]";
+        assert_eq!(
+            parse_directive(list_prefix, &db),
+            CommentDirective::Relations(vec![ExplicitRelation {
+                target_table: "heroprop".into(),
+                target_column: "ID".into(),
+                kind: RelationKind::List,
+                parser: Some(ReferenceParser::Prefixed {
+                    prefix: "npc_".into(),
+                    delimiter: None,
+                    index: None,
+                }),
+            }])
+        );
+
+        let list_slot_prefix = "立绘表现参数 [列表关联: heroprop.ID @ ,#1:npc_*]";
+        assert_eq!(
+            parse_directive(list_slot_prefix, &db),
+            CommentDirective::Relations(vec![ExplicitRelation {
+                target_table: "heroprop".into(),
+                target_column: "ID".into(),
+                kind: RelationKind::List,
+                parser: Some(ReferenceParser::Prefixed {
+                    prefix: "npc_".into(),
+                    delimiter: Some(",".into()),
+                    index: Some(0),
+                }),
+            }])
+        );
+
+        let list_slot_plain = "参数 [列表关联: goodsprop.ID @ |#2]";
+        assert_eq!(
+            parse_directive(list_slot_plain, &db),
+            CommentDirective::Relations(vec![ExplicitRelation {
+                target_table: "goodsprop".into(),
+                target_column: "ID".into(),
+                kind: RelationKind::List,
+                parser: Some(ReferenceParser::Token {
+                    delimiter: "|".into(),
+                    index: 1,
+                }),
+            }])
+        );
+
+        let ref_prefix = "立绘表现参数 [关联: heroprop.ID @ npc_*]";
+        assert_eq!(
+            parse_directive(ref_prefix, &db),
+            CommentDirective::Relations(vec![ExplicitRelation {
+                target_table: "heroprop".into(),
+                target_column: "ID".into(),
+                kind: RelationKind::Value,
+                parser: Some(ReferenceParser::Prefixed {
+                    prefix: "npc_".into(),
+                    delimiter: None,
+                    index: None,
+                }),
             }])
         );
 

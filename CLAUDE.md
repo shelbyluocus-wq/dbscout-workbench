@@ -403,7 +403,9 @@ capabilities:
   database on the same server. Column comments also support five authoritative
   explicit directives (`[枚举: 1=N, 2=R]`, `[数组位: N, R, SR]`,
   `[关联: table.col]`, `[列表关联: table.col @ extractor]`, `[无关联]`, also
-  accepting full-width brackets and English aliases) parsed identically by
+  accepting full-width brackets and English aliases; extractors cover `json`,
+  `,`, `|`, JSON object keys, JSON paths, prefix stripping such as `npc_*`, and
+  1-based delimited slots such as `,#1` or `,#1:npc_*`) parsed identically by
   `comments.rs`, `utils/commentDirectives.js` and `mockConfigRelations.js`: when
   present, they override fuzzy comments, code scans, formats, project rules and
   stale orphans for that column; `[枚举: ...]` and `[数组位: ...]` render

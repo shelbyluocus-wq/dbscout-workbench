@@ -93,6 +93,10 @@ pub fn validate_parser(parser: &ReferenceParser) -> Result<(), String> {
         ReferenceParser::JsonPaths { paths, .. } if paths.is_empty() || paths.len() > 8 || paths.iter().any(|path| path.len() > 256) => return Err("JSON 路径数量或长度超限".into()),
         ReferenceParser::JsonPaths { paths, .. } if paths.iter().any(|path| !super::parser::valid_json_path(path)) => return Err("JSON 路径仅支持命名成员、数组索引和 [*]".into()),
         ReferenceParser::Prefix { prefix } if prefix.is_empty() || prefix.len() > 64 => return Err("前缀为空或过长".into()),
+        ReferenceParser::Prefixed { prefix, .. } if prefix.is_empty() || prefix.len() > 64 || !super::parser::key_atom(prefix) => return Err("前缀为空、过长或包含非法字符".into()),
+        ReferenceParser::Prefixed { delimiter: Some(delimiter), .. } if ![",", "|"].contains(&delimiter.as_str()) => return Err("前缀分隔符仅支持逗号或竖线".into()),
+        ReferenceParser::Prefixed { delimiter: None, index: Some(_), .. } => return Err("指定项索引必须同时指定分隔符".into()),
+        ReferenceParser::Prefixed { index: Some(index), .. } if *index > 64 => return Err("指定项索引必须在 0-64 内".into()),
         ReferenceParser::Json { member, selector, .. } if member.is_empty() || member.len()>128 || selector.as_ref().is_some_and(|selector| selector.member.is_empty() || selector.member.len()>128 || selector.value.len()>256) => return Err("JSON 字段或选择条件无效".into()),
         ReferenceParser::Condition { prefix, value_prefix } if prefix.as_ref().is_some_and(|value| value.is_empty() || value.len()>64) || value_prefix.as_ref().is_some_and(|value| value.is_empty() || value.len()>64) => return Err("条件前缀为空或过长".into()),
         _ => {}

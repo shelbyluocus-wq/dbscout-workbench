@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Check, CircleAlert, Copy, ListOrdered, Plus, Sparkles, Tag, Trash2, X } from "lucide-vue-next";
+import { Check, CircleAlert, Copy, Link2, ListOrdered, Plus, Sparkles, Tag, Trash2, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { formatShortcutForPlatform } from "../utils/desktopPlatform.js";
 import { isImeKeyEvent } from "../utils/imeInput.js";
@@ -13,10 +13,13 @@ import {
   formatCommentDirective,
   parseCommentDirective,
   parseListExtractor,
+  parseTokenExtractorSpec,
   resolveCellEnumPreview,
   resolveCellSlotPreview,
+  resolveListSamplePreview,
   stripCommentDirectives,
   suggestEnumEntriesFromComment,
+  suggestPrefixFromSample,
   suggestSlotLabelsFromComment,
 } from "../utils/commentDirectives.js";
 
@@ -52,6 +55,9 @@ const targetTable = ref("");
 const targetColumn = ref("");
 const listFormat = ref("auto");
 const listExtractorInput = ref("");
+const tokenDelimiter = ref(",");
+const tokenIndex = ref("1");
+const tokenPrefix = ref("");
 const loadedColumnsMap = ref({});
 const copiedKind = ref("");
 let copiedTimer = 0;
@@ -107,6 +113,9 @@ const suggestedEnumEntries = computed(() => (
 const suggestedSlotLabels = computed(() => (
   isColumnKind.value ? suggestSlotLabelsFromComment(draft.value) : []
 ));
+const suggestedPrefix = computed(() => (
+  isColumnKind.value ? suggestPrefixFromSample(props.sampleValue) : ""
+));
 
 const effectiveListExtractor = computed(() => {
   if (mode.value !== "list") return "";
@@ -114,6 +123,19 @@ const effectiveListExtractor = computed(() => {
   if (listFormat.value === "json") return "json";
   if (listFormat.value === "comma") return ",";
   if (listFormat.value === "pipe") return "|";
+  if (listFormat.value === "prefix") {
+    const raw = listExtractorInput.value.trim();
+    const clean = raw.endsWith("*") ? raw.slice(0, -1).trim() : raw;
+    return clean ? `${clean}*` : "";
+  }
+  if (listFormat.value === "token") {
+    const idx = String(tokenIndex.value ?? "").trim();
+    const delim = tokenDelimiter.value === "|" ? "|" : ",";
+    if (!idx) return "";
+    const rawPrefix = tokenPrefix.value.trim();
+    const cleanPrefix = rawPrefix.endsWith("*") ? rawPrefix.slice(0, -1).trim() : rawPrefix;
+    return cleanPrefix ? `${delim}#${idx}:${cleanPrefix}*` : `${delim}#${idx}`;
+  }
   return listExtractorInput.value.trim();
 });
 
@@ -161,7 +183,13 @@ const validationError = computed(() => {
     const col = targetColumn.value.trim();
     if (!tbl || !IDENT_RE.test(tbl)) return t("commentEdit.targetTableError");
     if (col && !IDENT_RE.test(col)) return t("commentEdit.targetColumnError");
-    if (mode.value === "list" && (listFormat.value === "member" || listFormat.value === "path")) {
+    if (mode.value === "list" && listFormat.value === "prefix") {
+      const ext = effectiveListExtractor.value;
+      if (!ext || !parseListExtractor(ext)) return t("commentEdit.listPrefixError");
+    } else if (mode.value === "list" && listFormat.value === "token") {
+      const ext = effectiveListExtractor.value;
+      if (!ext || !parseListExtractor(ext)) return t("commentEdit.listTokenError");
+    } else if (mode.value === "list" && (listFormat.value === "member" || listFormat.value === "path")) {
       const ext = listExtractorInput.value.trim();
       if (!ext || !parseListExtractor(ext)) return t("commentEdit.listExtractorError");
     }
@@ -189,6 +217,13 @@ const sampleSlotPreview = computed(() => {
   return resolveCellSlotPreview(sample, directiveTag.value);
 });
 
+const sampleListPreview = computed(() => {
+  if (!isColumnKind.value || mode.value !== "list") return null;
+  const sample = String(props.sampleValue ?? "").trim();
+  if (!sample) return null;
+  return resolveListSamplePreview(sample, effectiveListExtractor.value);
+});
+
 useEscClose(
   () => props.open,
   () => {
@@ -214,6 +249,9 @@ function initFromValue(rawValue) {
   targetColumn.value = "";
   listFormat.value = "auto";
   listExtractorInput.value = "";
+  tokenDelimiter.value = ",";
+  tokenIndex.value = "1";
+  tokenPrefix.value = "";
 
   if (!parsed.hasDirective) {
     mode.value = "none";
@@ -227,10 +265,11 @@ function initFromValue(rawValue) {
     slotLabels.value = [...parsed.slots];
   } else if (parsed.kind === "relation" && parsed.relations.length) {
     const first = parsed.relations[0];
-    mode.value = first.kind === "list" ? "list" : "value";
+    const ext = String(first.extractor || "").trim();
+    mode.value = first.kind === "list" || ext ? "list" : "value";
     targetTable.value = first.targetTable || "";
     targetColumn.value = first.targetColumn || "";
-    const ext = String(first.extractor || "").trim();
+    const tokenSpec = ext ? parseTokenExtractorSpec(ext) : null;
     if (!ext) {
       listFormat.value = "auto";
     } else if (ext.toLowerCase() === "json") {
@@ -239,6 +278,14 @@ function initFromValue(rawValue) {
       listFormat.value = "comma";
     } else if (ext === "|" || ext.toLowerCase() === "pipe") {
       listFormat.value = "pipe";
+    } else if (tokenSpec) {
+      listFormat.value = "token";
+      tokenDelimiter.value = tokenSpec.delimiter;
+      tokenIndex.value = String(tokenSpec.oneBased);
+      tokenPrefix.value = tokenSpec.prefix;
+    } else if (ext.endsWith("*") && !ext.startsWith("$")) {
+      listFormat.value = "prefix";
+      listExtractorInput.value = ext.slice(0, -1).trim();
     } else if (ext.startsWith("$")) {
       listFormat.value = "path";
       listExtractorInput.value = ext;
@@ -327,6 +374,18 @@ function applySuggestedSlots() {
   if (!suggestedSlotLabels.value.length) return;
   slotLabels.value = [...suggestedSlotLabels.value];
 }
+
+function applySuggestedPrefix() {
+  if (!suggestedPrefix.value) return;
+  listFormat.value = "prefix";
+  listExtractorInput.value = suggestedPrefix.value;
+}
+
+watch(listFormat, (next) => {
+  if (next === "prefix" && !listExtractorInput.value.trim() && suggestedPrefix.value) {
+    listExtractorInput.value = suggestedPrefix.value;
+  }
+});
 
 function addEnumRow() {
   enumEntries.value = [...enumEntries.value, { key: "", label: "" }];
@@ -625,11 +684,23 @@ onBeforeUnmount(() => {
                   <option value="json">{{ t('commentEdit.listFormat.json') }}</option>
                   <option value="comma">{{ t('commentEdit.listFormat.comma') }}</option>
                   <option value="pipe">{{ t('commentEdit.listFormat.pipe') }}</option>
+                  <option value="prefix">{{ t('commentEdit.listFormat.prefix') }}</option>
+                  <option value="token">{{ t('commentEdit.listFormat.token') }}</option>
                   <option value="member">{{ t('commentEdit.listFormat.member') }}</option>
                   <option value="path">{{ t('commentEdit.listFormat.path') }}</option>
                 </select>
               </label>
-              <label v-if="listFormat === 'member' || listFormat === 'path'" class="wb-comment-rel-field">
+              <label v-if="listFormat === 'prefix'" class="wb-comment-rel-field">
+                <span>{{ t('commentEdit.listPrefixLabel') }}</span>
+                <input
+                  v-model="listExtractorInput"
+                  type="text"
+                  :placeholder="t('commentEdit.listPrefixPlaceholder')"
+                  :disabled="saving"
+                  spellcheck="false"
+                />
+              </label>
+              <label v-else-if="listFormat === 'member' || listFormat === 'path'" class="wb-comment-rel-field">
                 <span>{{ listFormat === 'member' ? t('commentEdit.listFormat.member') : t('commentEdit.listFormat.path') }}</span>
                 <input
                   v-model="listExtractorInput"
@@ -639,6 +710,60 @@ onBeforeUnmount(() => {
                   spellcheck="false"
                 />
               </label>
+            </div>
+            <div v-if="mode === 'list' && listFormat === 'token'" class="wb-comment-rel-grid is-triple">
+              <label class="wb-comment-rel-field">
+                <span>{{ t('commentEdit.listTokenDelimiter') }}</span>
+                <select v-model="tokenDelimiter" :disabled="saving">
+                  <option value=",">{{ t('commentEdit.listTokenComma') }}</option>
+                  <option value="|">{{ t('commentEdit.listTokenPipe') }}</option>
+                </select>
+              </label>
+              <label class="wb-comment-rel-field">
+                <span>{{ t('commentEdit.listTokenIndex') }}</span>
+                <input
+                  v-model="tokenIndex"
+                  type="number"
+                  min="1"
+                  max="65"
+                  :disabled="saving"
+                />
+              </label>
+              <label class="wb-comment-rel-field">
+                <span>{{ t('commentEdit.listTokenPrefix') }}</span>
+                <input
+                  v-model="tokenPrefix"
+                  type="text"
+                  :placeholder="t('commentEdit.listTokenPrefixPlaceholder')"
+                  :disabled="saving"
+                  spellcheck="false"
+                />
+              </label>
+            </div>
+            <div v-if="mode === 'list' && suggestedPrefix && listFormat !== 'prefix'" class="wb-comment-enum-tools">
+              <button
+                type="button"
+                class="wb-comment-inline-btn is-accent"
+                :disabled="saving"
+                @click="applySuggestedPrefix"
+              >
+                <Sparkles :size="12" aria-hidden="true" />
+                <span>{{ t('commentEdit.listSuggestPrefix', { prefix: suggestedPrefix }) }}</span>
+              </button>
+            </div>
+            <div v-if="mode === 'list' && sampleListPreview !== null" class="wb-comment-sample-preview-row">
+              <span class="wb-comment-sample-label">{{ t('commentEdit.samplePreview', { value: sampleValue }) }}</span>
+              <template v-if="sampleListPreview.length">
+                <span
+                  v-for="(val, idx) in sampleListPreview.slice(0, 8)"
+                  :key="idx"
+                  class="wb-cell-detail-enum-chip is-enum"
+                >
+                  <Link2 :size="10" aria-hidden="true" />
+                  <span class="wb-cell-detail-ref-id">{{ val }}</span>
+                </span>
+              </template>
+              <span v-else class="wb-comment-sample-empty">{{ t('commentEdit.listPreviewEmpty') }}</span>
             </div>
           </div>
         </section>

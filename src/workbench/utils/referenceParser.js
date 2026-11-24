@@ -6,10 +6,31 @@ const scalar = (value) => typeof value === "string" || typeof value === "number"
 const member = (object, name) => object[Object.keys(object).find((key) => key.toLowerCase() === name.toLowerCase())];
 const atom = (value) => /^[-A-Za-z0-9_.:]*$/.test(value);
 
+function stripPrefixedToken(token, prefix) {
+  const trimmed = String(token ?? "").trim().replace(/^"+|"+$/g, "").trim();
+  if (!trimmed.startsWith(prefix)) return null;
+  const rest = trimmed.slice(prefix.length);
+  return !EMPTY.has(rest) && atom(rest) ? rest : null;
+}
+
 export function normalizeReferenceParser(parser) {
   if (!parser || typeof parser !== "object") return null;
   if (parser.type === "prefix" && typeof parser.prefix === "string") {
     return { type: "prefix", prefix: parser.prefix };
+  }
+  if (parser.type === "prefixed" && typeof parser.prefix === "string" && parser.prefix && parser.prefix.length <= 64 && atom(parser.prefix)) {
+    const delimiter = parser.delimiter == null ? null : parser.delimiter;
+    const index = parser.index == null ? null : parser.index;
+    if (delimiter !== null && ![",", "|"].includes(delimiter)) return { type: "unsupported" };
+    if (index !== null && (delimiter === null || !Number.isInteger(index) || index < 0 || index > 1024)) {
+      return { type: "unsupported" };
+    }
+    return {
+      type: "prefixed",
+      prefix: parser.prefix,
+      ...(delimiter !== null ? { delimiter } : {}),
+      ...(index !== null ? { index } : {}),
+    };
   }
   if (parser.type === "token" && [",", "|"].includes(parser.delimiter)
     && Number.isInteger(parser.index) && parser.index >= 0 && parser.index <= 1024) {
@@ -61,6 +82,26 @@ export function parseReferenceValues(text, rawParser) {
   if (parser.type === "prefix") {
     if (!atom(value)) return null;
     values = value.startsWith(parser.prefix) ? [value] : [];
+  } else if (parser.type === "prefixed") {
+    if (value.startsWith("function")) return null;
+    if (parser.delimiter != null && parser.index != null) {
+      const tokens = value.split(parser.delimiter).map((part) => part.trim());
+      const stripped = tokens[parser.index] === undefined ? null : stripPrefixedToken(tokens[parser.index], parser.prefix);
+      values = stripped === null ? [] : [stripped];
+    } else if (parser.delimiter != null) {
+      values = value.split(parser.delimiter).map((part) => stripPrefixedToken(part, parser.prefix)).filter((item) => item !== null);
+    } else if (value.startsWith("{")) {
+      return null;
+    } else if (value.startsWith("[")) {
+      let items;
+      try { items = JSON.parse(value); } catch { return null; }
+      if (!Array.isArray(items)) return null;
+      const scalars = items.map(scalar);
+      if (scalars.includes(null)) return null;
+      values = scalars.map((part) => stripPrefixedToken(part, parser.prefix)).filter((item) => item !== null);
+    } else {
+      values = value.split(/[,|;\s]+/).map((part) => stripPrefixedToken(part, parser.prefix)).filter((item) => item !== null);
+    }
   } else if (parser.type === "token") {
     const tokens = value.split(parser.delimiter).map((part) => part.trim());
     if (!tokens.every(atom)) return null;

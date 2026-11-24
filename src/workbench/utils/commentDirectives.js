@@ -1,15 +1,20 @@
 // Unified column-comment directive parser, formatter and enum resolver.
 // Kept aligned with src-tauri/src/config_relations/comments.rs.
 
-import { normalizeReferenceParser } from "./referenceParser.js";
+import { normalizeReferenceParser, parseReferenceValues } from "./referenceParser.js";
 
 export const MAX_COLUMN_COMMENT_LENGTH = 1024;
 
 const IDENT_RE = /^[A-Za-z0-9_]+$/;
+const PREFIX_ATOM_RE = /^[-A-Za-z0-9_.:]{1,32}$/;
 const JSON_PATH_RE = /^\$(?:\.[A-Za-z0-9_]+|\[(?:\d+|\*)\])*$/;
 
 function isIdent(text) {
   return IDENT_RE.test(String(text || ""));
+}
+
+function isPrefixAtom(text) {
+  return PREFIX_ATOM_RE.test(String(text || ""));
 }
 
 function validJsonPath(path) {
@@ -109,6 +114,35 @@ function parseTableColumn(spec) {
   return isIdent(text) ? { targetTable: text, targetColumn: "" } : null;
 }
 
+export function parseTokenExtractorSpec(extractor) {
+  const text = String(extractor || "").trim();
+  const match = /^([,，|])\s*#(\d+)(?:\s*[:：]\s*(.+))?$/.exec(text);
+  if (!match) return null;
+  const delimiter = match[1] === "|" ? "|" : ",";
+  const oneBased = Number(match[2]);
+  if (!Number.isInteger(oneBased) || oneBased < 1 || oneBased > 65) return null;
+  const index = oneBased - 1;
+  const rawPrefix = match[3] == null ? "" : match[3].trim();
+  if (rawPrefix) {
+    const prefix = rawPrefix.endsWith("*") ? rawPrefix.slice(0, -1).trim() : rawPrefix;
+    if (!isPrefixAtom(prefix)) return null;
+    return {
+      delimiter,
+      oneBased,
+      index,
+      prefix,
+      parser: normalizeReferenceParser({ type: "prefixed", prefix, delimiter, index }),
+    };
+  }
+  return {
+    delimiter,
+    oneBased,
+    index,
+    prefix: "",
+    parser: normalizeReferenceParser({ type: "token", delimiter, index }),
+  };
+}
+
 export function parseListExtractor(extractor) {
   const text = String(extractor || "").trim();
   if (!text) return null;
@@ -121,26 +155,18 @@ export function parseListExtractor(extractor) {
       ? normalizeReferenceParser({ type: "jsonPaths", paths: [text], exclude: [] })
       : null;
   }
+  const tokenSpec = parseTokenExtractorSpec(text);
+  if (tokenSpec) return tokenSpec.parser;
+  if (text.endsWith("*")) {
+    const prefix = text.slice(0, -1).trim();
+    return isPrefixAtom(prefix)
+      ? normalizeReferenceParser({ type: "prefixed", prefix })
+      : null;
+  }
   return isIdent(text) ? normalizeReferenceParser({ type: "json", member: text }) : null;
 }
 
-function parseRefSpecs(body) {
-  const specs = [];
-  for (const item of String(body || "").split(/[,，;；]/)) {
-    const target = parseTableColumn(item);
-    if (!target) continue;
-    specs.push({
-      targetTable: target.targetTable,
-      targetColumn: target.targetColumn,
-      kind: "value",
-      extractor: "",
-      parser: null,
-    });
-  }
-  return specs;
-}
-
-function parseListSpecs(body) {
+function parseRelationSpecsWithKind(body, kind) {
   const specs = [];
   for (const rawItem of String(body || "").split(/[;；]/)) {
     const item = rawItem.trim();
@@ -158,12 +184,35 @@ function parseListSpecs(body) {
     specs.push({
       targetTable: target.targetTable,
       targetColumn: target.targetColumn,
-      kind: "list",
+      kind,
       extractor: extractorPart,
       parser,
     });
   }
   return specs;
+}
+
+function parseRefSpecs(body) {
+  if (String(body || "").includes("@")) {
+    return parseRelationSpecsWithKind(body, "value");
+  }
+  const specs = [];
+  for (const item of String(body || "").split(/[,，;；]/)) {
+    const target = parseTableColumn(item);
+    if (!target) continue;
+    specs.push({
+      targetTable: target.targetTable,
+      targetColumn: target.targetColumn,
+      kind: "value",
+      extractor: "",
+      parser: null,
+    });
+  }
+  return specs;
+}
+
+function parseListSpecs(body) {
+  return parseRelationSpecsWithKind(body, "list");
 }
 
 function parseSlotLabels(body) {
@@ -474,6 +523,49 @@ function dedupeEntries(items) {
     out.push(item);
   }
   return out;
+}
+
+export function suggestPrefixFromSample(sampleValue) {
+  const text = String(sampleValue ?? "").trim();
+  if (!text || text.startsWith("function")) return "";
+  const tokens = text.split(/[,|;\s[\]"]+/).map((part) => part.trim()).filter(Boolean);
+  for (const token of tokens) {
+    const match = /^([A-Za-z][A-Za-z0-9]*[_:-])(\d+)$/.exec(token);
+    if (match && isPrefixAtom(match[1])) return match[1];
+  }
+  return "";
+}
+
+export function resolveListSamplePreview(sampleValue, extractor) {
+  const text = String(sampleValue ?? "").trim();
+  if (!text) return null;
+  let parser = parseListExtractor(extractor);
+  if (!parser && !String(extractor || "").trim()) {
+    if (text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          if (parsed.every((item) => typeof item === "string" || typeof item === "number")) {
+            parser = normalizeReferenceParser({ type: "keys", delimiter: "json" });
+          } else if (parsed.length && parsed.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+            const firstKeys = Object.keys(parsed[0]);
+            const idKey = firstKeys.find((key) => key.toLowerCase() === "id")
+              || firstKeys.find((key) => key.toLowerCase().endsWith("id"));
+            if (idKey) parser = normalizeReferenceParser({ type: "json", member: idKey });
+          }
+        }
+      } catch {
+        parser = null;
+      }
+    } else if (text.includes("|")) {
+      parser = normalizeReferenceParser({ type: "keys", delimiter: "|" });
+    } else if (text.includes(",")) {
+      parser = normalizeReferenceParser({ type: "keys", delimiter: "," });
+    }
+  }
+  if (!parser) return null;
+  const extracted = parseReferenceValues(text, parser);
+  return Array.isArray(extracted) ? extracted : [];
 }
 
 export function formatAgentMeaningClipboard({

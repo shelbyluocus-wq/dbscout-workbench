@@ -10,8 +10,10 @@ import {
   parseCommentDirective,
   resolveCellEnumPreview,
   resolveCellSlotPreview,
+  resolveListSamplePreview,
   stripCommentDirectives,
   suggestEnumEntriesFromComment,
+  suggestPrefixFromSample,
   suggestSlotLabelsFromComment,
 } from "./commentDirectives.js";
 
@@ -187,4 +189,41 @@ test("cell detail panel, split layout, dialog and shell wire column meaning edit
   assert.match(shell, /@edit-column-meaning="openColumnMeaningEdit"/);
   assert.match(dialog, /wb-comment-meaning-box/);
   assert.match(dialog, /copyForAgent/);
+});
+
+test("prefix and positional token extractors parse, preview and suggest cleanly", () => {
+  const prefixed = parseCommentDirective("立绘表现参数 [列表关联: heroprop.ID @ npc_*]");
+  assert.equal(prefixed.kind, "relation");
+  assert.deepEqual(prefixed.relations[0].parser, { type: "prefixed", prefix: "npc_" });
+
+  const slotPrefixed = parseCommentDirective("立绘表现参数 [列表关联: heroprop.ID @ ,#1:npc_*]");
+  assert.deepEqual(slotPrefixed.relations[0].parser, {
+    type: "prefixed",
+    prefix: "npc_",
+    delimiter: ",",
+    index: 0,
+  });
+
+  const slotPlain = parseCommentDirective("来源参数 [列表关联: shoptypeprop.ShopType @ ,#1]");
+  assert.deepEqual(slotPlain.relations[0].parser, {
+    type: "token",
+    delimiter: ",",
+    index: 0,
+  });
+
+  const refWithExtractor = parseCommentDirective("立绘 [关联: heroprop.ID @ npc_*]");
+  assert.equal(refWithExtractor.kind, "relation");
+  assert.equal(refWithExtractor.relations[0].kind, "value");
+  assert.deepEqual(refWithExtractor.relations[0].parser, { type: "prefixed", prefix: "npc_" });
+
+  assert.equal(suggestPrefixFromSample("npc_1041,70,0,0,0"), "npc_");
+  assert.equal(suggestPrefixFromSample("201,100,0,0,0"), "");
+  assert.deepEqual(resolveListSamplePreview("npc_1041,70,0,0,0", "npc_*"), ["1041"]);
+  assert.deepEqual(resolveListSamplePreview("npc_1041,70,0,0,0", ",#1:npc_*"), ["1041"]);
+  assert.deepEqual(resolveListSamplePreview("201,100,0,0,0", "npc_*"), []);
+  assert.deepEqual(resolveListSamplePreview("7,900", ",#1"), ["7"]);
+  assert.equal(
+    formatCommentDirective({ kind: "list", targetTable: "heroprop", targetColumn: "ID", extractor: "npc_*" }),
+    "[列表关联: heroprop.ID @ npc_*]",
+  );
 });

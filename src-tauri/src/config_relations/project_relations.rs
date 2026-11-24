@@ -229,6 +229,27 @@ pub fn rules(snapshot: &DbSnapshot) -> Vec<ProjectRelation> {
         b.add("goodssourceprop", "Param", target, key, Some(ReferenceParser::Token { delimiter: ",".into(), index: 0 }),
             vec![guard("Type", &[kind])], "ItemSourceMgr.createSourceData：只取Param逗号列表第一项；Type=3对应商店类型，Type=4对应宝箱的Provence分类，不是BoxID。");
     }
+    for (source, column) in [
+        ("activemodelprop", "P5"),
+        ("comnpcshowprop", "P5"),
+        ("guideshowprop", "P5"),
+        ("teamupbosshardlvlprop", "Action"),
+        ("wikiprop", "Image"),
+    ] {
+        b.add(
+            source,
+            column,
+            "heroprop",
+            "ID",
+            Some(ReferenceParser::Prefixed {
+                prefix: "npc_".into(),
+                delimiter: Some(",".into()),
+                index: Some(0),
+            }),
+            Vec::new(),
+            "立绘动画参数：首项以 npc_ 开头时，去掉 npc_ 前缀后的编号对应 heroprop.ID；纯数字图片和后续缩放/偏移参数不参与匹配。",
+        );
+    }
     // Language overlays share the base identity, not the resource/text values.
     for table in snapshot.tables.values() {
         let Some((base, suffix)) = table.name.rsplit_once('_') else { continue };
@@ -312,5 +333,23 @@ mod tests {
         assert!(!suppressed(&key("otherprop", "Param1", "conditionprop", "Type")));
         assert!(!suppressed(&key("taskprop", "TaskType", "taskshowprop", "TaskType")));
         assert!(suppressed(&key("taskprop", "TaskType", "taskshowprop", "Kind")));
+    }
+
+    #[test]
+    fn npc_portrait_columns_extract_hero_ids_without_matching_plain_images() {
+        let db = snapshot(vec![
+            table("activemodelprop", &[("CliModelID", "int", "", true), ("P5", "varchar", "", false)]),
+            table("heroprop", &[("ID", "smallint", "", true)]),
+        ]);
+        let found = rules(&db)
+            .into_iter()
+            .find(|rule| rule.key.source_table == "activemodelprop" && rule.key.source_column == "P5")
+            .expect("activemodelprop.P5 rule");
+        assert_eq!(found.key.target_table, "heroprop");
+        assert_eq!(found.key.target_column, "ID");
+        let parser = found.parser.as_ref().expect("prefixed parser");
+        assert_eq!(parser.values("npc_1041,70,0,0,0").unwrap(), ["1041"]);
+        assert_eq!(parser.values("201,100,0,0,0").unwrap(), Vec::<String>::new());
+        assert_eq!(parser.values("0").unwrap(), Vec::<String>::new());
     }
 }

@@ -398,5 +398,54 @@
     },
     "text": "function(){return [{ID:7}]}",
     "values": null
+  },
+  {
+    "name": "prefixed npc hero id in comma tuple strips prefix and ignores trailing params",
+    "parser": {
+      "type": "prefixed",
+      "prefix": "npc_",
+      "delimiter": ",",
+      "index": 0
+    },
+    "text": "npc_1041,70,0,0,0",
+    "values": ["1041"]
+  },
+  {
+    "name": "prefixed npc tuple ignores plain numeric image ids",
+    "parser": {
+      "type": "prefixed",
+      "prefix": "npc_",
+      "delimiter": ",",
+      "index": 0
+    },
+    "text": "201,100,0,0,0",
+    "values": []
+  },
+  {
+    "name": "prefixed free scan finds prefixed tokens across comma or pipe lists",
+    "parser": {
+      "type": "prefixed",
+      "prefix": "npc_"
+    },
+    "text": "npc_1041,70,npc_1031,-20,0",
+    "values": ["1041", "1031"]
+  },
+  {
+    "name": "prefixed free scan parses json scalar arrays and refuses functions",
+    "parser": {
+      "type": "prefixed",
+      "prefix": "npc_"
+    },
+    "text": "[\"npc_1041\",\"201\",\"npc_1031\"]",
+    "values": ["1041", "1031"]
+  },
+  {
+    "name": "prefixed free scan refuses functions",
+    "parser": {
+      "type": "prefixed",
+      "prefix": "npc_"
+    },
+    "text": "function(){return 'npc_1041';}",
+    "values": null
   }
 ]

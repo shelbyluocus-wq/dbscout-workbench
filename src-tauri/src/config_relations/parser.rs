@@ -10,6 +10,16 @@ pub enum ReferenceParser {
     Keys { delimiter: String },
     Token { delimiter: String, index: usize },
     Prefix { prefix: String },
+    /// Extracts key values carrying a literal prefix (such as `npc_1041` inside
+    /// `npc_1041,70,0,0,0` or `npc_1041|npc_1031`), stripping the prefix before
+    /// matching the target column.
+    Prefixed {
+        prefix: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delimiter: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
     /// A restricted JSON path grammar: object members, numeric indexes and
     /// array wildcards only. Never evaluate config functions or expressions.
     JsonPaths { paths: Vec<String>, #[serde(default)] exclude: Vec<String> },
@@ -57,8 +67,14 @@ fn member<'a>(object: &'a serde_json::Map<String, Value>, name: &str) -> Option<
     object.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value)
 }
 
-fn key_atom(value: &str) -> bool {
+pub(crate) fn key_atom(value: &str) -> bool {
     value.chars().all(|ch| ch.is_ascii_alphanumeric() || "_-.:".contains(ch))
+}
+
+fn strip_prefixed_token<'a>(token: &'a str, prefix: &str) -> Option<&'a str> {
+    let trimmed = token.trim().trim_matches('"').trim();
+    let rest = trimmed.strip_prefix(prefix)?;
+    (!empty(rest) && key_atom(rest)).then_some(rest)
 }
 
 pub fn condition_parts(text: &str) -> Option<Vec<(String, String)>> {
@@ -92,6 +108,52 @@ impl ReferenceParser {
             Self::Prefix { prefix } => {
                 if !key_atom(text) { return None; }
                 if text.starts_with(prefix) { vec![text.into()] } else { Vec::new() }
+            }
+            Self::Prefixed { prefix, delimiter, index } => {
+                if prefix.is_empty() || !key_atom(prefix) || text.starts_with("function") {
+                    return None;
+                }
+                match (delimiter.as_deref(), *index) {
+                    (Some(delim), Some(idx)) => {
+                        if !matches!(delim, "," | "|") || idx > 1024 { return None; }
+                        let tokens = text.split(delim).map(str::trim).collect::<Vec<_>>();
+                        tokens.get(idx)
+                            .and_then(|token| strip_prefixed_token(token, prefix))
+                            .map(|value| vec![value.to_string()])
+                            .unwrap_or_default()
+                    }
+                    (Some(delim), None) => {
+                        if !matches!(delim, "," | "|") { return None; }
+                        text.split(delim)
+                            .filter_map(|token| strip_prefixed_token(token, prefix))
+                            .map(str::to_string)
+                            .collect()
+                    }
+                    (None, Some(_)) => return None,
+                    (None, None) => {
+                        if text.starts_with('{') {
+                            return None;
+                        }
+                        if text.starts_with('[') {
+                            let Value::Array(items) = serde_json::from_str::<Value>(text).ok()? else {
+                                return None;
+                            };
+                            let mut out = Vec::new();
+                            for item in items {
+                                let text_item = scalar(&item)?;
+                                if let Some(stripped) = strip_prefixed_token(&text_item, prefix) {
+                                    out.push(stripped.to_string());
+                                }
+                            }
+                            out
+                        } else {
+                            text.split(|ch: char| matches!(ch, ',' | '|' | ';') || ch.is_whitespace())
+                                .filter_map(|token| strip_prefixed_token(token, prefix))
+                                .map(str::to_string)
+                                .collect()
+                        }
+                    }
+                }
             }
             Self::Token { delimiter, index } => {
                 if !matches!(delimiter.as_str(), "," | "|") || *index > 1024 { return None; }
@@ -186,6 +248,43 @@ impl ReferenceParser {
             Self::Prefix { prefix } => {
                 if !value.starts_with(prefix) || !key_atom(value) { return ("1 = 0".into(), Vec::new()); }
                 (format!("BINARY TRIM({column}) = BINARY ?"), vec![value.into()])
+            }
+            Self::Prefixed { prefix, delimiter, index } => {
+                if prefix.is_empty() || !key_atom(prefix) || !key_atom(value) {
+                    return ("1 = 0".into(), Vec::new());
+                }
+                let prefixed = format!("{}{}", regex_literal(prefix), escaped);
+                match (delimiter.as_deref(), *index) {
+                    (Some(delim), Some(idx)) => {
+                        if !matches!(delim, "," | "|") || idx > 1024 {
+                            return ("1 = 0".into(), Vec::new());
+                        }
+                        let separator = regex_literal(delim);
+                        let token = if delim == "," { "[^,]*" } else { "[^|]*" };
+                        let pattern = format!("^({token}{separator}){{{idx}}}[[:space:]]*{prefixed}[[:space:]]*({separator}{token})*$");
+                        (format!("({column} NOT LIKE 'function%' AND {column} REGEXP ?)"), vec![pattern])
+                    }
+                    (Some(delim), None) => {
+                        if !matches!(delim, "," | "|") {
+                            return ("1 = 0".into(), Vec::new());
+                        }
+                        let separator = regex_literal(delim);
+                        let pattern = format!("(^|{separator})[[:space:]]*{prefixed}[[:space:]]*({separator}|$)");
+                        (format!("({column} NOT LIKE 'function%' AND {column} REGEXP ?)"), vec![pattern])
+                    }
+                    (None, Some(_)) => ("1 = 0".into(), Vec::new()),
+                    (None, None) => {
+                        let pattern = format!(
+                            r#"(^|,|\||;|\[|"|[[:space:]])[[:space:]]*{prefixed}[[:space:]]*($|,|\||;|\]|"|[[:space:]])"#
+                        );
+                        (
+                            format!(
+                                "(TRIM({column}) NOT LIKE 'function%' AND TRIM({column}) NOT LIKE '{{%' AND (LEFT(TRIM({column}), 1) <> '[' OR JSON_VALID({column})) AND {column} REGEXP ?)"
+                            ),
+                            vec![pattern],
+                        )
+                    }
+                }
             }
             Self::Token { delimiter, index } => {
                 if !matches!(delimiter.as_str(), "," | "|") || *index > 1024 || !key_atom(value) {
@@ -405,5 +504,33 @@ mod tests {
         let (_, binds) = optional.predicate("cell", "10031");
         assert!(binds[0].contains("|"), "either JSON member order must work");
         assert_eq!(optional.values("[{bad"), None);
+    }
+
+    #[test]
+    fn prefixed_parser_extracts_and_builds_safe_predicates() {
+        let slot = ReferenceParser::Prefixed {
+            prefix: "npc_".into(),
+            delimiter: Some(",".into()),
+            index: Some(0),
+        };
+        assert_eq!(slot.values("npc_1041,70,0,0,0"), Some(vec!["1041".into()]));
+        assert_eq!(slot.values("npc_1031,75,1,-20,0"), Some(vec!["1031".into()]));
+        assert_eq!(slot.values("201,100,0,0,0"), Some(Vec::new()));
+        assert_eq!(slot.values("0"), Some(Vec::new()));
+        let (sql, binds) = slot.predicate("cell", "1041");
+        assert!(sql.contains("REGEXP ?"));
+        assert!(binds[0].contains("npc_1041"));
+
+        let free = ReferenceParser::Prefixed {
+            prefix: "npc_".into(),
+            delimiter: None,
+            index: None,
+        };
+        assert_eq!(free.values("npc_1041,70,0,0,0"), Some(vec!["1041".into()]));
+        assert_eq!(free.values("npc_1041|npc_1031"), Some(vec!["1041".into(), "1031".into()]));
+        assert_eq!(free.values("{\"id\":\"npc_1041\"}"), None);
+        let (free_sql, free_binds) = free.predicate("cell", "1041");
+        assert!(free_sql.contains("NOT LIKE 'function%'"));
+        assert!(free_binds[0].contains("npc_1041"));
     }
 }
