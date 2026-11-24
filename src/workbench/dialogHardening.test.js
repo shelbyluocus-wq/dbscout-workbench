@@ -7,6 +7,7 @@ function read(relativePath) {
 }
 
 const taskDialogs = [
+  "./components/AccountStartupLoginDialog.vue",
   "./components/BackupCenterDialog.vue",
   "./components/BatchExportDialog.vue",
   "./components/BatchImportDialog.vue",

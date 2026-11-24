@@ -245,7 +245,7 @@ pub async fn table_latest(
         .server_key
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("mysql://configured:3306"));
     let connection_id = q
         .connection_id
         .as_deref()
@@ -273,8 +273,10 @@ pub async fn table_latest(
                AND LOWER(a.database) = LOWER(?) \
                AND a.table_name NOT LIKE '(%' \
                AND ( \
-                   (? IS NOT NULL AND a.server_key = ?) \
-                   OR (a.server_key IS NULL AND ? IS NOT NULL AND a.connection_id = ?) \
+                   a.server_key IS NULL \
+                   OR TRIM(a.server_key) = '' \
+                   OR LOWER(TRIM(a.server_key)) = 'mysql://configured:3306' \
+                   OR (? IS NOT NULL AND LOWER(TRIM(a.server_key)) = LOWER(?)) \
                ) \
          ) \
          SELECT table_name, ts, username, display_name, source \
@@ -284,8 +286,6 @@ pub async fn table_latest(
     .bind(database)
     .bind(server_key)
     .bind(server_key)
-    .bind(connection_id)
-    .bind(connection_id)
     .fetch_all(&pool)
     .await
     .map_err(|e| {
@@ -380,7 +380,7 @@ mod tests {
                     push_item(
                         "c4",
                         "2026-11-23T08:30:00Z",
-                        "mysql-1",
+                        "mysql-9",
                         None,
                         "heroprop",
                         "committed",
@@ -391,6 +391,14 @@ mod tests {
                         "mysql-2",
                         Some("mysql://10.0.0.1:3306"),
                         "(agent)",
+                        "committed",
+                    ),
+                    push_item(
+                        "c6",
+                        "2026-11-23T12:00:00Z",
+                        "mysql-1",
+                        Some("mysql://10.0.0.2:3306"),
+                        "other_server_table",
                         "committed",
                     ),
                 ],

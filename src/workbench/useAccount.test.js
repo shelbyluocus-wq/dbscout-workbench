@@ -8,9 +8,13 @@ import { useAccount } from "./composables/useAccount.js";
  * central server's username/token model: register creates a user, login looks
  * it up, and sync_audit_now promotes local audit rows into a shared list.
  */
-function createBackend() {
+function createBackend(options = {}) {
   const users = new Map(); // username -> { userId, username, displayName, token }
-  let account = { serverUrl: "http://localhost:8765", session: null };
+  let account = {
+    serverUrl: options.serverUrl ?? "http://localhost:8765",
+    session: options.session ?? null,
+  };
+  let serverReachable = options.reachable ?? false;
   const sharedAudit = [];
   const localAudit = [
     {
@@ -34,9 +38,19 @@ function createBackend() {
 
   return {
     sharedAudit,
+    setReachable(value) {
+      serverReachable = Boolean(value);
+    },
     invokeWorkbench(command, payload = {}) {
       if (command === "get_account") {
         return Promise.resolve({ serverUrl: account.serverUrl, session: account.session });
+      }
+      if (command === "probe_account_server") {
+        return Promise.resolve({
+          serverUrl: account.serverUrl,
+          session: account.session,
+          reachable: !account.session && serverReachable,
+        });
       }
       if (command === "set_account_server") {
         account.serverUrl = (payload.request?.serverUrl || "").trim() || null;
@@ -185,4 +199,43 @@ test("syncNow promotes local rows into the shared list attributed to the user", 
   assert.equal(result2.accepted, 0);
   assert.equal(result2.skipped, 1);
   assert.equal(syncedCalls, 2);
+});
+
+test("probeStartupLogin prompts only when server is reachable and user is logged out", async () => {
+  // 1) Reachable + logged out -> shouldPrompt = true, hydrates serverUrl.
+  const reachableBackend = createBackend({
+    serverUrl: "http://192.168.1.193:8765",
+    reachable: true,
+  });
+  const acc1 = useAccount({ ...reachableBackend });
+  const res1 = await acc1.probeStartupLogin();
+  assert.equal(res1.reachable, true);
+  assert.equal(res1.isLoggedIn, false);
+  assert.equal(res1.shouldPrompt, true);
+  assert.equal(acc1.serverUrl.value, "http://192.168.1.193:8765");
+
+  // 2) Unreachable + logged out -> shouldPrompt = false, silent no-op (no lastError).
+  const offlineBackend = createBackend({
+    serverUrl: "http://192.168.1.193:8765",
+    reachable: false,
+  });
+  const acc2 = useAccount({ ...offlineBackend });
+  const res2 = await acc2.probeStartupLogin();
+  assert.equal(res2.reachable, false);
+  assert.equal(res2.shouldPrompt, false);
+  assert.equal(acc2.lastError.value, "");
+
+  // 3) Already logged in -> shouldPrompt = false.
+  await acc1.register("alice", "Alice");
+  const res3 = await acc1.probeStartupLogin();
+  assert.equal(res3.isLoggedIn, true);
+  assert.equal(res3.shouldPrompt, false);
+
+  // 4) Backend error -> fails silently without setting lastError.
+  const failingAcc = useAccount({
+    invokeWorkbench: () => Promise.reject(new Error("network down")),
+  });
+  const res4 = await failingAcc.probeStartupLogin();
+  assert.equal(res4.shouldPrompt, false);
+  assert.equal(failingAcc.lastError.value, "");
 });

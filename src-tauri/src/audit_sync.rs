@@ -12,7 +12,7 @@
 
 use std::{collections::HashMap, future::Future, sync::atomic::Ordering, time::Duration};
 
-use reqwest::Url;
+use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
@@ -287,18 +287,153 @@ pub fn trigger_immediate_sync(app: &AppHandle) {
         .try_send(AuditSyncSignal::Push);
 }
 
+const LEGACY_PLACEHOLDER_SERVER_KEY: &str = "mysql://configured:3306";
+const FALLBACK_AUDIT_PAGE_LIMIT: usize = 2000;
+const FALLBACK_AUDIT_MAX_PAGES: usize = 5;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedTableLatestWire {
     table_name: String,
     ts: String,
-    username: String,
-    display_name: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedAuditListRowWire {
+    #[serde(default)]
+    ts: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    table_name: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    server_key: Option<String>,
+}
+
+fn pick_shared_actor(display_name: Option<&str>, username: Option<&str>) -> Option<String> {
+    display_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| username.map(str::trim).filter(|value| !value.is_empty()))
+        .map(str::to_string)
+}
+
+fn canonical_real_server_key(raw: Option<&str>) -> Option<&str> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case(LEGACY_PLACEHOLDER_SERVER_KEY))
+}
+
+fn aggregate_shared_audit_rows(
+    entries: &[SharedAuditListRowWire],
+    wanted_server_key: &str,
+) -> Vec<SharedTableLatest> {
+    let wanted_key = canonical_real_server_key(Some(wanted_server_key));
+    let mut latest_by_table: HashMap<String, SharedTableLatest> = HashMap::new();
+    for entry in entries {
+        if !matches!(entry.status.as_str(), "committed" | "rolled_back") {
+            continue;
+        }
+        let table_name = entry.table_name.trim();
+        if table_name.is_empty() || table_name.starts_with('(') {
+            continue;
+        }
+        if let (Some(wanted), Some(entry_key)) = (
+            wanted_key,
+            canonical_real_server_key(entry.server_key.as_deref()),
+        ) {
+            if !entry_key.eq_ignore_ascii_case(wanted) {
+                continue;
+            }
+        }
+        let Some(ts_ms) = parse_timestamp_ms(&entry.ts) else {
+            continue;
+        };
+        let actor = pick_shared_actor(entry.display_name.as_deref(), entry.username.as_deref());
+        let key = table_name.to_lowercase();
+        let should_replace = match latest_by_table.get(&key) {
+            None => true,
+            Some(current) => {
+                ts_ms > current.ts_ms
+                    || (ts_ms == current.ts_ms && current.actor.is_none() && actor.is_some())
+            }
+        };
+        if should_replace {
+            latest_by_table.insert(
+                key,
+                SharedTableLatest {
+                    table_name: table_name.to_string(),
+                    ts_ms,
+                    actor,
+                },
+            );
+        }
+    }
+    latest_by_table.into_values().collect()
+}
+
+/// Compatibility fallback for central servers that predate `/audit/table-latest`:
+/// reads recent pages from `GET /audit?database=...` and computes per-table latest
+/// timestamps + actors on the client.
+async fn fetch_shared_table_latest_via_audit_list(
+    http: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    server_key: &str,
+    database: &str,
+) -> Vec<SharedTableLatest> {
+    let endpoint = format!("{base_url}/audit");
+    let mut collected = Vec::new();
+    for page in 0..FALLBACK_AUDIT_MAX_PAGES {
+        let offset = page * FALLBACK_AUDIT_PAGE_LIMIT;
+        let limit_str = FALLBACK_AUDIT_PAGE_LIMIT.to_string();
+        let offset_str = offset.to_string();
+        let Ok(url) = Url::parse_with_params(
+            &endpoint,
+            &[
+                ("database", database),
+                ("limit", limit_str.as_str()),
+                ("offset", offset_str.as_str()),
+            ],
+        ) else {
+            break;
+        };
+        let Ok(resp) = http
+            .get(url)
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(4))
+            .send()
+            .await
+        else {
+            break;
+        };
+        if !resp.status().is_success() {
+            break;
+        }
+        let Ok(rows) = resp.json::<Vec<SharedAuditListRowWire>>().await else {
+            break;
+        };
+        let count = rows.len();
+        collected.extend(rows);
+        if count < FALLBACK_AUDIT_PAGE_LIMIT {
+            break;
+        }
+    }
+    aggregate_shared_audit_rows(&collected, server_key)
 }
 
 /// Best-effort fetch of per-table latest modification timestamps from the
 /// central server. Offline-first: returns empty when logged out, unconfigured,
-/// unreachable, or when talking to an older server without `/audit/table-latest`.
+/// or unreachable; automatically falls back to `GET /audit` when talking to an
+/// older server without `/audit/table-latest`.
 pub async fn fetch_shared_table_latest(
     app: &AppHandle,
     state: &AppState,
@@ -336,7 +471,21 @@ pub async fn fetch_shared_table_latest(
     else {
         return Vec::new();
     };
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if matches!(
+        status,
+        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED
+    ) {
+        return fetch_shared_table_latest_via_audit_list(
+            &state.account.http,
+            &base_url,
+            &session.token,
+            server_key,
+            database,
+        )
+        .await;
+    }
+    if !status.is_success() {
         return Vec::new();
     }
     let Ok(rows) = resp.json::<Vec<SharedTableLatestWire>>().await else {
@@ -345,13 +494,7 @@ pub async fn fetch_shared_table_latest(
     rows.into_iter()
         .filter_map(|row| {
             let ts_ms = parse_timestamp_ms(&row.ts)?;
-            let actor = if !row.display_name.trim().is_empty() {
-                Some(row.display_name)
-            } else if !row.username.trim().is_empty() {
-                Some(row.username)
-            } else {
-                None
-            };
+            let actor = pick_shared_actor(row.display_name.as_deref(), row.username.as_deref());
             Some(SharedTableLatest {
                 table_name: row.table_name,
                 ts_ms,
@@ -438,5 +581,71 @@ mod tests {
                 .expect("worker should stop after shutdown")
                 .expect("worker task should finish cleanly");
         });
+    }
+
+    #[test]
+    fn aggregate_shared_audit_rows_supports_legacy_rows_and_isolates_distinct_servers() {
+        let rows = vec![
+            SharedAuditListRowWire {
+                ts: "2026-11-23T08:00:00Z".into(),
+                username: Some("zhangsan".into()),
+                display_name: Some("张三".into()),
+                table_name: "goodsprop".into(),
+                status: "committed".into(),
+                server_key: None, // legacy row from older client/server
+            },
+            SharedAuditListRowWire {
+                ts: "2026-11-23T09:00:00Z".into(),
+                username: Some("lisi".into()),
+                display_name: Some("李四".into()),
+                table_name: "GoodsProp".into(),
+                status: "committed".into(),
+                server_key: Some("mysql://192.168.1.243:8306".into()),
+            },
+            SharedAuditListRowWire {
+                ts: "2026-11-23T10:00:00Z".into(),
+                username: Some("wangwu".into()),
+                display_name: Some("王五".into()),
+                table_name: "goodsprop".into(),
+                status: "aborted".into(),
+                server_key: Some("mysql://192.168.1.243:8306".into()),
+            },
+            SharedAuditListRowWire {
+                ts: "2026-11-23T11:00:00Z".into(),
+                username: Some("other".into()),
+                display_name: Some("其他服".into()),
+                table_name: "goodsprop".into(),
+                status: "committed".into(),
+                server_key: Some("mysql://192.168.1.223:8306".into()),
+            },
+            SharedAuditListRowWire {
+                ts: "2026-11-23T08:30:00Z".into(),
+                username: Some("alice".into()),
+                display_name: Some(String::new()),
+                table_name: "heroprop".into(),
+                status: "rolled_back".into(),
+                server_key: Some("mysql://configured:3306".into()),
+            },
+            SharedAuditListRowWire {
+                ts: "2026-11-23T12:00:00Z".into(),
+                username: Some("bot".into()),
+                display_name: Some("Bot".into()),
+                table_name: "(sql_console)".into(),
+                status: "committed".into(),
+                server_key: None,
+            },
+        ];
+
+        let mut latest = aggregate_shared_audit_rows(&rows, "mysql://192.168.1.243:8306");
+        latest.sort_by(|a, b| a.table_name.to_lowercase().cmp(&b.table_name.to_lowercase()));
+        assert_eq!(latest.len(), 2);
+        assert_eq!(latest[0].table_name, "GoodsProp");
+        assert_eq!(latest[0].actor.as_deref(), Some("李四"));
+        assert_eq!(
+            latest[0].ts_ms,
+            parse_timestamp_ms("2026-11-23T09:00:00Z").unwrap()
+        );
+        assert_eq!(latest[1].table_name, "heroprop");
+        assert_eq!(latest[1].actor.as_deref(), Some("alice"));
     }
 }

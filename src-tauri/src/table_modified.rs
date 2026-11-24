@@ -20,6 +20,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
+use reqwest::Url;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Emitter, Manager};
@@ -99,6 +100,13 @@ impl TableModifiedState {
         guard.insert(key, now);
         true
     }
+
+    pub fn clear_shared_fetch_debounce(&self) {
+        self.last_shared_fetch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,18 +165,34 @@ impl SavedRow {
     }
 }
 
-pub fn server_key_for_connection(connection: &RuntimeConnection) -> String {
-    let has_real_target = connection.mysql_url.is_some()
-        || connection.clickhouse_url.is_some()
-        || connection.mongodb_url.is_some();
-    if !has_real_target {
-        return format!("demo://{}", connection.id);
+fn extract_host_port_from_url(raw: &str, default_port: u16) -> Option<(String, u16)> {
+    let parsed = Url::parse(raw.trim()).ok()?;
+    let host = parsed.host_str()?.trim().to_lowercase();
+    if host.is_empty() {
+        return None;
     }
-    let scheme = match connection.kind {
-        DatabaseKind::MySql => "mysql",
-        DatabaseKind::ClickHouse => "clickhouse",
-        DatabaseKind::MongoDb => "mongodb",
+    let port = parsed.port().unwrap_or_else(|| {
+        if parsed.scheme().eq_ignore_ascii_case("https") && default_port == 8123 {
+            8443
+        } else {
+            default_port
+        }
+    });
+    Some((host, port))
+}
+
+pub fn server_key_for_connection(connection: &RuntimeConnection) -> String {
+    let (scheme, raw_url, default_port) = match connection.kind {
+        DatabaseKind::MySql => ("mysql", connection.mysql_url.as_deref(), 3306_u16),
+        DatabaseKind::ClickHouse => ("clickhouse", connection.clickhouse_url.as_deref(), 8123_u16),
+        DatabaseKind::MongoDb => ("mongodb", connection.mongodb_url.as_deref(), 27017_u16),
     };
+    let Some(raw_url) = raw_url.filter(|value| !value.trim().is_empty()) else {
+        return format!("demo://{}", connection.id);
+    };
+    if let Some((host, port)) = extract_host_port_from_url(raw_url, default_port) {
+        return format!("{scheme}://{host}:{port}");
+    }
     let host = connection.host.trim().to_lowercase();
     format!("{scheme}://{host}:{}", connection.port)
 }
@@ -528,14 +552,26 @@ fn apply_shared_to_row(state: &mut SavedRow, shared: &SharedTableLatest) -> bool
                 }
                 return false;
             }
-            if state.modified_source.as_deref() == Some(SOURCE_BLACKCAT)
-                && (shared.ts_ms - current_ms).abs() <= SELF_ECHO_GRACE_MS
-            {
-                if state.modified_actor.is_none() && shared.actor.is_some() {
-                    state.modified_actor = shared.actor.clone();
-                    return true;
+            if state.modified_source.as_deref() == Some(SOURCE_BLACKCAT) {
+                let is_self_echo = match (&state.modified_actor, &shared.actor) {
+                    (Some(local), Some(remote)) => {
+                        local.eq_ignore_ascii_case(remote)
+                            && shared.ts_ms <= current_ms.saturating_add(SELF_ECHO_GRACE_MS)
+                            && shared.ts_ms >= current_ms.saturating_sub(CLOCK_SKEW_GRACE_MS)
+                    }
+                    (None, Some(_)) => {
+                        shared.ts_ms <= current_ms.saturating_add(SELF_ECHO_GRACE_MS)
+                            && shared.ts_ms >= current_ms.saturating_sub(CLOCK_SKEW_GRACE_MS)
+                    }
+                    _ => false,
+                };
+                if is_self_echo {
+                    if state.modified_actor.is_none() && shared.actor.is_some() {
+                        state.modified_actor = shared.actor.clone();
+                        return true;
+                    }
+                    return false;
                 }
-                return false;
             }
             if shared.ts_ms > current_ms {
                 state.modified_at_ms = Some(shared.ts_ms);
@@ -1530,5 +1566,94 @@ mod tests {
         assert_eq!(steady[0].modified_at, Some(format_local_ms(navicat_ts)));
         assert_eq!(steady[0].modified_source.as_deref(), Some(SOURCE_DATABASE));
         assert_eq!(steady[0].modified_actor, None);
+    }
+
+    #[test]
+    fn server_key_uses_real_url_host_and_port_even_when_runtime_host_is_placeholder() {
+        let mysql = RuntimeConnection {
+            id: "mysql-2".into(),
+            kind: DatabaseKind::MySql,
+            label: "决胜2".into(),
+            host: "configured".into(),
+            port: 3306,
+            username: "mysql".into(),
+            mysql_url: Some("mysql://root:secret@192.168.1.243:8306/newsg_4cfg".into()),
+            clickhouse_url: None,
+            mongodb_url: None,
+            database: Some("newsg_4cfg".into()),
+        };
+        assert_eq!(server_key_for_connection(&mysql), "mysql://192.168.1.243:8306");
+
+        let mysql_default_port = RuntimeConnection {
+            mysql_url: Some("mysql://root@DB.Internal".into()),
+            ..mysql.clone()
+        };
+        assert_eq!(
+            server_key_for_connection(&mysql_default_port),
+            "mysql://db.internal:3306"
+        );
+
+        let demo = RuntimeConnection {
+            id: "demo-1".into(),
+            mysql_url: None,
+            ..mysql
+        };
+        assert_eq!(server_key_for_connection(&demo), "demo://demo-1");
+    }
+
+    #[test]
+    fn apply_shared_accepts_teammate_edit_shortly_after_local_and_upgrades_offline_self_echo() {
+        let t0 = 1_760_050_000_000_i64;
+        // 1) Teammate edits 2s after local logged-in edit: must switch to teammate.
+        let mut logged_in_local = SavedRow {
+            table_key: "goodsprop".into(),
+            table_name: "goodsprop".into(),
+            modified_at_ms: Some(t0),
+            modified_source: Some(SOURCE_BLACKCAT.into()),
+            modified_actor: Some("刘岳松".into()),
+            pending_local_write_ms: None,
+            observed_write_count: None,
+            observed_create_time: None,
+            observed_server_boot: None,
+            last_shared_ts_ms: None,
+        };
+        let changed = apply_shared_to_row(
+            &mut logged_in_local,
+            &SharedTableLatest {
+                table_name: "goodsprop".into(),
+                ts_ms: t0 + 2_000,
+                actor: Some("张三".into()),
+            },
+        );
+        assert!(changed);
+        assert_eq!(logged_in_local.modified_source.as_deref(), Some(SOURCE_SHARED));
+        assert_eq!(logged_in_local.modified_actor.as_deref(), Some("张三"));
+        assert_eq!(logged_in_local.modified_at_ms, Some(t0 + 2_000));
+
+        // 2) Offline local edit (actor=None) echoed back after login (audit ts 10s earlier
+        //    than record_local_change commit time): upgrades actor while preserving local source.
+        let mut offline_local = SavedRow {
+            table_key: "heroprop".into(),
+            table_name: "heroprop".into(),
+            modified_at_ms: Some(t0),
+            modified_source: Some(SOURCE_BLACKCAT.into()),
+            modified_actor: None,
+            pending_local_write_ms: None,
+            observed_write_count: None,
+            observed_create_time: None,
+            observed_server_boot: None,
+            last_shared_ts_ms: None,
+        };
+        let upgraded = apply_shared_to_row(
+            &mut offline_local,
+            &SharedTableLatest {
+                table_name: "heroprop".into(),
+                ts_ms: t0 - 10_000,
+                actor: Some("刘岳松".into()),
+            },
+        );
+        assert!(upgraded);
+        assert_eq!(offline_local.modified_source.as_deref(), Some(SOURCE_BLACKCAT));
+        assert_eq!(offline_local.modified_actor.as_deref(), Some("刘岳松"));
     }
 }

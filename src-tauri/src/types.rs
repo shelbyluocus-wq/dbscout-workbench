@@ -1430,6 +1430,15 @@ pub struct AccountView {
     pub session: Option<UserSession>,
 }
 
+/// Startup reachability check result for the central account server.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountStartupProbeView {
+    pub server_url: Option<String>,
+    pub session: Option<UserSession>,
+    pub reachable: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditSyncResult {

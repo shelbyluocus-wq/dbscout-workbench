@@ -3077,6 +3077,9 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "get_account") {
     return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
   }
+  if (command === "probe_account_server") {
+    return { serverUrl: mockAccount.serverUrl, session: mockAccount.session, reachable: false };
+  }
   if (command === "set_account_server") {
     mockAccount.serverUrl = (payload.request?.serverUrl || "").trim() || null;
     return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };

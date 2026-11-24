@@ -163,6 +163,7 @@ import TableTransferDialog from "./components/TableTransferDialog.vue";
 // The release workspace is large and rarely opened: load it on first use.
 const ReleaseFlowDialog = defineAsyncComponent(() => import("./components/ReleaseFlowDialog.vue"));
 const BlackcatMcpDialog = defineAsyncComponent(() => import("./components/BlackcatMcpDialog.vue"));
+const AccountStartupLoginDialog = defineAsyncComponent(() => import("./components/AccountStartupLoginDialog.vue"));
 import AiActivityGlow from "./components/AiActivityGlow.vue";
 import { requestSqlRun } from "./utils/sqlRunRequests.js";
 import { applyAgentTableViewState } from "./utils/agentTableView.js";
@@ -1195,6 +1196,9 @@ function relationsSupportedForTab(tab) {
 
 const account = useAccount({
   onSessionChanged: async () => {
+    if (account.isLoggedIn.value) {
+      startupAccountLoginOpen.value = false;
+    }
     // Preserve the user's chosen history view; login must not replace the
     // table they are inspecting with the shared audit feed.
     if (backupCenter.dialog.open && backupCenter.dialog.tab === "audit" && backupCenter.auditMode.mode === "shared") {
@@ -1214,6 +1218,33 @@ const account = useAccount({
     }
   },
 });
+
+const startupAccountLoginOpen = ref(false);
+let startupAccountProbeStarted = false;
+
+async function checkStartupAccountLogin() {
+  if (isFolderWindow || startupAccountProbeStarted) return;
+  startupAccountProbeStarted = true;
+  const probe = await account.probeStartupLogin();
+  if (probe.shouldPrompt && !account.isLoggedIn.value && !backupCenter.dialog.open) {
+    startupAccountLoginOpen.value = true;
+  }
+}
+
+function closeStartupAccountLogin() {
+  startupAccountLoginOpen.value = false;
+}
+
+function handleStartupAccountAuthenticated() {
+  startupAccountLoginOpen.value = false;
+  const name = account.displayName.value || account.username.value;
+  if (name) {
+    operationNotices.push({
+      tone: "success",
+      text: t("account.startup.loggedInNotice", { name }),
+    });
+  }
+}
 
 // 黑猫 MCP：管理外部 AI（Codex、Claude Code 等）的连接与权限分组。
 const blackcatMcpOpen = ref(false);
@@ -5786,6 +5817,7 @@ onMounted(async () => {
   persistenceReady = true;
   persistWorkspace();
   if (!isFolderWindow) scheduleDeferredUpdateCheck();
+  if (!isFolderWindow) void checkStartupAccountLogin();
   scheduleIdleStartupWork(() => { void preloadDeferredTabs(); }, RESTORED_TAB_PRELOAD_IDLE_TIMEOUT_MS);
 });
 
@@ -6413,6 +6445,14 @@ onBeforeUnmount(() => {
       :assistant="agent"
       :theme="effectiveTheme"
       @close="blackcatMcpOpen = false"
+    />
+
+    <AccountStartupLoginDialog
+      v-if="startupAccountLoginOpen"
+      :open="startupAccountLoginOpen"
+      :account="account"
+      @close="closeStartupAccountLogin"
+      @authenticated="handleStartupAccountAuthenticated"
     />
 
     <AiActivityGlow :theme="effectiveTheme" />

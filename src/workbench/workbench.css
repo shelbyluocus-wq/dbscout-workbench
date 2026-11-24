@@ -5574,6 +5574,172 @@ label:has(input[type="checkbox"]:disabled) {
   line-height: 1.5;
 }
 
+.wb-account-login-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(416px, calc(100vw - 32px));
+  padding: 18px 20px;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.wb-account-login-header {
+  margin-bottom: 0;
+}
+
+.wb-account-login-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wb-account-login-badge {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+}
+
+.wb-account-login-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--wb-success-border);
+  border-radius: 999px;
+  background: var(--wb-success-surface);
+  color: var(--wb-success-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.3;
+  box-sizing: border-box;
+}
+
+.wb-account-login-status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wb-success-text);
+}
+
+.wb-account-login-status-text {
+  flex: none;
+  font-weight: 500;
+}
+
+.wb-account-login-server {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-account-login-subtitle {
+  margin: 0;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+  line-height: 1.5;
+}
+
+.wb-account-login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wb-account-login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-account-login-field > span {
+  font-weight: 500;
+  color: var(--wb-text);
+}
+
+.wb-account-login-field input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  font-size: var(--wb-fs-body);
+  box-sizing: border-box;
+}
+
+.wb-account-login-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-danger-border);
+  border-radius: 6px;
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.45;
+}
+
+.wb-account-login-inline-link,
+.wb-account-login-mode-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wb-accent-strong);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.4;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.wb-account-login-inline-link {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wb-account-login-inline-link:hover:not(:disabled),
+.wb-account-login-mode-link:hover:not(:disabled) {
+  text-decoration: underline;
+  background: transparent;
+}
+
+.wb-account-login-inline-link:disabled,
+.wb-account-login-mode-link:disabled {
+  color: var(--wb-disabled);
+  cursor: not-allowed;
+}
+
+.wb-account-login-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.wb-account-login-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-account-login-actions button {
+  white-space: nowrap;
+}
+
 .wb-backup-settings-footer {
   display: flex;
   flex: none;

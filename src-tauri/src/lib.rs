@@ -339,6 +339,7 @@ pub fn run() {
             cocos_build::cocos_pick_project,
             cocos_build::cocos_pick_config,
             commands::get_account,
+            commands::probe_account_server,
             commands::set_account_server,
             commands::register_account,
             commands::login_account,

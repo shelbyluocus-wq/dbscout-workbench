@@ -64,6 +64,35 @@ export function useAccount(options = {}) {
     }
   }
 
+  async function probeStartupLogin() {
+    try {
+      const result = await invokeWorkbench("probe_account_server", {});
+      if (result && typeof result === "object") {
+        account.value = {
+          serverUrl: result.serverUrl ?? null,
+          session: result.session ?? null,
+        };
+      }
+      const reachable = Boolean(result?.reachable);
+      const signedIn = Boolean(result?.session);
+      return {
+        reachable,
+        isLoggedIn: signedIn,
+        shouldPrompt: reachable && !signedIn,
+      };
+    } catch {
+      return {
+        reachable: false,
+        isLoggedIn: Boolean(account.value?.session),
+        shouldPrompt: false,
+      };
+    }
+  }
+
+  function clearError() {
+    lastError.value = "";
+  }
+
   async function setServer(url) {
     busy.savingServer = true;
     try {
@@ -158,6 +187,8 @@ export function useAccount(options = {}) {
     username,
     serverUrl,
     loadAccount,
+    probeStartupLogin,
+    clearError,
     setServer,
     register,
     login,

@@ -10,10 +10,24 @@
 //! workstation tool on a trusted LAN. Documented in the server README.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use reqwest::StatusCode;
 use tauri::{AppHandle, Manager};
 
 use crate::types::{AccountConfig, AppState, UserSession};
+
+/// Default LAN central server used when no custom server URL has been saved yet.
+pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.193:8765";
+
+const STARTUP_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+fn apply_default_server_url(mut config: AccountConfig) -> AccountConfig {
+    if config.server_url.is_none() {
+        config.server_url = Some(DEFAULT_SERVER_URL.to_string());
+    }
+    config
+}
 
 /// Directory holding `session.json`. Sibling of the `backup/` config dir so
 /// both live under the platform app-data directory.
@@ -31,19 +45,21 @@ fn session_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(account_root(app)?.join("session.json"))
 }
 
-/// Read the persisted account config from disk. Returns `Default` if missing or
-/// unparseable (same lenient fallback as `backup::load_config`).
+/// Read the persisted account config from disk. Returns the default central
+/// server URL when missing or unparseable so fresh installs connect out of the
+/// box without manual URL entry.
 pub fn load_account(app: &AppHandle) -> AccountConfig {
     let path = match session_path(app) {
         Ok(path) => path,
-        Err(_) => return AccountConfig::default(),
+        Err(_) => return apply_default_server_url(AccountConfig::default()),
     };
-    match std::fs::read_to_string(&path) {
+    let loaded = match std::fs::read_to_string(&path) {
         Ok(content) if !content.trim().is_empty() => {
             serde_json::from_str(&content).unwrap_or_default()
         }
         _ => AccountConfig::default(),
-    }
+    };
+    apply_default_server_url(loaded)
 }
 
 /// Persist the account config to disk.
@@ -104,6 +120,97 @@ pub async fn server_url(state: &AppState) -> Option<String> {
         .await
         .server_url
         .clone()
-        .map(|url| url.trim_end_matches('/').to_string())
+        .map(|url| url.trim().trim_end_matches('/').to_string())
         .filter(|url| !url.is_empty())
+}
+
+/// Lightweight, silent reachability check against `GET /me`.
+/// `dbscout-server` rejects unauthenticated `/me` requests with 401 Unauthorized,
+/// so both 401 and 2xx confirm a live central server without mutating any state.
+pub async fn probe_server_reachable(http: &reqwest::Client, base_url: &str) -> bool {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return false;
+    }
+    let probe_url = format!("{trimmed}/me");
+    let Ok(url) = reqwest::Url::parse(&probe_url) else {
+        return false;
+    };
+    let Ok(resp) = http.get(url).timeout(STARTUP_PROBE_TIMEOUT).send().await else {
+        return false;
+    };
+    resp.status() == StatusCode::UNAUTHORIZED || resp.status().is_success()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn spawn_one_shot_http_server(status_line: &'static str, body: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0_u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[test]
+    fn default_server_url_applies_only_when_unset() {
+        let fresh = apply_default_server_url(AccountConfig::default());
+        assert_eq!(fresh.server_url.as_deref(), Some(DEFAULT_SERVER_URL));
+
+        let custom = apply_default_server_url(AccountConfig {
+            server_url: Some("http://10.0.0.5:8765".into()),
+            session: None,
+            loaded: false,
+        });
+        assert_eq!(custom.server_url.as_deref(), Some("http://10.0.0.5:8765"));
+
+        let opted_out = apply_default_server_url(AccountConfig {
+            server_url: Some(String::new()),
+            session: None,
+            loaded: false,
+        });
+        assert_eq!(opted_out.server_url.as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn probe_server_reachable_accepts_401_and_200_and_rejects_errors_or_closed_ports() {
+        let client = reqwest::Client::new();
+
+        let auth_server = spawn_one_shot_http_server("401 Unauthorized", "缺少认证令牌").await;
+        assert!(probe_server_reachable(&client, &auth_server).await);
+
+        let ok_server = spawn_one_shot_http_server("200 OK", "{}").await;
+        assert!(probe_server_reachable(&client, &ok_server).await);
+
+        let not_found_server = spawn_one_shot_http_server("404 Not Found", "").await;
+        assert!(!probe_server_reachable(&client, &not_found_server).await);
+
+        let error_server = spawn_one_shot_http_server("500 Internal Server Error", "").await;
+        assert!(!probe_server_reachable(&client, &error_server).await);
+
+        // Bind and immediately drop a listener to obtain a closed local port.
+        let closed_port = TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        assert!(
+            !probe_server_reachable(&client, &format!("http://127.0.0.1:{closed_port}")).await
+        );
+        assert!(!probe_server_reachable(&client, "").await);
+    }
 }

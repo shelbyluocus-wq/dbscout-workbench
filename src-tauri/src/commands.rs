@@ -10036,6 +10036,39 @@ pub async fn get_account(
     })
 }
 
+/// Non-blocking startup probe: loads persisted account settings (defaulting to
+/// the team central server URL when unset) and checks whether the server is
+/// reachable when no user session is signed in yet.
+#[tauri::command]
+pub async fn probe_account_server(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountStartupProbeView, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let (server_url, session) = {
+        let config = state.account.config.lock().await;
+        (config.server_url.clone(), config.session.clone())
+    };
+    if session.is_some() {
+        return Ok(AccountStartupProbeView {
+            server_url,
+            session,
+            reachable: false,
+        });
+    }
+    let reachable = match crate::account::server_url(&state).await {
+        Some(base_url) => {
+            crate::account::probe_server_reachable(&state.account.http, &base_url).await
+        }
+        None => false,
+    };
+    Ok(AccountStartupProbeView {
+        server_url,
+        session: None,
+        reachable,
+    })
+}
+
 #[tauri::command]
 pub async fn set_account_server(
     request: SetAccountServerRequest,
@@ -10044,7 +10077,7 @@ pub async fn set_account_server(
 ) -> Result<AccountView, String> {
     let _ = crate::account::ensure_loaded(&app, &state).await;
     let mut config = state.account.config.lock().await;
-    config.server_url = Some(request.server_url);
+    config.server_url = Some(request.server_url.trim().to_string());
     let snapshot = config.clone();
     drop(config);
     crate::account::save_account(&app, &snapshot)?;
@@ -10114,6 +10147,7 @@ pub async fn register_account(
     })?;
     // Push any outbox that accumulated before login.
     let _ = crate::audit_sync::push_outbox(&app, &state).await;
+    state.table_modified.clear_shared_fetch_debounce();
     Ok(view)
 }
 
@@ -10148,6 +10182,7 @@ pub async fn login_account(
         config.clone()
     })?;
     let _ = crate::audit_sync::push_outbox(&app, &state).await;
+    state.table_modified.clear_shared_fetch_debounce();
     Ok(view)
 }
 
@@ -10237,6 +10272,7 @@ pub async fn sync_audit_now(
     state: State<'_, AppState>,
 ) -> Result<AuditSyncResult, String> {
     let result = crate::audit_sync::push_outbox(&app, &state).await?;
+    state.table_modified.clear_shared_fetch_debounce();
     Ok(AuditSyncResult {
         accepted: result.accepted,
         skipped: result.skipped,
