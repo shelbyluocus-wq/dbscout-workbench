@@ -204,7 +204,7 @@ test("syncNow promotes local rows into the shared list attributed to the user", 
 test("probeStartupLogin prompts only when server is reachable and user is logged out", async () => {
   // 1) Reachable + logged out -> shouldPrompt = true, hydrates serverUrl.
   const reachableBackend = createBackend({
-    serverUrl: "http://192.168.1.193:8765",
+    serverUrl: "http://192.168.1.243:8765",
     reachable: true,
   });
   const acc1 = useAccount({ ...reachableBackend });
@@ -212,11 +212,11 @@ test("probeStartupLogin prompts only when server is reachable and user is logged
   assert.equal(res1.reachable, true);
   assert.equal(res1.isLoggedIn, false);
   assert.equal(res1.shouldPrompt, true);
-  assert.equal(acc1.serverUrl.value, "http://192.168.1.193:8765");
+  assert.equal(acc1.serverUrl.value, "http://192.168.1.243:8765");
 
   // 2) Unreachable + logged out -> shouldPrompt = false, silent no-op (no lastError).
   const offlineBackend = createBackend({
-    serverUrl: "http://192.168.1.193:8765",
+    serverUrl: "http://192.168.1.243:8765",
     reachable: false,
   });
   const acc2 = useAccount({ ...offlineBackend });

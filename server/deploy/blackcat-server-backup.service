@@ -1,0 +1,6 @@
+[Unit]
+Description=Daily online backup of Blackcat central SQLite database
+
+[Service]
+Type=oneshot
+ExecStart=/home/blackcat-server/scripts/backup-blackcat-db.sh

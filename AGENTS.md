@@ -138,8 +138,12 @@ capabilities:
 - **Safety layers** — full-database logical **snapshots/backup** (layer 1, GFS
   retention + restore) and a **change-audit + rollback** trail (layer 2, isolated
   SQLite).
-- **Accounts + central server** — optional login to a central server that
-  aggregates a **shared audit log** across workstations.
+- **Accounts + central server** — optional login to a central server
+  (default `http://192.168.1.243:8765`, standalone under `/home/blackcat-server`
+  on Linux via `npm run server:deploy`, retaining the latest 20 revisions per
+  table by default; clients automatically migrate saved legacy
+  `http://192.168.1.193:8765` addresses once) that aggregates a **shared audit
+  log** across workstations.
 - **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar whose
   large Node + native CLI runtime is downloaded from the SVN release directory
   on first use, with

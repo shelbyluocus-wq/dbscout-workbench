@@ -1,4 +1,6 @@
-//! HTTP handlers: register / login / me / audit (GET + POST) / audit/since.
+//! HTTP handlers: health / register / login / me / audit (GET + POST) / audit/since.
+
+use std::collections::HashSet;
 
 use axum::{
     extract::{Extension, Query, State},
@@ -10,8 +12,16 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::auth::account_info;
-use crate::db::{find_user_by_username, insert_user, UserRow};
+use crate::db::{
+    canonical_server_scope, find_user_by_username, insert_user, prune_table_revisions, UserRow,
+};
 use crate::models::*;
+
+#[derive(Clone)]
+pub struct ServerState {
+    pub pool: SqlitePool,
+    pub max_revisions_per_table: usize,
+}
 
 fn trim_username(value: &str) -> Option<String> {
     let name = value.trim();
@@ -27,8 +37,19 @@ fn server_err<E: Into<String>>(error: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, error.into())
 }
 
+/// Lightweight health check for deployment scripts and process supervision.
+pub async fn health(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    sqlx::query("SELECT 1")
+        .execute(&state.pool)
+        .await
+        .map_err(|e| server_err(format!("中心服务数据库不可用: {e}")))?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
 pub async fn register(
-    State(pool): State<SqlitePool>,
+    State(state): State<ServerState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<AccountInfo>, (StatusCode, String)> {
     let username =
@@ -41,7 +62,7 @@ pub async fn register(
         .map(|s| s.to_string())
         .unwrap_or_else(|| username.clone());
 
-    if find_user_by_username(&pool, &username)
+    if find_user_by_username(&state.pool, &username)
         .await
         .map_err(server_err)?
         .is_some()
@@ -52,7 +73,7 @@ pub async fn register(
     let id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
-    insert_user(&pool, &id, &username, &display_name, &token, &created_at)
+    insert_user(&state.pool, &id, &username, &display_name, &token, &created_at)
         .await
         .map_err(server_err)?;
 
@@ -65,12 +86,12 @@ pub async fn register(
 }
 
 pub async fn login(
-    State(pool): State<SqlitePool>,
+    State(state): State<ServerState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AccountInfo>, (StatusCode, String)> {
     let username =
         trim_username(&req.username).ok_or((StatusCode::BAD_REQUEST, "用户名不能为空".into()))?;
-    let user = find_user_by_username(&pool, &username)
+    let user = find_user_by_username(&state.pool, &username)
         .await
         .map_err(server_err)?
         .ok_or((StatusCode::NOT_FOUND, "用户不存在，请先注册".into()))?;
@@ -84,7 +105,7 @@ pub async fn me(Extension(user): Extension<UserRow>) -> Json<AccountInfo> {
 }
 
 pub async fn push_audit(
-    State(pool): State<SqlitePool>,
+    State(state): State<ServerState>,
     Json(req): Json<AuditPushRequest>,
 ) -> Result<Json<AuditPushResponse>, (StatusCode, String)> {
     if req.items.is_empty() {
@@ -96,6 +117,7 @@ pub async fn push_audit(
     let now = Utc::now().to_rfc3339();
     let mut accepted: u64 = 0;
     let mut skipped: u64 = 0;
+    let mut touched_tables: HashSet<(String, String, String)> = HashSet::new();
     for item in &req.items {
         // INSERT OR IGNORE => idempotent on client_id. Repeated pushes of the
         // same outbox row are safe no-ops.
@@ -129,7 +151,7 @@ pub async fn push_audit(
         .bind(&item.host)
         .bind(&now)
         .bind(&item.server_key)
-        .execute(&pool)
+        .execute(&state.pool)
         .await
         .map_err(|e| {
             (
@@ -139,15 +161,32 @@ pub async fn push_audit(
         })?;
         if res.rows_affected() > 0 {
             accepted += 1;
+            touched_tables.insert((
+                canonical_server_scope(item.server_key.as_deref()),
+                item.database.trim().to_ascii_lowercase(),
+                item.table_name.trim().to_ascii_lowercase(),
+            ));
         } else {
             skipped += 1;
+        }
+    }
+    if state.max_revisions_per_table > 0 {
+        for (scope, db_lower, table_lower) in touched_tables {
+            let _ = prune_table_revisions(
+                &state.pool,
+                &scope,
+                &db_lower,
+                &table_lower,
+                state.max_revisions_per_table,
+            )
+            .await;
         }
     }
     Ok(Json(AuditPushResponse { accepted, skipped }))
 }
 
 pub async fn list_audit(
-    State(pool): State<SqlitePool>,
+    State(state): State<ServerState>,
     Query(q): Query<AuditQuery>,
 ) -> Result<Json<Vec<SharedAuditLogEntry>>, (StatusCode, String)> {
     let limit = q.limit.unwrap_or(200).min(2000) as i64;
@@ -206,7 +245,7 @@ pub async fn list_audit(
     }
     query = query.bind(limit).bind(offset);
 
-    let rows = query.fetch_all(&pool).await.map_err(|e| {
+    let rows = query.fetch_all(&state.pool).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("查询共享审计失败: {e}"),
@@ -244,7 +283,7 @@ pub async fn list_audit(
 }
 
 pub async fn table_latest(
-    State(pool): State<SqlitePool>,
+    State(state): State<ServerState>,
     Query(q): Query<TableLatestQuery>,
 ) -> Result<Json<Vec<SharedTableLatestModified>>, (StatusCode, String)> {
     let database = q.database.trim();
@@ -296,7 +335,7 @@ pub async fn table_latest(
     .bind(database)
     .bind(server_key)
     .bind(server_key)
-    .fetch_all(&pool)
+    .fetch_all(&state.pool)
     .await
     .map_err(|e| {
         (
@@ -321,7 +360,14 @@ pub async fn table_latest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{connect, insert_user};
+    use crate::db::{connect, insert_user, prune_all_tables, DEFAULT_MAX_REVISIONS_PER_TABLE};
+
+    fn test_state(pool: SqlitePool) -> ServerState {
+        ServerState {
+            pool,
+            max_revisions_per_table: DEFAULT_MAX_REVISIONS_PER_TABLE,
+        }
+    }
 
     fn push_item(
         client_id: &str,
@@ -361,7 +407,7 @@ mod tests {
             .unwrap();
 
         let _ = push_audit(
-            State(pool.clone()),
+            State(test_state(pool.clone())),
             Json(AuditPushRequest {
                 items: vec![
                     push_item(
@@ -419,7 +465,7 @@ mod tests {
         .unwrap();
 
         let Json(mut items) = table_latest(
-            State(pool),
+            State(test_state(pool)),
             Query(TableLatestQuery {
                 database: "newsg_4cfg".into(),
                 server_key: Some("mysql://10.0.0.1:3306".into()),
@@ -466,7 +512,7 @@ mod tests {
         legacy_without_identity.row_identity = None;
 
         let Json(resp) = push_audit(
-            State(pool.clone()),
+            State(test_state(pool.clone())),
             Json(AuditPushRequest {
                 items: vec![with_identity, legacy_without_identity],
             }),
@@ -476,7 +522,7 @@ mod tests {
         assert_eq!(resp.accepted, 2);
 
         let Json(entries) = list_audit(
-            State(pool),
+            State(test_state(pool)),
             Query(AuditQuery {
                 database: Some("newsg_4cfg".into()),
                 table_name: Some("goodsprop".into()),
@@ -494,5 +540,141 @@ mod tests {
         );
         assert_eq!(entries[1].client_id, "c-legacy");
         assert_eq!(entries[1].row_identity, None);
+    }
+
+    #[tokio::test]
+    async fn health_checks_database_connectivity() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        let Json(payload) = health(State(test_state(pool))).await.unwrap();
+        assert_eq!(payload["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn push_audit_retains_latest_20_revisions_per_table_preserving_batch_imports() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok", "2026-11-23T00:00:00Z")
+            .await
+            .unwrap();
+
+        let mut items = Vec::new();
+        // 1 older edit on another table must remain untouched.
+        items.push(push_item(
+            "other-table-1",
+            "2026-11-20T00:00:00Z",
+            "mysql-1",
+            Some("mysql://192.168.1.243:8306"),
+            "skillprop",
+            "committed",
+        ));
+
+        // 25 distinct edits on heroprop (1 minute apart); edit #10 is a 3-row batch import within 1s.
+        for i in 1..=25 {
+            let ts = format!("2026-11-24T10:{:02}:00Z", i);
+            if i == 10 {
+                for j in 0..3 {
+                    let mut batch_row = push_item(
+                        &format!("hero-batch-{j}"),
+                        &format!("2026-11-24T10:10:0{j}Z"),
+                        "mysql-1",
+                        Some("mysql://192.168.1.243:8306"),
+                        "heroprop",
+                        "committed",
+                    );
+                    batch_row.source = "import".into();
+                    items.push(batch_row);
+                }
+            } else {
+                items.push(push_item(
+                    &format!("hero-{i:02}"),
+                    &ts,
+                    "mysql-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "heroprop",
+                    "committed",
+                ));
+            }
+        }
+
+        let _ = push_audit(State(test_state(pool.clone())), Json(AuditPushRequest { items }))
+            .await
+            .unwrap();
+
+        let Json(hero_entries) = list_audit(
+            State(test_state(pool.clone())),
+            Query(AuditQuery {
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("heroprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+        // Revisions 6..=25 survive (20 revisions total); revision 10 has 3 grouped rows => 22 rows.
+        assert_eq!(hero_entries.len(), 22);
+        assert_eq!(hero_entries[0].client_id, "hero-25");
+        assert_eq!(hero_entries.last().unwrap().client_id, "hero-06");
+        assert!(hero_entries.iter().filter(|e| e.client_id.starts_with("hero-batch-")).count() == 3);
+
+        let Json(skill_entries) = list_audit(
+            State(test_state(pool)),
+            Query(AuditQuery {
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("skillprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(skill_entries.len(), 1);
+        assert_eq!(skill_entries[0].client_id, "other-table-1");
+    }
+
+    #[tokio::test]
+    async fn startup_prune_all_tables_trims_migrated_history_to_20_per_table() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok", "2026-11-23T00:00:00Z")
+            .await
+            .unwrap();
+
+        // Seed 24 edits without pruning (simulating a pre-existing DB migrated from 193).
+        let unpruned_state = ServerState {
+            pool: pool.clone(),
+            max_revisions_per_table: 0,
+        };
+        let items: Vec<_> = (1..=24)
+            .map(|i| {
+                push_item(
+                    &format!("legacy-{i:02}"),
+                    &format!("2026-11-24T08:{:02}:00Z", i),
+                    "mysql-1",
+                    None,
+                    "goodsprop",
+                    "committed",
+                )
+            })
+            .collect();
+        let _ = push_audit(State(unpruned_state), Json(AuditPushRequest { items }))
+            .await
+            .unwrap();
+
+        let pruned = prune_all_tables(&pool, DEFAULT_MAX_REVISIONS_PER_TABLE)
+            .await
+            .unwrap();
+        assert_eq!(pruned, 4);
+
+        let Json(entries) = list_audit(
+            State(test_state(pool)),
+            Query(AuditQuery {
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("goodsprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(entries.len(), 20);
+        assert_eq!(entries[0].client_id, "legacy-24");
+        assert_eq!(entries.last().unwrap().client_id, "legacy-05");
     }
 }

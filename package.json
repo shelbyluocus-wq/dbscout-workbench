@@ -18,6 +18,8 @@
     "release:agent-runtime": "node scripts/package-agent-runtime.mjs",
     "release:sync-version": "node scripts/sync-update-version.mjs",
     "release:svn-manifest": "node scripts/svn-updater-manifest.mjs",
+    "server:deploy": "node scripts/deploy-blackcat-server.mjs",
+    "server:package": "node scripts/package-blackcat-server.mjs",
     "quality:duplication": "jscpd src sidecar scripts src-tauri/src server/src vite.config.js"
   },
   "dependencies": {

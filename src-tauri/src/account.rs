@@ -18,15 +18,45 @@ use tauri::{AppHandle, Manager};
 use crate::types::{AccountConfig, AppState, UserSession};
 
 /// Default LAN central server used when no custom server URL has been saved yet.
-pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.193:8765";
+pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.243:8765";
+
+/// Previous default central server addresses that should migrate once to
+/// `DEFAULT_SERVER_URL` when upgrading existing installations.
+const LEGACY_DEFAULT_SERVER_URLS: &[&str] = &["http://192.168.1.193:8765"];
+
+/// Current schema version for one-time `server_url` default migrations.
+pub const SERVER_URL_MIGRATION_VERSION: u32 = 1;
 
 const STARTUP_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
-fn apply_default_server_url(mut config: AccountConfig) -> AccountConfig {
+fn is_legacy_default_server_url(url: &str) -> bool {
+    let normalized = url.trim().trim_end_matches('/');
+    LEGACY_DEFAULT_SERVER_URLS
+        .iter()
+        .any(|legacy| normalized.eq_ignore_ascii_case(legacy))
+}
+
+fn apply_default_and_migrate_server_url(mut config: AccountConfig) -> (AccountConfig, bool) {
     if config.server_url.is_none() {
         config.server_url = Some(DEFAULT_SERVER_URL.to_string());
+        config.server_url_migration_version = Some(SERVER_URL_MIGRATION_VERSION);
+        return (config, false);
     }
-    config
+
+    if config.server_url_migration_version.unwrap_or(0) < SERVER_URL_MIGRATION_VERSION {
+        let should_migrate = config
+            .server_url
+            .as_deref()
+            .map(is_legacy_default_server_url)
+            .unwrap_or(false);
+        config.server_url_migration_version = Some(SERVER_URL_MIGRATION_VERSION);
+        if should_migrate {
+            config.server_url = Some(DEFAULT_SERVER_URL.to_string());
+            return (config, true);
+        }
+    }
+
+    (config, false)
 }
 
 /// Directory holding `session.json`. Sibling of the `backup/` config dir so
@@ -47,11 +77,11 @@ fn session_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Read the persisted account config from disk. Returns the default central
 /// server URL when missing or unparseable so fresh installs connect out of the
-/// box without manual URL entry.
+/// box without manual URL entry, and migrates legacy default addresses once.
 pub fn load_account(app: &AppHandle) -> AccountConfig {
     let path = match session_path(app) {
         Ok(path) => path,
-        Err(_) => return apply_default_server_url(AccountConfig::default()),
+        Err(_) => return apply_default_and_migrate_server_url(AccountConfig::default()).0,
     };
     let loaded = match std::fs::read_to_string(&path) {
         Ok(content) if !content.trim().is_empty() => {
@@ -59,7 +89,11 @@ pub fn load_account(app: &AppHandle) -> AccountConfig {
         }
         _ => AccountConfig::default(),
     };
-    apply_default_server_url(loaded)
+    let (migrated, should_persist) = apply_default_and_migrate_server_url(loaded);
+    if should_persist {
+        let _ = save_account(app, &migrated);
+    }
+    migrated
 }
 
 /// Persist the account config to disk.
@@ -166,23 +200,69 @@ mod tests {
     }
 
     #[test]
-    fn default_server_url_applies_only_when_unset() {
-        let fresh = apply_default_server_url(AccountConfig::default());
+    fn default_server_url_applies_and_migrates_legacy_default_once() {
+        let (fresh, persist_fresh) = apply_default_and_migrate_server_url(AccountConfig::default());
         assert_eq!(fresh.server_url.as_deref(), Some(DEFAULT_SERVER_URL));
+        assert_eq!(
+            fresh.server_url_migration_version,
+            Some(SERVER_URL_MIGRATION_VERSION)
+        );
+        assert!(!persist_fresh);
 
-        let custom = apply_default_server_url(AccountConfig {
+        let existing_session = UserSession {
+            user_id: "u1".into(),
+            username: "alice".into(),
+            display_name: "Alice".into(),
+            token: "tok-1".into(),
+        };
+        let (migrated, persist_migrated) = apply_default_and_migrate_server_url(AccountConfig {
+            server_url: Some("  HTTP://192.168.1.193:8765/ ".into()),
+            session: Some(existing_session.clone()),
+            server_url_migration_version: None,
+            loaded: false,
+        });
+        assert_eq!(migrated.server_url.as_deref(), Some(DEFAULT_SERVER_URL));
+        assert_eq!(
+            migrated.server_url_migration_version,
+            Some(SERVER_URL_MIGRATION_VERSION)
+        );
+        assert_eq!(
+            migrated.session.as_ref().map(|s| s.token.as_str()),
+            Some("tok-1")
+        );
+        assert!(persist_migrated);
+
+        // Once marked migrated, an explicit override back to the legacy host is respected.
+        let (explicit_rollback, persist_rollback) =
+            apply_default_and_migrate_server_url(AccountConfig {
+                server_url: Some("http://192.168.1.193:8765".into()),
+                session: None,
+                server_url_migration_version: Some(SERVER_URL_MIGRATION_VERSION),
+                loaded: false,
+            });
+        assert_eq!(
+            explicit_rollback.server_url.as_deref(),
+            Some("http://192.168.1.193:8765")
+        );
+        assert!(!persist_rollback);
+
+        let (custom, persist_custom) = apply_default_and_migrate_server_url(AccountConfig {
             server_url: Some("http://10.0.0.5:8765".into()),
             session: None,
+            server_url_migration_version: None,
             loaded: false,
         });
         assert_eq!(custom.server_url.as_deref(), Some("http://10.0.0.5:8765"));
+        assert!(!persist_custom);
 
-        let opted_out = apply_default_server_url(AccountConfig {
+        let (opted_out, persist_opted_out) = apply_default_and_migrate_server_url(AccountConfig {
             server_url: Some(String::new()),
             session: None,
+            server_url_migration_version: None,
             loaded: false,
         });
         assert_eq!(opted_out.server_url.as_deref(), Some(""));
+        assert!(!persist_opted_out);
     }
 
     #[tokio::test]

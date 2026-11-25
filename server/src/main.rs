@@ -36,9 +36,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = env::var("DBSCOUT_SERVER_BIND").unwrap_or_else(|_| "0.0.0.0:8765".into());
     let db_path =
         env::var("DBSCOUT_SERVER_DB").unwrap_or_else(|_| "./dbscout-server.sqlite".into());
+    let max_revisions_per_table = env::var("DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(db::DEFAULT_MAX_REVISIONS_PER_TABLE);
 
     let pool = db::connect(&db_path).await?;
-    tracing::info!("中心服务数据库就绪: {db_path}");
+    let pruned = db::prune_all_tables(&pool, max_revisions_per_table).await?;
+    tracing::info!(
+        "中心服务数据库就绪: {db_path} (每表保留最近 {max_revisions_per_table} 次改动, 启动清理 {pruned} 条旧记录)"
+    );
+
+    let state = handlers::ServerState {
+        pool: pool.clone(),
+        max_revisions_per_table,
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -47,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Public routes (no auth).
     let public = Router::new()
+        .route("/health", get(handlers::health))
         .route("/register", post(handlers::register))
         .route("/login", post(handlers::login));
 
@@ -69,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(protected)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
-        .with_state(pool.clone());
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!("dbscout-server 监听 http://{bind}");

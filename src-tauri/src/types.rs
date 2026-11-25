@@ -1197,9 +1197,11 @@ pub struct UserSession {
 }
 
 /// Persisted account config stored at `<app_data_dir>/account/session.json`.
-/// `server_url` is the central service base URL (e.g. http://192.168.1.10:8765);
-/// `session` is `None` when logged out. `loaded` is an in-memory-only flag
-/// (never serialized) tracking whether the on-disk config has been read.
+/// `server_url` is the central service base URL (e.g. http://192.168.1.243:8765);
+/// `session` is `None` when logged out. `server_url_migration_version` tracks
+/// one-time default-server migrations so manual overrides are never reverted.
+/// `loaded` is an in-memory-only flag (never serialized) tracking whether the
+/// on-disk config has been read.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountConfig {
@@ -1207,6 +1209,8 @@ pub struct AccountConfig {
     pub server_url: Option<String>,
     #[serde(default)]
     pub session: Option<UserSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_url_migration_version: Option<u32>,
     #[serde(default, skip)]
     pub loaded: bool,
 }

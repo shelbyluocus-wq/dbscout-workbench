@@ -10194,6 +10194,7 @@ pub async fn set_account_server(
     let _ = crate::account::ensure_loaded(&app, &state).await;
     let mut config = state.account.config.lock().await;
     config.server_url = Some(request.server_url.trim().to_string());
+    config.server_url_migration_version = Some(crate::account::SERVER_URL_MIGRATION_VERSION);
     let snapshot = config.clone();
     drop(config);
     crate::account::save_account(&app, &snapshot)?;

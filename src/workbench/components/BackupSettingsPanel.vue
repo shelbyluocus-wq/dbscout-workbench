@@ -294,7 +294,7 @@ async function onLogout() {
               <input
                 v-model="accountDraft.serverUrl"
                 type="text"
-                placeholder="http://192.168.1.193:8765"
+                placeholder="http://192.168.1.243:8765"
                 :aria-label="t('m_937c4d303733')"
               />
               <button type="button" :disabled="accountBusy.savingServer" @click="onSaveServerUrl">
