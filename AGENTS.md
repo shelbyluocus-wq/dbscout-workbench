@@ -1208,6 +1208,20 @@ Checks: `node --test src/workbench/useAuditHistory.test.js`,
 (`DBSCOUT_AUDIT_TEST_URL`, default `http://127.0.0.1:1431`). Browser test screenshots
 use `DBSCOUT_AUDIT_SCREENSHOTS` (default `/tmp/blackcat-audit-review`).
 
+The in-tab change history (the table toolbar's history view) pins leading
+primary-key columns beside the row numbers in both panes while they fit about
+half a pane, and change jumps scroll horizontally to a column boundary beside
+them. In full-table scope a proportional change map on the right marks every
+added, deleted and updated row with the viewport and current change; clicking
+a mark selects that change, empty track scrolls there. Missing-row placeholders
+label only the start of each run (repeated in long runs), and the revision
+timeline is grouped under sticky day headers. Layout logic lives in
+`utils/tableHistoryLayout.js`; checks: `node --test
+src/workbench/tableHistoryLayout.test.js src/workbench/tableChangeHistory.test.js
+src/workbench/tableHistoryScrollAndRestore.test.js`. Browser-mock seeding must
+import `mockBackend.js` through the app's own loaded URL (Vite adds `?t=`), or
+it writes to a separate module instance.
+
 ### Localization and privacy
 
 The interface supports English, Simplified Chinese and Traditional Chinese (Taiwan) through

@@ -30,6 +30,15 @@ import {
   computeHysteresisVirtualWindow,
   createDualPaneScrollSync,
 } from "../utils/tableHistoryScrollSync.js";
+import {
+  buildPlaceholderLabelIndices,
+  groupRevisionsByDay,
+  isSameFrozenLayout,
+  orderPrimaryKeyColumnsFirst,
+  resolveColumnRevealScroll,
+  resolveFrozenColumns,
+} from "../utils/tableHistoryLayout.js";
+import TableHistoryChangeMap from "./TableHistoryChangeMap.vue";
 import { useTableChangeHistory } from "../composables/useTableChangeHistory.js";
 import { invokeWorkbench as defaultInvokeWorkbench } from "../utils/tauriBridge.js";
 
@@ -73,8 +82,10 @@ const splitStageRef = ref(null);
 const beforeScrollerRef = ref(null);
 const afterScrollerRef = ref(null);
 const searchInputRef = ref(null);
+const changeMapRef = ref(null);
 
 const viewportHeight = ref(520);
+const paneWidth = ref(0);
 const virtualStart = ref(0);
 const virtualEnd = ref(0);
 const splitRatio = ref(0.5);
@@ -129,8 +140,8 @@ const isFallbackSplitMode = computed(() => (
 const isSplitComparisonMode = computed(() => isFullTableMode.value || isFallbackSplitMode.value);
 
 const fullTableColumns = computed(() => snapshot.value.columns || []);
-const comparisonColumns = computed(() => (
-  isFullTableMode.value ? fullTableColumns.value : fallbackTable.value.columns
+const comparisonColumns = computed(() => orderPrimaryKeyColumnsFirst(
+  isFullTableMode.value ? fullTableColumns.value : fallbackTable.value.columns,
 ));
 const comparisonRows = computed(() => (
   isFullTableMode.value ? displayRows.value : fallbackTable.value.rows
@@ -209,6 +220,26 @@ const gridTemplateColumns = computed(() => {
   });
   return `${ROW_NUM_WIDTH}px ${tracks.join(" ")}`;
 });
+
+// Keep the previous object while the pinned set is unchanged so pane resizes
+// and splitter drags do not re-render every visible row.
+const frozenLayout = computed((previous) => {
+  const next = resolveFrozenColumns({
+    columns: comparisonColumns.value,
+    widthOf: widthForCol,
+    rowNumWidth: ROW_NUM_WIDTH,
+    paneWidth: paneWidth.value,
+  });
+  return isSameFrozenLayout(previous, next) ? previous : next;
+});
+
+const frozenCellStyles = computed(() => {
+  const styles = new Map();
+  for (const [name, left] of frozenLayout.value.offsets) styles.set(name, { left: `${left}px` });
+  return styles;
+});
+
+const placeholderLabelIndices = computed(() => buildPlaceholderLabelIndices(comparisonRows.value));
 
 const gridTotalWidth = computed(() => {
   if (stretchLastFallbackColumn.value) return "100%";
@@ -386,8 +417,21 @@ async function confirmRestore() {
   }
 }
 
+const showChangeMap = computed(() => (
+  isFullTableMode.value
+  && state.displayScope === "full"
+  && changedDisplayIndices.value.length > 0
+  && totalHeight.value > viewportHeight.value - HEADER_HEIGHT
+));
+
+const activeChangeDisplayIndex = computed(() => {
+  const list = changedDisplayIndices.value;
+  if (!list.length) return -1;
+  return list[((state.activeChangeIndex % list.length) + list.length) % list.length];
+});
+
 const splitStageStyle = computed(() => ({
-  gridTemplateColumns: `minmax(0, ${splitRatio.value}fr) 5px minmax(0, ${1 - splitRatio.value}fr)`,
+  gridTemplateColumns: `minmax(0, ${splitRatio.value}fr) 5px minmax(0, ${1 - splitRatio.value}fr)${showChangeMap.value ? " auto" : ""}`,
 }));
 
 const effectiveSearchResult = computed(() => {
@@ -458,6 +502,7 @@ const dualScrollSync = createDualPaneScrollSync({
     if (clientHeight && Math.abs(clientHeight - viewportHeight.value) >= 1) {
       viewportHeight.value = clientHeight;
     }
+    syncChangeMapViewport();
     if (force) {
       if (virtualWindowFrame) {
         cancelAnimationFrame(virtualWindowFrame);
@@ -482,15 +527,27 @@ function scrollBothPanesTo(targetTop, targetLeft = null) {
   dualScrollSync.scrollBothTo(targetTop, targetLeft);
 }
 
-function columnLeftOffset(colName) {
-  let left = ROW_NUM_WIDTH;
-  for (const col of comparisonColumns.value) {
-    if (col.name === colName) {
-      return { left, width: widthForCol(col.name) };
-    }
-    left += widthForCol(col.name);
-  }
-  return null;
+function syncChangeMapViewport() {
+  const map = changeMapRef.value;
+  if (!map) return;
+  const scroller = afterScrollerRef.value || beforeScrollerRef.value;
+  const total = totalHeight.value;
+  if (!scroller || !(total > 0)) return;
+  const body = Math.max(0, scroller.clientHeight - HEADER_HEIGHT);
+  map.setViewport(currentScrollTop / total, body / total, scroller.offsetHeight - scroller.clientHeight);
+}
+
+function handleChangeMapJump(displayIndex) {
+  const position = changedDisplayIndices.value.indexOf(displayIndex);
+  if (position < 0) return;
+  state.activeChangeIndex = position;
+  scrollToDisplayRow(displayIndex, displayRows.value[displayIndex]?.changedCols?.[0] || "");
+}
+
+function handleChangeMapSeek(ratio) {
+  const scroller = beforeScrollerRef.value || afterScrollerRef.value;
+  const body = Math.max(ROW_HEIGHT, (scroller?.clientHeight || viewportHeight.value) - HEADER_HEIGHT);
+  scrollBothPanesTo(ratio * totalHeight.value - body / 2, null);
 }
 
 function scrollToDisplayRow(displayIndex, colName = "") {
@@ -509,17 +566,15 @@ function scrollToDisplayRow(displayIndex, colName = "") {
   const rowTop = displayIndex * ROW_HEIGHT;
   const targetTop = Math.max(0, rowTop - Math.round(availHeight * 0.32));
 
-  let targetLeft = null;
-  if (colName && scroller) {
-    const pos = columnLeftOffset(colName);
-    if (pos) {
-      const viewLeft = scroller.scrollLeft;
-      const viewRight = viewLeft + scroller.clientWidth;
-      if (pos.left < viewLeft + 24 || pos.left + pos.width > viewRight - 16) {
-        targetLeft = Math.max(0, pos.left - Math.round(scroller.clientWidth * 0.25));
-      }
-    }
-  }
+  const targetLeft = scroller ? resolveColumnRevealScroll({
+    columns: comparisonColumns.value,
+    widthOf: widthForCol,
+    rowNumWidth: ROW_NUM_WIDTH,
+    frozen: frozenLayout.value,
+    targetCol: colName,
+    scrollLeft: scroller.scrollLeft,
+    clientWidth: scroller.clientWidth,
+  }) : null;
   scrollBothPanesTo(targetTop, targetLeft);
 }
 
@@ -619,8 +674,9 @@ function moveSplitter(event) {
   const stage = splitStageRef.value;
   if (!stage) return;
   const rect = stage.getBoundingClientRect();
-  if (rect.width <= 0) return;
-  const raw = (event.clientX - rect.left) / rect.width;
+  const usableWidth = rect.width - (stage.querySelector(".wb-thv-map")?.offsetWidth || 0);
+  if (usableWidth <= 0) return;
+  const raw = (event.clientX - rect.left) / usableWidth;
   splitRatio.value = Math.max(0.26, Math.min(0.74, raw));
 }
 
@@ -721,6 +777,22 @@ function fullTime(ts) {
   return formatAuditTimestamp(ts) || String(ts || "");
 }
 
+function clockTime(ts) {
+  const full = formatAuditTimestamp(ts);
+  return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(full) ? full.slice(11, 19) : shortTime(ts);
+}
+
+const revisionGroups = computed(() => groupRevisionsByDay(filteredRevisions.value, {
+  parseMs: (rev) => rev?.tsMs || parseAuditTimestampMs(rev?.ts),
+}));
+
+function dayGroupLabel(group) {
+  if (group.kind === "today") return t("tableHistory.dayToday");
+  if (group.kind === "yesterday") return t("tableHistory.dayYesterday");
+  if (group.kind === "unknown") return t("tableHistory.dayUnknown");
+  return group.label;
+}
+
 function fieldComment(field) {
   if (!field) return "";
   return columnComments.value.get(String(field).toLowerCase()) || "";
@@ -753,15 +825,16 @@ function handleTimelineKeydown(event) {
   const list = filteredRevisions.value;
   if (!list.length) return;
   const currentIdx = list.findIndex((item) => item.id === selectedRevision.value?.id);
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    const next = list[Math.min(list.length - 1, Math.max(0, currentIdx) + 1)];
-    if (next) history.selectRevision(next.id);
-  } else if (event.key === "ArrowUp") {
-    event.preventDefault();
-    const prev = list[Math.max(0, currentIdx - 1)];
-    if (prev) history.selectRevision(prev.id);
-  }
+  const delta = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+  if (!delta) return;
+  event.preventDefault();
+  const target = list[Math.min(list.length - 1, Math.max(0, Math.max(0, currentIdx) + delta))];
+  if (!target) return;
+  history.selectRevision(target.id);
+  const timeline = event.currentTarget;
+  nextTick(() => {
+    timeline?.querySelector?.(".wb-thv-rev-item.is-active")?.scrollIntoView?.({ block: "nearest" });
+  });
 }
 
 function openInBackupCenter() {
@@ -831,6 +904,15 @@ watch(
   },
 );
 
+watch(
+  () => [showChangeMap.value, displayRows.value.length],
+  async ([visible]) => {
+    if (!visible) return;
+    await nextTick();
+    syncChangeMapViewport();
+  },
+);
+
 // Scroll to active search match whenever query or match index updates
 watch(
   () => [effectiveActiveSearchMatch.value?.rowId, effectiveActiveSearchMatch.value?.colName, state.activeMatchIndex],
@@ -866,9 +948,12 @@ onMounted(() => {
   if (typeof ResizeObserver === "function" && beforeScrollerRef.value) {
     resizeObserver = new ResizeObserver((entries) => {
       const height = entries[0]?.contentRect?.height;
+      const width = Math.round(entries[0]?.contentRect?.width || 0);
       if (height && Math.abs(height - viewportHeight.value) >= 1) {
         viewportHeight.value = height;
       }
+      if (width && width !== paneWidth.value) paneWidth.value = width;
+      syncChangeMapViewport();
       if (isFallbackSplitMode.value) syncFallbackRowHeights();
     });
     resizeObserver.observe(beforeScrollerRef.value);
@@ -892,6 +977,7 @@ watch(
       resizeObserver.disconnect();
       if (el) {
         viewportHeight.value = el.clientHeight || viewportHeight.value;
+        paneWidth.value = el.clientWidth || paneWidth.value;
         resizeObserver.observe(el);
         if (isFallbackSplitMode.value) nextTick(syncFallbackRowHeights);
       }
@@ -1161,43 +1247,46 @@ onBeforeUnmount(() => {
             </div>
           </template>
           <template v-else-if="filteredRevisions.length">
-            <button
-              v-for="rev in filteredRevisions"
-              :key="rev.id"
-              type="button"
-              role="option"
-              class="wb-thv-rev-item"
-              :class="{ 'is-active': selectedRevision?.id === rev.id }"
-              :aria-selected="selectedRevision?.id === rev.id"
-              @click="history.selectRevision(rev.id)"
-            >
-              <div class="wb-thv-rev-top">
-                <span class="wb-thv-rev-actor">
-                  <span class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
-                  <span class="wb-thv-actor-name">{{ rev.actor }}</span>
-                </span>
-                <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ shortTime(rev.ts) }}</span>
-              </div>
-              <div class="wb-thv-rev-bottom">
-                <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
-                  {{ sourceLabel(rev.source, rev.isRollback) }}
-                </span>
-                <span class="wb-thv-rev-badges">
-                  <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
-                    {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+            <template v-for="group in revisionGroups" :key="group.key">
+              <div class="wb-thv-day-head" role="presentation">{{ dayGroupLabel(group) }}</div>
+              <button
+                v-for="rev in group.items"
+                :key="rev.id"
+                type="button"
+                role="option"
+                class="wb-thv-rev-item"
+                :class="{ 'is-active': selectedRevision?.id === rev.id }"
+                :aria-selected="selectedRevision?.id === rev.id"
+                @click="history.selectRevision(rev.id)"
+              >
+                <div class="wb-thv-rev-top">
+                  <span class="wb-thv-rev-actor">
+                    <span class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
+                    <span class="wb-thv-actor-name">{{ rev.actor }}</span>
                   </span>
-                  <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
-                    {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                  <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ clockTime(rev.ts) }}</span>
+                </div>
+                <div class="wb-thv-rev-bottom">
+                  <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
+                    {{ sourceLabel(rev.source, rev.isRollback) }}
                   </span>
-                  <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
-                    {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                  <span class="wb-thv-rev-badges">
+                    <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
+                      {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+                    </span>
+                    <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
+                      {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                    </span>
+                    <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
+                      {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                    </span>
+                    <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
+                      {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
+                    </span>
                   </span>
-                  <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
-                    {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
-                  </span>
-                </span>
-              </div>
-            </button>
+                </div>
+              </button>
+            </template>
 
             <button
               v-if="history.hasMore.value"
@@ -1293,8 +1382,11 @@ onBeforeUnmount(() => {
                     class="wb-thv-col-head"
                     :class="{
                       'is-pk': col.primaryKey,
+                      'is-frozen': frozenLayout.offsets.has(col.name),
+                      'is-frozen-edge': frozenLayout.lastName === col.name,
                       'is-search-header-hit': effectiveSearchResult.matchedHeaderCols.has(col.name),
                     }"
+                    :style="frozenCellStyles.get(col.name)"
                     :title="col.comment ? `${col.name} · ${col.comment}` : col.name"
                   >
                     <div class="wb-thv-col-head-top">
@@ -1336,7 +1428,7 @@ onBeforeUnmount(() => {
                           class="wb-thv-cell is-placeholder"
                           :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                         >
-                          {{ t('tableHistory.placeholderBeforeInsert') }}
+                          <span v-if="placeholderLabelIndices.has(displayIndex)" class="wb-thv-placeholder-label">{{ t('tableHistory.placeholderBeforeInsert') }}</span>
                         </div>
                       </template>
                       <template v-else>
@@ -1346,12 +1438,15 @@ onBeforeUnmount(() => {
                           class="wb-thv-cell"
                           :class="{
                             'is-pk': col.primaryKey,
+                            'is-frozen': frozenLayout.offsets.has(col.name),
+                            'is-frozen-edge': frozenLayout.lastName === col.name,
                             'is-diff-before': row.status === 'updated' && row.changedCols.includes(col.name),
                             'is-deleted-cell': row.status === 'deleted',
                             'is-search-hit': isSearchMatchedCell(row.id, col.name),
                             'is-search-active': isActiveSearchCell(row.id, col.name),
                           }"
                           :title="cellDisplay(row.before, col.name).text"
+                          :style="frozenCellStyles.get(col.name)"
                         >
                           <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.before">
                             <span v-if="row.cellDiffs[col.name].before.isNull" class="wb-thv-null-pill">NULL</span>
@@ -1414,7 +1509,7 @@ onBeforeUnmount(() => {
                         class="wb-thv-cell is-placeholder"
                         :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                       >
-                        {{ t('tableHistory.placeholderBeforeInsert') }}
+                        <span v-if="placeholderLabelIndices.has(rowIdx)" class="wb-thv-placeholder-label">{{ t('tableHistory.placeholderBeforeInsert') }}</span>
                       </div>
                     </template>
                     <template v-else>
@@ -1424,12 +1519,15 @@ onBeforeUnmount(() => {
                         class="wb-thv-cell is-wrap"
                         :class="{
                           'is-pk': col.primaryKey,
+                          'is-frozen': frozenLayout.offsets.has(col.name),
+                          'is-frozen-edge': frozenLayout.lastName === col.name,
                           'is-diff-before': row.status === 'updated' && row.changedCols.includes(col.name),
                           'is-deleted-cell': row.status === 'deleted',
                           'is-search-hit': isSearchMatchedCell(row.id, col.name),
                           'is-search-active': isActiveSearchCell(row.id, col.name),
                         }"
                         :title="cellDisplay(row.before, col.name).text"
+                        :style="frozenCellStyles.get(col.name)"
                       >
                         <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.before">
                           <span v-if="row.cellDiffs[col.name].before.isNull" class="wb-thv-null-pill">NULL</span>
@@ -1532,8 +1630,11 @@ onBeforeUnmount(() => {
                     class="wb-thv-col-head"
                     :class="{
                       'is-pk': col.primaryKey,
+                      'is-frozen': frozenLayout.offsets.has(col.name),
+                      'is-frozen-edge': frozenLayout.lastName === col.name,
                       'is-search-header-hit': effectiveSearchResult.matchedHeaderCols.has(col.name),
                     }"
+                    :style="frozenCellStyles.get(col.name)"
                     :title="col.comment ? `${col.name} · ${col.comment}` : col.name"
                   >
                     <div class="wb-thv-col-head-top">
@@ -1575,7 +1676,7 @@ onBeforeUnmount(() => {
                           class="wb-thv-cell is-placeholder"
                           :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                         >
-                          {{ t('tableHistory.placeholderAfterDelete') }}
+                          <span v-if="placeholderLabelIndices.has(displayIndex)" class="wb-thv-placeholder-label">{{ t('tableHistory.placeholderAfterDelete') }}</span>
                         </div>
                       </template>
                       <template v-else>
@@ -1585,12 +1686,15 @@ onBeforeUnmount(() => {
                           class="wb-thv-cell"
                           :class="{
                             'is-pk': col.primaryKey,
+                            'is-frozen': frozenLayout.offsets.has(col.name),
+                            'is-frozen-edge': frozenLayout.lastName === col.name,
                             'is-diff-after': row.status === 'updated' && row.changedCols.includes(col.name),
                             'is-inserted-cell': row.status === 'inserted',
                             'is-search-hit': isSearchMatchedCell(row.id, col.name),
                             'is-search-active': isActiveSearchCell(row.id, col.name),
                           }"
                           :title="cellDisplay(row.after, col.name).text"
+                          :style="frozenCellStyles.get(col.name)"
                         >
                           <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.after">
                             <span v-if="row.cellDiffs[col.name].after.isNull" class="wb-thv-null-pill">NULL</span>
@@ -1653,7 +1757,7 @@ onBeforeUnmount(() => {
                         class="wb-thv-cell is-placeholder"
                         :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                       >
-                        {{ t('tableHistory.placeholderAfterDelete') }}
+                        <span v-if="placeholderLabelIndices.has(rowIdx)" class="wb-thv-placeholder-label">{{ t('tableHistory.placeholderAfterDelete') }}</span>
                       </div>
                     </template>
                     <template v-else>
@@ -1663,12 +1767,15 @@ onBeforeUnmount(() => {
                         class="wb-thv-cell is-wrap"
                         :class="{
                           'is-pk': col.primaryKey,
+                          'is-frozen': frozenLayout.offsets.has(col.name),
+                          'is-frozen-edge': frozenLayout.lastName === col.name,
                           'is-diff-after': row.status === 'updated' && row.changedCols.includes(col.name),
                           'is-inserted-cell': row.status === 'inserted',
                           'is-search-hit': isSearchMatchedCell(row.id, col.name),
                           'is-search-active': isActiveSearchCell(row.id, col.name),
                         }"
                         :title="cellDisplay(row.after, col.name).text"
+                        :style="frozenCellStyles.get(col.name)"
                       >
                         <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.after">
                           <span v-if="row.cellDiffs[col.name].after.isNull" class="wb-thv-null-pill">NULL</span>
@@ -1712,6 +1819,16 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </section>
+
+          <TableHistoryChangeMap
+            v-if="showChangeMap"
+            ref="changeMapRef"
+            :rows="displayRows"
+            :indices="changedDisplayIndices"
+            :active-index="activeChangeDisplayIndex"
+            @jump="handleChangeMapJump"
+            @seek="handleChangeMapSeek"
+          />
         </div>
 
         <!-- DDL-Only / Non-Tabular Revision Detail -->
