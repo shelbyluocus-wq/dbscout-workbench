@@ -1189,7 +1189,7 @@ async function toggleGridSearchFilter(tab, rawQuery) {
   resetGridState();
   const result = await props.applySearchFilter?.(tab);
   if (result?.ok && tab.filter) {
-    refreshCurrentSearchMatches();
+    await resumeCurrentSearchResults({ select: true });
   }
 }
 
@@ -1842,11 +1842,11 @@ async function locateTableMatch(tab, { rowIdentity, columnName: targetColumn } =
   let rowIndex = findLoadedIndex();
   if (rowIndex < 0 && typeof props.loadNextPage === "function") {
     statusText.value = "正在定位命中行…";
-    while (rowIndex < 0 && !tab.fullyLoaded) {
+    while (rowIndex < 0 && (tab.loading || !tab.fullyLoaded)) {
       const before = tabRowCount(tab);
-      await props.loadNextPage(tab);
+      const loaded = await props.loadNextPage(tab);
       rowIndex = findLoadedIndex();
-      if (tabRowCount(tab) <= before && !tab.fullyLoaded) break;
+      if (!loaded && tabRowCount(tab) <= before && !tab.fullyLoaded) break;
     }
   }
   if (rowIndex < 0) {

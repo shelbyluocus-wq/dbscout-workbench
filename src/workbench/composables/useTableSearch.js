@@ -47,6 +47,7 @@ function searchCacheSignature(editState, tab, query, mode, columns) {
     mode,
     columns.join("\u001f"),
     getEditMutationVersion(editState),
+    Math.max(0, Math.floor(Number(tab?.rowWindowOffset) || 0)),
   ].join("\u001e");
 }
 
@@ -196,13 +197,19 @@ export function useTableSearch(activeTab, {
   async function resumeCurrentSearchResults({ select = false } = {}) {
     const tab = activeTab.value;
     if (!tab) return [];
-    const runId = ++searchRunId;
     if (!tab.searchResultMode) {
       const query = String(tab.searchQuery || tab.filter || "").trim();
       if (!query) return [];
-      const result = await executeOrdinarySearch(tab, query, runId, { select });
+      const runId = ++searchRunId;
+      cancelScheduled({ stale: true });
+      const result = await executeOrdinarySearch(tab, query, runId, {
+        select,
+        skipSearchFilterRefresh: true,
+      });
       return result?.ok ? searchMatches.value : [];
     }
+    const runId = ++searchRunId;
+    cancelScheduled({ stale: true });
     if (!(await continueUntilFirstMatch(tab, runId))) return [];
     const matches = refreshSearchMatches(tab);
     if (select && matches.length) selectSearchMatch(tab, preferredMatchIndex(tab, 0));
@@ -289,7 +296,7 @@ export function useTableSearch(activeTab, {
     return loaded;
   }
 
-  async function executeOrdinarySearch(tab, query, runId, { select = true } = {}) {
+  async function executeOrdinarySearch(tab, query, runId, { select = true, skipSearchFilterRefresh = false } = {}) {
     if (tab.searchResultMode || tab.searchResultJobId) {
       const restored = await loadSearchResultPage?.(tab, "");
       if (runId !== searchRunId || activeTab.value !== tab || restored?.stale) {
@@ -302,13 +309,13 @@ export function useTableSearch(activeTab, {
     try {
       tab.filter = query;
       tab.searchQuery = query;
-      if (tab.searchFilterActive && typeof onSearchFilterChange === "function") {
+      if (!skipSearchFilterRefresh && tab.searchFilterActive && typeof onSearchFilterChange === "function") {
         const filtered = await onSearchFilterChange(tab);
         if (runId !== searchRunId || activeTab.value !== tab || filtered?.stale) {
           return { ok: false, stale: true };
         }
       }
-      while (runId === searchRunId && activeTab.value === tab && !tab.fullyLoaded) {
+      while (runId === searchRunId && activeTab.value === tab && (tab.loading || !tab.fullyLoaded)) {
         const previousRowCount = tabRows(tab).length;
         const loaded = await loadNextOrdinaryPage(tab);
         if (runId !== searchRunId || activeTab.value !== tab) return { ok: false, stale: true };
@@ -396,6 +403,13 @@ export function useTableSearch(activeTab, {
   async function goToNextSearchMatch() {
     const tab = activeTab.value;
     if (!tab) return false;
+    if (!tab.searchResultMode && (tab.loading || !tab.fullyLoaded) && String(tab.searchQuery || tab.filter || "").trim()) {
+      const hadMatches = searchMatches.value.length > 0;
+      const targetIndex = hadMatches ? activeSearchMatchIndex.value + 1 : 0;
+      const matches = await resumeCurrentSearchResults({ select: false });
+      if (!matches.length) return false;
+      return selectSearchMatch(tab, targetIndex);
+    }
     const runId = ++searchRunId;
     refreshSearchMatches(tab);
     if (!searchMatches.value.length) return false;
@@ -421,6 +435,13 @@ export function useTableSearch(activeTab, {
   async function goToPreviousSearchMatch() {
     const tab = activeTab.value;
     if (!tab) return false;
+    if (!tab.searchResultMode && (tab.loading || !tab.fullyLoaded) && String(tab.searchQuery || tab.filter || "").trim()) {
+      const hadMatches = searchMatches.value.length > 0;
+      const previousIndex = activeSearchMatchIndex.value - 1;
+      const matches = await resumeCurrentSearchResults({ select: false });
+      if (!matches.length) return false;
+      return selectSearchMatch(tab, hadMatches && previousIndex >= 0 ? previousIndex : matches.length - 1);
+    }
     const runId = ++searchRunId;
     refreshSearchMatches(tab);
     if (!searchMatches.value.length) return false;

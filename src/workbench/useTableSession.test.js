@@ -3274,3 +3274,103 @@ test("column filters and searchFilterActive route cleanly to backend filters wit
   assert.equal(calls.at(-1).payload.request.filter, null);
   await session.dispose();
 });
+
+test("clearing a relation filter preserves filterMode, refreshes exact totals, and lets concurrent loadNextPage wait cleanly", async () => {
+  const workspace = createWorkspaceState({ connectionId: "mysql-1", database: "game" });
+  workspace.tabs = [{
+    id: "tab-rel",
+    kind: "data",
+    connectionId: "mysql-1",
+    database: "game",
+    tableName: "ins5prop",
+    tableKey: "mysql-1\u001fgame\u001fins5prop",
+    sessionId: "ins5-session",
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    rows: [{ id: "1" }],
+    columns: [{ column_name: "id" }],
+    totalRows: 1,
+    totalRowsExact: false,
+    hasMore: false,
+    fullyLoaded: true,
+    filter: "",
+    searchQuery: "",
+    filterMode: "exact",
+    hitResultMode: true,
+    relationFilter: { column: "id", kind: "equals", values: ["1"] },
+    relationOrigin: { ...SKILL_ORIGIN },
+    sort: null,
+    loading: false,
+    loadingMore: false,
+  }];
+  const page1Gate = deferred();
+  const page2Gate = deferred();
+  const calls = [];
+  const invoke = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "fetch_table_count") {
+      return { totalRows: 1500, exact: true, estimated: false };
+    }
+    if (command === "fetch_table_page") {
+      const offset = payload.request.offset ?? (payload.request.page - 1) * payload.request.pageSize;
+      if (offset === 0) {
+        await page1Gate.promise;
+        return {
+          sessionId: "ins5-session",
+          columns: [{ column_name: "id" }],
+          rows: Array.from({ length: REQUEST_PAGE_SIZE }, (_, i) => ({ id: String(i + 1) })),
+          totalRows: REQUEST_PAGE_SIZE,
+          totalRowsExact: false,
+          hasMore: true,
+          page: 1,
+          pageSize: REQUEST_PAGE_SIZE,
+        };
+      }
+      await page2Gate.promise;
+      return {
+        sessionId: "ins5-session",
+        columns: [{ column_name: "id" }],
+        rows: Array.from({ length: 500 }, (_, i) => ({ id: String(REQUEST_PAGE_SIZE + i + 1) })),
+        totalRows: 1500,
+        totalRowsExact: false,
+        hasMore: false,
+        page: 2,
+        pageSize: REQUEST_PAGE_SIZE,
+      };
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+  const session = useTableSession(workspace, invoke, { busy: ref(false), statusText: ref("") });
+  const tab = workspace.tabs[0];
+
+  const clearing = session.clearRelationFilter(tab);
+  assert.equal(tab.loading, true);
+  assert.equal(tab.filterMode, "exact");
+
+  // Search starts while page 1 is still loading: loadNextPage awaits page 1
+  // instead of returning false and aborting the scan.
+  const waitingForPage1 = session.loadNextPage(tab);
+  page1Gate.resolve();
+  const canContinue = await waitingForPage1;
+  const cleared = await clearing;
+
+  assert.equal(cleared.ok, true);
+  assert.equal(canContinue, true);
+  assert.equal(tab.rows.length, REQUEST_PAGE_SIZE);
+  assert.equal(tab.fullyLoaded, false);
+
+  // Two concurrent loadNextPage callers share one page-2 fetch.
+  const nextA = session.loadNextPage(tab);
+  const nextB = session.loadNextPage(tab);
+  page2Gate.resolve();
+  const [loadedA, loadedB] = await Promise.all([nextA, nextB]);
+
+  assert.equal(loadedA, true);
+  assert.equal(loadedB, true);
+  assert.equal(tab.rows.length, 1500);
+  assert.equal(tab.fullyLoaded, true);
+  assert.equal(calls.filter((call) => call.command === "fetch_table_page").length, 2);
+  await waitForTimers();
+  assert.equal(calls.some((call) => call.command === "fetch_table_count"), true);
+  await session.dispose();
+});

@@ -3901,3 +3901,18 @@ test("relation jumps center the target column in the viewport for fresh and reus
   assert.match(selectFirst, /selectCellAt\?\.\(tab,\s*0,\s*Math\.max\(0,\s*columnIndex\),\s*\{\s*alignColumn:\s*"center"\s*\}\)/);
   assert.match(selectFirst, /scrollColumnIntoView\?\.\(targetColumnIndex,\s*"td",\s*\{\s*align:\s*"center"\s*\}\)/);
 });
+
+test("clearing relation or match-only filters resumes full-table search across remaining pages", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const pane = read("./components/WorkbenchPane.vue");
+
+  assert.match(
+    orchestrator,
+    /async function clearTabRelationFilter\(tab\)[\s\S]*?await clearRelationFilter\(tab\)[\s\S]*?await resumeSearchAfterTableRefresh\(/,
+  );
+  assert.match(orchestrator, /clearRelationFilter:\s*\(tab\)\s*=>\s*void clearTabRelationFilter\(tab\)/);
+  assert.match(
+    pane,
+    /async function toggleGridSearchFilter\(tab,\s*rawQuery\)[\s\S]*?await resumeCurrentSearchResults\(\{\s*select:\s*true\s*\}\)/,
+  );
+});

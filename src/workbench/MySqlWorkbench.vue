@@ -1201,8 +1201,14 @@ function openConfigRelationTable({ connectionId, database, tableName, tableComme
   );
 }
 
+async function clearTabRelationFilter(tab) {
+  const result = await clearRelationFilter(tab);
+  if (result?.ok) await resumeSearchAfterTableRefresh(result.tab || tab);
+  return result;
+}
+
 provide(CONFIG_RELATION_CONTEXT, {
-  clearRelationFilter: (tab) => void clearRelationFilter(tab),
+  clearRelationFilter: (tab) => void clearTabRelationFilter(tab),
   relations: configRelations,
   relationsSupportedForTab,
   openRelation: (request) => void openRelationTab(request),

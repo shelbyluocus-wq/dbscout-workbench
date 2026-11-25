@@ -56,6 +56,8 @@ export function useTableSession(
   { statusText, setStatus, ensureTableSchema: sharedEnsureTableSchema = null, onTableActivated = null },
 ) {
   const currentRequestByTab = new Map();
+  const currentNextRequestByTab = new Map();
+  const pendingPageRequestByTab = new Map();
   const currentTotalRequestByTab = new Map();
   const currentSearchJobByTab = new Map();
   const openingRequestsByTab = new Map();
@@ -65,6 +67,28 @@ export function useTableSession(
   let totalRequestSequence = 0;
   let activationIntentSequence = 0;
   const closingSessionRequests = new Map();
+
+  function trackTabPageRequest(tabId, kind, run) {
+    if (!tabId) return run({ kind, addedRows: 0, promise: null });
+    const entry = { kind, addedRows: 0, promise: null };
+    pendingPageRequestByTab.set(tabId, entry);
+    let result;
+    try {
+      result = run(entry);
+    } catch (error) {
+      if (pendingPageRequestByTab.get(tabId) === entry) {
+        pendingPageRequestByTab.delete(tabId);
+      }
+      return Promise.reject(error);
+    }
+    const promise = Promise.resolve(result).finally(() => {
+      if (pendingPageRequestByTab.get(tabId) === entry) {
+        pendingPageRequestByTab.delete(tabId);
+      }
+    });
+    entry.promise = promise;
+    return promise;
+  }
   // Refetching the loaded rows in place never asks for more than this.
   const IN_PLACE_MAX_ROWS = REQUEST_PAGE_SIZE * 5;
   let disposed = false;
@@ -614,75 +638,77 @@ export function useTableSession(
     { connectionId = workspace.connectionId, database = workspace.database, tableName = normalizeTableName(table), readOnly = Boolean(table?.readOnly || table?.read_only), background = false } = {},
   ) {
     if (!tab) return null;
-    // Background preloads stay silent: no progress cursor, no status-bar text.
-    const reportProgress = !background;
-    if (reportProgress) {
-      pendingTableOpenCount.value += 1;
-      statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
-    }
-    let requestToken;
-    let openedSessionId = "";
-    try {
-      tab.readOnly = readOnly;
-      requestToken = beginTabRequest(tab.id);
-      tab.loading = true;
-      tab.loadingMore = false;
-      tab.loadError = null;
-      // open_table_session already returns columns/primaryKeys/tableComment, so
-      // we no longer block on get_table_schema for the first frame. The schema
-      // fetch is fired in the background only to refresh the sidebar schema tree.
-      const page = await measureAsync(
-        "table.open.invoke",
-        () => invokeWorkbench("open_table_session", {
-          connectionId,
-          database,
-          tableName,
-          options: buildOpenSessionOptions(tab),
-        }),
-        { connectionId, database, tableName },
-      );
-      openedSessionId = String(page?.sessionId || "");
-      if (!isCurrentTabRequest(tab.id, requestToken) || !findTabById(tab.id)) {
-        await closeOwnedSession(openedSessionId);
-        return null;
-      }
-      markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
-      replaceTabPage(workspace, tab.id, page);
-      openedSessionId = "";
-      tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
-      markPerf("table.page.replace.end", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.first-grid-frame", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
-      tab.primaryKeys = page.primaryKeys || [];
-      tab.tableComment = page.tableComment || "";
-      tab.loadError = null;
-      scheduleExactTotalRefresh(tab);
-      scheduleInitialBufferFill(tab);
-      // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
-      // Retains the sameSource stale-guard inside ensureTableSchema.
-      ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
+    return trackTabPageRequest(tab.id, "page", async () => {
+      // Background preloads stay silent: no progress cursor, no status-bar text.
+      const reportProgress = !background;
       if (reportProgress) {
-        const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
-        if (setStatus) setStatus(msg);
-        else statusText.value = msg;
+        pendingTableOpenCount.value += 1;
+        statusText.value = `加载 ${database ? `${database}.` : ""}${tableName}`;
       }
-      return tab;
-    } catch (error) {
-      if (openedSessionId && findTabById(tab.id)?.sessionId !== openedSessionId) {
-        await closeOwnedSession(openedSessionId);
-      }
-      if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) {
-        tab.loading = false;
-        tab.loadError = String(error?.message || error);
+      let requestToken;
+      let openedSessionId = "";
+      try {
+        tab.readOnly = readOnly;
+        requestToken = beginTabRequest(tab.id);
+        tab.loading = true;
+        tab.loadingMore = false;
+        tab.loadError = null;
+        // open_table_session already returns columns/primaryKeys/tableComment, so
+        // we no longer block on get_table_schema for the first frame. The schema
+        // fetch is fired in the background only to refresh the sidebar schema tree.
+        const page = await measureAsync(
+          "table.open.invoke",
+          () => invokeWorkbench("open_table_session", {
+            connectionId,
+            database,
+            tableName,
+            options: buildOpenSessionOptions(tab),
+          }),
+          { connectionId, database, tableName },
+        );
+        openedSessionId = String(page?.sessionId || "");
+        if (!isCurrentTabRequest(tab.id, requestToken) || !findTabById(tab.id)) {
+          await closeOwnedSession(openedSessionId);
+          return null;
+        }
+        markPerf("table.page.replace.start", { tableName, rows: page.rows?.length || 0, columns: page.columns?.length || 0 });
+        replaceTabPage(workspace, tab.id, page);
+        openedSessionId = "";
+        tab = workspace.tabs.find((item) => item.id === tab.id) || tab;
+        markPerf("table.page.replace.end", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+        sampleNextFrame("table.first-grid-frame", { tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+        tab.primaryKeys = page.primaryKeys || [];
+        tab.tableComment = page.tableComment || "";
+        tab.loadError = null;
+        scheduleExactTotalRefresh(tab);
+        scheduleInitialBufferFill(tab);
+        // Background refresh of workspace.schema (sidebar tree) — fire-and-forget.
+        // Retains the sameSource stale-guard inside ensureTableSchema.
+        ensureTableSchema(tableName, { connectionId, database }).catch(() => {});
         if (reportProgress) {
-          const msg = `读取表失败：${String(error?.message || error)}`;
-          if (setStatus) setStatus(msg, { error: true });
+          const msg = tableStatusLabel(tab, page.totalRows, page.totalRowsExact, page.hasMore);
+          if (setStatus) setStatus(msg);
           else statusText.value = msg;
         }
+        return tab;
+      } catch (error) {
+        if (openedSessionId && findTabById(tab.id)?.sessionId !== openedSessionId) {
+          await closeOwnedSession(openedSessionId);
+        }
+        if (!requestToken || isCurrentTabRequest(tab.id, requestToken)) {
+          tab.loading = false;
+          tab.loadError = String(error?.message || error);
+          if (reportProgress) {
+            const msg = `读取表失败：${String(error?.message || error)}`;
+            if (setStatus) setStatus(msg, { error: true });
+            else statusText.value = msg;
+          }
+        }
+        return null;
+      } finally {
+        if (reportProgress) pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
       }
-      return null;
-    } finally {
-      if (reportProgress) pendingTableOpenCount.value = Math.max(0, pendingTableOpenCount.value - 1);
-    }
+    });
   }
 
   function startProvisionalOpen(tab, table, options, { paneId, intent } = {}) {
@@ -890,78 +916,80 @@ export function useTableSession(
       }
       return { ok: false, error: new Error("missing table session") };
     }
-    const requestToken = beginTabRequest(tab.id);
-    const inPlaceWindow = inPlace ? loadedRowWindow(tab, anchor) : null;
-    cancelExactTotalRefresh(tab);
-    tab.loading = true;
-    tab.loadingMore = false;
-    tab.loadError = null;
-    try {
-      let windowOffset = (Math.max(1, Math.floor(Number(page) || 1)) - 1) * REQUEST_PAGE_SIZE;
-      let payload;
-      if (inPlaceWindow) {
-        // Rows at the end may be gone: step back a window, then to the top.
-        const starts = [...new Set([inPlaceWindow.offset, Math.max(0, inPlaceWindow.offset - inPlaceWindow.size), 0])];
-        for (const start of starts) {
+    return trackTabPageRequest(tab.id, "page", async () => {
+      const requestToken = beginTabRequest(tab.id);
+      const inPlaceWindow = inPlace ? loadedRowWindow(tab, anchor) : null;
+      cancelExactTotalRefresh(tab);
+      tab.loading = true;
+      tab.loadingMore = false;
+      tab.loadError = null;
+      try {
+        let windowOffset = (Math.max(1, Math.floor(Number(page) || 1)) - 1) * REQUEST_PAGE_SIZE;
+        let payload;
+        if (inPlaceWindow) {
+          // Rows at the end may be gone: step back a window, then to the top.
+          const starts = [...new Set([inPlaceWindow.offset, Math.max(0, inPlaceWindow.offset - inPlaceWindow.size), 0])];
+          for (const start of starts) {
+            payload = await measureAsync(
+              "table.fetch.invoke",
+              () => invokeWorkbench("fetch_table_page", {
+                sessionId: tab.sessionId,
+                request: buildPageRequest(tab, Math.floor(start / REQUEST_PAGE_SIZE) + 1, {
+                  includeFilter: usesBackendFilter(tab),
+                  pageSize: inPlaceWindow.size,
+                  offset: start,
+                }),
+              }),
+              { tableName: tab.tableName, page: Math.floor(start / REQUEST_PAGE_SIZE) + 1, offset: start },
+            );
+            if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+            windowOffset = start;
+            if (Array.isArray(payload?.rows) && payload.rows.length > 0) break;
+          }
+        } else {
           payload = await measureAsync(
             "table.fetch.invoke",
             () => invokeWorkbench("fetch_table_page", {
-              sessionId: tab.sessionId,
-              request: buildPageRequest(tab, Math.floor(start / REQUEST_PAGE_SIZE) + 1, {
-                includeFilter: usesBackendFilter(tab),
-                pageSize: inPlaceWindow.size,
-                offset: start,
+                sessionId: tab.sessionId,
+                request: buildPageRequest(tab, page, { includeFilter: usesBackendFilter(tab) }),
               }),
-            }),
-            { tableName: tab.tableName, page: Math.floor(start / REQUEST_PAGE_SIZE) + 1, offset: start },
+            { tableName: tab.tableName, page },
           );
-          if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
-          windowOffset = start;
-          if (Array.isArray(payload?.rows) && payload.rows.length > 0) break;
         }
-      } else {
-        payload = await measureAsync(
-          "table.fetch.invoke",
-          () => invokeWorkbench("fetch_table_page", {
-              sessionId: tab.sessionId,
-              request: buildPageRequest(tab, page, { includeFilter: usesBackendFilter(tab) }),
-            }),
-          { tableName: tab.tableName, page },
-        );
-      }
-      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
-      markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
-      const totals = inPlaceWindow ? inPlaceTotals(tab, payload, windowOffset, removedRows) : {};
-      replaceTabPage(workspace, tab.id, { ...payload, ...totals, rowWindowOffset: windowOffset });
-      if (totals.totalRowsExact === false) scheduleExactTotalRefresh(tab);
-      markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
-      sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
-      tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
-      tab.loadError = null;
-      const msg = tableStatusLabel(tab, payload.totalRows, payload.totalRowsExact, payload.hasMore);
-      if (setStatus) setStatus(msg);
-      else statusText.value = msg;
-      return { ok: true, tab };
-    } catch (error) {
-      if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
-      if (isSessionInvalidError(error)) {
-        // The backend session died silently (idle TTL / capacity eviction /
-        // connection teardown). Reopen it transparently instead of surfacing
-        // an unrecoverable error; loadFirstPageIntoTab keeps the tab's
-        // filter/sort through buildOpenSessionOptions.
-        const recoveredTab = await reopenTableSession(tab);
-        if (recoveredTab) return { ok: true, tab: recoveredTab, recovered: true };
+        if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+        markPerf("table.page.replace.start", { tableName: tab.tableName, rows: payload.rows?.length || 0, columns: payload.columns?.length || 0 });
+        const totals = inPlaceWindow ? inPlaceTotals(tab, payload, windowOffset, removedRows) : {};
+        replaceTabPage(workspace, tab.id, { ...payload, ...totals, rowWindowOffset: windowOffset });
+        if (totals.totalRowsExact === false) scheduleExactTotalRefresh(tab);
+        markPerf("table.page.replace.end", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+        sampleNextFrame("table.grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+        tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
+        tab.loadError = null;
+        const msg = tableStatusLabel(tab, payload.totalRows, payload.totalRowsExact, payload.hasMore);
+        if (setStatus) setStatus(msg);
+        else statusText.value = msg;
+        return { ok: true, tab };
+      } catch (error) {
+        if (!isCurrentTabRequest(tab.id, requestToken)) return { ok: false, stale: true };
+        if (isSessionInvalidError(error)) {
+          // The backend session died silently (idle TTL / capacity eviction /
+          // connection teardown). Reopen it transparently instead of surfacing
+          // an unrecoverable error; loadFirstPageIntoTab keeps the tab's
+          // filter/sort through buildOpenSessionOptions.
+          const recoveredTab = await reopenTableSession(tab);
+          if (recoveredTab) return { ok: true, tab: recoveredTab, recovered: true };
+          return { ok: false, error };
+        }
+        tab.loading = false;
+        tab.loadError = String(error?.message || error);
+        const msg = `读取分页失败：${String(error?.message || error)}`;
+        if (setStatus) setStatus(msg, { error: true });
+        else statusText.value = msg;
         return { ok: false, error };
+      } finally {
+        if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
       }
-      tab.loading = false;
-      tab.loadError = String(error?.message || error);
-      const msg = `读取分页失败：${String(error?.message || error)}`;
-      if (setStatus) setStatus(msg, { error: true });
-      else statusText.value = msg;
-      return { ok: false, error };
-    } finally {
-      if (isCurrentTabRequest(tab.id, requestToken)) tab.loading = false;
-    }
+    });
   }
 
   async function loadNextPage(tab) {
@@ -969,54 +997,74 @@ export function useTableSession(
       const result = await loadNextSearchResultPage(tab);
       return Boolean(result?.ok && result?.addedRows > 0);
     }
+    const pending = tab?.id ? pendingPageRequestByTab.get(tab.id) : null;
+    if (pending) {
+      try {
+        await pending.promise;
+      } catch {
+        return false;
+      }
+      if (disposed || !findTabById(tab.id)) return false;
+      if (pending.kind === "next") return pending.addedRows > 0 || Boolean(tab.loading);
+      return !tab.loadError && (Boolean(tab.loading) || (!tab.fullyLoaded && tab.hasMore !== false));
+    }
     if (!tab?.sessionId || tab.loading || tab.loadingMore || tab.loadingPrevious || tab.boundaryLoading || tab.fullyLoaded || tab.hasMore === false) return false;
     const totalRows = Math.max(0, Math.floor(Number(tab.totalRows) || 0));
     if (tab.totalRowsExact !== false && totalRows > 0 && tabRowCount(tab) >= totalRows) {
       tab.fullyLoaded = true;
       return false;
     }
-    const requestToken = beginTabRequest(tab.id);
-    tab.loadingMore = true;
-    try {
-      const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
-      const loadedRowCount = tabRowCount(tab);
-      const nextPageSize = loadedRowCount < REQUEST_PAGE_SIZE
-        ? REQUEST_PAGE_SIZE - loadedRowCount
-        : REQUEST_PAGE_SIZE;
-      const nextPage = Math.floor(loadedRowCount / REQUEST_PAGE_SIZE) + 1;
-      const payload = await measureAsync(
-        "table.fetchMore.invoke",
-        () => invokeWorkbench("fetch_table_page", {
-          sessionId: tab.sessionId,
-          request: buildPageRequest(tab, nextPage, {
-            includeFilter: usesBackendFilter(tab),
-            pageSize: nextPageSize,
-            offset: windowOffset + loadedRowCount,
+    return trackTabPageRequest(tab.id, "next", async (entry) => {
+      const requestToken = beginTabRequest(tab.id);
+      currentNextRequestByTab.set(tab.id, requestToken);
+      tab.loadingMore = true;
+      try {
+        const windowOffset = Math.max(0, Math.floor(Number(tab.rowWindowOffset) || 0));
+        const loadedRowCount = tabRowCount(tab);
+        const nextPageSize = loadedRowCount < REQUEST_PAGE_SIZE
+          ? REQUEST_PAGE_SIZE - loadedRowCount
+          : REQUEST_PAGE_SIZE;
+        const nextPage = Math.floor(loadedRowCount / REQUEST_PAGE_SIZE) + 1;
+        const payload = await measureAsync(
+          "table.fetchMore.invoke",
+          () => invokeWorkbench("fetch_table_page", {
+            sessionId: tab.sessionId,
+            request: buildPageRequest(tab, nextPage, {
+              includeFilter: usesBackendFilter(tab),
+              pageSize: nextPageSize,
+              offset: windowOffset + loadedRowCount,
+            }),
           }),
-        }),
-        { tableName: tab.tableName, page: nextPage, offset: windowOffset + loadedRowCount },
-      );
-      if (!isCurrentTabRequest(tab.id, requestToken)) return false;
-      appendTabPage(workspace, tab.id, payload);
-      if (tabRowCount(tab) >= REQUEST_PAGE_SIZE) tab.pageSize = REQUEST_PAGE_SIZE;
-      markPerf("table.page.appended", { tableName: tab.tableName, rows: tabRowCount(tab), totalRows: tab.totalRows || 0 });
-      sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
-      tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
-      tab.loadMoreError = null;
-      const msg = tableStatusLabel(tab);
-      if (setStatus) setStatus(msg);
-      else statusText.value = msg;
-      return Array.isArray(payload.rows) && payload.rows.length > 0;
-    } catch (error) {
-      if (isCurrentTabRequest(tab.id, requestToken)) {
-        tab.loadingMore = false;
-        tab.loadMoreError = String(error?.message || error);
-        const msg = `继续读取失败：${String(error?.message || error)}`;
-        if (setStatus) setStatus(msg, { error: true });
+          { tableName: tab.tableName, page: nextPage, offset: windowOffset + loadedRowCount },
+        );
+        if (!isCurrentTabRequest(tab.id, requestToken)) return false;
+        appendTabPage(workspace, tab.id, payload);
+        if (tabRowCount(tab) >= REQUEST_PAGE_SIZE) tab.pageSize = REQUEST_PAGE_SIZE;
+        markPerf("table.page.appended", { tableName: tab.tableName, rows: tabRowCount(tab), totalRows: tab.totalRows || 0 });
+        sampleNextFrame("table.append-grid-frame", { tableName: tab.tableName, rows: tabRowCount(tab), columns: tab.columns?.length || 0 });
+        tab.primaryKeys = payload.primaryKeys || tab.primaryKeys || [];
+        tab.loadMoreError = null;
+        const msg = tableStatusLabel(tab);
+        if (setStatus) setStatus(msg);
         else statusText.value = msg;
+        entry.addedRows = Array.isArray(payload.rows) ? payload.rows.length : 0;
+        return entry.addedRows > 0;
+      } catch (error) {
+        if (isCurrentTabRequest(tab.id, requestToken)) {
+          tab.loadingMore = false;
+          tab.loadMoreError = String(error?.message || error);
+          const msg = `继续读取失败：${String(error?.message || error)}`;
+          if (setStatus) setStatus(msg, { error: true });
+          else statusText.value = msg;
+        }
+        return false;
+      } finally {
+        if (currentNextRequestByTab.get(tab.id) === requestToken) {
+          currentNextRequestByTab.delete(tab.id);
+          tab.loadingMore = false;
+        }
       }
-      return false;
-    }
+    });
   }
 
   // 向前（表头方向）加载上一页窗口：跳到末行后向上滚动时无缝接回前面的行。
@@ -1389,14 +1437,19 @@ export function useTableSession(
   async function clearRelationFilter(tab) {
     if (!normalizeRelationFilter(tab?.relationFilter)) return { ok: false };
     const query = String(tab.searchQuery || tab.filter || "").trim();
+    const filterMode = normalizeTableFilterMode(tab.filterMode);
     resetNormalTableViewState(tab);
+    tab.filterMode = filterMode;
     if (query) {
       tab.filter = query;
       tab.searchQuery = query;
     }
     if (!tab.sessionId) return { ok: true, tab };
     const result = await fetchPage(tab, 1);
-    return { ok: true, tab: result?.tab || tab };
+    if (!result?.ok) return result || { ok: false, tab };
+    const nextTab = result.tab || tab;
+    scheduleExactTotalRefresh(nextTab);
+    return { ok: true, tab: nextTab };
   }
 
   function applySort(tab, column, direction) {
@@ -1418,7 +1471,9 @@ export function useTableSession(
       tab.searchResultQuery = "";
     }
     if (!tab.sessionId) return { ok: true, tab };
-    return fetchPage(tab, 1);
+    const result = await fetchPage(tab, 1);
+    if (result?.ok) scheduleExactTotalRefresh(result.tab || tab);
+    return result;
   }
 
   async function applyColumnFilter(tab, column, rule) {
@@ -1432,14 +1487,18 @@ export function useTableSession(
       ? upsertColumnFilter(tab.columnFilters, { ...rule, column })
       : removeColumnFilter(tab.columnFilters, column);
     if (!tab.sessionId) return { ok: true, tab };
-    return fetchPage(tab, 1);
+    const result = await fetchPage(tab, 1);
+    if (result?.ok) scheduleExactTotalRefresh(result.tab || tab);
+    return result;
   }
 
   async function clearColumnFilters(tab) {
     if (!tab || !hasActiveColumnFilters(tab.columnFilters)) return { ok: false };
     tab.columnFilters = [];
     if (!tab.sessionId) return { ok: true, tab };
-    return fetchPage(tab, 1);
+    const result = await fetchPage(tab, 1);
+    if (result?.ok) scheduleExactTotalRefresh(result.tab || tab);
+    return result;
   }
 
   return {

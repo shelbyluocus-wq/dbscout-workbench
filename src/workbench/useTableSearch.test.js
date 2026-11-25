@@ -531,3 +531,100 @@ test("handleTableFindKeydown prevents native find and focuses the table search i
   assert.equal(searched.handleTableFindKeydown(event), true);
   assert.deepEqual(calls, ["preventDefault", "stopPropagation", "focus", "select"]);
 });
+
+test("ordinary search waits for an in-flight table reload before scanning all pages", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Filtered", note: "only row" }];
+  tab.loading = true;
+  tab.fullyLoaded = false;
+  const reloadGate = deferred();
+  const selected = [];
+  let pageCalls = 0;
+  const { searched, scheduler } = createSearch(tab, {
+    selected,
+    loadNextPage: async (targetTab) => {
+      pageCalls += 1;
+      if (pageCalls === 1) {
+        await reloadGate.promise;
+        targetTab.rows = [{ id: "1", name: "Page 1", note: "first" }];
+        targetTab.loading = false;
+        targetTab.fullyLoaded = false;
+        return true;
+      }
+      targetTab.rows.push({ id: "1728", name: "Page 2", note: "572001" });
+      targetTab.fullyLoaded = true;
+      return true;
+    },
+  });
+
+  const pending = searched.runTableSearch("572001");
+  scheduler.flushLatest();
+  reloadGate.resolve();
+  const result = await pending;
+
+  assert.equal(result.ok, true);
+  assert.equal(pageCalls, 2);
+  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
+});
+
+test("resumeCurrentSearchResults skips redundant search-filter reload and preserves pending empty-tab typing", async () => {
+  const tab = makeTab();
+  tab.fullyLoaded = false;
+  let filterReloads = 0;
+  const { searched, scheduler } = createSearch(tab, {
+    loadNextPage: async (targetTab) => {
+      targetTab.rows.push({ id: "3", name: "Later", note: "Needle later" });
+      targetTab.fullyLoaded = true;
+      return true;
+    },
+  });
+
+  // When tab.filter is still empty during debounce, resume must not cancel the scheduled search.
+  const pending = searched.runTableSearch("needle");
+  assert.deepEqual(await searched.resumeCurrentSearchResults({ select: true }), []);
+  assert.equal(scheduler.size(), 1);
+  scheduler.flushLatest();
+  await pending;
+  assert.equal(searched.searchMatches.value.length, 2);
+
+  // When searchFilterActive is already applied by the caller, resume scans without refetching page 1.
+  const filteredTab = makeTab();
+  filteredTab.filter = "needle";
+  filteredTab.searchQuery = "needle";
+  filteredTab.searchFilterActive = true;
+  filteredTab.fullyLoaded = true;
+  const filteredSearch = useTableSearch(computed(() => filteredTab), {
+    onSearchFilterChange: async () => {
+      filterReloads += 1;
+      return { ok: true };
+    },
+    loadNextPage: async () => false,
+    selectCellAt: () => {},
+    statusText: ref(""),
+  });
+  const resumed = await filteredSearch.resumeCurrentSearchResults({ select: true });
+  assert.equal(filterReloads, 0);
+  assert.equal(resumed.length, 1);
+});
+
+test("next and previous navigation resume an incomplete ordinary search instead of sticking at 0/0", async () => {
+  const tab = makeTab();
+  tab.rows = [{ id: "1", name: "Alpha", note: "page 1" }];
+  tab.filter = "572001";
+  tab.searchQuery = "572001";
+  tab.fullyLoaded = false;
+  const selected = [];
+  const { searched } = createSearch(tab, {
+    selected,
+    loadNextPage: async (targetTab) => {
+      targetTab.rows.push({ id: "1728", name: "Target", note: "572001" });
+      targetTab.fullyLoaded = true;
+      return true;
+    },
+  });
+
+  assert.equal(await searched.goToNextSearchMatch(), true);
+  assert.deepEqual(searched.searchMatches.value, [{ rowIndex: 1, columnIndex: 2 }]);
+  assert.deepEqual(selected, [{ targetTab: tab, rowIndex: 1, columnIndex: 2 }]);
+});
