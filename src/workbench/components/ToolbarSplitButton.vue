@@ -13,11 +13,12 @@ const props = defineProps({
   menuDisabled: { type: Boolean, default: false },
   primaryOpensMenu: { type: Boolean, default: false },
   singleTrigger: { type: Boolean, default: false },
+  openOnHover: { type: Boolean, default: false },
   active: { type: Boolean, default: false },
   menuClass: { type: String, default: "" },
 });
 
-const emit = defineEmits(["primary", "toggle", "close", "select"]);
+const emit = defineEmits(["primary", "toggle", "open", "close", "select"]);
 const theme = inject("theme", ref("light"));
 const rootRef = ref(null);
 const mainRef = ref(null);
@@ -25,6 +26,11 @@ const caretRef = ref(null);
 const menuRef = ref(null);
 const menuPosition = ref({ left: 8, top: 8, minWidth: 168 });
 const menuId = `wb-toolbar-menu-${useId().replace(/:/g, "")}`;
+const HOVER_OPEN_DELAY_MS = 65;
+const HOVER_CLOSE_DELAY_MS = 180;
+const openedByHover = ref(false);
+let hoverOpenTimer = null;
+let hoverCloseTimer = null;
 
 const resolvedMenuLabel = computed(() => props.menuLabel || `${props.label}选项`);
 const menuStyle = computed(() => ({
@@ -39,7 +45,7 @@ function updateMenuPosition() {
 
   const viewportWidth = globalThis.innerWidth || globalThis.document?.documentElement?.clientWidth || triggerRect.right;
   const viewportHeight = globalThis.innerHeight || globalThis.document?.documentElement?.clientHeight || triggerRect.bottom;
-  const menuWidth = menuRef.value?.offsetWidth || Math.max(168, triggerRect.width);
+  const menuWidth = menuRef.value?.offsetWidth || Math.max(204, triggerRect.width);
   const menuHeight = menuRef.value?.offsetHeight || 44;
   const margin = 8;
   const gap = 6;
@@ -52,7 +58,7 @@ function updateMenuPosition() {
     top: belowTop + menuHeight <= viewportHeight - margin || aboveTop < margin
       ? Math.min(belowTop, Math.max(margin, viewportHeight - menuHeight - margin))
       : aboveTop,
-    minWidth: Math.max(168, Math.ceil(triggerRect.width)),
+    minWidth: Math.max(204, Math.ceil(triggerRect.width)),
   };
 }
 
@@ -74,24 +80,113 @@ function focusRelativeMenuItem(delta) {
   focusMenuItem((current < 0 ? 0 : current) + delta);
 }
 
+function clearHoverTimers() {
+  if (hoverOpenTimer) {
+    clearTimeout(hoverOpenTimer);
+    hoverOpenTimer = null;
+  }
+  if (hoverCloseTimer) {
+    clearTimeout(hoverCloseTimer);
+    hoverCloseTimer = null;
+  }
+}
+
+function isHoverTriggerDisabled() {
+  return props.singleTrigger
+    ? Boolean(props.primaryDisabled || props.menuDisabled)
+    : Boolean(props.menuDisabled);
+}
+
+function scheduleHoverOpen() {
+  if (!props.openOnHover || isHoverTriggerDisabled()) return;
+  if (hoverCloseTimer) {
+    clearTimeout(hoverCloseTimer);
+    hoverCloseTimer = null;
+  }
+  if (props.open || hoverOpenTimer) return;
+  hoverOpenTimer = setTimeout(() => {
+    hoverOpenTimer = null;
+    if (props.open || isHoverTriggerDisabled()) return;
+    openedByHover.value = true;
+    emit("open");
+  }, HOVER_OPEN_DELAY_MS);
+}
+
+function scheduleHoverClose() {
+  if (!props.openOnHover) return;
+  if (hoverOpenTimer) {
+    clearTimeout(hoverOpenTimer);
+    hoverOpenTimer = null;
+  }
+  if (!props.open || !openedByHover.value || hoverCloseTimer) return;
+  hoverCloseTimer = setTimeout(() => {
+    hoverCloseTimer = null;
+    if (!props.open || !openedByHover.value) return;
+    openedByHover.value = false;
+    emit("close");
+  }, HOVER_CLOSE_DELAY_MS);
+}
+
+function onTriggerPointerEnter(event) {
+  if (event?.pointerType === "touch") return;
+  scheduleHoverOpen();
+}
+
+function onTriggerPointerLeave(event) {
+  if (event?.pointerType === "touch") return;
+  scheduleHoverClose();
+}
+
+function onMenuPointerEnter(event) {
+  if (event?.pointerType === "touch") return;
+  if (hoverCloseTimer) {
+    clearTimeout(hoverCloseTimer);
+    hoverCloseTimer = null;
+  }
+}
+
+function onMenuPointerLeave(event) {
+  if (event?.pointerType === "touch") return;
+  scheduleHoverClose();
+}
+
 function closeMenu({ restoreFocus = false } = {}) {
+  clearHoverTimers();
+  openedByHover.value = false;
   emit("close");
   if (restoreFocus) nextTick(() => (props.singleTrigger ? mainRef.value : caretRef.value)?.focus());
 }
 
 function onMainClick() {
+  clearHoverTimers();
   if (props.primaryOpensMenu) {
+    if (props.open && openedByHover.value) {
+      openedByHover.value = false;
+      nextTick(() => focusMenuItem(0));
+      return;
+    }
+    openedByHover.value = false;
     emit("toggle");
     return;
   }
+  openedByHover.value = false;
   emit("close");
   emit("primary");
 }
 
+function onKeyboardToggle() {
+  clearHoverTimers();
+  openedByHover.value = false;
+  emit("toggle");
+}
+
 function onSelect(item) {
   if (item?.disabled) return;
+  clearHoverTimers();
+  const restoreFocus = !openedByHover.value;
+  openedByHover.value = false;
   emit("select", item.id);
-  closeMenu({ restoreFocus: true });
+  closeMenu({ restoreFocus });
 }
 
 function onMenuKeydown(event) {
@@ -134,11 +229,15 @@ function onDocumentKeydown(event) {
 watch(
   () => props.open,
   (open) => {
-    if (!open) return;
+    if (!open) {
+      clearHoverTimers();
+      openedByHover.value = false;
+      return;
+    }
     updateMenuPosition();
     nextTick(() => {
       updateMenuPosition();
-      focusMenuItem(0);
+      if (!openedByHover.value) focusMenuItem(0);
     });
   },
 );
@@ -152,6 +251,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  clearHoverTimers();
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("focusin", onDocumentFocusIn);
   document.removeEventListener("keydown", onDocumentKeydown, true);
@@ -165,6 +265,8 @@ onBeforeUnmount(() => {
     ref="rootRef"
     class="wb-toolbar-split-button"
     :class="{ 'is-open': open, 'is-active': active, 'is-single-trigger': singleTrigger }"
+    @pointerenter="onTriggerPointerEnter"
+    @pointerleave="onTriggerPointerLeave"
   >
     <button
       v-if="singleTrigger"
@@ -177,7 +279,7 @@ onBeforeUnmount(() => {
       :aria-controls="open ? menuId : undefined"
       :aria-label="`${resolvedMenuLabel}：${label}`"
       @click="onMainClick"
-      @keydown.arrow-down.prevent="emit('toggle')"
+      @keydown.arrow-down.prevent="onKeyboardToggle"
     >
       <ToolbarActionIcon v-if="icon" :name="icon" />
       <span class="wb-toolbar-action-label">{{ label }}</span>
@@ -209,8 +311,8 @@ onBeforeUnmount(() => {
       :aria-expanded="String(open)"
       :aria-controls="open ? menuId : undefined"
       :aria-label="resolvedMenuLabel"
-      @click="emit('toggle')"
-      @keydown.arrow-down.prevent="emit('toggle')"
+      @click="onKeyboardToggle"
+      @keydown.arrow-down.prevent="onKeyboardToggle"
     >
       <ChevronDown :size="12" aria-hidden="true" />
     </button>
@@ -229,28 +331,38 @@ onBeforeUnmount(() => {
           :aria-label="resolvedMenuLabel"
           @keydown="onMenuKeydown"
           @pointerdown.stop
+          @pointerenter="onMenuPointerEnter"
+          @pointerleave="onMenuPointerLeave"
         >
-          <button
-            v-for="item in items"
-            :key="item.id"
-            type="button"
-            class="wb-toolbar-action-menu-item"
-            :class="{ 'is-checked': item.checked, 'has-separator': item.separatorBefore }"
-            :disabled="item.disabled"
-            :role="item.checkable ? 'menuitemradio' : 'menuitem'"
-            :aria-checked="item.checkable ? String(Boolean(item.checked)) : undefined"
-            @click="onSelect(item)"
-          >
-            <span class="wb-toolbar-action-menu-icon" aria-hidden="true">
-              <Check v-if="item.checked" :size="16" />
-              <ToolbarActionIcon v-else-if="item.icon" :name="item.icon" :size="16" />
-              <span v-else class="wb-toolbar-action-menu-icon-placeholder"></span>
-            </span>
-            <span class="wb-toolbar-action-menu-copy">
-              <span class="wb-toolbar-action-menu-label">{{ item.label }}</span>
-              <span v-if="item.hint" class="wb-toolbar-action-menu-hint">{{ item.hint }}</span>
-            </span>
-          </button>
+          <template v-for="(item, index) in items" :key="item.id">
+            <div
+              v-if="item.groupLabel"
+              class="wb-toolbar-action-menu-group"
+              :class="{ 'has-divider': index > 0 || item.separatorBefore }"
+              role="presentation"
+            >
+              {{ item.groupLabel }}
+            </div>
+            <button
+              type="button"
+              class="wb-toolbar-action-menu-item"
+              :class="{ 'is-checked': item.checked, 'has-separator': !item.groupLabel && item.separatorBefore }"
+              :disabled="item.disabled"
+              :role="item.checkable ? 'menuitemradio' : 'menuitem'"
+              :aria-checked="item.checkable ? String(Boolean(item.checked)) : undefined"
+              @click="onSelect(item)"
+            >
+              <span class="wb-toolbar-action-menu-icon" aria-hidden="true">
+                <Check v-if="item.checked" :size="16" />
+                <ToolbarActionIcon v-else-if="item.icon" :name="item.icon" :size="16" />
+                <span v-else class="wb-toolbar-action-menu-icon-placeholder"></span>
+              </span>
+              <span class="wb-toolbar-action-menu-copy">
+                <span class="wb-toolbar-action-menu-label">{{ item.label }}</span>
+                <span v-if="item.hint" class="wb-toolbar-action-menu-hint">{{ item.hint }}</span>
+              </span>
+            </button>
+          </template>
         </div>
       </Transition>
     </Teleport>

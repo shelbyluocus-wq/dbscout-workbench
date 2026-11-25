@@ -230,7 +230,7 @@ async function restoreRuntimeConnection(invokeWorkbench, payload) {
     } catch (error) {
       // macOS can briefly reject LAN routes while registering a cold app launch.
       const message = String(error?.message || error || "");
-      if (attempt >= retryDelays.length || !/no route to host|network is unreachable|host is unreachable/i.test(message)) throw error;
+      if (attempt >= retryDelays.length || !/no route to host|network is unreachable|host is unreachable|operation not permitted/i.test(message)) throw error;
       await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
     }
   }
@@ -476,6 +476,27 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   function whenConnectionsRestored() {
     return connectionsRestored;
+  }
+
+  async function restoreDisconnectedSavedConnections({ targetConnectionId = "" } = {}) {
+    await connectionsRestored;
+    const requestedId = String(targetConnectionId || "").trim();
+    if (requestedId && connections.value.some((item) => item.id === requestedId && item.connected)) {
+      return true;
+    }
+    const hasDisconnected = connections.value.some((item) => item?.saved && !item.connected);
+    if (!hasDisconnected) return false;
+    const saved = readSavedConnections();
+    if (!saved.length) return false;
+    await restoreSavedConnectionsInOrder(saved, {
+      readyWhen: () => Boolean(requestedId) && connections.value.some((item) => (
+        item.id === requestedId && item.connected
+      )),
+    });
+    connections.value = applyConnectionOrder(connections.value);
+    return requestedId
+      ? connections.value.some((item) => item.id === requestedId && item.connected)
+      : connections.value.some((item) => item.connected);
   }
 
   function restoreSavedConnectionsInOrder(saved, { readyWhen = () => false } = {}) {
@@ -1150,6 +1171,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   return {
     connections,
     whenConnectionsRestored,
+    restoreDisconnectedSavedConnections,
     visibleConnections,
     databases,
     databasesByConnection,

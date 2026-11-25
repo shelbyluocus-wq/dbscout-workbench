@@ -42,8 +42,11 @@ export function useRailDatabases({
         (candidate) => String(candidate?.id) === String(entry.connectionId),
       ) || null;
       const connectionName = connectionLabel(entry.connectionId, connection?.label || entry.connectionId);
-      const missing = !connection;
-      const disconnected = !missing && connection.connected !== true;
+      const hasPendingSavedPlaceholder = !connection && (connections.value || []).some(
+        (candidate) => candidate?.saved && candidate.connected !== true,
+      );
+      const missing = !connection && !hasPendingSavedPlaceholder;
+      const disconnected = hasPendingSavedPlaceholder || (!missing && connection.connected !== true);
       const decoration = getDatabaseDecoration(entry.connectionId, entry.database);
       const autoText = deriveRailMonogram(label);
       let glyph;

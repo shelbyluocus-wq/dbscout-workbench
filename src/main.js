@@ -12,6 +12,7 @@ import {
   resolveWindowRole,
   setCurrentWindowRole,
 } from "./workbench/utils/windowRole.js";
+import { installGlobalErrorHandlers } from "./workbench/utils/frontendErrorLog.js";
 
 // Platform attribute so CSS can scope macOS-only styling (menus, fonts,
 // scrollbars) without touching Windows; also true in the browser preview.
@@ -33,4 +34,6 @@ watch(language.locale, (locale) => {
     : "Blackcat";
 }, { immediate: true });
 
-createApp(MySqlWorkbench).mount("#app");
+const app = createApp(MySqlWorkbench);
+installGlobalErrorHandlers(app);
+app.mount("#app");

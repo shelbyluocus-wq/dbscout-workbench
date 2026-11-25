@@ -1,26 +1,56 @@
 import { readLocalizedContractSource } from "./test-support/localizedContractSource.js";
+import zhCN from "./i18n/zhCN.js";
+import zhTW from "./i18n/zhTW.js";
+import en from "./i18n/en.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const read = (path) => readLocalizedContractSource(new URL(path, import.meta.url), "utf8");
 
-test("data table toolbar exposes direct actions and dropdown choices", () => {
+test("data table toolbar places view switch right of search and collapses replace and split into categorized hover tools", () => {
   const grid = read("./components/DataGrid.vue");
   const home = read("./components/DatabaseHome.vue");
+  const component = read("./components/ToolbarSplitButton.vue");
+  const icons = read("./components/ToolbarActionIcon.vue");
   const styles = read("./workbench.css");
 
   assert.match(grid, /ToolbarSplitButton/);
+  assert.match(
+    grid,
+    /<header ref="tableToolbarRef" class="wb-table-toolbar">[\s\S]*?class="wb-table-search-field"[\s\S]*?class="wb-table-view-switch"[\s\S]*?class="wb-table-toolbar-actions wb-toolbar-action-group"/,
+    "table view switch sits directly to the right of the search field",
+  );
   assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
   assert.match(grid, /createTableImportToolbarActions/);
   assert.match(grid, /:label="importActions\.primary\.label"[\s\S]*?@primary="emit\(resolveTableImportToolbarEvent\(importActions\.primary\.id\)\)"/);
-  assert.match(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/);
+  assert.doesNotMatch(grid, /wb-table-action-button/, "replace is collapsed out of the top-level row");
+  assert.doesNotMatch(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/, "split is collapsed out of the top-level row");
+  assert.match(
+    grid,
+    /class="wb-table-toolbar-tools"[\s\S]*?:label="t\('toolbar\.tools'\)"[\s\S]*?icon="tools"[\s\S]*?open-on-hover[\s\S]*?:items="toolsActionItems"/,
+    "replace and split live inside the categorized hover-expandable tools menu",
+  );
+  assert.match(grid, /groupLabel:\s*t\('toolbar\.groupEdit'\)/);
+  assert.match(grid, /groupLabel:\s*t\('toolbar\.groupView'\)/);
+  assert.match(grid, /groupLabel:\s*t\('toolbar\.groupData'\)/);
+  for (const key of ["toolbar.tools", "toolbar.toolsMenuLabel", "toolbar.groupData", "toolbar.groupEdit", "toolbar.groupView"]) {
+    assert.ok(zhCN[key], `missing zhCN key ${key}`);
+    assert.ok(zhTW[key], `missing zhTW key ${key}`);
+    assert.ok(en[key], `missing en key ${key}`);
+  }
   assert.match(grid, /批量导出/);
   assert.match(grid, /左右分屏/);
   assert.match(grid, /上下分屏/);
+  assert.match(component, /openOnHover/);
+  assert.match(component, /@pointerenter="onTriggerPointerEnter"/);
+  assert.match(component, /@pointerenter="onMenuPointerEnter"/);
+  assert.match(component, /class="wb-toolbar-action-menu-group"/);
+  assert.match(icons, /tools:\s*LayoutGrid/);
   assert.doesNotMatch(grid, /wb-split-more-btn/);
   assert.match(grid, /wb-table-toolbar-actions wb-toolbar-action-group/);
   assert.match(home, /wb-toolbar-action-group wb-dbhome-action-group/);
   assert.match(styles, /\.wb-toolbar-action-group\s*\{/);
+  assert.match(styles, /\.wb-toolbar-action-menu-group\s*\{/);
 });
 
 test("freeze leads the table action group with direct and menu actions", () => {
@@ -94,8 +124,8 @@ test("table and homepage toolbars progressively collapse in narrow split panes",
   const styles = read("./workbench.css");
 
   assert.match(grid, /class="wb-toolbar-compact-overflow wb-table-toolbar-overflow"/);
-  assert.equal((grid.match(/class="wb-table-toolbar-secondary"/g) || []).length, 2, "freeze and split yield first");
-  assert.match(grid, /class="wb-table-toolbar-more"[\s\S]*?:items="secondaryActionItems"/);
+  assert.equal((grid.match(/class="wb-table-toolbar-secondary"/g) || []).length, 1, "freeze yields first into categorized tools while replace and split stay categorized there");
+  assert.match(grid, /class="wb-table-toolbar-tools"[\s\S]*?:items="toolsActionItems"/);
   assert.match(grid, /:items="compactActionItems"/);
   assert.match(grid, /id: "export-current"/);
   assert.match(grid, /\.\.\.importActions\.value\.compactItems/);

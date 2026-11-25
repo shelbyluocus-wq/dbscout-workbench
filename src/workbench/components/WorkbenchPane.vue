@@ -144,6 +144,7 @@ const activeDataTab = computed(() => {
 });
 const tableHistoryContext = inject("tableHistoryContext", null);
 const isActiveDataTabHistory = computed(() => Boolean(activeDataTab.value && activeDataTab.value.viewMode === "history"));
+const pairedHistorySearchWidth = ref(0);
 const tableHistoryIsLoggedIn = computed(() => Boolean(tableHistoryContext?.isLoggedIn?.value));
 const tableHistoryCanOpenBackupCenter = computed(() => Boolean(tableHistoryContext?.canOpenBackupCenter?.value ?? true));
 const activeDataTabMeta = computed(() => {
@@ -156,12 +157,13 @@ const activeDataTabMeta = computed(() => {
   return findIn(props.homeTables) || findIn(props.schema) || null;
 });
 
-function switchActiveDataTabView(mode) {
+function switchActiveDataTabView(mode, searchFieldWidth = 0) {
   const tab = activeDataTab.value;
   if (!tab) return;
   const nextMode = mode === "history" ? "history" : "data";
   if ((tab.viewMode || "data") === nextMode) return;
   if (nextMode === "history") {
+    pairedHistorySearchWidth.value = Number(searchFieldWidth) > 0 ? Math.round(Number(searchFieldWidth)) : 0;
     captureActiveTableViewState(tab);
     tab.viewMode = "history";
   } else {
@@ -2140,13 +2142,15 @@ onMounted(() => emitPaneState());
       :invoke-workbench="invokeWorkbench"
       :is-logged-in="tableHistoryIsLoggedIn"
       :can-open-backup-center="tableHistoryCanOpenBackupCenter"
+      :paired-search-width="pairedHistorySearchWidth"
       @switch-view="switchActiveDataTabView"
       @open-backup-center="openTableHistoryBackupCenter"
     />
 
     <DataGrid
       v-if="activeDataTab"
-      v-show="!isActiveDataTabHistory"
+      :class="{ 'wb-pane-view-hidden': isActiveDataTabHistory }"
+      :aria-hidden="isActiveDataTabHistory ? 'true' : undefined"
       :tab="activeDataTab"
       :schema="schema"
       :engine-kind="activeEngineKind"
@@ -2256,7 +2260,8 @@ onMounted(() => emitPaneState());
 
     <CellDetailPanel
       v-if="activeDataTab"
-      v-show="!isActiveDataTabHistory"
+      :class="{ 'wb-pane-view-hidden': isActiveDataTabHistory }"
+      :aria-hidden="isActiveDataTabHistory ? 'true' : undefined"
       :selected-cell="selectedCell"
       :cell-context="selectedCellContext"
       :row-summary="dataTabRowSummary"

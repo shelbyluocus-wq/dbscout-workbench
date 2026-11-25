@@ -17,6 +17,7 @@ mod config_relations;
 mod control_server;
 mod database_sync_jobs;
 mod db;
+mod frontend_log;
 mod macos_appearance;
 mod ddl;
 mod demo;
@@ -370,6 +371,7 @@ pub fn run() {
             control_server::control_frontend_unready,
             control_server::control_update_context,
             control_server::control_complete_ui_action,
+            frontend_log::log_frontend_error,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build 黑猫")

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   computeInlineDiff,
@@ -10,6 +11,7 @@ import {
   mergeTableAuditEntries,
 } from "./utils/tableChangeHistory.js";
 import {
+  buildFallbackComparisonTable,
   canReconstructRevision,
   reconstructRevisionFullTable,
   searchFullTableComparisonRows,
@@ -590,4 +592,57 @@ test("searchFullTableComparisonRows matches cell values, PKs, and Chinese column
     { text: "|103#", match: false },
     { text: "350", match: true },
   ]);
+});
+
+test("TableChangeHistoryView prevents timeline item crushing, aligns toolbar with DataGrid, avoids GPU blur, and unifies UPDATE split layout", () => {
+  const view = readFileSync(new URL("./components/TableChangeHistoryView.vue", import.meta.url), "utf8");
+  const css = readFileSync(new URL("./workbench.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(view, /wb-thv-fallback-head/, "redundant right-side actor/time header should be omitted");
+  assert.match(
+    view,
+    /<header class="wb-table-toolbar wb-thv-topbar">[\s\S]*?class="wb-table-search-field"[\s\S]*?class="wb-table-view-switch"/,
+    "history topbar reuses DataGrid search field and keeps view switch in identical order/position",
+  );
+  assert.doesNotMatch(view, /translateY\(/, "virtual slice avoids transform translateY blur under macOS zoom");
+  assert.doesNotMatch(css, /\.wb-thv-virtual-slice\s*\{[^}]*will-change:\s*transform/s);
+  assert.match(css, /\.wb-thv-timeline\s*\{[^}]*display:\s*grid[^}]*grid-auto-rows:\s*max-content/s);
+  assert.match(css, /\.wb-thv-rev-item\s*\{[^}]*flex:\s*none[^}]*min-height:\s*auto/s);
+  assert.match(css, /\.wb-thv-load-more\s*\{[^}]*flex:\s*none/s);
+});
+
+test("buildFallbackComparisonTable shapes legacy UPDATE, INSERT, DELETE, and DDL revisions into unified split-table rows", () => {
+  const columns = [
+    { columnName: "ID", columnComment: "物品ID", isPrimaryKey: true },
+    { columnName: "GMDesc", columnComment: "GM说明", isPrimaryKey: false },
+    { columnName: "Name", columnComment: "名称", isPrimaryKey: false },
+  ];
+  const updateRev = groupAuditRevisions(mergeTableAuditEntries({
+    sharedEntries: [
+      {
+        clientId: "u1",
+        ts: "2026-11-13T08:50:28Z",
+        displayName: "杨奭宸",
+        operation: "UPDATE",
+        columnName: "GMDesc",
+        oldValue: "公会建筑升级材料，非个人资源，慎发",
+        newValue: "公会圣物升级材料，非个人资源，慎发",
+        status: "committed",
+        source: "grid",
+      },
+    ],
+  }))[0];
+
+  const table = buildFallbackComparisonTable(updateRev, columns, ["ID"]);
+  assert.equal(table.hasTabularRows, true);
+  assert.equal(table.columns.length, 1);
+  assert.equal(table.columns[0].name, "GMDesc");
+  assert.equal(table.columns[0].comment, "GM说明");
+  assert.equal(table.rows.length, 1);
+  assert.equal(table.rows[0].status, "updated");
+  assert.equal(table.rows[0].before.GMDesc, "公会建筑升级材料，非个人资源，慎发");
+  assert.equal(table.rows[0].after.GMDesc, "公会圣物升级材料，非个人资源，慎发");
+  assert.equal(table.rows[0].cellDiffs.GMDesc.before.changed, "建筑");
+  assert.equal(table.rows[0].cellDiffs.GMDesc.after.changed, "圣物");
+  assert.deepEqual(table.ddlItems, []);
 });

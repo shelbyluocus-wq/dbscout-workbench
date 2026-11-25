@@ -291,3 +291,17 @@ test("reorder moves a tile before or after its neighbor", () => {
   rail.reorder(railDatabaseId("c1", "one"), railDatabaseId("c1", "two"), { position: "before" });
   assert.deepEqual(rail.items.value.map((item) => item.database), ["one", "two", "three"]);
 });
+
+test("treats runtime-id rail tiles as reconnectable disconnected tiles when saved placeholders are pending restore", () => {
+  const { rail } = makeRail({
+    connections: [
+      { id: "saved-mysql:192.168.1.223:8306:root", label: "root@192.168.1.223:8306", saved: true, connected: false },
+      { id: "saved-mysql:192.168.1.243:8306:root", label: "root@192.168.1.243:8306", saved: true, connected: false },
+    ],
+  });
+  rail.pin({ connectionId: "mysql-2", database: "newsg_4cfg" });
+  const [tile] = rail.items.value;
+  assert.equal(tile.missing, false);
+  assert.equal(tile.disconnected, true);
+  assert.match(tile.hint, /^railDatabase\.disconnectedHint/);
+});

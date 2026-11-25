@@ -16,13 +16,17 @@ import {
   X,
 } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
-import { filterRevisionItems, normalizeCellDisplay, parseAuditTimestampMs } from "../utils/tableChangeHistory.js";
-import { splitSearchHighlight } from "../utils/tableHistorySnapshot.js";
+import { normalizeCellDisplay, parseAuditTimestampMs } from "../utils/tableChangeHistory.js";
+import {
+  buildFallbackComparisonTable,
+  searchFullTableComparisonRows,
+  splitSearchHighlight,
+} from "../utils/tableHistorySnapshot.js";
 import { useTableChangeHistory } from "../composables/useTableChangeHistory.js";
 import { invokeWorkbench as defaultInvokeWorkbench } from "../utils/tauriBridge.js";
 
 const ROW_HEIGHT = 30;
-const HEADER_HEIGHT = 44;
+const HEADER_HEIGHT = 48;
 const BUFFER_ROWS = 12;
 const ROW_NUM_WIDTH = 44;
 const MIN_COL_WIDTH = 76;
@@ -37,6 +41,7 @@ const props = defineProps({
   invokeWorkbench: { type: Function, default: null },
   isLoggedIn: { type: Boolean, default: false },
   canOpenBackupCenter: { type: Boolean, default: true },
+  pairedSearchWidth: { type: Number, default: 0 },
 });
 
 const emit = defineEmits(["switch-view", "open-backup-center"]);
@@ -59,22 +64,24 @@ const splitRatio = ref(0.5);
 const draggingSplitter = ref(false);
 const columnWidths = ref({});
 const resizingCol = ref(null);
+const effectivePairedSearchWidth = ref(Math.max(0, Math.round(Number(props.pairedSearchWidth) || 0)));
+const fallbackRowHeights = ref([]);
 
 let syncSourceSide = "";
 let syncReleaseFrame = 0;
 let resizeObserver = null;
+let rootResizeObserver = null;
+let initialRootWidth = 0;
 
 const state = history.state;
 const snapshot = history.snapshot;
 const displayRows = history.displayRows;
 const changedDisplayIndices = history.changedDisplayIndices;
 const searchResult = history.searchResult;
-const activeSearchMatch = history.activeSearchMatch;
 const selectedRevision = history.selectedRevision;
 const filteredRevisions = history.filteredRevisions;
 const actors = history.actors;
 const externalNotice = history.externalNotice;
-const columnComments = history.columnComments;
 
 const isFullTableMode = computed(() => snapshot.value.mode === "full-table");
 const isFieldDiffMode = computed(() => snapshot.value.mode === "field-diff");
@@ -82,7 +89,39 @@ const isInitialLoading = computed(() => (
   (state.loading || state.liveLoading) && state.revisions.length === 0
 ));
 
+const fallbackTable = computed(() => {
+  if (!isFieldDiffMode.value || !selectedRevision.value) {
+    return { columns: [], rows: [], ddlItems: [], hasTabularRows: false };
+  }
+  return buildFallbackComparisonTable(
+    selectedRevision.value,
+    snapshot.value.columns,
+    snapshot.value.primaryKeys,
+  );
+});
+
+const isFallbackSplitMode = computed(() => (
+  !isFullTableMode.value && isFieldDiffMode.value && fallbackTable.value.hasTabularRows
+));
+const isSplitComparisonMode = computed(() => isFullTableMode.value || isFallbackSplitMode.value);
+
 const fullTableColumns = computed(() => snapshot.value.columns || []);
+const comparisonColumns = computed(() => (
+  isFullTableMode.value ? fullTableColumns.value : fallbackTable.value.columns
+));
+const comparisonRows = computed(() => (
+  isFullTableMode.value ? displayRows.value : fallbackTable.value.rows
+));
+
+const pairedSearchFieldStyle = computed(() => {
+  const w = effectivePairedSearchWidth.value;
+  if (!(w > 0)) return undefined;
+  return {
+    flex: `0 1 ${w}px`,
+    width: `${w}px`,
+    maxWidth: `${w}px`,
+  };
+});
 
 function estimateDisplayChars(text) {
   const s = String(text || "");
@@ -96,8 +135,8 @@ function estimateDisplayChars(text) {
 
 // Estimate comfortable default column widths from headers + first 40 rows (CJK-aware).
 const computedDefaultWidths = computed(() => {
-  const cols = fullTableColumns.value;
-  const sampleRows = displayRows.value.slice(0, 40);
+  const cols = comparisonColumns.value;
+  const sampleRows = comparisonRows.value.slice(0, 40);
   const widths = {};
   for (const col of cols) {
     let maxUnits = Math.max(
@@ -113,8 +152,8 @@ const computedDefaultWidths = computed(() => {
         : "";
       maxUnits = Math.max(maxUnits, estimateDisplayChars(bText), estimateDisplayChars(aText));
     }
-    const base = col.primaryKey ? 84 : 108;
-    const est = Math.round(maxUnits * 8.2 + 28);
+    const base = col.primaryKey ? 88 : 116;
+    const est = Math.round(maxUnits * 8.4 + 28);
     widths[col.name] = Math.max(base, Math.min(280, est));
   }
   return widths;
@@ -125,16 +164,32 @@ function widthForCol(colName) {
   if (Number.isFinite(custom)) {
     return Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, custom));
   }
-  return computedDefaultWidths.value[colName] || 120;
+  return computedDefaultWidths.value[colName] || 124;
 }
 
+const stretchLastFallbackColumn = computed(() => (
+  isFallbackSplitMode.value
+  && comparisonColumns.value.length > 0
+  && comparisonColumns.value.length <= 3
+  && Object.keys(columnWidths.value).length === 0
+));
+
 const gridTemplateColumns = computed(() => {
-  const tracks = fullTableColumns.value.map((col) => `${widthForCol(col.name)}px`);
+  const cols = comparisonColumns.value;
+  const tracks = cols.map((col, idx) => {
+    const w = widthForCol(col.name);
+    if (stretchLastFallbackColumn.value && idx === cols.length - 1) {
+      const floor = cols.length === 1 ? 0 : Math.min(w, 120);
+      return `minmax(${floor}px, 1fr)`;
+    }
+    return `${w}px`;
+  });
   return `${ROW_NUM_WIDTH}px ${tracks.join(" ")}`;
 });
 
 const gridTotalWidth = computed(() => {
-  const sum = fullTableColumns.value.reduce((acc, col) => acc + widthForCol(col.name), ROW_NUM_WIDTH);
+  if (stretchLastFallbackColumn.value) return "100%";
+  const sum = comparisonColumns.value.reduce((acc, col) => acc + widthForCol(col.name), ROW_NUM_WIDTH);
   return `${sum}px`;
 });
 
@@ -159,14 +214,29 @@ const splitStageStyle = computed(() => ({
   gridTemplateColumns: `minmax(0, ${splitRatio.value}fr) 5px minmax(0, ${1 - splitRatio.value}fr)`,
 }));
 
-// Fallback field-diff items (when full-table snapshot cannot be reconstructed)
-const filteredFallbackItems = computed(() => {
-  if (!selectedRevision.value || !isFieldDiffMode.value) return [];
-  return filterRevisionItems(
-    selectedRevision.value.items,
-    state.searchQuery,
-    columnComments.value,
-  );
+const effectiveSearchResult = computed(() => {
+  if (isFullTableMode.value) return searchResult.value;
+  if (isFallbackSplitMode.value) {
+    return searchFullTableComparisonRows(
+      comparisonRows.value,
+      comparisonColumns.value,
+      state.searchQuery,
+    );
+  }
+  return {
+    query: String(state.searchQuery || "").trim().toLowerCase(),
+    matches: [],
+    matchedRowIds: new Set(),
+    matchedCellKeys: new Set(),
+    matchedHeaderCols: new Set(),
+  };
+});
+
+const effectiveActiveSearchMatch = computed(() => {
+  const matches = effectiveSearchResult.value.matches;
+  if (!matches.length) return null;
+  const clamped = ((state.activeMatchIndex % matches.length) + matches.length) % matches.length;
+  return matches[clamped] || null;
 });
 
 const activeChangeDisplay = computed(() => {
@@ -179,14 +249,10 @@ const activeChangeDisplay = computed(() => {
 const searchMatchDisplay = computed(() => {
   const q = String(state.searchQuery || "").trim();
   if (!q) return null;
-  if (isFullTableMode.value) {
-    const total = searchResult.value.matches.length;
+  if (isSplitComparisonMode.value) {
+    const total = effectiveSearchResult.value.matches.length;
     const current = total > 0 ? (((state.activeMatchIndex % total) + total) % total) + 1 : 0;
     return { current, total };
-  }
-  if (isFieldDiffMode.value) {
-    const total = filteredFallbackItems.value.length;
-    return { current: total, total, filterMode: true };
   }
   return null;
 });
@@ -257,7 +323,7 @@ function scrollBothPanesTo(targetTop, targetLeft = null) {
 
 function columnLeftOffset(colName) {
   let left = ROW_NUM_WIDTH;
-  for (const col of fullTableColumns.value) {
+  for (const col of comparisonColumns.value) {
     if (col.name === colName) {
       return { left, width: widthForCol(col.name) };
     }
@@ -267,6 +333,15 @@ function columnLeftOffset(colName) {
 }
 
 function scrollToDisplayRow(displayIndex, colName = "") {
+  if (isFallbackSplitMode.value) {
+    const beforeEl = beforeScrollerRef.value;
+    const targetRow = beforeEl?.querySelector?.(`[data-fallback-row-index="${displayIndex}"]`);
+    if (beforeEl && targetRow) {
+      const targetTop = Math.max(0, targetRow.offsetTop - HEADER_HEIGHT - 16);
+      scrollBothPanesTo(targetTop, null);
+    }
+    return;
+  }
   if (displayIndex < 0 || displayIndex >= displayRows.value.length) return;
   const scroller = beforeScrollerRef.value || afterScrollerRef.value;
   const availHeight = Math.max(120, (scroller?.clientHeight || viewportHeight.value) - HEADER_HEIGHT);
@@ -307,9 +382,42 @@ function handleStepChange(delta) {
 }
 
 function handleStepSearchMatch(delta) {
-  const match = history.stepSearchMatch(delta);
-  if (!match) return;
-  scrollToDisplayRow(match.displayIndex, match.colName);
+  const matches = effectiveSearchResult.value.matches;
+  if (!matches.length) return;
+  const nextIdx = ((state.activeMatchIndex + delta) % matches.length + matches.length) % matches.length;
+  state.activeMatchIndex = nextIdx;
+  const match = matches[nextIdx];
+  if (match) scrollToDisplayRow(match.displayIndex, match.colName);
+}
+
+function syncFallbackRowHeights() {
+  if (!isFallbackSplitMode.value) {
+    fallbackRowHeights.value = [];
+    return;
+  }
+  const beforeRows = beforeScrollerRef.value?.querySelectorAll?.("[data-fallback-row-index]");
+  const afterRows = afterScrollerRef.value?.querySelectorAll?.("[data-fallback-row-index]");
+  if (!beforeRows?.length || !afterRows?.length) return;
+  const count = Math.min(beforeRows.length, afterRows.length);
+  for (let i = 0; i < count; i += 1) {
+    beforeRows[i].style.minHeight = "";
+    afterRows[i].style.minHeight = "";
+  }
+  const next = [];
+  for (let i = 0; i < count; i += 1) {
+    const h = Math.ceil(Math.max(
+      beforeRows[i].getBoundingClientRect().height,
+      afterRows[i].getBoundingClientRect().height,
+      38,
+    ));
+    next.push(h);
+  }
+  fallbackRowHeights.value = next;
+}
+
+function fallbackRowStyle(index) {
+  const h = fallbackRowHeights.value[index];
+  return h ? { gridTemplateColumns: gridTemplateColumns.value, minHeight: `${h}px` } : { gridTemplateColumns: gridTemplateColumns.value };
 }
 
 function handleSearchKeydown(event) {
@@ -438,6 +546,7 @@ function sourceLabel(source, isRollback) {
 function shortTime(ts) {
   const full = formatAuditTimestamp(ts);
   if (!full) return "";
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(full)) return full.slice(5, 19);
   return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(full) ? full.slice(5, 16) : full;
 }
 
@@ -458,11 +567,11 @@ function cellDisplay(rowObj, colName) {
 }
 
 function isSearchMatchedCell(rowId, colName) {
-  return searchResult.value.matchedCellKeys.has(`${rowId}\x1f${colName}`);
+  return effectiveSearchResult.value.matchedCellKeys.has(`${rowId}\x1f${colName}`);
 }
 
 function isActiveSearchCell(rowId, colName) {
-  const active = activeSearchMatch.value;
+  const active = effectiveActiveSearchMatch.value;
   return Boolean(active && active.rowId === rowId && active.colName === colName);
 }
 
@@ -541,12 +650,32 @@ watch(
 
 // Scroll to active search match whenever query or match index updates
 watch(
-  () => [activeSearchMatch.value?.rowId, activeSearchMatch.value?.colName, state.activeMatchIndex],
+  () => [effectiveActiveSearchMatch.value?.rowId, effectiveActiveSearchMatch.value?.colName, state.activeMatchIndex],
   async () => {
-    const match = activeSearchMatch.value;
-    if (!match || !isFullTableMode.value) return;
+    const match = effectiveActiveSearchMatch.value;
+    if (!match || !isSplitComparisonMode.value) return;
     await nextTick();
     scrollToDisplayRow(match.displayIndex, match.colName);
+  },
+);
+
+watch(
+  () => [isFallbackSplitMode.value, selectedRevision.value?.id, splitRatio.value, columnWidths.value, state.searchQuery],
+  async () => {
+    if (!isFallbackSplitMode.value) {
+      fallbackRowHeights.value = [];
+      return;
+    }
+    await nextTick();
+    syncFallbackRowHeights();
+  },
+);
+
+watch(
+  () => props.pairedSearchWidth,
+  (val) => {
+    effectivePairedSearchWidth.value = Math.max(0, Math.round(Number(val) || 0));
+    initialRootWidth = Math.round(rootRef.value?.getBoundingClientRect?.().width || 0);
   },
 );
 
@@ -557,8 +686,19 @@ onMounted(() => {
       if (height && Math.abs(height - viewportHeight.value) >= 1) {
         viewportHeight.value = height;
       }
+      if (isFallbackSplitMode.value) syncFallbackRowHeights();
     });
     resizeObserver.observe(beforeScrollerRef.value);
+  }
+  if (typeof ResizeObserver === "function" && rootRef.value) {
+    initialRootWidth = Math.round(rootRef.value.getBoundingClientRect().width || 0);
+    rootResizeObserver = new ResizeObserver((entries) => {
+      const nextWidth = Math.round(entries[0]?.contentRect?.width || 0);
+      if (initialRootWidth > 0 && nextWidth > 0 && Math.abs(nextWidth - initialRootWidth) > 2) {
+        effectivePairedSearchWidth.value = 0;
+      }
+    });
+    rootResizeObserver.observe(rootRef.value);
   }
 });
 
@@ -570,6 +710,7 @@ watch(
       if (el) {
         viewportHeight.value = el.clientHeight || viewportHeight.value;
         resizeObserver.observe(el);
+        if (isFallbackSplitMode.value) nextTick(syncFallbackRowHeights);
       }
     }
   },
@@ -582,6 +723,8 @@ onBeforeUnmount(() => {
   if (syncReleaseFrame) cancelAnimationFrame(syncReleaseFrame);
   resizeObserver?.disconnect();
   resizeObserver = null;
+  rootResizeObserver?.disconnect();
+  rootResizeObserver = null;
 });
 </script>
 
@@ -592,33 +735,90 @@ onBeforeUnmount(() => {
     :aria-label="t('tableHistory.viewAria', { table: tableName })"
     @keydown="handleViewKeydown"
   >
-    <!-- Top bar: [ 表数据 | 修改记录 ] + [ 完整表格 | 仅看改动行 ] + 改动定位 + 搜索 + 刷新 -->
-    <header class="wb-thv-topbar">
-      <div class="wb-thv-topbar-left">
-        <div class="wb-table-view-switch" role="tablist" :aria-label="t('tableHistory.viewSwitchAria')">
-          <button
-            type="button"
-            role="tab"
-            aria-selected="false"
-            class="wb-table-view-switch-btn"
-            @click="emit('switch-view', 'data')"
-          >
-            <Table2 :size="13" :stroke-width="1.9" aria-hidden="true" />
-            <span>{{ t('tableHistory.viewData') }}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected="true"
-            class="wb-table-view-switch-btn is-active"
-          >
-            <History :size="13" :stroke-width="1.9" aria-hidden="true" />
-            <span>{{ t('tableHistory.viewHistory') }}</span>
-          </button>
+    <!-- Top bar: identical position & search field geometry to DataGrid so switching views never jumps -->
+    <header class="wb-table-toolbar wb-thv-topbar">
+      <div
+        class="wb-table-search-field"
+        :class="{ 'has-matches': Boolean(searchMatchDisplay && searchMatchDisplay.total > 0) }"
+        :style="pairedSearchFieldStyle"
+      >
+        <Search class="wb-table-search-field-icon" :size="15" aria-hidden="true" />
+        <input
+          ref="searchInputRef"
+          type="text"
+          class="wb-table-search-field-input"
+          :value="state.searchQuery"
+          :placeholder="t('tableHistory.searchPlaceholder')"
+          :aria-label="t('tableHistory.searchPlaceholder')"
+          @input="history.setSearchQuery($event.target.value)"
+          @keydown="handleSearchKeydown"
+        />
+        <button
+          v-if="state.searchQuery"
+          type="button"
+          class="wb-table-search-clear"
+          :title="t('tableHistory.clearSearch')"
+          :aria-label="t('tableHistory.clearSearch')"
+          @mousedown.prevent
+          @click="history.setSearchQuery('')"
+        >
+          <X :size="16" :stroke-width="2" aria-hidden="true" />
+        </button>
+        <div v-if="searchMatchDisplay" class="wb-search-aux">
+          <span v-if="searchMatchDisplay.total > 0" class="wb-search-nav-inline" role="group" :aria-label="t('m_8ca869f0b453')">
+            <button
+              type="button"
+              class="wb-search-nav-icon"
+              :disabled="searchMatchDisplay.total <= 1"
+              :title="t('tableHistory.prevMatch')"
+              :aria-label="t('tableHistory.prevMatch')"
+              @click="handleStepSearchMatch(-1)"
+            >
+              <ChevronUp :size="18" :stroke-width="2" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="wb-search-nav-icon"
+              :disabled="searchMatchDisplay.total <= 1"
+              :title="t('tableHistory.nextMatch')"
+              :aria-label="t('tableHistory.nextMatch')"
+              @click="handleStepSearchMatch(1)"
+            >
+              <ChevronDown :size="18" :stroke-width="2" aria-hidden="true" />
+            </button>
+          </span>
+          <span
+            class="wb-search-hit-count"
+            :class="{ 'is-empty': searchMatchDisplay.total === 0 }"
+            aria-live="polite"
+          >{{ searchMatchDisplay.current }} / {{ searchMatchDisplay.total }}</span>
         </div>
+      </div>
 
+      <div class="wb-table-view-switch" role="tablist" :aria-label="t('tableHistory.viewSwitchAria')">
+        <button
+          type="button"
+          role="tab"
+          aria-selected="false"
+          class="wb-table-view-switch-btn"
+          @click="emit('switch-view', 'data')"
+        >
+          <Table2 :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewData') }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected="true"
+          class="wb-table-view-switch-btn is-active"
+        >
+          <History :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewHistory') }}</span>
+        </button>
+      </div>
+
+      <div class="wb-thv-topbar-right">
         <template v-if="isFullTableMode">
-          <span class="wb-thv-topbar-sep" aria-hidden="true"></span>
           <div class="wb-thv-scope-switch" role="group" :aria-label="t('tableHistory.scopeAria')">
             <button
               type="button"
@@ -668,65 +868,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </template>
-      </div>
-
-      <div class="wb-thv-topbar-right">
-        <div class="wb-thv-search" :class="{ 'has-query': Boolean(state.searchQuery) }">
-          <Search :size="13" :stroke-width="2" class="wb-thv-search-icon" aria-hidden="true" />
-          <input
-            ref="searchInputRef"
-            type="text"
-            :value="state.searchQuery"
-            :placeholder="t('tableHistory.searchPlaceholder')"
-            :aria-label="t('tableHistory.searchPlaceholder')"
-            @input="history.setSearchQuery($event.target.value)"
-            @keydown="handleSearchKeydown"
-          />
-          <template v-if="searchMatchDisplay">
-            <span
-              class="wb-thv-search-count"
-              :class="{ 'is-empty': searchMatchDisplay.total === 0 }"
-            >
-              <template v-if="searchMatchDisplay.filterMode">
-                {{ searchMatchDisplay.total }}
-              </template>
-              <template v-else>
-                {{ searchMatchDisplay.current }} / {{ searchMatchDisplay.total }}
-              </template>
-            </span>
-            <template v-if="!searchMatchDisplay.filterMode">
-              <button
-                type="button"
-                class="wb-thv-search-nav"
-                :disabled="searchMatchDisplay.total <= 1"
-                :title="t('tableHistory.prevMatch')"
-                :aria-label="t('tableHistory.prevMatch')"
-                @click="handleStepSearchMatch(-1)"
-              >
-                <ChevronUp :size="13" :stroke-width="2" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                class="wb-thv-search-nav"
-                :disabled="searchMatchDisplay.total <= 1"
-                :title="t('tableHistory.nextMatch')"
-                :aria-label="t('tableHistory.nextMatch')"
-                @click="handleStepSearchMatch(1)"
-              >
-                <ChevronDown :size="13" :stroke-width="2" aria-hidden="true" />
-              </button>
-            </template>
-            <button
-              type="button"
-              class="wb-thv-search-clear"
-              :title="t('tableHistory.clearSearch')"
-              :aria-label="t('tableHistory.clearSearch')"
-              @click="history.setSearchQuery('')"
-            >
-              <X :size="12" :stroke-width="2.2" aria-hidden="true" />
-            </button>
-          </template>
-        </div>
 
         <button
           type="button"
@@ -830,7 +971,9 @@ onBeforeUnmount(() => {
                 <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ shortTime(rev.ts) }}</span>
               </div>
               <div class="wb-thv-rev-bottom">
-                <span class="wb-thv-rev-source">{{ sourceLabel(rev.source, rev.isRollback) }}</span>
+                <span class="wb-thv-rev-source" :data-source="rev.isRollback ? 'rollback' : (rev.source || 'other')">
+                  {{ sourceLabel(rev.source, rev.isRollback) }}
+                </span>
                 <span class="wb-thv-rev-badges">
                   <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
                     {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
@@ -892,12 +1035,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- Mode A: Synchronized Side-by-Side Full-Table Comparison -->
+        <!-- Unified Side-by-Side Split-Table Comparison (Full-Table AND Fallback UPDATE/INSERT/DELETE) -->
         <div
-          v-else-if="isFullTableMode"
+          v-else-if="isSplitComparisonMode"
           ref="splitStageRef"
           class="wb-thv-split-stage"
-          :class="{ 'is-dragging': draggingSplitter }"
+          :class="{ 'is-dragging': draggingSplitter, 'is-fallback-split': isFallbackSplitMode }"
           :style="splitStageStyle"
         >
           <!-- LEFT PANE: 修改前 -->
@@ -906,9 +1049,8 @@ onBeforeUnmount(() => {
               <span class="wb-thv-pane-label">
                 <span class="wb-thv-pane-dot is-before" aria-hidden="true"></span>
                 <strong>{{ t('tableHistory.beforePaneTitle') }}</strong>
-                <span class="wb-thv-pane-sub">{{ t('tableHistory.beforePaneSub') }}</span>
               </span>
-              <span class="wb-thv-pane-time">{{ t('tableHistory.beforeTime', { time: fullTime(selectedRevision.ts) }) }}</span>
+              <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ t('tableHistory.beforeTime', { time: shortTime(selectedRevision.ts) }) }}</span>
             </header>
 
             <div
@@ -920,17 +1062,17 @@ onBeforeUnmount(() => {
                 <div class="wb-thv-grid-header" :style="{ gridTemplateColumns }">
                   <div class="wb-thv-col-head is-rownum">#</div>
                   <div
-                    v-for="col in fullTableColumns"
+                    v-for="col in comparisonColumns"
                     :key="`before-h-${col.name}`"
                     class="wb-thv-col-head"
                     :class="{
                       'is-pk': col.primaryKey,
-                      'is-search-header-hit': searchResult.matchedHeaderCols.has(col.name),
+                      'is-search-header-hit': effectiveSearchResult.matchedHeaderCols.has(col.name),
                     }"
                     :title="col.comment ? `${col.name} · ${col.comment}` : col.name"
                   >
                     <div class="wb-thv-col-head-top">
-                      <KeyRound v-if="col.primaryKey" :size="11" :stroke-width="2.1" class="wb-thv-pk-icon" aria-hidden="true" />
+                      <KeyRound v-if="col.primaryKey" :size="12" :stroke-width="2.1" class="wb-thv-pk-icon" aria-hidden="true" />
                       <span class="wb-thv-col-name">{{ col.name }}</span>
                     </div>
                     <span v-if="col.comment" class="wb-thv-col-comment">{{ col.comment }}</span>
@@ -943,10 +1085,10 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="wb-thv-virtual-spacer" :style="{ height: `${totalHeight}px` }">
+                <div v-if="isFullTableMode" class="wb-thv-virtual-spacer" :style="{ height: `${totalHeight}px` }">
                   <div
                     class="wb-thv-virtual-slice"
-                    :style="{ transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)` }"
+                    :style="{ top: `${visibleRange.start * ROW_HEIGHT}px` }"
                   >
                     <div
                       v-for="{ row, displayIndex } in visibleRows"
@@ -956,7 +1098,7 @@ onBeforeUnmount(() => {
                         `is-${row.status}`,
                         {
                           'is-active-change': isActiveChangedRow(displayIndex),
-                          'is-search-row-hit': searchResult.matchedRowIds.has(row.id),
+                          'is-search-row-hit': effectiveSearchResult.matchedRowIds.has(row.id),
                         },
                       ]"
                       :style="{ gridTemplateColumns }"
@@ -966,14 +1108,14 @@ onBeforeUnmount(() => {
                       <template v-if="row.status === 'inserted'">
                         <div
                           class="wb-thv-cell is-placeholder"
-                          :style="{ gridColumn: `2 / span ${Math.max(1, fullTableColumns.length)}` }"
+                          :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                         >
                           {{ t('tableHistory.placeholderBeforeInsert') }}
                         </div>
                       </template>
                       <template v-else>
                         <div
-                          v-for="col in fullTableColumns"
+                          v-for="col in comparisonColumns"
                           :key="`b-${row.id}-${col.name}`"
                           class="wb-thv-cell"
                           :class="{
@@ -1025,6 +1167,83 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </div>
+
+                <!-- Fallback Split Rows (UPDATE / INSERT / DELETE without full-table row identity) -->
+                <div v-else class="wb-thv-fallback-rows">
+                  <div
+                    v-for="(row, rowIdx) in comparisonRows"
+                    :key="`fb-b-${row.id}`"
+                    :data-fallback-row-index="rowIdx"
+                    class="wb-thv-grid-row is-fallback-row"
+                    :class="[
+                      `is-${row.status}`,
+                      { 'is-search-row-hit': effectiveSearchResult.matchedRowIds.has(row.id) },
+                    ]"
+                    :style="fallbackRowStyle(rowIdx)"
+                    :data-row-status="row.status"
+                  >
+                    <div class="wb-thv-cell is-rownum">{{ row.rowIndex + 1 }}</div>
+                    <template v-if="row.status === 'inserted'">
+                      <div
+                        class="wb-thv-cell is-placeholder"
+                        :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
+                      >
+                        {{ t('tableHistory.placeholderBeforeInsert') }}
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div
+                        v-for="col in comparisonColumns"
+                        :key="`fb-b-${row.id}-${col.name}`"
+                        class="wb-thv-cell is-wrap"
+                        :class="{
+                          'is-pk': col.primaryKey,
+                          'is-diff-before': row.status === 'updated' && row.changedCols.includes(col.name),
+                          'is-deleted-cell': row.status === 'deleted',
+                          'is-search-hit': isSearchMatchedCell(row.id, col.name),
+                          'is-search-active': isActiveSearchCell(row.id, col.name),
+                        }"
+                        :title="cellDisplay(row.before, col.name).text"
+                      >
+                        <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.before">
+                          <span v-if="row.cellDiffs[col.name].before.isNull" class="wb-thv-null-pill">NULL</span>
+                          <span v-else-if="row.cellDiffs[col.name].before.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
+                          <span v-else-if="row.cellDiffs[col.name].before.hasHighlight" class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].before.prefix, state.searchQuery)" :key="`fbp-${idx}`">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template><mark class="wb-thv-mark-del">
+                              <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].before.changed, state.searchQuery)" :key="`fbc-${idx}`">
+                                <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                                <template v-else>{{ seg.text }}</template>
+                              </template>
+                            </mark><template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].before.suffix, state.searchQuery)" :key="`fbs-${idx}`">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                          <span v-else class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].before.text, state.searchQuery)" :key="idx">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                        </template>
+                        <template v-else>
+                          <span v-if="cellDisplay(row.before, col.name).isNull" class="wb-thv-null-pill">NULL</span>
+                          <span v-else-if="cellDisplay(row.before, col.name).isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
+                          <span v-else-if="cellDisplay(row.before, col.name).isMissing" class="wb-thv-missing-dash">—</span>
+                          <span v-else class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(cellDisplay(row.before, col.name).text, state.searchQuery)" :key="idx">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -1045,11 +1264,8 @@ onBeforeUnmount(() => {
               <span class="wb-thv-pane-label">
                 <span class="wb-thv-pane-dot is-after" aria-hidden="true"></span>
                 <strong>{{ t('tableHistory.afterPaneTitle') }}</strong>
-                <span class="wb-thv-pane-sub">
-                  {{ selectedRevision.actor }} · {{ sourceLabel(selectedRevision.source, selectedRevision.isRollback) }}
-                </span>
               </span>
-              <span class="wb-thv-pane-time">{{ fullTime(selectedRevision.ts) }}</span>
+              <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ shortTime(selectedRevision.ts) }}</span>
             </header>
 
             <div
@@ -1061,17 +1277,17 @@ onBeforeUnmount(() => {
                 <div class="wb-thv-grid-header" :style="{ gridTemplateColumns }">
                   <div class="wb-thv-col-head is-rownum">#</div>
                   <div
-                    v-for="col in fullTableColumns"
+                    v-for="col in comparisonColumns"
                     :key="`after-h-${col.name}`"
                     class="wb-thv-col-head"
                     :class="{
                       'is-pk': col.primaryKey,
-                      'is-search-header-hit': searchResult.matchedHeaderCols.has(col.name),
+                      'is-search-header-hit': effectiveSearchResult.matchedHeaderCols.has(col.name),
                     }"
                     :title="col.comment ? `${col.name} · ${col.comment}` : col.name"
                   >
                     <div class="wb-thv-col-head-top">
-                      <KeyRound v-if="col.primaryKey" :size="11" :stroke-width="2.1" class="wb-thv-pk-icon" aria-hidden="true" />
+                      <KeyRound v-if="col.primaryKey" :size="12" :stroke-width="2.1" class="wb-thv-pk-icon" aria-hidden="true" />
                       <span class="wb-thv-col-name">{{ col.name }}</span>
                     </div>
                     <span v-if="col.comment" class="wb-thv-col-comment">{{ col.comment }}</span>
@@ -1084,10 +1300,10 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="wb-thv-virtual-spacer" :style="{ height: `${totalHeight}px` }">
+                <div v-if="isFullTableMode" class="wb-thv-virtual-spacer" :style="{ height: `${totalHeight}px` }">
                   <div
                     class="wb-thv-virtual-slice"
-                    :style="{ transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)` }"
+                    :style="{ top: `${visibleRange.start * ROW_HEIGHT}px` }"
                   >
                     <div
                       v-for="{ row, displayIndex } in visibleRows"
@@ -1097,7 +1313,7 @@ onBeforeUnmount(() => {
                         `is-${row.status}`,
                         {
                           'is-active-change': isActiveChangedRow(displayIndex),
-                          'is-search-row-hit': searchResult.matchedRowIds.has(row.id),
+                          'is-search-row-hit': effectiveSearchResult.matchedRowIds.has(row.id),
                         },
                       ]"
                       :style="{ gridTemplateColumns }"
@@ -1107,14 +1323,14 @@ onBeforeUnmount(() => {
                       <template v-if="row.status === 'deleted'">
                         <div
                           class="wb-thv-cell is-placeholder"
-                          :style="{ gridColumn: `2 / span ${Math.max(1, fullTableColumns.length)}` }"
+                          :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
                         >
                           {{ t('tableHistory.placeholderAfterDelete') }}
                         </div>
                       </template>
                       <template v-else>
                         <div
-                          v-for="col in fullTableColumns"
+                          v-for="col in comparisonColumns"
                           :key="`a-${row.id}-${col.name}`"
                           class="wb-thv-cell"
                           :class="{
@@ -1166,154 +1382,117 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                 </div>
+
+                <!-- Fallback Split Rows (After) -->
+                <div v-else class="wb-thv-fallback-rows">
+                  <div
+                    v-for="(row, rowIdx) in comparisonRows"
+                    :key="`fb-a-${row.id}`"
+                    :data-fallback-row-index="rowIdx"
+                    class="wb-thv-grid-row is-fallback-row"
+                    :class="[
+                      `is-${row.status}`,
+                      { 'is-search-row-hit': effectiveSearchResult.matchedRowIds.has(row.id) },
+                    ]"
+                    :style="fallbackRowStyle(rowIdx)"
+                    :data-row-status="row.status"
+                  >
+                    <div class="wb-thv-cell is-rownum">{{ row.rowIndex + 1 }}</div>
+                    <template v-if="row.status === 'deleted'">
+                      <div
+                        class="wb-thv-cell is-placeholder"
+                        :style="{ gridColumn: `2 / span ${Math.max(1, comparisonColumns.length)}` }"
+                      >
+                        {{ t('tableHistory.placeholderAfterDelete') }}
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div
+                        v-for="col in comparisonColumns"
+                        :key="`fb-a-${row.id}-${col.name}`"
+                        class="wb-thv-cell is-wrap"
+                        :class="{
+                          'is-pk': col.primaryKey,
+                          'is-diff-after': row.status === 'updated' && row.changedCols.includes(col.name),
+                          'is-inserted-cell': row.status === 'inserted',
+                          'is-search-hit': isSearchMatchedCell(row.id, col.name),
+                          'is-search-active': isActiveSearchCell(row.id, col.name),
+                        }"
+                        :title="cellDisplay(row.after, col.name).text"
+                      >
+                        <template v-if="row.status === 'updated' && row.cellDiffs[col.name]?.after">
+                          <span v-if="row.cellDiffs[col.name].after.isNull" class="wb-thv-null-pill">NULL</span>
+                          <span v-else-if="row.cellDiffs[col.name].after.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
+                          <span v-else-if="row.cellDiffs[col.name].after.hasHighlight" class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].after.prefix, state.searchQuery)" :key="`fap-${idx}`">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template><mark class="wb-thv-mark-ins">
+                              <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].after.changed, state.searchQuery)" :key="`fac-${idx}`">
+                                <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                                <template v-else>{{ seg.text }}</template>
+                              </template>
+                            </mark><template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].after.suffix, state.searchQuery)" :key="`fas-${idx}`">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                          <span v-else class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(row.cellDiffs[col.name].after.text, state.searchQuery)" :key="idx">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                        </template>
+                        <template v-else>
+                          <span v-if="cellDisplay(row.after, col.name).isNull" class="wb-thv-null-pill">NULL</span>
+                          <span v-else-if="cellDisplay(row.after, col.name).isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
+                          <span v-else-if="cellDisplay(row.after, col.name).isMissing" class="wb-thv-missing-dash">—</span>
+                          <span v-else class="wb-thv-cell-text is-wrap">
+                            <template v-for="(seg, idx) in splitSearchHighlight(cellDisplay(row.after, col.name).text, state.searchQuery)" :key="idx">
+                              <mark v-if="seg.match" class="wb-thv-search-mark">{{ seg.text }}</mark>
+                              <template v-else>{{ seg.text }}</template>
+                            </template>
+                          </span>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
         </div>
 
-        <!-- Mode B: Honest Field-Level Fallback Diff (legacy teammate UPDATE without PK / DDL / no-PK table) -->
+        <!-- DDL-Only / Non-Tabular Revision Detail -->
         <div v-else-if="isFieldDiffMode" class="wb-thv-fallback">
-          <div class="wb-thv-fallback-head">
-            <span class="wb-thv-avatar is-lg" aria-hidden="true">{{ actorInitial(selectedRevision.actor) }}</span>
-            <div class="wb-thv-fallback-who">
-              <div class="wb-thv-fallback-who-line">
-                <strong>{{ selectedRevision.actor }}</strong>
-                <span v-if="selectedRevision.username && selectedRevision.username !== selectedRevision.actor" class="wb-thv-fallback-username">
-                  @{{ selectedRevision.username }}
-                </span>
-                <span class="wb-thv-fallback-source-tag">
-                  {{ sourceLabel(selectedRevision.source, selectedRevision.isRollback) }}
-                </span>
-              </div>
-              <span class="wb-thv-fallback-time">{{ fullTime(selectedRevision.ts) }}</span>
-            </div>
-          </div>
-
           <div class="wb-thv-fallback-scroll">
-            <div v-if="!filteredFallbackItems.length" class="wb-thv-fallback-empty">
-              <p>{{ t('tableHistory.noDiffMatch') }}</p>
-              <button
-                v-if="state.searchQuery"
-                type="button"
-                class="wb-thv-link-btn"
-                @click="history.setSearchQuery('')"
-              >{{ t('tableHistory.clearSearch') }}</button>
+            <div v-if="!fallbackTable.ddlItems.length" class="wb-thv-fallback-empty">
+              <p>{{ t('tableHistory.noFieldDetail') }}</p>
             </div>
-            <template v-else>
-              <div class="wb-thv-fallback-colhead" role="row">
-                <span>{{ t('tableHistory.colField') }}</span>
-                <span>{{ t('tableHistory.colBefore') }}</span>
-                <span>{{ t('tableHistory.colAfter') }}</span>
-              </div>
-
-              <div class="wb-thv-fallback-groups">
-                <section
-                  v-for="(item, itemIdx) in filteredFallbackItems"
-                  :key="`${item.id}-${itemIdx}`"
-                  class="wb-thv-fallback-group"
-                >
-                  <header class="wb-thv-fallback-group-head">
-                    <span class="wb-thv-op-tag" :data-op="item.operation">
-                      {{ isRollbackEntry(item) ? t('tableHistory.source.rollback') : item.operation }}
-                    </span>
-                    <span v-if="item.rowIdentity.length" class="wb-thv-row-pk">
-                      <span
-                        v-for="(pair, pairIdx) in item.rowIdentity"
-                        :key="pair.key"
-                        class="wb-thv-pk-pair"
-                      >
-                        <template v-if="pairIdx > 0"><span class="wb-thv-pk-sep">·</span></template>
-                        <em>{{ pair.key }}</em>={{ pair.value }}
-                      </span>
-                    </span>
-                    <span v-else-if="filteredFallbackItems.length > 1" class="wb-thv-row-ordinal">
-                      {{ t('tableHistory.rowOrdinal', { index: itemIdx + 1 }) }}
-                    </span>
-                    <span v-if="item.notes" class="wb-thv-row-notes">{{ item.notes }}</span>
-                  </header>
-
-                  <template v-if="item.operation === 'DDL'">
-                    <div class="wb-thv-ddl-box">
-                      <ul v-if="item.ddlItems.length" class="wb-thv-ddl-list">
-                        <li v-for="(desc, dIdx) in item.ddlItems" :key="dIdx">{{ desc }}</li>
-                      </ul>
-                      <details v-if="item.forwardSql" class="wb-thv-ddl-sql">
-                        <summary>{{ t('tableHistory.viewSql') }}</summary>
-                        <pre>{{ item.forwardSql }}</pre>
-                      </details>
-                    </div>
-                  </template>
-
-                  <template v-else-if="item.operation === 'INSERT' || item.operation === 'DELETE'">
-                    <div
-                      v-for="(rf, rfIdx) in item.rowFields"
-                      :key="`${rf.field}-${rfIdx}`"
-                      class="wb-thv-fallback-row"
-                    >
-                      <div class="wb-thv-fallback-field">
-                        <span class="wb-thv-field-name">{{ rf.field || t('tableHistory.rowContent') }}</span>
-                        <span v-if="fieldComment(rf.field)" class="wb-thv-field-comment">{{ fieldComment(rf.field) }}</span>
-                      </div>
-                      <div
-                        class="wb-thv-fallback-val"
-                        :class="item.operation === 'DELETE' ? 'is-before' : 'is-absent'"
-                      >
-                        <template v-if="item.operation === 'DELETE'">
-                          <span v-if="rf.value.isNull" class="wb-thv-null-pill">NULL</span>
-                          <span v-else-if="rf.value.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
-                          <span v-else class="wb-thv-val-text">{{ rf.value.text }}</span>
-                        </template>
-                        <span v-else class="wb-thv-missing-dash">—</span>
-                      </div>
-                      <div
-                        class="wb-thv-fallback-val"
-                        :class="item.operation === 'INSERT' ? 'is-after' : 'is-absent'"
-                      >
-                        <template v-if="item.operation === 'INSERT'">
-                          <span v-if="rf.value.isNull" class="wb-thv-null-pill">NULL</span>
-                          <span v-else-if="rf.value.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
-                          <span v-else class="wb-thv-val-text">{{ rf.value.text }}</span>
-                        </template>
-                        <span v-else class="wb-thv-missing-dash">—</span>
-                      </div>
-                    </div>
-                  </template>
-
-                  <template v-else-if="item.changes.length">
-                    <div
-                      v-for="(change, cIdx) in item.changes"
-                      :key="`${change.field}-${cIdx}`"
-                      class="wb-thv-fallback-row"
-                    >
-                      <div class="wb-thv-fallback-field">
-                        <span class="wb-thv-field-name">{{ change.field || t('tableHistory.valueField') }}</span>
-                        <span v-if="fieldComment(change.field)" class="wb-thv-field-comment">{{ fieldComment(change.field) }}</span>
-                      </div>
-                      <div class="wb-thv-fallback-val is-before">
-                        <span v-if="change.before.isNull" class="wb-thv-null-pill">NULL</span>
-                        <span v-else-if="change.before.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
-                        <span v-else-if="change.before.hasHighlight" class="wb-thv-val-text">
-                          {{ change.before.prefix }}<mark class="wb-thv-mark-del">{{ change.before.changed }}</mark>{{ change.before.suffix }}
-                        </span>
-                        <span v-else class="wb-thv-val-text">{{ change.before.text }}</span>
-                      </div>
-                      <div class="wb-thv-fallback-val is-after">
-                        <span v-if="change.after.isNull" class="wb-thv-null-pill">NULL</span>
-                        <span v-else-if="change.after.isEmpty" class="wb-thv-empty-pill">{{ t('tableHistory.emptyString') }}</span>
-                        <span v-else-if="change.after.hasHighlight" class="wb-thv-val-text">
-                          {{ change.after.prefix }}<mark class="wb-thv-mark-ins">{{ change.after.changed }}</mark>{{ change.after.suffix }}
-                        </span>
-                        <span v-else class="wb-thv-val-text">{{ change.after.text }}</span>
-                      </div>
-                    </div>
-                  </template>
-
-                  <div v-else class="wb-thv-no-detail-row">
-                    {{ t('tableHistory.noFieldDetail') }}
-                  </div>
-                </section>
-              </div>
-            </template>
+            <div v-else class="wb-thv-fallback-groups">
+              <section
+                v-for="(item, itemIdx) in fallbackTable.ddlItems"
+                :key="`${item.id}-${itemIdx}`"
+                class="wb-thv-fallback-group"
+              >
+                <header class="wb-thv-fallback-group-head">
+                  <span class="wb-thv-op-tag" data-op="DDL">
+                    {{ isRollbackEntry(item) ? t('tableHistory.source.rollback') : 'DDL' }}
+                  </span>
+                  <span v-if="item.notes" class="wb-thv-row-notes">{{ item.notes }}</span>
+                </header>
+                <div class="wb-thv-ddl-box">
+                  <ul v-if="item.ddlItems.length" class="wb-thv-ddl-list">
+                    <li v-for="(desc, dIdx) in item.ddlItems" :key="dIdx">{{ desc }}</li>
+                  </ul>
+                  <details v-if="item.forwardSql" class="wb-thv-ddl-sql">
+                    <summary>{{ t('tableHistory.viewSql') }}</summary>
+                    <pre>{{ item.forwardSql }}</pre>
+                  </details>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       </main>

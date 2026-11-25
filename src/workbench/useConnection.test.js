@@ -1663,3 +1663,38 @@ test("revisiting a connection displays its cached database list while refreshing
   assert.equal(await switchingBack, SOURCE_SELECTION.selected);
   assert.deepEqual(conn.databases.value, ["game_db", "analytics", "events"]);
 });
+
+test("restoreDisconnectedSavedConnections recovers saved servers in order after a failed cold start", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      { kind: "mysql", host: "192.168.1.223", port: "8306", username: "root", password: "a" },
+      { kind: "mysql", host: "192.168.1.243", port: "8306", username: "root", password: "b" },
+    ]),
+  });
+  let allowNetwork = false;
+  const runtime = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "list_connections") return runtime.map((item) => ({ ...item }));
+    if (command === "restore_connection") {
+      if (!allowNetwork) throw new Error("Operation not permitted (os error 1)");
+      const id = `mysql-${runtime.length + 1}`;
+      runtime.push({ id, kind: "mysql", label: `MySQL ${runtime.length + 1}`, host: "configured", port: 3306, username: "mysql", connected: true });
+      return payload.url.includes("243") ? ["newsg_4cfg"] : ["edota_15cfg"];
+    }
+    return [];
+  };
+  const conn = useConnection(createWorkspaceState(), invoke);
+  try {
+    await conn.loadConnections();
+    assert.equal(conn.selectedDatabase.value, "");
+    assert.equal(conn.connections.value.every((item) => item.saved && !item.connected), true);
+
+    allowNetwork = true;
+    const recovered = await conn.restoreDisconnectedSavedConnections({ targetConnectionId: "mysql-2" });
+    assert.equal(recovered, true);
+    assert.deepEqual(conn.connections.value.map((item) => item.id), ["mysql-1", "mysql-2"]);
+    assert.equal(conn.connections.value[1].host, "192.168.1.243");
+  } finally {
+    conn.dispose();
+  }
+});

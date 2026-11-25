@@ -39,6 +39,7 @@ import { computeTableBranchMinHeight, SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, useSideba
 import { useSidebarTableSelection } from "../composables/useSidebarTableSelection.js";
 import { isContextMenuKey, isDeleteCommandKey } from "../utils/listSelection.js";
 import { splitMiddleEllipsis } from "../utils/middleEllipsis.js";
+import { shouldEmitSidebarDatabaseOpen } from "../utils/workspaceHomeRecovery.js";
 import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
 
 function themeLabel(theme) {
@@ -517,7 +518,12 @@ function revealActiveTable() {
 function onConnectionClick(connectionId) {
   const connection = props.connections.find((item) => item.id === connectionId);
   if (connection?.connected && props.databases.length > 0 &&
-      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) return;
+      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) {
+    if (shouldEmitSidebarDatabaseOpen({ activeTab: props.activeTab }) && props.selectedDatabase) {
+      emit("select-database", { connectionId, database: props.selectedDatabase });
+    }
+    return;
+  }
   revealConnection(treeState, connectionId);
   emit("select-connection", connectionId);
 }
@@ -526,6 +532,9 @@ function onDatabaseClick(connectionId, database) {
   if (toggleDatabaseExpansion(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
     if (isDatabaseExpanded(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
       nextTick(() => revealActiveTable());
+    }
+    if (shouldEmitSidebarDatabaseOpen({ activeTab: props.activeTab })) {
+      emit("select-database", { connectionId, database });
     }
     return;
   }

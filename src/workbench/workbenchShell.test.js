@@ -39,7 +39,8 @@ test("main.js mounts the MySQL workbench as the first screen", () => {
 
   assert.match(main, /import\s+MySqlWorkbench\s+from\s+["']\.\/workbench\/MySqlWorkbench\.vue["']/);
   assert.match(main, /import\s+["']\.\/workbench\/workbench\.css["']/);
-  assert.match(main, /createApp\(MySqlWorkbench\)\.mount\("#app"\)/);
+  assert.match(main, /createApp\(MySqlWorkbench\)/);
+  assert.match(main, /\.mount\("#app"\)/);
 });
 
 test("composables and mock modules use the Rust workbench commands", () => {
@@ -2108,7 +2109,7 @@ test("split panes render independent tabbars at the top of each pane", () => {
   assert.doesNotMatch(grid, /<slot name="toolbar-tabs"><\/slot>/);
   assert.match(grid, /ToolbarSplitButton/);
   assert.match(grid, /'split-pane'/);
-  assert.match(grid, /emit\('split-pane', 'right'\)/);
+  assert.match(grid, /emit\(["']split-pane["'], ["']right["']\)/);
   assert.doesNotMatch(grid, /wb-split-more-btn/);
   assert.match(styles, /\.wb-pane-tabbar\s*\{/);
   assert.match(styles, /\.wb-pane-tabbar\s+\.wb-object-tabs\s*\{/);
@@ -2139,7 +2140,8 @@ test("table actions are direct in data tabs while non-data panes keep fallback c
   );
   assert.match(grid, /label="导出"[\s\S]*?@primary="emit\('export'\)"/);
   assert.match(grid, /:label="importActions\.primary\.label"[\s\S]*?@primary="emit\(resolveTableImportToolbarEvent\(importActions\.primary\.id\)\)"/);
-  assert.match(grid, /label="分屏"[\s\S]*?@primary="emit\('split-pane', 'right'\)"/);
+  assert.match(grid, /class="wb-table-toolbar-tools"[\s\S]*?open-on-hover[\s\S]*?:items="toolsActionItems"/);
+  assert.match(grid, /split-right[\s\S]*?split-down/);
   assert.match(grid, /批量导出/);
   assert.doesNotMatch(grid, /title="更多选项"/);
   assert.match(pane, /title="更多选项"/);

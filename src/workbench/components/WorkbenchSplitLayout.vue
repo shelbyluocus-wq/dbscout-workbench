@@ -11,6 +11,7 @@ import {
   publishedActiveTabForPane,
   visibleTabsForPane,
 } from "../utils/tabPublication.js";
+import WorkbenchErrorBoundary from "./WorkbenchErrorBoundary.vue";
 import WorkbenchPane from "./WorkbenchPane.vue";
 
 const props = defineProps({
@@ -381,9 +382,12 @@ onBeforeUnmount(finishResize);
     </div>
   </section>
 
-  <WorkbenchPane
+  <WorkbenchErrorBoundary
     v-else-if="layout?.type === 'pane' && panes[layout.paneId]"
     :key="nodeKey(layout)"
+    :area="`pane:${layout.paneId}`"
+  >
+  <WorkbenchPane
     :pane="panes[layout.paneId]"
     :tabs="tabsForPane(panes[layout.paneId])"
     :all-tabs="tabs"
@@ -464,4 +468,5 @@ onBeforeUnmount(finishResize);
     @delete-sql-document="(...args) => emit('delete-sql-document', ...args)"
     @open-sql-file="(...args) => emit('open-sql-file', ...args)"
   />
+  </WorkbenchErrorBoundary>
 </template>

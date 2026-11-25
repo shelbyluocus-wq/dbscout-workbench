@@ -1,4 +1,4 @@
-import { getCurrentInstance, inject, nextTick, onBeforeUnmount, watch } from "vue";
+import { getCurrentInstance, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { fitToolbar } from "../utils/toolbarFit.js";
 
 /**
@@ -12,11 +12,14 @@ import { fitToolbar } from "../utils/toolbarFit.js";
  */
 export function useToolbarFit(elementRef, { maxLevel, contentSignature, suspended = null }) {
   const suspendRef = suspended ?? (getCurrentInstance() ? inject("suspendGridAutoFit", null) : null);
+  const fitLevel = ref(0);
   let observer = null;
   let pendingRefit = false;
   const refit = () => {
     pendingRefit = false;
-    return fitToolbar(elementRef.value, maxLevel);
+    const level = fitToolbar(elementRef.value, maxLevel);
+    fitLevel.value = level;
+    return level;
   };
   const onResize = () => {
     if (suspendRef?.value) {
@@ -54,5 +57,5 @@ export function useToolbarFit(elementRef, { maxLevel, contentSignature, suspende
     observer = null;
   });
 
-  return { refit };
+  return { refit, fitLevel };
 }

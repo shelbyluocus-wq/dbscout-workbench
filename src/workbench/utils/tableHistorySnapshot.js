@@ -538,6 +538,151 @@ export function searchFullTableComparisonRows(displayRows = [], columns = [], ra
 }
 
 /**
+ * Build a unified side-by-side comparison table (`columns` + `rows`) for a
+ * fallback revision (e.g. legacy teammate UPDATE lacking row primary-key
+ * identity, or no-PK table) so UPDATE/INSERT/DELETE revisions share the exact
+ * same Before/After split-table visual structure as full-table comparison.
+ */
+export function buildFallbackComparisonTable(revision, rawColumns = [], rawPrimaryKeys = []) {
+  const items = Array.isArray(revision?.items) ? revision.items : [];
+  const primaryKeys = Array.isArray(rawPrimaryKeys) ? rawPrimaryKeys.filter(Boolean) : [];
+  const normalizedCols = normalizeSnapshotColumns(rawColumns, primaryKeys);
+  const colByLower = new Map();
+  const colOrder = new Map();
+  normalizedCols.forEach((col, idx) => {
+    colByLower.set(col.name.toLowerCase(), col);
+    colOrder.set(col.name.toLowerCase(), idx);
+  });
+
+  const ddlItems = [];
+  const rows = [];
+  const columnMap = new Map();
+
+  const registerCol = (rawName, forcePk = false) => {
+    const name = String(rawName || "").trim();
+    if (!name) return "";
+    const lower = name.toLowerCase();
+    const known = colByLower.get(lower);
+    const canonical = known?.name || name;
+    if (!columnMap.has(lower)) {
+      columnMap.set(lower, {
+        name: canonical,
+        comment: known?.comment || "",
+        primaryKey: Boolean(forcePk || known?.primaryKey),
+      });
+    } else if (forcePk) {
+      columnMap.get(lower).primaryKey = true;
+    }
+    return canonical;
+  };
+
+  items.forEach((item, index) => {
+    const op = String(item?.operation || "UPDATE").toUpperCase();
+    if (op === "DDL") {
+      ddlItems.push(item);
+      return;
+    }
+
+    const before = {};
+    const after = {};
+    const cellDiffs = {};
+    const changedCols = [];
+    const identity = {};
+
+    for (const pair of Array.isArray(item.rowIdentity) ? item.rowIdentity : []) {
+      if (!pair?.key) continue;
+      const col = registerCol(pair.key, true);
+      const val = pair.value === "NULL" ? null : pair.value;
+      identity[col] = val;
+      before[col] = val;
+      after[col] = val;
+    }
+
+    if (op === "INSERT") {
+      for (const rf of Array.isArray(item.rowFields) ? item.rowFields : []) {
+        const col = registerCol(rf.field || "Value");
+        if (!col) continue;
+        after[col] = rf.value?.isNull ? null : String(rf.value?.text ?? "");
+        changedCols.push(col);
+      }
+      rows.push({
+        id: `fb-${item.id ?? index}-${index}`,
+        rowIndex: rows.length,
+        identity,
+        status: "inserted",
+        before: null,
+        after,
+        changedCols,
+        cellDiffs,
+        operation: op,
+      });
+      return;
+    }
+
+    if (op === "DELETE") {
+      for (const rf of Array.isArray(item.rowFields) ? item.rowFields : []) {
+        const col = registerCol(rf.field || "Value");
+        if (!col) continue;
+        before[col] = rf.value?.isNull ? null : String(rf.value?.text ?? "");
+        changedCols.push(col);
+      }
+      rows.push({
+        id: `fb-${item.id ?? index}-${index}`,
+        rowIndex: rows.length,
+        identity,
+        status: "deleted",
+        before,
+        after: null,
+        changedCols,
+        cellDiffs,
+        operation: op,
+      });
+      return;
+    }
+
+    for (const change of Array.isArray(item.changes) ? item.changes : []) {
+      const col = registerCol(change.field || "Value");
+      if (!col) continue;
+      before[col] = change.before?.isNull ? null : String(change.before?.text ?? "");
+      after[col] = change.after?.isNull ? null : String(change.after?.text ?? "");
+      changedCols.push(col);
+      cellDiffs[col] = {
+        before: change.before,
+        after: change.after,
+      };
+    }
+
+    if (!changedCols.length && Object.keys(identity).length === 0) return;
+
+    rows.push({
+      id: `fb-${item.id ?? index}-${index}`,
+      rowIndex: rows.length,
+      identity,
+      status: "updated",
+      before,
+      after,
+      changedCols,
+      cellDiffs,
+      operation: op,
+    });
+  });
+
+  const columns = [...columnMap.values()].sort((a, b) => {
+    if (a.primaryKey !== b.primaryKey) return a.primaryKey ? -1 : 1;
+    const oa = colOrder.has(a.name.toLowerCase()) ? colOrder.get(a.name.toLowerCase()) : Number.MAX_SAFE_INTEGER;
+    const ob = colOrder.has(b.name.toLowerCase()) ? colOrder.get(b.name.toLowerCase()) : Number.MAX_SAFE_INTEGER;
+    return oa - ob;
+  });
+
+  return {
+    columns,
+    rows,
+    ddlItems,
+    hasTabularRows: rows.length > 0,
+  };
+}
+
+/**
  * Split a text string into alternating plain and matched segments for inline
  * search highlighting without raw HTML injection.
  */

@@ -713,7 +713,8 @@ test("table toolbar stays readable in split panes without wrapping controls", ()
   assert.match(navIconRule, /width\s*:\s*24px/);
   assert.match(toolbarSplitButtonVue, /class="wb-toolbar-action-label"/);
   assert.match(css, /\.wb-table-toolbar:is\(\[data-fit="1"\], \[data-fit="2"\]\) \.wb-table-toolbar-actions > \.wb-table-toolbar-secondary\s*\{[^}]*display:\s*none/);
-  assert.match(css, /\.wb-table-toolbar:is\(\[data-fit="1"\], \[data-fit="2"\]\) \.wb-table-toolbar-actions > \.wb-table-toolbar-more\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(css, /\.wb-table-toolbar:is\(\[data-fit="1"\], \[data-fit="2"\]\) \.wb-table-toolbar-actions > \.wb-table-toolbar-secondary \+ \.wb-toolbar-split-button\s*\{[^}]*border-left:\s*0/);
+  assert.match(css, /\.wb-table-toolbar-tools \.wb-toolbar-menu-button\s*\{[^}]*font-size:\s*var\(--wb-fs-body\)/);
   assert.match(css, /\.wb-table-toolbar\[data-fit="2"\] \.wb-table-toolbar-actions \.wb-toolbar-action-label\s*\{[^}]*display:\s*none/);
   assert.match(css, /\.wb-table-toolbar\[data-fit="2"\] \.wb-table-search-field\s*\{[^}]*min-width:\s*136px/);
   assert.doesNotMatch(css, /@container \(max-width: 780px\)[^{]*\{\s*\.wb-table-toolbar-actions/, "table toolbar collapses by measured fit, not fixed widths");

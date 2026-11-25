@@ -37,7 +37,6 @@ import {
 import GridDataRow from "./GridDataRow.vue";
 import { createCellEditorHandlers, vImeValue } from "../utils/imeInput.js";
 import ColumnSortMenu from "./ColumnSortMenu.vue";
-import ToolbarActionIcon from "./ToolbarActionIcon.vue";
 import ToolbarSplitButton from "./ToolbarSplitButton.vue";
 import { useToolbarFit } from "../composables/useToolbarFit.js";
 
@@ -46,6 +45,7 @@ const configRelationContext = useConfigRelationContext();
 const gridWrapRef = ref(null);
 const gridViewportHeight = ref(0);
 const searchInputRef = ref(null);
+const searchFieldRef = ref(null);
 const isCellDragging = ref(false);
 const isRowDragging = ref(false);
 const isFillDragging = ref(false);
@@ -193,8 +193,9 @@ const hasActiveCellSearch = computed(() => Boolean(
 ));
 const relationChip = computed(() => relationChipLabel(props.tab, t));
 const tableToolbarRef = ref(null);
-// Fit levels: 0 full, 1 freeze/split move into More, 2 icons only, 3 one overflow menu.
-useToolbarFit(tableToolbarRef, {
+// Fit levels: 0 full (Replace/Split already categorized in Tools), 1 Freeze folds into Tools,
+// 2 icons only, 3 one categorized overflow menu.
+const { fitLevel: toolbarFitLevel } = useToolbarFit(tableToolbarRef, {
   maxLevel: 3,
   contentSignature: () => [
     relationChip.value,
@@ -204,7 +205,7 @@ useToolbarFit(tableToolbarRef, {
     props.searchHitSummary?.label,
     activeFilterModeLabel.value,
     importActions.value.primary.label,
-    t("m_131b13aa2659"),
+    t("toolbar.tools"),
     workbenchFontSignature.value,
   ].join("\u001f"),
 });
@@ -395,39 +396,62 @@ const freezeItems = computed(() => ([
   { id: "freeze-first-column", label: t('m_e6f957238ec6'), icon: "freeze-column" },
   { id: "unfreeze", label: t('m_0592dd0b34a5'), icon: "unfreeze", disabled: !hasFreeze.value },
 ]));
-// 中等宽度时冻结、分屏先让位进「更多」，替换/导出/导入保留文字。
-const secondaryActionItems = computed(() => ([
-  ...freezeItems.value,
-  ...splitItems.value.map((item, index) => ({
-    ...item,
-    separatorBefore: index === 0,
-  })),
-]));
-const compactActionItems = computed(() => ([
-  ...freezeItems.value,
-  {
-    id: "replace",
-    label: t('m_d688f871711e'),
-    hint: t('m_a89a70b335c6'),
-    icon: "replace",
-    disabled: props.busy || !props.tab?.sessionId || !canFindReplace.value,
-    separatorBefore: true,
-  },
-  {
-    id: "export-current",
-    label: t('m_4a964617f078'),
-    hint: t('m_4c3fa3b8f8c2'),
-    icon: "export",
-    disabled: props.busy,
-    separatorBefore: true,
-  },
-  ...exportItems.value,
-  ...importActions.value.compactItems,
-  ...splitItems.value.map((item, index) => ({
-    ...item,
-    separatorBefore: index === 0,
-  })),
-]));
+const replaceMenuItem = computed(() => ({
+  id: "replace",
+  label: t('m_d688f871711e'),
+  hint: t('m_a89a70b335c6'),
+  icon: "replace",
+  disabled: props.busy || !props.tab?.sessionId || !canFindReplace.value,
+}));
+// 不常用操作按分类收纳在「工具」悬停展开菜单中：编辑（查找替换）与视图（分屏；窄窗时并入冻结）。
+const toolsActionItems = computed(() => {
+  const editItems = [{
+    ...replaceMenuItem.value,
+    groupLabel: t('toolbar.groupEdit'),
+  }];
+  const viewItems = toolbarFitLevel.value > 0
+    ? [
+        ...freezeItems.value,
+        ...splitItems.value.map((item, index) => ({
+          ...item,
+          separatorBefore: index === 0,
+        })),
+      ]
+    : [...splitItems.value];
+  if (viewItems.length) {
+    viewItems[0] = { ...viewItems[0], groupLabel: t('toolbar.groupView') };
+  }
+  return [...editItems, ...viewItems];
+});
+const compactActionItems = computed(() => {
+  const dataItems = [
+    {
+      id: "export-current",
+      label: t('m_4a964617f078'),
+      hint: t('m_4c3fa3b8f8c2'),
+      icon: "export",
+      disabled: props.busy,
+      groupLabel: t('toolbar.groupData'),
+    },
+    ...exportItems.value,
+    ...importActions.value.compactItems,
+  ];
+  const editItems = [{
+    ...replaceMenuItem.value,
+    groupLabel: t('toolbar.groupEdit'),
+  }];
+  const viewItems = [
+    ...freezeItems.value,
+    ...splitItems.value.map((item, index) => ({
+      ...item,
+      separatorBefore: index === 0,
+    })),
+  ];
+  if (viewItems.length) {
+    viewItems[0] = { ...viewItems[0], groupLabel: t('toolbar.groupView') };
+  }
+  return [...dataItems, ...editItems, ...viewItems];
+});
 
 // Rows rendered in the frozen band (always visible, outside the virtual window).
 const frozenRows = computed(() => {
@@ -1351,7 +1375,13 @@ function toggleToolbarMenu(menuId) {
   openToolbarMenu.value = openToolbarMenu.value === menuId ? "" : menuId;
 }
 
-function closeToolbarMenu() {
+function openToolbarMenuByHover(menuId) {
+  if (openToolbarMenu.value && openToolbarMenu.value !== menuId) return;
+  openToolbarMenu.value = menuId;
+}
+
+function closeToolbarMenu(menuId = "") {
+  if (menuId && openToolbarMenu.value !== menuId) return;
   openToolbarMenu.value = "";
 }
 
@@ -1630,33 +1660,18 @@ function handleTableContextMenu(event) {
   emit('contextmenu', event);
 }
 
+function switchToHistoryView() {
+  const width = Math.round(searchFieldRef.value?.getBoundingClientRect?.().width || 0);
+  emit('switch-view', 'history', width);
+}
+
 </script>
 
 <template>
   <section v-if="tab" class="wb-table-panel" :style="gridHeightStyle" @contextmenu="handleTableContextMenu">
     <header ref="tableToolbarRef" class="wb-table-toolbar">
-      <div class="wb-table-view-switch" role="tablist" :aria-label="t('tableHistory.viewSwitchAria')">
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          class="wb-table-view-switch-btn is-active"
-        >
-          <Table2 :size="13" :stroke-width="1.9" aria-hidden="true" />
-          <span>{{ t('tableHistory.viewData') }}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="false"
-          class="wb-table-view-switch-btn"
-          @click="emit('switch-view', 'history')"
-        >
-          <History :size="13" :stroke-width="1.9" aria-hidden="true" />
-          <span>{{ t('tableHistory.viewHistory') }}</span>
-        </button>
-      </div>
       <div
+        ref="searchFieldRef"
         class="wb-table-search-field"
         :class="{ 'has-matches': hasSearchMatches, 'is-mode-open': openToolbarMenu === 'filter', 'is-filter-active': Boolean(tab.searchFilterActive) }"
       >
@@ -1731,9 +1746,30 @@ function handleTableContextMenu(event) {
           :open="openToolbarMenu === 'filter'"
           :items="filterModeItems"
           @toggle="toggleToolbarMenu('filter')"
-          @close="closeToolbarMenu"
+          @close="closeToolbarMenu('filter')"
           @select="handleToolbarAction"
         />
+      </div>
+      <div class="wb-table-view-switch" role="tablist" :aria-label="t('tableHistory.viewSwitchAria')">
+        <button
+          type="button"
+          role="tab"
+          aria-selected="true"
+          class="wb-table-view-switch-btn is-active"
+        >
+          <Table2 :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewData') }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected="false"
+          class="wb-table-view-switch-btn"
+          @click="switchToHistoryView"
+        >
+          <History :size="13" :stroke-width="1.9" aria-hidden="true" />
+          <span>{{ t('tableHistory.viewHistory') }}</span>
+        </button>
       </div>
       <span v-if="relationChip" class="wb-relation-chip" :title="relationChip">
         <Link2 :size="11" class="wb-relation-chip-icon" aria-hidden="true" />
@@ -1794,17 +1830,6 @@ function handleTableContextMenu(event) {
         </button>
       </span>
       <div class="wb-table-toolbar-actions wb-toolbar-action-group" role="group" :aria-label="t('m_e3244d705db7')">
-        <button
-          type="button"
-          class="wb-toolbar-action-button wb-table-action-button"
-          :aria-label="t('m_d688f871711e')"
-          :title="t('m_73f15c6f54f1')"
-          :disabled="busy || !tab.sessionId || !canFindReplace"
-          @click="emit('replace')"
-        >
-          <ToolbarActionIcon name="replace" />
-          <span class="wb-toolbar-action-label">{{ t('m_131b13aa2659') }}</span>
-        </button>
         <ToolbarSplitButton
           class="wb-table-toolbar-secondary"
           :label="t('m_0eafcb149bcd')"
@@ -1815,7 +1840,7 @@ function handleTableContextMenu(event) {
           :items="freezeItems"
           @primary="applyDefaultFreeze"
           @toggle="toggleToolbarMenu('freeze')"
-          @close="closeToolbarMenu"
+          @close="closeToolbarMenu('freeze')"
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
@@ -1828,7 +1853,7 @@ function handleTableContextMenu(event) {
           :menu-disabled="busy"
           @primary="emit('export')"
           @toggle="toggleToolbarMenu('export')"
-          @close="closeToolbarMenu"
+          @close="closeToolbarMenu('export')"
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
@@ -1841,33 +1866,23 @@ function handleTableContextMenu(event) {
           :menu-disabled="importItems.every((item) => item.disabled)"
           @primary="emit(resolveTableImportToolbarEvent(importActions.primary.id))"
           @toggle="toggleToolbarMenu('import')"
-          @close="closeToolbarMenu"
+          @close="closeToolbarMenu('import')"
           @select="handleToolbarAction"
         />
         <ToolbarSplitButton
-          class="wb-table-toolbar-secondary"
-          :label="t('m_666ec3442af3')"
-          icon="split-right"
-          :menu-label="t('m_6f718069947d')"
-          :open="openToolbarMenu === 'split'"
-          :items="splitItems"
-          @primary="emit('split-pane', 'right')"
-          @toggle="toggleToolbarMenu('split')"
-          @close="closeToolbarMenu"
-          @select="handleToolbarAction"
-        />
-        <ToolbarSplitButton
-          class="wb-table-toolbar-more"
-          :label="t('m_38844b135cf7')"
-          icon="more"
-          :menu-label="t('m_e3244d705db7')"
+          class="wb-table-toolbar-tools"
+          :label="t('toolbar.tools')"
+          icon="tools"
+          :menu-label="t('toolbar.toolsMenuLabel')"
           primary-opens-menu
           single-trigger
-          :active="hasFreeze"
-          :open="openToolbarMenu === 'secondary'"
-          :items="secondaryActionItems"
-          @toggle="toggleToolbarMenu('secondary')"
-          @close="closeToolbarMenu"
+          open-on-hover
+          :active="hasFreeze && toolbarFitLevel > 0"
+          :open="openToolbarMenu === 'tools'"
+          :items="toolsActionItems"
+          @open="openToolbarMenuByHover('tools')"
+          @toggle="toggleToolbarMenu('tools')"
+          @close="closeToolbarMenu('tools')"
           @select="handleToolbarAction"
         />
       </div>
@@ -1878,10 +1893,13 @@ function handleTableContextMenu(event) {
         :menu-label="t('m_e3244d705db7')"
         primary-opens-menu
         single-trigger
+        open-on-hover
+        :active="hasFreeze"
         :open="openToolbarMenu === 'compact'"
         :items="compactActionItems"
+        @open="openToolbarMenuByHover('compact')"
         @toggle="toggleToolbarMenu('compact')"
-        @close="closeToolbarMenu"
+        @close="closeToolbarMenu('compact')"
         @select="handleToolbarAction"
       />
     </header>

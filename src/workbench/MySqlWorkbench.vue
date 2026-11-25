@@ -87,6 +87,12 @@ import { useSqlQueryDocumentStore } from "./composables/sqlQueryDocumentStore.js
 import { createCoalescedTask } from "./utils/coalescedTask.js";
 import { createTabSourceSync } from "./utils/tabSourceSync.js";
 import { applySavedTableTabState, savedTableTabMatchesSource } from "./utils/savedTabRestore.js";
+import {
+  isDisconnectedSavedPlaceholder,
+  shouldEnsureDatabaseHome,
+  shouldRestorePendingStartupSnapshot,
+  shouldSkipWorkspacePersist,
+} from "./utils/workspaceHomeRecovery.js";
 import { MAX_FROZEN_COLS } from "./constants.js";
 import { resolveGridRowHeight } from "./utils/gridRowHeight.js";
 import {
@@ -139,6 +145,7 @@ import {
 } from "./utils/pinnedDatabases.js";
 
 import WorkbenchActivityRail from "./components/WorkbenchActivityRail.vue";
+import WorkbenchErrorBoundary from "./components/WorkbenchErrorBoundary.vue";
 import WorkbenchSidebar from "./components/WorkbenchSidebar.vue";
 import WorkbenchSplitLayout from "./components/WorkbenchSplitLayout.vue";
 import DataGrid from "./components/DataGrid.vue";
@@ -945,7 +952,11 @@ const {
     loadTables: conn.loadTables,
     ensureTableSchema: conn.ensureTableSchema,
     fetchPage: refreshTabPage,
-    refreshDatabases: conn.refreshDatabases,
+    refreshDatabases: async (options) => {
+      const refreshed = await conn.refreshDatabases(options);
+      if (selectedDatabase.value) await restorePendingStartupOrEnsureHome();
+      return refreshed;
+    },
   },
   activeDataTab,
   { openTableDesign, onTablePageRefreshed: resumeSearchAfterTableRefresh },
@@ -1262,12 +1273,6 @@ function handleStartupAccountAuthenticated() {
   }
 }
 
-provide("tableHistoryContext", {
-  isLoggedIn: computed(() => account.isLoggedIn.value),
-  canOpenBackupCenter: computed(() => !isFolderWindow),
-  openBackupCenter: openBackupCenterForTable,
-});
-
 async function openHomeTableHistory(payload = {}) {
   const connectionId = String(payload?.connectionId || selectedConnectionId.value || "").trim();
   const database = String(payload?.database || selectedDatabase.value || "").trim();
@@ -1316,6 +1321,11 @@ function openBlackcatMcp() {
 // external MCP connection to the main window.
 const tableFolders = useTableFolderStore();
 const isFolderWindow = isTableFolderWindowRole(currentWindowRole());
+provide("tableHistoryContext", {
+  isLoggedIn: computed(() => account.isLoggedIn.value),
+  canOpenBackupCenter: computed(() => !isFolderWindow),
+  openBackupCenter: openBackupCenterForTable,
+});
 const tableFolderPage = useTableFolders({
   invokeWorkbench,
   workspace,
@@ -1873,6 +1883,77 @@ function openCurrentDatabaseHome({ paneId = workspace.focusedPaneId, activate = 
 function ensureCurrentDatabaseHome() {
   const activate = !workspace.activeTabId;
   return openCurrentDatabaseHome({ activate });
+}
+
+let pendingStartupSnapshot = null;
+let deferredRestoreSnapshot = null;
+let startupRestoreRecoveryArmed = false;
+let startupRecoveryInFlight = false;
+
+async function restorePendingStartupOrEnsureHome() {
+  if (isFolderWindow || !selectedDatabase.value) return null;
+  if (pendingStartupSnapshot) {
+    const snapshot = pendingStartupSnapshot;
+    pendingStartupSnapshot = null;
+    if (shouldRestorePendingStartupSnapshot(snapshot, {
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+      tabs: workspace.tabs,
+    })) {
+      deferredRestoreSnapshot = snapshot;
+      try {
+        await restoreSavedTabs();
+      } finally {
+        deferredRestoreSnapshot = null;
+      }
+    }
+  }
+  if (shouldEnsureDatabaseHome({
+    isFolderWindow,
+    selectedDatabase: selectedDatabase.value,
+    tabs: workspace.tabs,
+    focusedPane: getFocusedPane(workspace),
+  })) {
+    return ensureCurrentDatabaseHome();
+  }
+  return null;
+}
+
+async function selectConnectionWithHome(connectionId, options) {
+  const outcome = await selectConnection(connectionId, options);
+  if (outcome === SOURCE_SELECTION.selected && selectedDatabase.value) {
+    await restorePendingStartupOrEnsureHome();
+  }
+  return outcome;
+}
+
+async function submitConnDialogWithHome() {
+  await submitConnDialog();
+  if (selectedDatabase.value) {
+    await restorePendingStartupOrEnsureHome();
+  }
+}
+
+async function retryStartupConnectionsOnRecovery(event) {
+  if (isFolderWindow || startupRecoveryInFlight || connDialog.open) return;
+  if (selectedDatabase.value || !isDisconnectedSavedPlaceholder(selectedConnectionId.value, connections.value)) {
+    startupRestoreRecoveryArmed = false;
+    return;
+  }
+  if (event?.type !== "online" && !startupRestoreRecoveryArmed) return;
+  startupRestoreRecoveryArmed = false;
+  startupRecoveryInFlight = true;
+  try {
+    await conn.loadConnections();
+    if (selectedDatabase.value) {
+      await restorePendingStartupOrEnsureHome();
+      persistWorkspace();
+    }
+  } catch {
+    // Keep placeholder state and preserved startup snapshot until the user reconnects.
+  } finally {
+    startupRecoveryInFlight = false;
+  }
 }
 
 function openSqlLibrary(paneId = workspace.focusedPaneId) {
@@ -3126,6 +3207,13 @@ async function performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabas
   if (pendingHome) pendingHome.loading = sourceChanging;
 
   let outcome = SOURCE_SELECTION.selected;
+  if (
+    targetConnectionId !== String(selectedConnectionId.value) &&
+    !connections.value.some((item) => String(item.id) === targetConnectionId) &&
+    connections.value.some((item) => item?.saved && !item.connected)
+  ) {
+    await conn.restoreDisconnectedSavedConnections({ targetConnectionId });
+  }
   if (targetConnectionId !== String(selectedConnectionId.value)) {
     outcome = await selectConnection(targetConnectionId, { preferredDatabase: targetDatabase });
   }
@@ -3161,11 +3249,14 @@ async function performDatabaseHomeTargetOpen({ targetConnectionId, targetDatabas
     } else {
       const fallbackHome = openCurrentDatabaseHome({ paneId: targetPaneId, activate: true });
       if (fallbackHome) fallbackHome.loading = false;
+      else if (!previousHomeState && pendingHome) discardPaneHomeTabs(workspace, targetPaneId);
     }
     return false;
   }
   const openedHome = openCurrentDatabaseHome({ paneId: targetPaneId, activate: true });
   if (openedHome) openedHome.loading = false;
+  pendingStartupSnapshot = null;
+  startupRestoreRecoveryArmed = false;
   // Opening the database that is already selected changes no source, so the
   // sidebar would not bring its row back into view by itself.
   if (!sourceChanging) sidebarRef.value?.revealSelectedDatabase?.();
@@ -3264,7 +3355,7 @@ async function reconnectConnectionFromPalette({ connectionId }) {
   if (!connectionId) return;
   quickOpenVisible.value = false;
   quickOpenQuery.value = "";
-  await selectConnection(connectionId);
+  await selectConnectionWithHome(connectionId);
 }
 
 async function openQuickOpenValueResult(result) {
@@ -4383,6 +4474,7 @@ async function confirmRemoveConnection({ connectionId = "" } = {}) {
   if (!confirmed) return;
   closeConnectionTabs(workspace, { connectionId });
   await removeConnection(connectionId);
+  if (selectedDatabase.value) await restorePendingStartupOrEnsureHome();
   // 清理该连接的常驻库条目，避免幽灵条目残留在 Quick Open 浮层里。
   pinnedDatabases.value = removePinnedDatabasesForConnection(connectionId, pinnedDatabases.value);
 }
@@ -5401,6 +5493,14 @@ let persistenceReady = false;
 
 function persistWorkspace() {
   if (!persistenceReady) return;
+  if (shouldSkipWorkspacePersist({
+    connectionId: selectedConnectionId.value,
+    database: selectedDatabase.value,
+    tabs: workspace.tabs,
+    connections: connections.value,
+  })) {
+    return;
+  }
   saveWorkspaceSnapshot(
     buildWorkspaceSnapshot({
       connectionId: selectedConnectionId.value,
@@ -5485,7 +5585,7 @@ function flushWorkspacePersistenceWhenHidden() {
 }
 
 async function restoreSavedTabs() {
-  const snapshot = loadWorkspaceSnapshot();
+  const snapshot = deferredRestoreSnapshot || loadWorkspaceSnapshot();
   if (!snapshot) return;
 
   const currentConnectionId = selectedConnectionId.value;
@@ -5845,6 +5945,8 @@ onMounted(async () => {
   void ensureSqlExecutionListener();
   window.addEventListener("resize", onWindowResize);
   window.addEventListener("blur", onWindowBlurTitlebarReset);
+  window.addEventListener("focus", retryStartupConnectionsOnRecovery);
+  window.addEventListener("online", retryStartupConnectionsOnRecovery);
   window.addEventListener("pointermove", onPointerMoveClearTitlebarSuppress, { passive: true });
   document.addEventListener("visibilitychange", onVisibilityTitlebarReset);
   document.addEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
@@ -5864,6 +5966,7 @@ onMounted(async () => {
   // startup default (analysis point #2). Best-effort; failures don't block UI.
   if (!isFolderWindow) void syncGlobalShortcutBinding();
   try {
+    const initialSnapshot = loadWorkspaceSnapshot();
     await conn.loadConnections();
     // loadConnections() returns once the last-used connection is ready; other
     // saved connections keep restoring in order in the background. Only mark
@@ -5871,8 +5974,18 @@ onMounted(async () => {
     // start cannot race its first DB/UI request against connection restoration.
     if (!isFolderWindow) void conn.whenConnectionsRestored().finally(() => agent.ensureControlListener());
     markPerf("workbench.connections-ready", { connections: connections.value.length, databases: databases.value.length });
-    await restoreSavedTabs();
-    await ensureCurrentDatabaseHome();
+    if (!isFolderWindow && shouldSkipWorkspacePersist({
+      connectionId: selectedConnectionId.value,
+      database: selectedDatabase.value,
+      tabs: workspace.tabs,
+      connections: connections.value,
+    })) {
+      pendingStartupSnapshot = initialSnapshot;
+      startupRestoreRecoveryArmed = true;
+    } else {
+      await restoreSavedTabs();
+      await ensureCurrentDatabaseHome();
+    }
     tableFolderPage.afterFolderWindowRestored();
     void tableFolderPage.startFolderWindow();
     markPerf("workbench.tabs-restored", { tabs: workspace.tabs.length });
@@ -5893,6 +6006,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   flushWorkspacePersistence();
   window.removeEventListener("blur", onWindowBlurTitlebarReset);
+  window.removeEventListener("focus", retryStartupConnectionsOnRecovery);
+  window.removeEventListener("online", retryStartupConnectionsOnRecovery);
   window.removeEventListener("pointermove", onPointerMoveClearTitlebarSuppress);
   document.removeEventListener("visibilitychange", onVisibilityTitlebarReset);
   document.removeEventListener("visibilitychange", flushWorkspacePersistenceWhenHidden);
@@ -6097,6 +6212,7 @@ onBeforeUnmount(() => {
         }"
         @transitionend="onSidebarLayoutTransitionEnd"
       >
+        <WorkbenchErrorBoundary area="sidebar" compact>
         <WorkbenchSidebar
           ref="sidebarRef"
           :class="{
@@ -6130,7 +6246,7 @@ onBeforeUnmount(() => {
         @cancel-search-values="cancelSidebarValueSearch"
         @open-schema-result="openSidebarSchemaResult"
         @open-value-result="openSidebarValueResult"
-        @select-connection="selectConnection($event)"
+        @select-connection="selectConnectionWithHome($event)"
         @select-database="selectDatabaseWithHome($event)"
         @reorder-connections="reorderConnections"
         @reorder-databases="reorderDatabases"
@@ -6146,6 +6262,7 @@ onBeforeUnmount(() => {
         @set-vibrancy="macosVibrancy.setPreference"
         @change-font="applyFontSettings"
         />
+        </WorkbenchErrorBoundary>
       </div>
 
       <PaneDivider
@@ -6156,6 +6273,7 @@ onBeforeUnmount(() => {
       />
 
       <section class="wb-main">
+        <WorkbenchErrorBoundary area="workspace">
         <WorkbenchSplitLayout
           :layout="workspace.layout"
           :panes="workspace.panes"
@@ -6233,6 +6351,7 @@ onBeforeUnmount(() => {
           @delete-sql-document="deleteSqlDocument"
           @open-sql-file="openSqlFile"
         />
+        </WorkbenchErrorBoundary>
         <DatabaseGlowOverlay :playback="switchGlowPlayback" />
       </section>
 
@@ -6620,7 +6739,7 @@ onBeforeUnmount(() => {
       :dialog="connDialog"
       :busy="busy"
       :test-busy="connTestBusy"
-      @submit="submitConnDialog"
+      @submit="submitConnDialogWithHome"
       @cancel="cancelConnDialog"
       @test="testConnDialog"
       @field-change="onConnDialogFieldChange"

@@ -3073,6 +3073,10 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     return { deletedCount: 0 };
   }
 
+  if (command === "log_frontend_error") {
+    return null;
+  }
+
   // ---- Account & shared audit commands ----
   if (command === "get_account") {
     return { serverUrl: mockAccount.serverUrl, session: mockAccount.session };
