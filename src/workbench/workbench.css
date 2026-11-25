@@ -14464,36 +14464,6 @@ label:has(input[type="checkbox"]:disabled) {
   font-weight: 650;
 }
 
-.wb-tab-shortcut-badge {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 19px;
-  transform: translateY(-50%);
-  border: 1px solid var(--wb-border-strong);
-  border-radius: 5px;
-  background: var(--wb-workspace-mist-raised);
-  color: var(--wb-text);
-  font-family: var(--wb-mono, ui-monospace, monospace);
-  font-size: var(--wb-fs-caption);
-  font-weight: 650;
-  pointer-events: none;
-}
-
-.wb-tab.is-showing-shortcut .wb-tab-close:not(:focus-visible),
-.wb-tab.is-showing-shortcut:has(.wb-tab-close:focus-visible) .wb-tab-shortcut-badge,
-.wb-tab.is-showing-shortcut .wb-tab-home-icon {
-  visibility: hidden;
-}
-
-.wb-tab[data-kind="home"] .wb-tab-shortcut-badge {
-  right: auto;
-  left: 4px;
-}
-
 /* Two stable rows. The name has the full text column and source/status
    share the second row, clear of the close target. */
 .wb-tab-title-stack {

@@ -183,7 +183,7 @@ try {
       await page.keyboard.press(nextTab);
       await page.locator(".wb-tab.active").filter({ hasText: "Home" }).waitFor({ timeout: 5000 });
       await page.keyboard.down(key);
-      assert.deepEqual(await page.locator(".wb-tab-shortcut-badge").allTextContents(), ["`"]);
+      assert.equal(await page.locator(".wb-tab-shortcut-badge").count(), 0);
       for (const digit of "123456789") {
         await page.keyboard.press(digit);
       }
@@ -192,9 +192,8 @@ try {
       await page.keyboard.press(previousTab);
       await search.waitFor({ timeout: 5000 });
       await page.keyboard.press(`${key}+Backquote`);
-      await page.locator(".wb-tab.active").filter({ hasText: "Home" }).waitFor({ timeout: 5000 });
-      await page.keyboard.press(previousTab);
-      await search.waitFor({ timeout: 5000 });
+      assert.equal(await page.locator(".wb-tab.active").filter({ hasText: tableName }).count(), 1);
+      assert.equal(await search.isVisible(), true);
 
       await search.focus();
       await page.keyboard.press(`${key}+f`);

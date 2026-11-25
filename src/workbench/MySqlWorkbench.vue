@@ -104,7 +104,6 @@ import {
 } from "./composables/useShortcuts.js";
 import { HOME_DATABASE_FAVORITES_CONTEXT } from "./composables/homeDatabaseFavoritesContext.js";
 import { useWindowPin } from "./composables/useWindowPin.js";
-import { useTabShortcutHints } from "./composables/useTabShortcutHints.js";
 import {
   buildWorkspaceSnapshot,
   saveWorkspaceSnapshot,
@@ -127,7 +126,6 @@ import { gridSelectionCount, isGridCellSelected } from "./utils/gridCellSelectio
 import { markPerf, sampleNextFrame } from "./utils/performanceMarks.js";
 import { resolveHomeDesignTargets } from "./utils/homeDesignTargets.js";
 import { adjacentPublishedTabId } from "./utils/tabPublication.js";
-import { isReservedTabShortcutCombo, isTabShortcutEvent } from "./utils/tabShortcutHints.js";
 import { normalizeTableFilterMode } from "./utils/tableFilterMode.js";
 import {
   closableRelativeTabsInPane,
@@ -290,7 +288,6 @@ watch(quickOpenVisible, (open) => {
 // rebind the global "open window" shortcut via the Rust backend). Used so
 // the Ctrl+P database-search shortcut reads the configured binding (#8/#9).
 const shortcutHelper = useShortcuts(invokeWorkbench);
-const { hintsVisible: tabShortcutHintsVisible, hide: hideTabShortcutHints } = useTabShortcutHints();
 function withShortcutLabel(action, shortcut) {
   return shortcut ? t("shell.withShortcut", { action, shortcut: formatShortcutForPlatform(shortcut) }) : action;
 }
@@ -3311,9 +3308,6 @@ function removeFavoriteDatabase({ connectionId, database } = {}) {
 }
 
 function favoriteShortcutConflict(target, shortcut) {
-  if (isReservedTabShortcutCombo(shortcut)) {
-    return "已用于切换打开的标签";
-  }
   for (const [action, binding] of Object.entries(shortcutHelper.bindings)) {
     if (binding && sameShortcutCombo(binding, shortcut)) {
       return `与“${SHORTCUT_LABELS[action] || action}”快捷键冲突`;
@@ -5222,15 +5216,6 @@ function handleCycleTabKeydown(event) {
   return true;
 }
 
-function handleTabShortcutKeydown(event) {
-  if (!isTabShortcutEvent(event)) return false;
-  event.preventDefault();
-  event.stopPropagation();
-  const pane = getFocusedPane(workspace);
-  if (pane) openCurrentDatabaseHome({ paneId: pane.id, activate: true });
-  return true;
-}
-
 function handleGlobalHomeClipboardKeydown(event) {
   if (activeTab.value?.kind !== "home") return false;
   if (isEditableShortcutTarget(event.target)) return false;
@@ -5287,7 +5272,7 @@ function preventDialogShortcutDefault(event) {
   const matchesFavorite = pinnedDatabases.value.some(
     (entry) => entry.shortcut && matchesShortcutCombo(entry.shortcut, event),
   );
-  if (!matchedAction && !matchesFavorite && !isNativeFindKeydown(event) && !isTabShortcutEvent(event)) return;
+  if (!matchedAction && !matchesFavorite && !isNativeFindKeydown(event)) return;
   // Keep the browser's native undo/redo inside dialog text fields. Every
   // other configured app shortcut is inert while a dialog owns the keyboard.
   if (matchedAction === "undo" && isEditableShortcutTarget(event.target)) return;
@@ -5336,7 +5321,6 @@ function handleGlobalShortcutKeydown(event) {
     return;
   }
   if (dialogLayerManager.hasActiveModalLayer()) {
-    hideTabShortcutHints();
     preventDialogShortcutDefault(event);
     return;
   }
@@ -5352,7 +5336,6 @@ function handleGlobalShortcutKeydown(event) {
   if (handleCloseTabKeydown(event)) return;
   if (handleOpenDesignShortcut(event)) return;
   if (handleCycleTabKeydown(event)) return;
-  if (handleTabShortcutKeydown(event)) return;
   if (handleGlobalHomeClipboardKeydown(event)) return;
   if (handleGlobalTableSearchKeydown(event)) return;
   if (handleReplaceInTableKeydown(event)) return;
@@ -6279,7 +6262,6 @@ onBeforeUnmount(() => {
           :panes="workspace.panes"
           :tabs="workspace.tabs"
           :focused-pane-id="workspace.focusedPaneId"
-          :show-shortcut-hints="tabShortcutHintsVisible"
           :edit-state="editState"
           :invoke-workbench="invokeWorkbench"
           :app-state="{ busy: conn.busy, statusText: conn.statusText }"

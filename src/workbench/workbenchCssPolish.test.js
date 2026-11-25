@@ -284,18 +284,6 @@ test("homepage tab shows its icon and label with room for the pane close button"
   assert.match(rowIndexRule, /width\s*:\s*var\(--wb-row-index-width\)/);
 });
 
-test("tab shortcut badges stay readable over the wallpaper and inside the tab", () => {
-  const badgeRule = ruleBody(".wb-tab-shortcut-badge");
-
-  assert.match(tabsVue, /class="wb-tab-shortcut-badge"/);
-  assert.match(badgeRule, /background:\s*var\(--wb-workspace-mist-raised\)/);
-  assert.match(badgeRule, /color:\s*var\(--wb-text\)/);
-  assert.match(badgeRule, /font-family:\s*var\(--wb-mono/);
-  assert.match(badgeRule, /font-size:\s*var\(--wb-fs-caption\)/);
-  assert.match(badgeRule, /right:\s*4px/);
-  assert.doesNotMatch(css, /\.wb-tab\.is-showing-shortcut \.wb-tab-title\s*\{/);
-});
-
 test("database homepage batch actions use a clear quiet grouped treatment", () => {
   const groupRule = ruleBody(".wb-toolbar-action-group");
   const buttonRule = ruleBody(".wb-dbhome-action-button");

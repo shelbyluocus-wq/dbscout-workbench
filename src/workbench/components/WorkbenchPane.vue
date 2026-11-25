@@ -70,7 +70,6 @@ const props = defineProps({
   sqlDocuments: { type: Array, default: () => [] },
   currentConnectionId: { type: String, default: "" },
   isFocused: { type: Boolean, default: false },
-  showShortcutHints: { type: Boolean, default: false },
   fetchPage: { type: Function, required: true },
   loadNextPage: { type: Function, required: true },
   loadPreviousPage: { type: Function, required: true },
@@ -2125,7 +2124,6 @@ onMounted(() => emitPaneState());
         :active-tab-id="pane.activeTabId"
         :pane-id="pane.id"
         :can-close-pane="rootPaneCount > 1"
-        :show-shortcut-hints="isFocused && showShortcutHints"
         :connections="connections"
         @activate-tab="activateTab"
         @close-tab="closeTab"

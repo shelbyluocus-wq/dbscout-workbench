@@ -3084,30 +3084,19 @@ test("Ctrl+W, Ctrl+Tab, and Ctrl+Shift+Tab manage table tabs like Excel", () => 
   assert.match(orchestrator, /void\s+activateTab\(pane\.id,\s*nextTabId\)/);
 });
 
-test("Ctrl+Backquote opens the database home in the focused pane", () => {
+test("Ctrl/Cmd+Backquote no longer opens the database home or shows tab shortcut badges", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   const tabs = read("./components/WorkbenchTabs.vue");
   const pane = read("./components/WorkbenchPane.vue");
   const splitLayout = read("./components/WorkbenchSplitLayout.vue");
+  const styles = read("./workbench.css");
 
-  assert.match(orchestrator, /import\s*\{[^}]*isTabShortcutEvent[^}]*\}\s*from\s*["']\.\/utils\/tabShortcutHints\.js["']/);
-  assert.match(orchestrator, /useTabShortcutHints\(/);
-  assert.match(
-    orchestrator,
-    /function\s+handleGlobalShortcutKeydown\s*\([^)]*\)\s*\{[\s\S]*?if\s*\(handleCycleTabKeydown\(event\)\)\s*return;[\s\S]*?if\s*\(handleTabShortcutKeydown\(event\)\)\s*return;/,
-  );
-  assert.match(orchestrator, /function\s+handleTabShortcutKeydown\s*\(/);
-  assert.match(orchestrator, /openCurrentDatabaseHome\(\{\s*paneId:\s*pane\.id,\s*activate:\s*true\s*\}\)/);
-  assert.match(orchestrator, /preventDialogShortcutDefault[\s\S]*isTabShortcutEvent\(event\)/);
-  assert.match(orchestrator, /dialogLayerManager\.hasActiveModalLayer\(\)[\s\S]*?hideTabShortcutHints\(\)/);
-  assert.match(orchestrator, /:show-shortcut-hints="tabShortcutHintsVisible"/);
-
-  assert.match(splitLayout, /showShortcutHints:\s*\{\s*type:\s*Boolean/);
-  assert.match(splitLayout, /:show-shortcut-hints="showShortcutHints"/);
-  assert.match(pane, /:show-shortcut-hints="isFocused && showShortcutHints"/);
-  assert.match(tabs, /assignTabShortcutHints\(/);
-  assert.match(tabs, /hint\?\.combo\.at\(-1\)/);
-  assert.match(tabs, /class="wb-tab-shortcut-badge"/);
+  assert.doesNotMatch(orchestrator, /tabShortcutHints|useTabShortcutHints|handleTabShortcutKeydown|isTabShortcutEvent|isReservedTabShortcutCombo/);
+  assert.doesNotMatch(orchestrator, /show-shortcut-hints/);
+  assert.doesNotMatch(splitLayout, /showShortcutHints|show-shortcut-hints/);
+  assert.doesNotMatch(pane, /showShortcutHints|show-shortcut-hints/);
+  assert.doesNotMatch(tabs, /tabShortcutHints|assignTabShortcutHints|showShortcutHints|wb-tab-shortcut-badge|is-showing-shortcut/);
+  assert.doesNotMatch(styles, /wb-tab-shortcut-badge|is-showing-shortcut/);
 });
 
 test("shortcut settings dialog does not overflow and protects overlay clicks", () => {

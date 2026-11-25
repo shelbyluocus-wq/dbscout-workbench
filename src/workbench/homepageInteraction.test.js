@@ -254,13 +254,10 @@ test("homepage tab keeps the normal arrow cursor", () => {
   assert.match(homeCursorRule, /user-select:\s*none/);
 });
 
-test("favorite database shortcuts cannot reuse the database home shortcut", () => {
+test("favorite database shortcuts do not reserve a built-in home tab shortcut", () => {
   const orchestrator = read("./MySqlWorkbench.vue");
   assert.match(orchestrator, /function favoriteShortcutConflict\(target, shortcut\)/);
-  assert.match(
-    orchestrator,
-    /function favoriteShortcutConflict\([\s\S]*?isReservedTabShortcutCombo\(shortcut\)[\s\S]*?切换打开的标签/,
-  );
+  assert.doesNotMatch(orchestrator, /isReservedTabShortcutCombo/);
 });
 
 test("database favorites surface opens from an activity rail button instead of home-tab hover", () => {
