@@ -1,8 +1,10 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, ref } from "vue";
+import { ChevronRight, Download } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
 import { parseConnectionConfigText } from "../utils/connectionConfigImport.js";
+import { isNavicatNcxFileName } from "../utils/navicatImport.js";
 import { isConnFormComplete, isConnTestReady, normalizeConnectionKind } from "../utils/connectionKinds.js";
 
 const props = defineProps({
@@ -11,7 +13,16 @@ const props = defineProps({
   testBusy: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["submit", "cancel", "test", "field-change", "config-import", "config-import-error"]);
+const emit = defineEmits([
+  "submit",
+  "cancel",
+  "test",
+  "field-change",
+  "config-import",
+  "config-import-error",
+  "open-navicat-import",
+  "open-navicat-ncx",
+]);
 const draggingConfig = ref(false);
 const dialogRef = ref(null);
 
@@ -68,6 +79,10 @@ async function onDialogDrop(event) {
   const file = Array.from(event.dataTransfer?.files || [])[0];
   if (!file) return;
   try {
+    if (isNavicatNcxFileName(file.name)) {
+      emit("open-navicat-ncx", { fileName: file.name, content: await file.text() });
+      return;
+    }
     const parsed = parseConnectionConfigText(await file.text(), { fileName: file.name });
     emit("config-import", parsed.config);
   } catch (error) {
@@ -100,6 +115,21 @@ async function onDialogDrop(event) {
         <span class="wb-config-dropzone-mark">JSON</span>
         <span>{{ t('m_c34d1be9488f') }}</span>
       </div>
+      <button
+        type="button"
+        class="wb-navicat-entry-btn"
+        :disabled="busy || testBusy"
+        @click="emit('open-navicat-import')"
+      >
+        <span class="wb-navicat-entry-lead">
+          <Download :size="14" aria-hidden="true" />
+          <span>{{ t('navicatImport.entryLabel') }}</span>
+        </span>
+        <span class="wb-navicat-entry-tail">
+          <span>{{ t('navicatImport.entryHint') }}</span>
+          <ChevronRight :size="14" aria-hidden="true" />
+        </span>
+      </button>
       <label class="wb-dialog-field">
         <span>{{ t('m_ba40014ff496') }}</span>
         <select v-model="dialog.kind" @change="applyKindDefaults">

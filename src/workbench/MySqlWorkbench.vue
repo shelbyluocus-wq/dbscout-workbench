@@ -161,6 +161,7 @@ import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
 import DatabaseDisplayDialog from "./components/DatabaseDisplayDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
+import NavicatImportDialog from "./components/NavicatImportDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import BackupCenterDialog from "./components/BackupCenterDialog.vue";
@@ -357,6 +358,8 @@ const {
   onConnDialogFieldChange,
   submitConnDialog,
   removeConnection,
+  listSavedConnections,
+  importNavicatConnections,
   dispose: disposeConnection,
 } = conn;
 
@@ -1935,6 +1938,33 @@ async function submitConnDialogWithHome() {
   if (selectedDatabase.value) {
     await restorePendingStartupOrEnsureHome();
   }
+}
+
+const navicatImportOpen = ref(false);
+const navicatInitialNcx = ref(null);
+const navicatSavedConnections = ref([]);
+
+function openNavicatImport(ncxPayload = null) {
+  cancelConnDialog();
+  navicatSavedConnections.value = listSavedConnections();
+  navicatInitialNcx.value = ncxPayload?.content ? { ...ncxPayload } : null;
+  navicatImportOpen.value = true;
+}
+
+function closeNavicatImport() {
+  navicatImportOpen.value = false;
+  navicatInitialNcx.value = null;
+}
+
+async function handleNavicatImport(items) {
+  closeNavicatImport();
+  await importNavicatConnections(items, {
+    onFirstConnected: async () => {
+      if (selectedDatabase.value) {
+        await restorePendingStartupOrEnsureHome();
+      }
+    },
+  });
 }
 
 async function retryStartupConnectionsOnRecovery(event) {
@@ -6733,6 +6763,18 @@ onBeforeUnmount(() => {
       @field-change="onConnDialogFieldChange"
       @config-import="applyConnConfigImport"
       @config-import-error="rejectConnConfigImport"
+      @open-navicat-import="openNavicatImport()"
+      @open-navicat-ncx="openNavicatImport($event)"
+    />
+
+    <NavicatImportDialog
+      v-if="navicatImportOpen"
+      :open="navicatImportOpen"
+      :existing-connections="connections"
+      :saved-connections="navicatSavedConnections"
+      :initial-ncx-payload="navicatInitialNcx"
+      @close="closeNavicatImport"
+      @import="handleNavicatImport"
     />
 
     <QuickOpenPalette

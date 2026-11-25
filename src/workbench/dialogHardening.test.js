@@ -17,6 +17,7 @@ const taskDialogs = [
   "./components/DatabaseSyncDialog.vue",
   "./components/FontSettingsDialog.vue",
   "./components/ImportWizardDialog.vue",
+  "./components/NavicatImportDialog.vue",
   "./components/ShortcutSettingsDialog.vue",
   "./components/SqlHistoryDialog.vue",
   "./components/TableCopyDialog.vue",

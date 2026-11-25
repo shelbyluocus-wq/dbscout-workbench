@@ -2537,6 +2537,150 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     // Mirror the real backend: the returned list equals list_databases.
     return [...(mockConnectionDatabases[connection.id] || ["game_db"])];
   }
+  if (command === "scan_navicat_connections") {
+    return {
+      supported: true,
+      platform: "windows",
+      source: "registry",
+      skippedUnsupported: 1,
+      notice: "",
+      connections: [
+        {
+          id: "registry:mysql:0",
+          name: "4区配置库",
+          kind: "mysql",
+          host: "192.168.1.223",
+          port: "8306",
+          username: "root",
+          password: "demo_password",
+          database: "newsg_4cfg",
+          url: "",
+          passwordStatus: "decrypted",
+          warnings: [],
+          source: "registry",
+          sourceLabel: "MySQL",
+        },
+        {
+          id: "registry:mysql:1",
+          name: "测试服 MySQL",
+          kind: "mysql",
+          host: "10.0.0.18",
+          port: "3306",
+          username: "dev",
+          password: "",
+          database: "",
+          url: "",
+          passwordStatus: "missing",
+          warnings: [],
+          source: "registry",
+          sourceLabel: "MySQL",
+        },
+        {
+          id: "registry:mongodb:2",
+          name: "活动日志 MongoDB",
+          kind: "mongodb",
+          host: "10.0.0.25",
+          port: "27017",
+          username: "admin",
+          password: "demo_mongo_password",
+          database: "game_log",
+          url: "mongodb://admin:demo_mongo_password@10.0.0.25:27017/game_log?authSource=admin",
+          passwordStatus: "decrypted",
+          warnings: [],
+          source: "registry",
+          sourceLabel: "MongoDB",
+        },
+        {
+          id: "registry:mongodb:3",
+          name: "本地 MongoDB",
+          kind: "mongodb",
+          host: "127.0.0.1",
+          port: "27017",
+          username: "",
+          password: "",
+          database: "game_db",
+          url: "",
+          passwordStatus: "empty",
+          warnings: [],
+          source: "registry",
+          sourceLabel: "MongoDB",
+        },
+      ],
+    };
+  }
+  if (command === "import_navicat_ncx_file") {
+    const content = String(payload?.content || "");
+    if (!content.trim()) {
+      return {
+        supported: true,
+        platform: "windows",
+        source: "ncx",
+        skippedUnsupported: 0,
+        notice: "",
+        connections: [
+          {
+            id: "ncx:mysql:0",
+            name: "导出备份 MySQL",
+            kind: "mysql",
+            host: "10.0.1.9",
+            port: "3306",
+            username: "root",
+            password: "demo_ncx_password",
+            database: "game_db",
+            url: "",
+            passwordStatus: "decrypted",
+            warnings: [],
+            source: "ncx",
+            sourceLabel: "MySQL",
+          },
+        ],
+      };
+    }
+    const matches = [...content.matchAll(/<Connection\b([^>]*?)\/?>/gi)];
+    const parsed = [];
+    let skippedUnsupported = 0;
+    for (let index = 0; index < matches.length; index += 1) {
+      const attrs = {};
+      for (const pair of matches[index][1].matchAll(/([A-Za-z0-9_:-]+)\s*=\s*"([^"]*)"/g)) {
+        attrs[pair[1].toLowerCase()] = pair[2];
+      }
+      const connType = String(attrs.conntype || "").toUpperCase();
+      const kind = connType === "MONGO" || connType === "MONGODB"
+        ? "mongodb"
+        : connType === "MYSQL" || connType === "MARIADB"
+          ? "mysql"
+          : "";
+      if (!kind) {
+        skippedUnsupported += 1;
+        continue;
+      }
+      const host = String(attrs.host || "").trim();
+      if (!host) continue;
+      parsed.push({
+        id: `ncx:${kind}:${index}`,
+        name: attrs.connectionname || `${host}:${attrs.port || (kind === "mongodb" ? "27017" : "3306")}`,
+        kind,
+        host,
+        port: String(attrs.port || (kind === "mongodb" ? "27017" : "3306")),
+        username: String(attrs.username || (kind === "mysql" ? "root" : "")),
+        password: attrs.password ? "demo_ncx_password" : "",
+        database: String(attrs.initialdatabase || attrs.database || ""),
+        url: "",
+        passwordStatus: attrs.password ? "decrypted" : kind === "mongodb" && !attrs.username ? "empty" : "missing",
+        warnings: [],
+        source: "ncx",
+        sourceLabel: connType === "MARIADB" ? "MariaDB" : kind === "mongodb" ? "MongoDB" : "MySQL",
+      });
+    }
+    return {
+      supported: true,
+      platform: "windows",
+      source: "ncx",
+      skippedUnsupported,
+      notice: "",
+      connections: parsed,
+    };
+  }
   if (command === "agent_pick_project_directory") {
     return {
       id: "mock-project-dbscout-workbench",

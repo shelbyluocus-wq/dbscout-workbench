@@ -24,6 +24,8 @@ mod demo;
 mod mysql_column_types;
 mod mysql_text;
 mod natural_sort;
+mod navicat_crypto;
+mod navicat_import;
 mod path_reveal;
 mod perf;
 mod perf_fixture;
@@ -291,6 +293,8 @@ pub fn run() {
             commands::add_connection,
             commands::restore_connection,
             commands::remove_connection,
+            navicat_import::scan_navicat_connections,
+            navicat_import::import_navicat_ncx_file,
             commands::save_export_file,
             commands::save_export_files,
             commands::save_text_file,

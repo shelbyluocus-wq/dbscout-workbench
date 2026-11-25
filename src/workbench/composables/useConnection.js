@@ -21,6 +21,11 @@ import {
   isSupportedConnectionKind,
   normalizeConnectionKind,
 } from "../utils/connectionKinds.js";
+import {
+  buildImportedConnectionRecord,
+  hasConnectableCredentials,
+  injectPasswordIntoConnectionUrl,
+} from "../utils/navicatImport.js";
 
 export { normalizeAliasInput, resolveDatabaseAlias, resolveConnectionAlias } from "./aliasStore.js";
 export {
@@ -270,6 +275,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     username: CONNECTION_KINDS.mysql.defaultUser,
     password: "",
     importedDatabase: "",
+    reconnectPlaceholderId: "",
+    reconnectAlias: "",
+    reconnectUrl: "",
     error: "",
     testPassed: false,
   });
@@ -599,6 +607,31 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     );
   }
 
+  function migratePlaceholderAlias(placeholderId, runtimeId, fallbackAlias = "") {
+    if (!runtimeId) return;
+    const placeholderAlias = placeholderId ? aliases.getConnectionAlias(placeholderId) : "";
+    const existingAlias = aliases.getConnectionAlias(runtimeId);
+    const nextAlias = existingAlias || placeholderAlias || String(fallbackAlias || "").trim();
+    if (!existingAlias && nextAlias) {
+      aliases.setConnectionAlias(runtimeId, nextAlias);
+    }
+    if (placeholderId && placeholderId !== runtimeId && placeholderAlias) {
+      aliases.removeConnectionAliases(placeholderId);
+    }
+  }
+
+  function replaceConnectionOrderId(previousId, nextId) {
+    if (!previousId || !nextId || previousId === nextId) return;
+    const order = readJsonStorage(CONNECTION_ORDER_KEY, []);
+    if (!Array.isArray(order) || !order.includes(previousId)) return;
+    const nextOrder = [];
+    for (const id of order) {
+      const mapped = id === previousId ? nextId : id;
+      if (!nextOrder.includes(mapped)) nextOrder.push(mapped);
+    }
+    writeJsonStorage(CONNECTION_ORDER_KEY, nextOrder);
+  }
+
   async function restoreSavedConnectionRuntime(savedConn) {
     const placeholderId = `saved-${savedConnectionKey(savedConn)}`;
     const existing = connections.value.find((connection) => (
@@ -606,6 +639,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     ));
     if (existing?.connected) {
       applySavedMetadata(existing, savedConn);
+      migratePlaceholderAlias(placeholderId, existing.id, savedConn.alias);
+      replaceConnectionOrderId(placeholderId, existing.id);
       connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
       return existing;
     }
@@ -619,18 +654,24 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     try {
       const restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
       const previousConnections = connections.value;
-      connections.value = applyConnectionOrder(mergeConnections(previousConnections, await invokeWorkbench("list_connections")));
+      const merged = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
       const restored =
-        connections.value.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
-        connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
+        merged.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
+        merged.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
       if (restored) {
         if (Array.isArray(restoredDatabases)) restoredDatabaseLists.set(restored.id, restoredDatabases);
         applySavedMetadata(restored, savedConn);
+        migratePlaceholderAlias(placeholderId, restored.id, savedConn.alias);
+        replaceConnectionOrderId(placeholderId, restored.id);
+        if (selectedConnectionId.value === placeholderId) {
+          selectedConnectionId.value = restored.id;
+        }
         restored.connected = true;
         delete restored.restoreError;
-        connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
+        connections.value = applyConnectionOrder(merged.filter((connection) => connection.id !== placeholderId));
         return restored;
       }
+      connections.value = applyConnectionOrder(merged);
       return upsertSavedConnectionPlaceholder(savedConn, true);
     } catch (error) {
       const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
@@ -663,6 +704,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     const existing = connections.value.find((connection) => connection.id === id || savedConnectionMatches(connection, savedConn));
     const placeholder = applySavedMetadata(existing || { id, database: savedConn.database || null }, savedConn);
     placeholder.connected = connected;
+    if (savedConn.alias && !aliases.getConnectionAlias(placeholder.id)) {
+      aliases.setConnectionAlias(placeholder.id, savedConn.alias);
+    }
     if (!existing) connections.value.push(placeholder);
     return placeholder;
   }
@@ -739,7 +783,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     connDialog.port = String(connection.port || defaults.defaultPort);
     connDialog.username = connection.username || defaults.defaultUser;
     connDialog.password = "";
-    connDialog.importedDatabase = "";
+    connDialog.importedDatabase = String(connection.database || "").trim();
+    connDialog.reconnectPlaceholderId = String(connection.id || "").startsWith("saved-") ? String(connection.id) : "";
+    connDialog.reconnectAlias = aliases.getConnectionAlias(connection.id) || "";
+    connDialog.reconnectUrl = kind === CONNECTION_KINDS.mongodb.kind ? String(connection.url || "") : "";
     connDialog.error = message;
     connDialog.open = true;
   }
@@ -987,8 +1034,15 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     connDialog.testPassed = false;
   }
 
+  function clearConnDialogReconnectMeta() {
+    connDialog.reconnectPlaceholderId = "";
+    connDialog.reconnectAlias = "";
+    connDialog.reconnectUrl = "";
+  }
+
   function openConnDialog() {
     resetConnTestState();
+    clearConnDialogReconnectMeta();
     connDialog.error = "";
     connDialog.kind = connDialog.kind || CONNECTION_KINDS.mysql.kind;
     connDialog.importedDatabase = "";
@@ -998,12 +1052,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   function cancelConnDialog() {
     connDialog.open = false;
     resetConnTestState();
+    clearConnDialogReconnectMeta();
     connDialog.error = "";
     connDialog.importedDatabase = "";
   }
 
   function applyConnConfigImport(config = {}) {
     resetConnTestState();
+    clearConnDialogReconnectMeta();
     const kind = normalizeConnectionKind(config.kind);
     const defaults = CONNECTION_KINDS[kind];
     connDialog.kind = kind;
@@ -1115,7 +1171,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return;
     }
     const normalizedKind = normalizeConnectionKind(kind);
-    const url = buildConnectionUrl({ kind: normalizedKind, host, port, username, password });
+    const reconnectPlaceholderId = connDialog.reconnectPlaceholderId;
+    const reconnectAlias = connDialog.reconnectAlias;
+    const url =
+      normalizedKind === CONNECTION_KINDS.mongodb.kind && connDialog.reconnectUrl
+        ? injectPasswordIntoConnectionUrl(connDialog.reconnectUrl, { username, password })
+        : buildConnectionUrl({ kind: normalizedKind, host, port, username, password });
     busy.value = true;
     connDialog.error = "";
     try {
@@ -1123,15 +1184,18 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       await whenConnectionsRestored();
       const previousIds = new Set(connections.value.map((connection) => connection.id));
       const dbList = await invokeWorkbench("add_connection", { kind: normalizedKind, url });
-      connections.value = applyConnectionOrder(await invokeWorkbench("list_connections"));
+      connections.value = applyConnectionOrder(
+        mergeConnections(connections.value, await invokeWorkbench("list_connections")),
+      );
       const newConnection =
-        connections.value.find((connection) => !previousIds.has(connection.id)) ||
+        connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== reconnectPlaceholderId) ||
         connections.value[connections.value.length - 1];
       if (newConnection) selectedConnectionId.value = newConnection.id;
       const orderedNewDatabases = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, dbList);
       databases.value = orderedNewDatabases;
       if (newConnection?.id) databasesByConnection[newConnection.id] = orderedNewDatabases;
       connDialog.open = false;
+      clearConnDialogReconnectMeta();
       if (newConnection) {
         applySavedMetadata(newConnection, {
           host: connDialog.host.trim(),
@@ -1141,7 +1205,11 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           readOnly: isReadOnlyKind(normalizedKind),
           url,
         });
+        migratePlaceholderAlias(reconnectPlaceholderId, newConnection.id, reconnectAlias);
         newConnection.connected = true;
+        if (reconnectPlaceholderId && reconnectPlaceholderId !== newConnection.id) {
+          connections.value = connections.value.filter((connection) => connection.id !== reconnectPlaceholderId);
+        }
       }
       writeSavedConnection({
         kind: normalizedKind,
@@ -1149,6 +1217,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         port: connDialog.port.trim(),
         username: connDialog.username,
         password: connDialog.password,
+        alias: reconnectAlias || undefined,
         readOnly: isReadOnlyKind(normalizedKind),
         url,
       });
@@ -1166,6 +1235,98 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     } finally {
       busy.value = false;
     }
+  }
+
+  function listSavedConnections() {
+    return readSavedConnections();
+  }
+
+  async function importNavicatConnections(items, { onFirstConnected = null } = {}) {
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) return { added: 0, updated: 0, skipped: 0, total: 0 };
+
+    await whenConnectionsRestored();
+
+    const hadConnectedServer = connections.value.some((connection) => connection?.connected);
+    const seenKeys = new Set();
+    const toRestore = [];
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const rawItem of list) {
+      const record = buildImportedConnectionRecord(rawItem);
+      if (!record.host) {
+        skipped += 1;
+        continue;
+      }
+      const key = savedConnectionKey(record);
+      if (seenKeys.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      seenKeys.add(key);
+
+      const existingConn = connections.value.find((connection) => savedConnectionMatches(connection, record));
+      const existingSaved = readSavedConnections().find((saved) => savedConnectionKey(saved) === key);
+      const mergedRecord = {
+        ...record,
+        alias: record.alias || existingSaved?.alias || "",
+        database: record.database || existingSaved?.database || "",
+      };
+
+      writeSavedConnection(mergedRecord);
+
+      if (existingConn || existingSaved) {
+        updated += 1;
+        if (existingConn) {
+          if (mergedRecord.alias && !aliases.getConnectionAlias(existingConn.id)) {
+            aliases.setConnectionAlias(existingConn.id, mergedRecord.alias);
+          }
+          if (!existingConn.connected) {
+            applySavedMetadata(existingConn, mergedRecord);
+            if (hasConnectableCredentials(mergedRecord)) toRestore.push(mergedRecord);
+          }
+        } else {
+          upsertSavedConnectionPlaceholder(mergedRecord, false);
+          if (hasConnectableCredentials(mergedRecord)) toRestore.push(mergedRecord);
+        }
+      } else {
+        added += 1;
+        upsertSavedConnectionPlaceholder(mergedRecord, false);
+        if (hasConnectableCredentials(mergedRecord)) toRestore.push(mergedRecord);
+      }
+    }
+
+    writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((connection) => connection.id));
+
+    if (toRestore.length > 0) {
+      const restorePromise = restoreSavedConnectionsInOrder(toRestore, { readyWhen: () => true });
+      void restorePromise
+        .then(() => connectionsRestored)
+        .then(async () => {
+          if (disposed || hadConnectedServer) return;
+          const firstConnected = connections.value.find((connection) => connection?.connected);
+          if (!firstConnected) return;
+          if (!selectedConnectionId.value || String(selectedConnectionId.value).startsWith("saved-")) {
+            await selectConnection(firstConnected.id);
+            if (typeof onFirstConnected === "function") {
+              await onFirstConnected(firstConnected);
+            }
+          }
+        })
+        .catch(() => null);
+    }
+
+    const total = added + updated;
+    if (added > 0 && updated > 0) {
+      statusText.value = `已从 Navicat 导入 ${added} 个新连接，更新 ${updated} 个已有连接`;
+    } else if (added > 0) {
+      statusText.value = `已从 Navicat 导入 ${added} 个连接`;
+    } else if (updated > 0) {
+      statusText.value = `已更新 ${updated} 个 Navicat 连接`;
+    }
+    return { added, updated, skipped, total };
   }
 
   return {
@@ -1223,6 +1384,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     onConnDialogFieldChange,
     submitConnDialog,
     removeConnection,
+    listSavedConnections,
+    importNavicatConnections,
     dispose,
   };
 }
