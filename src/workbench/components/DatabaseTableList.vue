@@ -41,6 +41,9 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   localeMeta: { type: Object, default: null },
+  visible: { type: Boolean, default: true },
+  initialScrollTop: { type: Number, default: 0 },
+  initialScrollLeft: { type: Number, default: 0 },
 });
 
 const emit = defineEmits([
@@ -49,6 +52,7 @@ const emit = defineEmits([
   "activate-row",
   "open-design",
   "visible-tables",
+  "scroll-change",
   "start-rename",
   "rename-draft",
   "submit-rename",
@@ -75,7 +79,8 @@ const scrollerRef = ref(null);
 const renameInputRef = ref(null);
 const renameErrorId = `wb-dbhome-rename-error-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const renameSubmissionHandled = ref(false);
-const scrollTop = ref(0);
+const scrollTop = ref(Math.max(0, Number(props.initialScrollTop) || 0));
+const scrollLeft = ref(Math.max(0, Number(props.initialScrollLeft) || 0));
 const viewportHeight = ref(520);
 const surfaceWidth = ref(0);
 const columnLayout = ref(loadHomeColumnLayout());
@@ -162,9 +167,15 @@ const visibleSearchMatches = computed(() => {
   }));
 });
 
+let lastEmittedVisibleSignature = "";
 watch(
-  () => visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean).join("\u001f"),
-  () => {
+  () => [
+    props.visible,
+    visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean).join("\u001f"),
+  ],
+  ([visible, signature]) => {
+    if (!visible || !signature || signature === lastEmittedVisibleSignature) return;
+    lastEmittedVisibleSignature = signature;
     emit("visible-tables", visibleRows.value.map(({ table }) => tableName(table)).filter(Boolean));
   },
   { immediate: true },
@@ -240,9 +251,21 @@ function handleHeaderClick(column) {
 
 function onScroll(event) {
   const target = event?.currentTarget;
-  if (!target) return;
+  if (!target || !props.visible) return;
+  if (!target.clientHeight && !target.clientWidth) return;
   scrollTop.value = target.scrollTop;
+  scrollLeft.value = target.scrollLeft;
   viewportHeight.value = target.clientHeight || viewportHeight.value;
+  emit("scroll-change", { scrollTop: scrollTop.value, scrollLeft: scrollLeft.value });
+}
+
+function restoreScrollPosition() {
+  const scroller = scrollerRef.value;
+  if (!scroller || !props.visible) return;
+  const targetTop = Math.max(0, Number(scrollTop.value) || 0);
+  const targetLeft = Math.max(0, Number(scrollLeft.value) || 0);
+  if (scroller.scrollTop !== targetTop) scroller.scrollTop = targetTop;
+  if (scroller.scrollLeft !== targetLeft) scroller.scrollLeft = targetLeft;
 }
 
 function select(table, event) {
@@ -552,6 +575,7 @@ function scrollTableIntoView(name, { block = "center" } = {}) {
   }
   scroller.scrollTop = Math.max(0, nextTop);
   scrollTop.value = scroller.scrollTop;
+  emit("scroll-change", { scrollTop: scrollTop.value, scrollLeft: scrollLeft.value });
   return true;
 }
 
@@ -567,8 +591,14 @@ function resetView() {
   boxBaseNames.value = [];
   suppressHeaderClick.value = false;
   renameSubmissionHandled.value = false;
+  lastEmittedVisibleSignature = "";
   scrollTop.value = 0;
-  if (scrollerRef.value) scrollerRef.value.scrollTop = 0;
+  scrollLeft.value = 0;
+  if (scrollerRef.value) {
+    scrollerRef.value.scrollTop = 0;
+    scrollerRef.value.scrollLeft = 0;
+  }
+  emit("scroll-change", { scrollTop: 0, scrollLeft: 0 });
 }
 
 watch(
@@ -607,12 +637,26 @@ let pendingSurfaceMeasure = false;
 
 function syncSurfaceMetrics() {
   const surface = scrollerRef.value;
-  if (!surface) return;
+  if (!surface || !props.visible) return;
   const nextWidth = surface.clientWidth;
   const nextHeight = surface.clientHeight;
-  if (Math.abs(nextWidth - surfaceWidth.value) >= 1) surfaceWidth.value = nextWidth;
-  if (nextHeight && Math.abs(nextHeight - viewportHeight.value) >= 1) viewportHeight.value = nextHeight;
+  if (!nextWidth && !nextHeight) return;
+  if (nextWidth > 0 && Math.abs(nextWidth - surfaceWidth.value) >= 1) surfaceWidth.value = nextWidth;
+  if (nextHeight > 0 && Math.abs(nextHeight - viewportHeight.value) >= 1) viewportHeight.value = nextHeight;
 }
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) {
+      headerMenu.value.open = false;
+      return;
+    }
+    restoreScrollPosition();
+    syncSurfaceMetrics();
+  },
+  { flush: "post" },
+);
 
 watch(
   () => Boolean(suspendPaneResize?.value),
@@ -625,9 +669,12 @@ watch(
 
 onMounted(() => {
   const surface = scrollerRef.value;
-  if (!surface || typeof ResizeObserver !== "function") return;
+  if (!surface) return;
+  restoreScrollPosition();
+  if (typeof ResizeObserver !== "function") return;
   syncSurfaceMetrics();
   surfaceObserver = new ResizeObserver(() => {
+    if (!props.visible) return;
     if (suspendPaneResize?.value) {
       pendingSurfaceMeasure = true;
       const nextHeight = surface.clientHeight;

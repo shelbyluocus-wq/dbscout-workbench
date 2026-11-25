@@ -71,3 +71,13 @@ test("fitToolbar still collapses for a real overflow of two pixels", () => {
   const toolbar = fakeToolbar(1000, [1002, 900, 700, 300]);
   assert.equal(fitToolbar(toolbar, 3), 1);
 });
+
+test("fitToolbar keeps its previous fit level when hidden at zero width", () => {
+  const toolbar = fakeToolbar(600, [900, 640, 520, 300]);
+  assert.equal(fitToolbar(toolbar, 3), 2);
+  assert.equal(toolbar.dataset.fit, "2");
+
+  toolbar.clientWidth = 0;
+  assert.equal(fitToolbar(toolbar, 3), 2);
+  assert.equal(toolbar.dataset.fit, "2");
+});

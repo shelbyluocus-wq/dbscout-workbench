@@ -404,10 +404,14 @@ test("database homepage is wired as the current database table management tab", 
 
   assert.match(pane, /import\s+DatabaseHome\s+from\s+["']\.\/DatabaseHome\.vue["']/);
   assert.match(pane, /const\s+activeHomeTab\s*=\s*computed/);
+  assert.match(pane, /const\s+paneHomeTab\s*=\s*computed/);
   assert.match(pane, /const\s+databaseHomeRef\s*=\s*ref\(null\)/);
   assert.match(pane, /<DatabaseHome\b/);
+  assert.match(pane, /v-if="paneHomeTab"/);
   assert.match(pane, /ref="databaseHomeRef"/);
-  assert.match(pane, /:key="activeHomeTab\.tabKey\s*\|\|\s*activeHomeTab\.id"/);
+  assert.match(pane, /:key="paneHomeTab\.tabKey\s*\|\|\s*paneHomeTab\.id"/);
+  assert.match(pane, /:class="\{\s*'wb-pane-view-hidden':\s*!activeHomeTab\s*\}"/);
+  assert.match(pane, /:visible="Boolean\(activeHomeTab\)"/);
   assert.match(pane, /:tables="homeTables"/);
   assert.match(pane, /@visible-tables="emit\('home-visible-tables'/);
   assert.match(pane, /@paste-tables="[^"]*paste-home-tables/);

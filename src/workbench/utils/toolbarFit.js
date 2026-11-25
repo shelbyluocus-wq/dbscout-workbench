@@ -41,6 +41,12 @@ function overflows(element) {
  */
 export function fitToolbar(element, maxLevel) {
   if (!element) return 0;
+  // A view kept mounted while hidden (`display: none`) reads 0 width; leave
+  // its last fit level intact so returning to it never flashes and re-collapses.
+  if (element.clientWidth <= 0) {
+    const previous = Number(element.dataset?.[TOOLBAR_FIT_ATTRIBUTE]);
+    return Number.isFinite(previous) ? previous : 0;
+  }
   const { dataset } = element;
   const previous = dataset[TOOLBAR_FIT_ATTRIBUTE];
   dataset[TOOLBAR_FIT_MEASURING_ATTRIBUTE] = "";

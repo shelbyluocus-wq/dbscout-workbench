@@ -344,6 +344,8 @@ function createHomeTab({ id, connectionId = "", database = "", readOnly = false 
     selectedTableNames: [],
     focusedTableName: "",
     focusedTableComment: "",
+    scrollTop: 0,
+    scrollLeft: 0,
     clipboardFeedback: "",
     loading: false,
     error: "",
@@ -449,6 +451,8 @@ function updateHomeTab(tab, { connectionId, database, sourceKey, homeTabKey, rea
     tab.selectedTableNames = [];
     tab.focusedTableName = "";
     tab.focusedTableComment = "";
+    tab.scrollTop = 0;
+    tab.scrollLeft = 0;
     tab.clipboardFeedback = "";
     tab.loading = false;
     tab.error = "";
@@ -456,6 +460,8 @@ function updateHomeTab(tab, { connectionId, database, sourceKey, homeTabKey, rea
   } else {
     if (!Array.isArray(tab.selectedTableNames)) tab.selectedTableNames = [];
     if (!tab.sortMode) tab.sortMode = "nameAsc";
+    if (!Number.isFinite(Number(tab.scrollTop))) tab.scrollTop = 0;
+    if (!Number.isFinite(Number(tab.scrollLeft))) tab.scrollLeft = 0;
   }
   return tab;
 }

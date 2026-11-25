@@ -184,6 +184,7 @@ function handleTableHistoryRestored() {
 }
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
+const paneHomeTab = computed(() => activeHomeTab.value || (props.tabs || []).find((tab) => tab?.kind === "home") || null);
 const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
 const activeSqlLibraryTab = computed(() => (props.activeTab?.kind === "sql-library" ? props.activeTab : null));
 const activeFoldersTab = computed(() => (props.activeTab?.kind === "folders" ? props.activeTab : null));
@@ -201,7 +202,7 @@ const canImportActive = computed(() =>
 const canFindReplaceActive = computed(() =>
   connectionHasCapability(activeEngineKind.value, "findReplace") && !activeDataReadOnly.value,
 );
-const homeEngineKind = computed(() => engineKindFor(activeHomeTab.value?.connectionId));
+const homeEngineKind = computed(() => engineKindFor(paneHomeTab.value?.connectionId));
 const busy = computed(() => Boolean(props.appState?.busy?.value ?? props.appState?.busy));
 const statusText = props.appState.statusText;
 const { confirm: confirmDialog } = useConfirm();
@@ -1462,15 +1463,27 @@ function openDetailContextMenu(event, clipboardActions) {
 }
 
 function copyHomeSelection() {
+  if (!activeHomeTab.value) return false;
   return databaseHomeRef.value?.copySelection?.() === true;
 }
 
 function pasteHomeTables() {
+  if (!activeHomeTab.value) return false;
   return databaseHomeRef.value?.pasteTables?.() === true;
 }
 
 function refreshHomeView() {
+  if (!activeHomeTab.value) return false;
   return databaseHomeRef.value?.refresh?.() === true;
+}
+
+function isHomeViewActive() {
+  return Boolean(paneHomeTab.value && props.pane?.activeTabId === paneHomeTab.value.id);
+}
+
+function handleDatabaseHomeStateChange() {
+  if (!activeHomeTab.value) return;
+  emitPaneState();
 }
 
 function focusCurrentSearch() {
@@ -2319,39 +2332,6 @@ onMounted(() => emitPaneState());
       :tab="activeFoldersTab"
     />
 
-    <DatabaseHome
-      v-else-if="activeHomeTab"
-      :key="activeHomeTab.tabKey || activeHomeTab.id"
-      ref="databaseHomeRef"
-      :tab="activeHomeTab"
-      :engine-kind="homeEngineKind"
-      :tables="homeTables"
-      :clipboard="homeClipboard"
-      :recent-table-names="recentTableNames"
-      :busy="busy"
-      :active="isFocused"
-      :can-close-pane="rootPaneCount > 1"
-      @open-table="emit('open-home-table', $event, pane.id)"
-      @open-design="emit('open-design', $event, pane.id)"
-      @create-table="emit('create-table', $event, pane.id)"
-      @copy-tables="emit('copy-home-tables', $event)"
-      @paste-tables="emit('paste-home-tables', $event)"
-      @rename-table="emit('rename-home-table', $event)"
-      @edit-table-comment="emit('edit-home-table-comment', $event)"
-      @delete-tables="emit('delete-home-tables', $event)"
-      @send-tables="emit('send-home-tables', $event)"
-      @refresh="emit('refresh-home', $event)"
-      @visible-tables="emit('home-visible-tables', $event)"
-      @batch-export="emit('batch-export', $event)"
-      @batch-import="emit('batch-import', $event)"
-      @focus-table="emit('focus-home-table', $event, pane.id)"
-      @view-change-history="emit('view-home-table-history', { ...$event, paneId: pane.id })"
-      @split-pane="emit('split-pane', pane.id, $event)"
-      @close-pane="emit('close-pane', pane.id)"
-      @open-sql-library="emit('open-sql-library', pane.id)"
-      @state-change="emit('state-change', { paneId: pane.id, activeHomeTab, activeDataTab: null, activeDesignTab: null })"
-    />
-
     <section v-else-if="activeDesignTab" class="wb-pane-content-with-actions">
       <div class="wb-pane-inline-actions" :aria-label="t('m_6011c42c053f')">
         <button
@@ -2375,7 +2355,7 @@ onMounted(() => emitPaneState());
       />
     </section>
 
-    <section v-else class="wb-empty">
+    <section v-else-if="!activeHomeTab" class="wb-empty">
       <div class="wb-pane-empty-actions" :aria-label="t('m_6011c42c053f')">
         <button
           ref="splitMenuAnchor"
@@ -2400,5 +2380,42 @@ onMounted(() => emitPaneState());
         <span>{{ t('m_a47d889ebe6e') }}</span>
       </div>
     </section>
+
+    <DatabaseHome
+      v-if="paneHomeTab"
+      :key="paneHomeTab.tabKey || paneHomeTab.id"
+      ref="databaseHomeRef"
+      :class="{ 'wb-pane-view-hidden': !activeHomeTab }"
+      :aria-hidden="!activeHomeTab ? 'true' : undefined"
+      :tab="paneHomeTab"
+      :engine-kind="homeEngineKind"
+      :tables="homeTables"
+      :clipboard="homeClipboard"
+      :recent-table-names="recentTableNames"
+      :busy="busy"
+      :active="isFocused"
+      :visible="Boolean(activeHomeTab)"
+      :is-active-view="isHomeViewActive"
+      :can-close-pane="rootPaneCount > 1"
+      @open-table="emit('open-home-table', $event, pane.id)"
+      @open-design="emit('open-design', $event, pane.id)"
+      @create-table="emit('create-table', $event, pane.id)"
+      @copy-tables="emit('copy-home-tables', $event)"
+      @paste-tables="emit('paste-home-tables', $event)"
+      @rename-table="emit('rename-home-table', $event)"
+      @edit-table-comment="emit('edit-home-table-comment', $event)"
+      @delete-tables="emit('delete-home-tables', $event)"
+      @send-tables="emit('send-home-tables', $event)"
+      @refresh="emit('refresh-home', $event)"
+      @visible-tables="emit('home-visible-tables', $event)"
+      @batch-export="emit('batch-export', $event)"
+      @batch-import="emit('batch-import', $event)"
+      @focus-table="emit('focus-home-table', $event, pane.id)"
+      @view-change-history="emit('view-home-table-history', { ...$event, paneId: pane.id })"
+      @split-pane="emit('split-pane', pane.id, $event)"
+      @close-pane="emit('close-pane', pane.id)"
+      @open-sql-library="emit('open-sql-library', pane.id)"
+      @state-change="handleDatabaseHomeStateChange"
+    />
   </section>
 </template>

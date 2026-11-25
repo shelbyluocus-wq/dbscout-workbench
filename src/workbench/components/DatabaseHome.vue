@@ -57,6 +57,8 @@ const props = defineProps({
   clipboard: { type: Object, default: null },
   busy: { type: Boolean, default: false },
   active: { type: Boolean, default: true },
+  visible: { type: Boolean, default: true },
+  isActiveView: { type: Function, default: null },
   canClosePane: { type: Boolean, default: false },
   engineKind: { type: String, default: "" },
 });
@@ -269,9 +271,11 @@ const typeaheadResultLabel = computed(() => {
 const typeaheadResultHtml = computed(() =>
   highlightSearchRanges(typeaheadResultLabel.value, typeahead.matchRanges.value),
 );
+const isHomeInteractive = computed(() => props.active && props.visible);
 const selectionDismissal = createHomepageSelectionDismissal({
   getRoot: () => homeRootRef.value,
   getProtectedRoots: () => [contextMenuRef.value],
+  isEnabled: () => props.visible && (typeof props.isActiveView !== "function" || props.isActiveView()),
   clearSelection,
 });
 
@@ -281,6 +285,7 @@ function syncTabState() {
   props.tab.sortMode = controller.sortMode.value;
   props.tab.selectedTableNames = [...controller.selectedNames.value];
   props.tab.focusedTableName = controller.focusedName.value || "";
+  if (!props.visible) return;
   emit("state-change", {
     tabId: props.tab.id,
     query: props.tab.query,
@@ -288,6 +293,12 @@ function syncTabState() {
     selectedTableNames: props.tab.selectedTableNames,
     focusedTableName: props.tab.focusedTableName,
   });
+}
+
+function handleTableListScrollChange({ scrollTop = 0, scrollLeft = 0 } = {}) {
+  if (!props.tab) return;
+  props.tab.scrollTop = Math.max(0, Number(scrollTop) || 0);
+  props.tab.scrollLeft = Math.max(0, Number(scrollLeft) || 0);
 }
 
 function setQuery(value) {
@@ -338,6 +349,14 @@ watch(
     controller.focusedName.value = props.tab.focusedTableName || controller.selectedNames.value.at(-1) || "";
     searchNavigationName.value = "";
     controller.cancelRename();
+  },
+);
+
+watch(
+  () => (Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames.join("\u001f") : ""),
+  (incoming) => {
+    if (incoming === controller.selectedNames.value.join("\u001f")) return;
+    controller.setSelection(Array.isArray(props.tab.selectedTableNames) ? props.tab.selectedTableNames : []);
   },
 );
 
@@ -815,6 +834,7 @@ function handleHomeSurfaceClick(event) {
 }
 
 function handleDocumentPointerDown(event) {
+  if (!props.visible) return;
   const input = searchInputRef.value;
   if (!input || document.activeElement !== input) return;
   if (event.target?.closest?.(".wb-dbhome-search")) return;
@@ -833,7 +853,7 @@ function isTypeaheadEventInCurrentPane(event) {
 }
 
 function handleTypeaheadKeydown(event) {
-  if (!props.active || isEditableTypeaheadTarget(event.target)) return;
+  if (!isHomeInteractive.value || isEditableTypeaheadTarget(event.target)) return;
   if (!isTypeaheadEventInCurrentPane(event)) return;
   if (handleHomeArrowKeydown(event)) {
     event.stopPropagation?.();
@@ -855,14 +875,32 @@ watch(
 );
 
 watch(
-  () => props.active,
-  (active) => {
-    if (!active) {
+  () => isHomeInteractive.value,
+  (interactive) => {
+    if (!interactive) {
       typeahead.dismiss();
       splitMenuOpen.value = false;
       compactActionMenuOpen.value = false;
     }
   },
+);
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) {
+      closeMenu();
+      return;
+    }
+    const activeElement = globalThis.document?.activeElement;
+    if (
+      props.active
+      && (!activeElement || activeElement === document.body || activeElement === document.documentElement)
+    ) {
+      homeRootRef.value?.focus?.({ preventScroll: true });
+    }
+  },
+  { flush: "post" },
 );
 
 onMounted(() => {
@@ -1030,6 +1068,9 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
       :tables="displayedTables"
       :locale-meta="localeFoldResult.localeMetaByName"
       :loading="homeLoading"
+      :visible="visible"
+      :initial-scroll-top="tab.scrollTop || 0"
+      :initial-scroll-left="tab.scrollLeft || 0"
       :search-query="controller.query.value"
       :typeahead-query="typeahead.query.value"
       :selected-names="controller.selectedNames.value"
@@ -1063,6 +1104,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
       @view-change-history="viewTableChangeHistory"
       @box-selection-complete="selectionDismissal.markBoxSelectionComplete"
       @visible-tables="emit('visible-tables', { ...tableSourceContext, tableNames: $event })"
+      @scroll-change="handleTableListScrollChange"
     />
 
     <div

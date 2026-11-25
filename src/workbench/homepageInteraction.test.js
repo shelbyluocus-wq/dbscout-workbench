@@ -304,3 +304,34 @@ test("tab drag preview keeps its transform transition after base tab styles", ()
   assert.match(tabs, /@dragover\.prevent\.stop="markTabDragTarget\(tab\.id, \$event\)"/);
   assert.match(moveRule, /transform\s+0\.18s\s+cubic-bezier\(0\.25,\s*1,\s*0\.5,\s*1\)/);
 });
+
+test("returning to the same database homepage preserves its mounted view and scroll position without refreshing", () => {
+  const pane = read("./components/WorkbenchPane.vue");
+  const home = read("./components/DatabaseHome.vue");
+  const tableList = read("./components/DatabaseTableList.vue");
+  const homeTag = pane.match(/<DatabaseHome\b[\s\S]*?\/>/)?.[0] || "";
+
+  assert.ok(homeTag, "DatabaseHome tag must exist");
+  assert.doesNotMatch(homeTag, /\bv-else-if=/);
+  assert.doesNotMatch(homeTag, /\bv-show=/);
+  assert.match(homeTag, /v-if="paneHomeTab"/);
+  assert.match(homeTag, /:key="paneHomeTab\.tabKey \|\| paneHomeTab\.id"/);
+  assert.match(homeTag, /:class="\{\s*'wb-pane-view-hidden':\s*!activeHomeTab\s*\}"/);
+  assert.match(homeTag, /:visible="Boolean\(activeHomeTab\)"/);
+  assert.match(pane, /<section v-else-if="!activeHomeTab" class="wb-empty">/);
+  assert.match(pane, /function handleDatabaseHomeStateChange\(\)\s*\{\s*if \(!activeHomeTab\.value\) return;\s*emitPaneState\(\);\s*\}/);
+
+  assert.match(home, /const isHomeInteractive = computed\(\(\) => props\.active && props\.visible\)/);
+  assert.match(home, /isEnabled:\s*\(\)\s*=>\s*props\.visible/);
+  assert.match(home, /if \(!isHomeInteractive\.value \|\| isEditableTypeaheadTarget\(event\.target\)\) return;/);
+  assert.match(home, /function handleTableListScrollChange/);
+  assert.match(home, /:visible="visible"/);
+  assert.match(home, /:initial-scroll-top="tab\.scrollTop \|\| 0"/);
+  assert.match(home, /@scroll-change="handleTableListScrollChange"/);
+
+  assert.match(tableList, /function restoreScrollPosition\(\)/);
+  assert.match(tableList, /if \(!target \|\| !props\.visible\) return;/);
+  assert.match(tableList, /if \(nextWidth > 0 && Math\.abs\(nextWidth - surfaceWidth\.value\) >= 1\)/);
+  assert.match(tableList, /if \(!visible \|\| !signature \|\| signature === lastEmittedVisibleSignature\) return;/);
+  assert.match(tableList, /watch\(\s*\(\)\s*=>\s*props\.visible,[\s\S]*?restoreScrollPosition\(\);[\s\S]*?syncSurfaceMetrics\(\);[\s\S]*?\{\s*flush:\s*"post"\s*\}/);
+});

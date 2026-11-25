@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { createHomepageSelectionDismissal } from "./homepageSelectionDismissal.js";
 
-function createTarget({ inside = false, tableRow = false, homeActions = false, insideMenu = false, insideDialog = false } = {}) {
+function createTarget({ inside = false, tableRow = false, homeActions = false, insideMenu = false, insideDialog = false, insideTab = false } = {}) {
   return {
     inside,
     insideMenu,
@@ -11,6 +11,7 @@ function createTarget({ inside = false, tableRow = false, homeActions = false, i
       if (tableRow && selector === ".wb-dbhome-object-row") return this;
       if (homeActions && selector === ".wb-dbhome-actions") return this;
       if (insideDialog && selector === '[aria-modal="true"]') return this;
+      if (insideTab && selector === ".wb-tab") return this;
       return null;
     },
   };
@@ -93,4 +94,38 @@ test("a valid box selection suppresses only its immediate follow-up click", () =
   scheduledGuardResets.at(-1)();
   dismissal.handleDocumentClick({ target: outside });
   assert.equal(scheduledClears.length, 2);
+});
+
+test("selection dismissal ignores clicks while the homepage is hidden or being left", () => {
+  const scheduled = [];
+  let clearCount = 0;
+  let enabled = false;
+  const outside = createTarget();
+  const dismissal = createHomepageSelectionDismissal({
+    getRoot: () => ({ contains: () => false }),
+    isEnabled: () => enabled,
+    clearSelection: () => { clearCount += 1; },
+    scheduleClear: (callback) => scheduled.push(callback),
+    scheduleGuardReset: () => {},
+  });
+
+  // Clicking while hidden must not schedule a selection clear.
+  dismissal.handleDocumentClick({ target: outside });
+  assert.equal(scheduled.length, 0);
+  assert.equal(clearCount, 0);
+
+  // Clicking another tab while visible schedules a clear in capture phase,
+  // but tab activation hides the homepage before the microtask runs.
+  enabled = true;
+  dismissal.handleDocumentClick({ target: outside });
+  assert.equal(scheduled.length, 1);
+  enabled = false;
+  scheduled.shift()();
+  assert.equal(clearCount, 0);
+
+  // Clicking a workbench tab never dismisses homepage selection.
+  enabled = true;
+  dismissal.handleDocumentClick({ target: createTarget({ insideTab: true }) });
+  assert.equal(scheduled.length, 0);
+  assert.equal(clearCount, 0);
 });

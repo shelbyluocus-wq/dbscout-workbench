@@ -330,6 +330,18 @@ test("openDatabaseHomeTab reuses the homepage when switching databases", () => {
   const state = createWorkspaceState({ connectionId: "demo", database: "shop" });
   const shopHome = openDatabaseHomeTab(state, {}, { paneId: "pane-1" });
   shopHome.selectedTableNames = ["orders"];
+  shopHome.scrollTop = 480;
+  shopHome.scrollLeft = 36;
+
+  // Reopening the same database preserves scroll position and selection.
+  const sameHome = openDatabaseHomeTab(
+    state,
+    { connectionId: "demo", database: "shop" },
+    { paneId: "pane-1" },
+  );
+  assert.equal(sameHome.scrollTop, 480);
+  assert.equal(sameHome.scrollLeft, 36);
+  assert.deepEqual(sameHome.selectedTableNames, ["orders"]);
 
   const inventoryHome = openDatabaseHomeTab(
     state,
@@ -345,6 +357,8 @@ test("openDatabaseHomeTab reuses the homepage when switching databases", () => {
     ],
   );
   assert.deepEqual(inventoryHome.selectedTableNames, []);
+  assert.equal(inventoryHome.scrollTop, 0);
+  assert.equal(inventoryHome.scrollLeft, 0);
 });
 
 test("openDatabaseHomeTab preserves independent restored homepages", () => {
