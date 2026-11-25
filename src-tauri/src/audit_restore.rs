@@ -6,7 +6,7 @@ use crate::{
     perf::PerfContext,
     types::{AppState, CellUpdateChange, RowIdentity, TableMeta},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{MySql, MySqlPool, Row, SqlitePool, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -629,6 +629,571 @@ pub async fn restore_audit_table(
     Ok("已恢复到所选操作之前".into())
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryRestoreOp {
+    pub kind: String,
+    pub row_identity: RowIdentity,
+    #[serde(default)]
+    pub expected_current: RowIdentity,
+    #[serde(default)]
+    pub target_values: RowIdentity,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryStateRestoreRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub table_name: String,
+    #[serde(default)]
+    pub target_label: Option<String>,
+    pub operations: Vec<HistoryRestoreOp>,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryStateRestorePreview {
+    pub token: String,
+    pub inserted: usize,
+    pub updated: usize,
+    pub deleted: usize,
+    pub total: usize,
+}
+
+fn validate_history_restore_target(
+    request: &HistoryStateRestoreRequest,
+) -> Result<(&str, &str, &str), String> {
+    let c = request.connection_id.trim();
+    let d = request.database.trim();
+    let t = request.table_name.trim();
+    if c.is_empty() || d.is_empty() || t.is_empty() {
+        return Err("请选择连接、数据库和表".into());
+    }
+    if request.operations.is_empty() {
+        return Err("没有需要还原的数据变更".into());
+    }
+    Ok((c, d, t))
+}
+
+fn build_history_restore_plan(
+    op: &HistoryRestoreOp,
+    database: &str,
+    table_name: &str,
+    table: &TableMeta,
+    target_label: Option<&str>,
+) -> Result<(PendingAudit, usize), String> {
+    let known: HashSet<&str> = table
+        .columns
+        .iter()
+        .map(|c| c.column_name.as_str())
+        .collect();
+    let generated: HashSet<&str> = table
+        .columns
+        .iter()
+        .filter(|c| c.is_generated)
+        .map(|c| c.column_name.as_str())
+        .collect();
+    let pk_columns: Vec<&str> = table
+        .columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.column_name.as_str())
+        .collect();
+    if pk_columns.is_empty() {
+        return Err("该表未设置主键，无法按行精准还原".into());
+    }
+    if op.row_identity.is_empty()
+        || op.row_identity.keys().any(|k| !known.contains(k.as_str()))
+        || pk_columns
+            .iter()
+            .any(|pk| !op.row_identity.contains_key(*pk))
+    {
+        return Err("还原操作缺少完整主键标识，不能还原".into());
+    }
+
+    let json_columns: HashSet<String> = table
+        .columns
+        .iter()
+        .filter(|c| c.column_type.to_lowercase().contains("json"))
+        .map(|c| c.column_name.clone())
+        .collect();
+    let note = target_label
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|label| format!("从修改记录还原到 {label}"))
+        .unwrap_or_else(|| "从修改记录还原".into());
+
+    match op.kind.as_str() {
+        "update" => {
+            if op.target_values.is_empty()
+                || op.target_values.len() != op.expected_current.len()
+                || op
+                    .target_values
+                    .keys()
+                    .any(|k| !op.expected_current.contains_key(k))
+            {
+                return Err("还原字段的前后值不完整，不能还原".into());
+            }
+            if op
+                .target_values
+                .keys()
+                .any(|k| !known.contains(k.as_str()) || generated.contains(k.as_str()))
+            {
+                return Err("表结构与历史记录不一致，不能还原".into());
+            }
+            let mut keys: Vec<String> = op.target_values.keys().cloned().collect();
+            keys.sort();
+            let changes: Vec<CellUpdateChange> = keys
+                .iter()
+                .map(|k| CellUpdateChange {
+                    column_name: k.clone(),
+                    old_value: op.expected_current[k].clone(),
+                    new_value: op.target_values[k].clone(),
+                })
+                .collect();
+            let set_bind_count = changes
+                .iter()
+                .filter(|c| c.old_value != c.new_value && c.new_value.is_some())
+                .count();
+            let (forward_sql, forward_binds, inverse_sql, inverse_binds) =
+                audit::build_row_update_inverse(
+                    database,
+                    table_name,
+                    &op.row_identity,
+                    &changes,
+                    &json_columns,
+                )?;
+            let (column_name, old_value, new_value) = if changes.len() == 1 {
+                (
+                    Some(changes[0].column_name.clone()),
+                    changes[0].old_value.clone(),
+                    changes[0].new_value.clone(),
+                )
+            } else {
+                let old_map: serde_json::Map<String, serde_json::Value> = keys
+                    .iter()
+                    .map(|k| {
+                        let v = op.expected_current[k]
+                            .as_ref()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .unwrap_or(serde_json::Value::Null);
+                        (k.clone(), v)
+                    })
+                    .collect();
+                let new_map: serde_json::Map<String, serde_json::Value> = keys
+                    .iter()
+                    .map(|k| {
+                        let v = op.target_values[k]
+                            .as_ref()
+                            .map(|s| serde_json::Value::String(s.clone()))
+                            .unwrap_or(serde_json::Value::Null);
+                        (k.clone(), v)
+                    })
+                    .collect();
+                (
+                    None,
+                    Some(serde_json::Value::Object(old_map).to_string()),
+                    Some(serde_json::Value::Object(new_map).to_string()),
+                )
+            };
+            Ok((
+                PendingAudit {
+                    operation: "UPDATE",
+                    column_name,
+                    old_value,
+                    new_value,
+                    row_identity: Some(
+                        serde_json::to_value(&op.row_identity).map_err(|e| e.to_string())?,
+                    ),
+                    forward_sql: exact_text_guards(forward_sql, table),
+                    forward_binds,
+                    inverse_sql: Some(exact_text_guards(inverse_sql, table)),
+                    inverse_binds,
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some(note),
+                },
+                set_bind_count,
+            ))
+        }
+        "delete" => {
+            let mut guard = RowIdentity::new();
+            for (k, v) in &op.expected_current {
+                if known.contains(k.as_str())
+                    && !generated.contains(k.as_str())
+                    && !json_columns.contains(k)
+                {
+                    guard.insert(k.clone(), v.clone());
+                }
+            }
+            for (k, v) in &op.row_identity {
+                guard.insert(k.clone(), v.clone());
+            }
+            let (del_sql, del_binds) =
+                audit::build_delete_forward_nullable(database, table_name, &guard)?;
+            let mut columns: Vec<String> = table
+                .columns
+                .iter()
+                .filter(|c| !c.is_generated)
+                .map(|c| c.column_name.clone())
+                .collect();
+            columns.sort();
+            let (ins_sql, ins_binds) = audit::build_delete_inverse(
+                database,
+                table_name,
+                &columns,
+                &audit::preimage_vector(&columns, &guard),
+            );
+            Ok((
+                PendingAudit {
+                    operation: "DELETE",
+                    column_name: None,
+                    old_value: Some(serde_json::to_string(&guard).map_err(|e| e.to_string())?),
+                    new_value: None,
+                    row_identity: Some(
+                        serde_json::to_value(&op.row_identity).map_err(|e| e.to_string())?,
+                    ),
+                    forward_sql: exact_text_guards(del_sql, table),
+                    forward_binds: del_binds,
+                    inverse_sql: Some(ins_sql),
+                    inverse_binds: ins_binds,
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some(note),
+                },
+                0,
+            ))
+        }
+        "insert" => {
+            let mut columns: Vec<String> = table
+                .columns
+                .iter()
+                .filter(|c| !c.is_generated)
+                .map(|c| c.column_name.clone())
+                .collect();
+            columns.sort();
+            if columns
+                .iter()
+                .any(|c| !op.target_values.contains_key(c.as_str()))
+            {
+                return Err("历史删除记录未保存完整字段值，无法安全还原；请查看快照".into());
+            }
+            if op
+                .target_values
+                .keys()
+                .any(|k| !known.contains(k.as_str()) || generated.contains(k.as_str()))
+            {
+                return Err("表结构与历史记录不一致，不能还原".into());
+            }
+            let mut full_row = RowIdentity::new();
+            for col in &columns {
+                full_row.insert(
+                    col.clone(),
+                    op.target_values.get(col).cloned().unwrap_or(None),
+                );
+            }
+            let (ins_sql, ins_binds) = audit::build_delete_inverse(
+                database,
+                table_name,
+                &columns,
+                &audit::preimage_vector(&columns, &full_row),
+            );
+            let (del_sql, del_binds) =
+                audit::build_delete_forward_nullable(database, table_name, &op.row_identity)?;
+            Ok((
+                PendingAudit {
+                    operation: "INSERT",
+                    column_name: None,
+                    old_value: None,
+                    new_value: Some(serde_json::to_string(&full_row).map_err(|e| e.to_string())?),
+                    row_identity: Some(
+                        serde_json::to_value(&op.row_identity).map_err(|e| e.to_string())?,
+                    ),
+                    forward_sql: ins_sql,
+                    forward_binds: ins_binds,
+                    inverse_sql: Some(exact_text_guards(del_sql, table)),
+                    inverse_binds: del_binds,
+                    rollback_strategy: audit::STRATEGY_AUTO,
+                    notes: Some(note),
+                },
+                0,
+            ))
+        }
+        _ => Err("不支持的还原操作类型".into()),
+    }
+}
+
+async fn verify_history_restore_op_in_tx(
+    tx: &mut Transaction<'_, MySql>,
+    database: &str,
+    table_name: &str,
+    table: &TableMeta,
+    op: &HistoryRestoreOp,
+    plan: &PendingAudit,
+    set_bind_count: usize,
+) -> Result<(), String> {
+    match op.kind.as_str() {
+        "update" | "delete" => {
+            let where_part = plan
+                .forward_sql
+                .split_once(" WHERE ")
+                .ok_or("还原语句缺少行条件")?
+                .1;
+            let where_clean = where_part
+                .strip_suffix(" LIMIT 1")
+                .unwrap_or(where_part);
+            let sql = format!(
+                "SELECT COUNT(*) FROM {} WHERE {where_clean}",
+                db::qualified_table(database, table_name)
+            );
+            let mut query = sqlx::query_scalar::<_, i64>(&sql);
+            for bind in plan.forward_binds.iter().skip(set_bind_count) {
+                query = query.bind(bind);
+            }
+            let matched = query
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| format!("校验还原目标行失败: {e}"))?;
+            if matched != 1 {
+                return Err(
+                    "目标行当前值与历史记录不一致（可能已被其他工具或成员修改），无法直接还原"
+                        .into(),
+                );
+            }
+        }
+        "insert" => {
+            let (del_sql, del_binds) =
+                audit::build_delete_forward_nullable(database, table_name, &op.row_identity)?;
+            let guarded = exact_text_guards(del_sql, table);
+            let where_part = guarded
+                .split_once(" WHERE ")
+                .ok_or("主键校验条件无效")?
+                .1;
+            let where_clean = where_part
+                .strip_suffix(" LIMIT 1")
+                .unwrap_or(where_part);
+            let sql = format!(
+                "SELECT COUNT(*) FROM {} WHERE {where_clean}",
+                db::qualified_table(database, table_name)
+            );
+            let mut query = sqlx::query_scalar::<_, i64>(&sql);
+            for bind in &del_binds {
+                query = query.bind(bind);
+            }
+            let existing = query
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| format!("校验还原主键失败: {e}"))?;
+            if existing != 0 {
+                return Err("目标主键行当前已存在，无法重新插入；请刷新后再试".into());
+            }
+        }
+        _ => return Err("不支持的还原操作类型".into()),
+    }
+    Ok(())
+}
+
+fn summarize_history_restore(
+    operations: &[HistoryRestoreOp],
+    current_fingerprint: &str,
+) -> Result<HistoryStateRestorePreview, String> {
+    let token = digest(
+        &serde_json::to_vec(&(current_fingerprint, operations)).map_err(|e| e.to_string())?,
+    );
+    let inserted = operations.iter().filter(|op| op.kind == "insert").count();
+    let updated = operations.iter().filter(|op| op.kind == "update").count();
+    let deleted = operations.iter().filter(|op| op.kind == "delete").count();
+    Ok(HistoryStateRestorePreview {
+        token,
+        inserted,
+        updated,
+        deleted,
+        total: operations.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn preview_history_state_restore(
+    request: HistoryStateRestoreRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HistoryStateRestorePreview, String> {
+    let (c, d, t) = validate_history_restore_target(&request)?;
+    let pool = crate::commands::real_database_pool(c, d, &state, &perf_context).await?;
+    let audit_pool = audit::ensure_audit_pool(&app, &state).await?;
+    let table = validate_table(&pool, d, t).await?;
+    let mut tx = locked_transaction(&pool).await?;
+    let current = fingerprint(&mut tx, d, t, &table).await?;
+    validate_locked_schema(&mut tx, d, t, &table).await?;
+    let scope_req = HistoryRequest {
+        connection_id: Some(c.into()),
+        database: Some(d.into()),
+        table_name: Some(t.into()),
+        search: None,
+        offset: None,
+        audit_id: None,
+        token: None,
+    };
+    reconcile(&audit_pool, &scope_req, &current).await?;
+    for op in &request.operations {
+        let (plan, set_bind_count) =
+            build_history_restore_plan(op, d, t, &table, request.target_label.as_deref())?;
+        verify_history_restore_op_in_tx(&mut tx, d, t, &table, op, &plan, set_bind_count).await?;
+    }
+    let result = summarize_history_restore(&request.operations, &current)?;
+    tx.rollback().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn apply_history_state_restore(
+    request: HistoryStateRestoreRequest,
+    perf_context: PerfContext,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (c, d, t) = validate_history_restore_target(&request)?;
+    let pool = crate::commands::real_database_pool(c, d, &state, &perf_context).await?;
+    let audit_pool = audit::ensure_audit_pool(&app, &state).await?;
+    let table = validate_table(&pool, d, t).await?;
+    let mut tx = locked_transaction(&pool).await?;
+    let before = fingerprint(&mut tx, d, t, &table).await?;
+    validate_locked_schema(&mut tx, d, t, &table).await?;
+    let scope_req = HistoryRequest {
+        connection_id: Some(c.into()),
+        database: Some(d.into()),
+        table_name: Some(t.into()),
+        search: None,
+        offset: None,
+        audit_id: None,
+        token: None,
+    };
+    reconcile(&audit_pool, &scope_req, &before).await?;
+    let expected = summarize_history_restore(&request.operations, &before)?;
+    if request.token.as_deref() != Some(&expected.token) {
+        return Err("预览后表数据已变化，请重新预览；本次未修改数据".into());
+    }
+
+    let mut plans = Vec::with_capacity(request.operations.len());
+    for op in &request.operations {
+        let (mut plan, _) =
+            build_history_restore_plan(op, d, t, &table, request.target_label.as_deref())?;
+        if plan.operation == "DELETE" {
+            let columns: Vec<String> = table
+                .columns
+                .iter()
+                .filter(|col| !col.is_generated)
+                .map(|col| col.column_name.clone())
+                .collect();
+            let projection = columns
+                .iter()
+                .map(|col| format!("CAST(`{}` AS CHAR)", db::escape_ident(col)))
+                .collect::<Vec<_>>()
+                .join(",");
+            let where_part = plan
+                .forward_sql
+                .split_once(" WHERE ")
+                .ok_or("删除还原语句无有效行条件")?
+                .1;
+            let select_sql = format!(
+                "SELECT {projection} FROM {} WHERE {where_part}",
+                db::qualified_table(d, t)
+            );
+            let mut q = sqlx::query(&select_sql);
+            for b in &plan.forward_binds {
+                q = q.bind(b);
+            }
+            let row = q
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("目标行当前值与历史不一致，整次还原已取消")?;
+            let mut full = RowIdentity::new();
+            for (i, col) in columns.iter().enumerate() {
+                full.insert(
+                    col.clone(),
+                    row.try_get::<Option<String>, _>(i)
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            let (sql, binds) = audit::build_delete_inverse(
+                d,
+                t,
+                &columns,
+                &audit::preimage_vector(&columns, &full),
+            );
+            plan.inverse_sql = Some(sql);
+            plan.inverse_binds = binds;
+            plan.old_value = Some(serde_json::to_string(&full).map_err(|e| e.to_string())?);
+        }
+        let mut query = sqlx::query(&plan.forward_sql);
+        for bind in &plan.forward_binds {
+            query = query.bind(bind);
+        }
+        let result = query
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("还原数据冲突，整次还原已取消: {e}"))?;
+        if result.rows_affected() != 1 {
+            return Err("目标行当前值与历史不一致，整次还原已取消".into());
+        }
+        plans.push(plan);
+    }
+
+    let after = fingerprint(&mut tx, d, t, &table).await?;
+    let (actor, client_id) = crate::account::audit_actor_and_id(&app, &state).await;
+    let ctx = audit::AuditContext {
+        connection_id: c.into(),
+        database: d.into(),
+        table_name: t.into(),
+        session_id: None,
+        source: audit::SOURCE_ROLLBACK,
+        actor,
+        client_id,
+    };
+    let ids = audit::record_pending_batch(&audit_pool, &ctx, &plans).await?;
+    let job_id = uuid::Uuid::new_v4().to_string();
+    let journal = sqlx::query(
+        "INSERT INTO audit_restore_jobs(id,connection_id,database,table_name,before_hash,after_hash,audit_ids,status) VALUES(?,?,?,?,?,?,?,'prepared')",
+    )
+    .bind(&job_id)
+    .bind(c)
+    .bind(d)
+    .bind(t)
+    .bind(&before)
+    .bind(&after)
+    .bind(serde_json::to_string(&ids).map_err(|e| e.to_string())?)
+    .execute(&audit_pool)
+    .await;
+    if let Err(e) = journal {
+        let _ = audit::mark_aborted_required_batch(&audit_pool, &ids).await;
+        return Err(format!("保存还原核对记录失败，本次已取消: {e}"));
+    }
+    if let Err(e) = tx.commit().await {
+        return Err(format!(
+            "还原任务 {job_id} 提交结果待核对，请重新预览核对，不能视为成功: {e}"
+        ));
+    }
+    crate::commands::invalidate_table_count(&state, c, d, t);
+    crate::table_modified::record_local_change(&app, &state, c, d, &[t]).await;
+    let _ = app.emit(
+        audit::BACKUP_JOB_EVENT,
+        serde_json::json!({"kind":"restore","connectionId":c,"database":d,"table":t}),
+    );
+    settle_job(&audit_pool, &job_id, &ids, true)
+        .await
+        .map_err(|e| {
+            format!("数据已还原，但审计状态待核对（任务 {job_id}）；请重新预览核对: {e}")
+        })?;
+    crate::audit_sync::trigger_immediate_sync(&app);
+    Ok(match request.target_label.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(label) => format!("已还原到 {label}"),
+        None => "已还原到所选历史状态".into(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,5 +1450,64 @@ mod tests {
         let sql = "UPDATE `db`.`items` SET `value` = ? WHERE `id` <=> ? AND `value` = ? LIMIT 1"
             .to_string();
         assert_eq!(exact_text_guards(sql,&schema()),"UPDATE `db`.`items` SET `value` = ? WHERE BINARY `id` <=> BINARY ? AND BINARY `value` = BINARY ? LIMIT 1");
+    }
+
+    #[test]
+    fn history_restore_plan_builds_guarded_update_insert_delete_and_rejects_unsafe_ops() {
+        let table = schema();
+        let update_op = HistoryRestoreOp {
+            kind: "update".into(),
+            row_identity: HashMap::from([("id".into(), Some("1".into()))]),
+            expected_current: HashMap::from([("value".into(), Some("new".into()))]),
+            target_values: HashMap::from([("value".into(), Some("old".into()))]),
+        };
+        let (plan, set_binds) =
+            build_history_restore_plan(&update_op, "db", "items", &table, Some("11-13 修改前"))
+                .unwrap();
+        assert_eq!(plan.operation, "UPDATE");
+        assert_eq!(plan.column_name.as_deref(), Some("value"));
+        assert_eq!(plan.old_value.as_deref(), Some("new"));
+        assert_eq!(plan.new_value.as_deref(), Some("old"));
+        assert_eq!(set_binds, 1);
+        assert!(plan.forward_sql.contains("WHERE BINARY `id` <=> BINARY ?"));
+        assert!(plan.forward_sql.contains("BINARY `value` = BINARY ?"));
+
+        let insert_op = HistoryRestoreOp {
+            kind: "insert".into(),
+            row_identity: HashMap::from([("id".into(), Some("2".into()))]),
+            expected_current: HashMap::new(),
+            target_values: HashMap::from([
+                ("id".into(), Some("2".into())),
+                ("value".into(), None),
+            ]),
+        };
+        let (ins_plan, _) =
+            build_history_restore_plan(&insert_op, "db", "items", &table, None).unwrap();
+        assert_eq!(ins_plan.operation, "INSERT");
+        assert!(ins_plan.forward_sql.contains("VALUES (?, NULL)"));
+
+        let incomplete_insert = HistoryRestoreOp {
+            kind: "insert".into(),
+            row_identity: HashMap::from([("id".into(), Some("2".into()))]),
+            expected_current: HashMap::new(),
+            target_values: HashMap::from([("id".into(), Some("2".into()))]),
+        };
+        assert!(
+            build_history_restore_plan(&incomplete_insert, "db", "items", &table, None)
+                .unwrap_err()
+                .contains("完整字段")
+        );
+
+        let missing_pk_op = HistoryRestoreOp {
+            kind: "delete".into(),
+            row_identity: HashMap::new(),
+            expected_current: HashMap::new(),
+            target_values: HashMap::new(),
+        };
+        assert!(
+            build_history_restore_plan(&missing_pk_op, "db", "items", &table, None)
+                .unwrap_err()
+                .contains("主键")
+        );
     }
 }

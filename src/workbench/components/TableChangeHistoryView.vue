@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -11,8 +12,10 @@ import {
   Info,
   KeyRound,
   RefreshCw,
+  RotateCcw,
   Search,
   Table2,
+  TriangleAlert,
   X,
 } from "lucide-vue-next";
 import { t } from "../i18n/index.js";
@@ -22,12 +25,19 @@ import {
   searchFullTableComparisonRows,
   splitSearchHighlight,
 } from "../utils/tableHistorySnapshot.js";
+import { buildHistoryRestorePlan } from "../utils/tableHistoryRestore.js";
+import {
+  computeHysteresisVirtualWindow,
+  createDualPaneScrollSync,
+} from "../utils/tableHistoryScrollSync.js";
 import { useTableChangeHistory } from "../composables/useTableChangeHistory.js";
 import { invokeWorkbench as defaultInvokeWorkbench } from "../utils/tauriBridge.js";
 
 const ROW_HEIGHT = 30;
 const HEADER_HEIGHT = 48;
-const BUFFER_ROWS = 12;
+const BUFFER_ROWS = 20;
+const WINDOW_TRIGGER_MARGIN = 8;
+const SMALL_TABLE_LIMIT = 120;
 const ROW_NUM_WIDTH = 44;
 const MIN_COL_WIDTH = 76;
 const MAX_COL_WIDTH = 460;
@@ -38,16 +48,22 @@ const props = defineProps({
   tableName: { type: String, default: "" },
   tableComment: { type: String, default: "" },
   tableMeta: { type: Object, default: null },
+  readOnly: { type: Boolean, default: false },
+  engineKind: { type: String, default: "mysql" },
   invokeWorkbench: { type: Function, default: null },
   isLoggedIn: { type: Boolean, default: false },
   canOpenBackupCenter: { type: Boolean, default: true },
   pairedSearchWidth: { type: Number, default: 0 },
 });
 
-const emit = defineEmits(["switch-view", "open-backup-center"]);
+const emit = defineEmits(["switch-view", "open-backup-center", "restored"]);
+
+function invokeCommand(command, payload) {
+  return (props.invokeWorkbench || defaultInvokeWorkbench)(command, payload);
+}
 
 const history = useTableChangeHistory({
-  invokeWorkbench: (...args) => (props.invokeWorkbench || defaultInvokeWorkbench)(...args),
+  invokeWorkbench: invokeCommand,
   isLoggedIn: () => Boolean(props.isLoggedIn),
   getSelfLabel: () => t("home.modifiedSelf"),
 });
@@ -58,8 +74,9 @@ const beforeScrollerRef = ref(null);
 const afterScrollerRef = ref(null);
 const searchInputRef = ref(null);
 
-const scrollTop = ref(0);
 const viewportHeight = ref(520);
+const virtualStart = ref(0);
+const virtualEnd = ref(0);
 const splitRatio = ref(0.5);
 const draggingSplitter = ref(false);
 const columnWidths = ref({});
@@ -67,8 +84,14 @@ const resizingCol = ref(null);
 const effectivePairedSearchWidth = ref(Math.max(0, Math.round(Number(props.pairedSearchWidth) || 0)));
 const fallbackRowHeights = ref([]);
 
-let syncSourceSide = "";
-let syncReleaseFrame = 0;
+const restorePreviewingTarget = ref(""); // "" | "before" | "after"
+const restoreApplying = ref(false);
+const restoreNotice = ref("");
+const restoreError = ref("");
+const restoreModal = ref(null);
+
+let currentScrollTop = 0;
+let virtualWindowFrame = 0;
 let resizeObserver = null;
 let rootResizeObserver = null;
 let initialRootWidth = 0;
@@ -195,12 +218,36 @@ const gridTotalWidth = computed(() => {
 
 const totalHeight = computed(() => displayRows.value.length * ROW_HEIGHT);
 
+function applyVirtualWindow({ top = currentScrollTop, height = viewportHeight.value, force = false } = {}) {
+  const next = computeHysteresisVirtualWindow({
+    total: displayRows.value.length,
+    scrollTop: top,
+    viewportHeight: height,
+    rowHeight: ROW_HEIGHT,
+    bufferRows: BUFFER_ROWS,
+    triggerMargin: WINDOW_TRIGGER_MARGIN,
+    currentStart: virtualStart.value,
+    smallTableLimit: SMALL_TABLE_LIMIT,
+    force,
+  });
+  if (next.start !== virtualStart.value) virtualStart.value = next.start;
+  if (next.end !== virtualEnd.value) virtualEnd.value = next.end;
+}
+
+function scheduleVirtualWindowUpdate() {
+  if (virtualWindowFrame) return;
+  virtualWindowFrame = requestAnimationFrame(() => {
+    virtualWindowFrame = 0;
+    applyVirtualWindow({ top: currentScrollTop, height: viewportHeight.value, force: false });
+  });
+}
+
 const visibleRange = computed(() => {
   const total = displayRows.value.length;
   if (!total) return { start: 0, end: 0 };
-  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER_ROWS);
-  const count = Math.ceil(Math.max(240, viewportHeight.value) / ROW_HEIGHT) + BUFFER_ROWS * 2;
-  return { start, end: Math.min(total, start + count) };
+  const start = Math.min(total, Math.max(0, virtualStart.value));
+  const end = Math.min(total, Math.max(start, virtualEnd.value || Math.min(total, SMALL_TABLE_LIMIT)));
+  return { start, end };
 });
 
 const visibleRows = computed(() => (
@@ -209,6 +256,135 @@ const visibleRows = computed(() => (
     displayIndex: visibleRange.value.start + offset,
   }))
 ));
+
+const canRestoreEngine = computed(() => (
+  !props.readOnly && String(props.engineKind || "mysql").toLowerCase() === "mysql"
+));
+
+const selectedRevisionFullIndex = history.selectedRevisionFullIndex;
+
+const beforeRestorePlan = computed(() => {
+  if (!canRestoreEngine.value || !selectedRevision.value || state.liveLoading) {
+    return { canRestore: false, reason: "unavailable", operations: [], counts: { insert: 0, update: 0, delete: 0, total: 0 }, undoneRevisions: 0 };
+  }
+  return buildHistoryRestorePlan({
+    columns: snapshot.value.columns,
+    primaryKeys: snapshot.value.primaryKeys,
+    liveRows: state.liveRows,
+    revisions: state.revisions,
+    targetIndex: selectedRevisionFullIndex.value,
+    target: "before",
+  });
+});
+
+const afterRestorePlan = computed(() => {
+  if (!canRestoreEngine.value || !selectedRevision.value || state.liveLoading) {
+    return { canRestore: false, reason: "unavailable", operations: [], counts: { insert: 0, update: 0, delete: 0, total: 0 }, undoneRevisions: 0 };
+  }
+  return buildHistoryRestorePlan({
+    columns: snapshot.value.columns,
+    primaryKeys: snapshot.value.primaryKeys,
+    liveRows: state.liveRows,
+    revisions: state.revisions,
+    targetIndex: selectedRevisionFullIndex.value,
+    target: "after",
+  });
+});
+
+function restoreDisabledReason(plan) {
+  if (!canRestoreEngine.value) {
+    return props.readOnly ? t("tableHistory.restore.readOnly") : t("tableHistory.restore.mysqlOnly");
+  }
+  switch (plan?.reason) {
+    case "no-primary-key":
+      return t("tableHistory.restore.reasonNoPk");
+    case "contains-ddl":
+      return t("tableHistory.restore.reasonDdl");
+    case "missing-row-identity":
+      return t("tableHistory.restore.reasonMissingIdentity");
+    case "incomplete-row-data":
+      return t("tableHistory.restore.reasonIncompleteRow");
+    case "already-current":
+      return t("tableHistory.restore.reasonAlreadyCurrent");
+    default:
+      return "";
+  }
+}
+
+async function requestRestore(target) {
+  const rev = selectedRevision.value;
+  const plan = target === "after" ? afterRestorePlan.value : beforeRestorePlan.value;
+  if (!rev || !plan?.canRestore || restorePreviewingTarget.value || restoreApplying.value) return;
+
+  const timeText = fullTime(rev.ts);
+  const targetLabel = target === "after"
+    ? t("tableHistory.restore.targetAfterLabel", { time: timeText })
+    : t("tableHistory.restore.targetBeforeLabel", { time: timeText });
+
+  restorePreviewingTarget.value = target;
+  restoreError.value = "";
+  restoreNotice.value = "";
+  try {
+    const preview = await invokeCommand("preview_history_state_restore", {
+      request: {
+        connectionId: props.connectionId,
+        database: props.database,
+        tableName: props.tableName,
+        targetLabel,
+        operations: plan.operations,
+      },
+    });
+    restoreModal.value = {
+      target,
+      targetLabel,
+      operations: plan.operations,
+      undoneRevisions: plan.undoneRevisions,
+      preview,
+      error: "",
+    };
+  } catch (error) {
+    restoreError.value = String(error?.message || error || t("tableHistory.restore.previewFailed"));
+  } finally {
+    restorePreviewingTarget.value = "";
+  }
+}
+
+function closeRestoreModal() {
+  if (restoreApplying.value) return;
+  restoreModal.value = null;
+}
+
+async function confirmRestore() {
+  const modal = restoreModal.value;
+  if (!modal || restoreApplying.value) return;
+  restoreApplying.value = true;
+  modal.error = "";
+  restoreError.value = "";
+  try {
+    const message = await invokeCommand("apply_history_state_restore", {
+      request: {
+        connectionId: props.connectionId,
+        database: props.database,
+        tableName: props.tableName,
+        targetLabel: modal.targetLabel,
+        operations: modal.operations,
+        token: modal.preview?.token,
+      },
+    });
+    restoreModal.value = null;
+    restoreNotice.value = String(message || t("tableHistory.restore.successFallback", { target: modal.targetLabel }));
+    emit("restored", {
+      connectionId: props.connectionId,
+      database: props.database,
+      tableName: props.tableName,
+    });
+    await history.refresh();
+  } catch (error) {
+    modal.error = String(error?.message || error || t("tableHistory.restore.applyFailed"));
+  } finally {
+    restoreApplying.value = false;
+  }
+}
 
 const splitStageStyle = computed(() => ({
   gridTemplateColumns: `minmax(0, ${splitRatio.value}fr) 5px minmax(0, ${1 - splitRatio.value}fr)`,
@@ -273,52 +449,37 @@ const fallbackBannerText = computed(() => {
   }
 });
 
-// Always-on locked vertical + horizontal synchronized scrolling between Before & After panes
+// Anti-jitter locked vertical + horizontal synchronized scrolling between Before & After panes
+const dualScrollSync = createDualPaneScrollSync({
+  getBefore: () => beforeScrollerRef.value,
+  getAfter: () => afterScrollerRef.value,
+  onSync: ({ top, clientHeight, force }) => {
+    currentScrollTop = top;
+    if (clientHeight && Math.abs(clientHeight - viewportHeight.value) >= 1) {
+      viewportHeight.value = clientHeight;
+    }
+    if (force) {
+      if (virtualWindowFrame) {
+        cancelAnimationFrame(virtualWindowFrame);
+        virtualWindowFrame = 0;
+      }
+      applyVirtualWindow({ top, height: viewportHeight.value, force: true });
+    } else {
+      scheduleVirtualWindowUpdate();
+    }
+  },
+});
+
+function claimScrollDriver(side) {
+  dualScrollSync.claimDriver(side);
+}
+
 function onGridScroll(side, event) {
-  const source = event?.currentTarget;
-  if (!source) return;
-  if (syncSourceSide && syncSourceSide !== side) return;
-
-  syncSourceSide = side;
-  const top = source.scrollTop;
-  const left = source.scrollLeft;
-  scrollTop.value = top;
-  if (source.clientHeight) {
-    viewportHeight.value = source.clientHeight;
-  }
-
-  const peer = side === "before" ? afterScrollerRef.value : beforeScrollerRef.value;
-  if (peer) {
-    if (peer.scrollTop !== top) peer.scrollTop = top;
-    if (peer.scrollLeft !== left) peer.scrollLeft = left;
-  }
-
-  if (syncReleaseFrame) cancelAnimationFrame(syncReleaseFrame);
-  syncReleaseFrame = requestAnimationFrame(() => {
-    syncSourceSide = "";
-    syncReleaseFrame = 0;
-  });
+  dualScrollSync.handleScroll(side, event?.currentTarget || null);
 }
 
 function scrollBothPanesTo(targetTop, targetLeft = null) {
-  const beforeEl = beforeScrollerRef.value;
-  const afterEl = afterScrollerRef.value;
-  const clampedTop = Math.max(0, Math.round(targetTop));
-  syncSourceSide = "programmatic";
-  scrollTop.value = clampedTop;
-  if (beforeEl) {
-    beforeEl.scrollTop = clampedTop;
-    if (targetLeft !== null) beforeEl.scrollLeft = Math.max(0, Math.round(targetLeft));
-  }
-  if (afterEl) {
-    afterEl.scrollTop = clampedTop;
-    if (targetLeft !== null) afterEl.scrollLeft = Math.max(0, Math.round(targetLeft));
-  }
-  if (syncReleaseFrame) cancelAnimationFrame(syncReleaseFrame);
-  syncReleaseFrame = requestAnimationFrame(() => {
-    syncSourceSide = "";
-    syncReleaseFrame = 0;
-  });
+  dualScrollSync.scrollBothTo(targetTop, targetLeft);
 }
 
 function columnLeftOffset(colName) {
@@ -431,6 +592,12 @@ function handleSearchKeydown(event) {
 }
 
 function handleViewKeydown(event) {
+  if (event.key === "Escape" && restoreModal.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeRestoreModal();
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === "f") {
     event.preventDefault();
     searchInputRef.value?.focus?.();
@@ -526,7 +693,7 @@ function actorInitial(name) {
 }
 
 function sourceLabel(source, isRollback) {
-  if (isRollback) return t("tableHistory.source.rollback");
+  if (isRollback || String(source || "") === "rollback") return t("tableHistory.source.rollback");
   switch (String(source || "")) {
     case "grid":
       return t("tableHistory.source.grid");
@@ -632,6 +799,22 @@ watch(
   },
 );
 
+watch(
+  () => [displayRows.value.length, viewportHeight.value],
+  () => {
+    applyVirtualWindow({ top: currentScrollTop, height: viewportHeight.value, force: true });
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.connectionId, props.database, props.tableName, selectedRevision.value?.id],
+  () => {
+    restoreError.value = "";
+    restoreModal.value = null;
+  },
+);
+
 // Auto-scroll to first changed row whenever revision / snapshot / scope changes
 watch(
   () => [
@@ -720,7 +903,11 @@ onBeforeUnmount(() => {
   history.dispose();
   endSplitterDrag();
   endColResize();
-  if (syncReleaseFrame) cancelAnimationFrame(syncReleaseFrame);
+  dualScrollSync.reset();
+  if (virtualWindowFrame) {
+    cancelAnimationFrame(virtualWindowFrame);
+    virtualWindowFrame = 0;
+  }
   resizeObserver?.disconnect();
   resizeObserver = null;
   rootResizeObserver?.disconnect();
@@ -904,9 +1091,30 @@ onBeforeUnmount(() => {
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
       <span>{{ fallbackBannerText }}</span>
     </div>
-    <div v-if="state.error" class="wb-thv-error-bar" role="alert">
+    <div v-if="restoreNotice" class="wb-thv-success-bar" role="status">
+      <CheckCircle2 :size="14" :stroke-width="2" aria-hidden="true" />
+      <span>{{ restoreNotice }}</span>
+      <button
+        type="button"
+        class="wb-thv-bar-dismiss"
+        :aria-label="t('errorBoundary.dismiss')"
+        @click="restoreNotice = ''"
+      >
+        <X :size="13" :stroke-width="2" aria-hidden="true" />
+      </button>
+    </div>
+    <div v-if="restoreError || state.error" class="wb-thv-error-bar" role="alert">
       <AlertCircle :size="14" :stroke-width="2" aria-hidden="true" />
-      <span>{{ state.error }}</span>
+      <span>{{ restoreError || state.error }}</span>
+      <button
+        v-if="restoreError"
+        type="button"
+        class="wb-thv-bar-dismiss"
+        :aria-label="t('errorBoundary.dismiss')"
+        @click="restoreError = ''"
+      >
+        <X :size="13" :stroke-width="2" aria-hidden="true" />
+      </button>
     </div>
 
     <!-- Main body: left revision timeline + right synchronized full-table comparison -->
@@ -971,7 +1179,7 @@ onBeforeUnmount(() => {
                 <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ shortTime(rev.ts) }}</span>
               </div>
               <div class="wb-thv-rev-bottom">
-                <span class="wb-thv-rev-source" :data-source="rev.isRollback ? 'rollback' : (rev.source || 'other')">
+                <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
                   {{ sourceLabel(rev.source, rev.isRollback) }}
                 </span>
                 <span class="wb-thv-rev-badges">
@@ -1050,13 +1258,31 @@ onBeforeUnmount(() => {
                 <span class="wb-thv-pane-dot is-before" aria-hidden="true"></span>
                 <strong>{{ t('tableHistory.beforePaneTitle') }}</strong>
               </span>
-              <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ t('tableHistory.beforeTime', { time: shortTime(selectedRevision.ts) }) }}</span>
+              <span class="wb-thv-pane-right">
+                <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ t('tableHistory.beforeTime', { time: shortTime(selectedRevision.ts) }) }}</span>
+                <button
+                  v-if="canRestoreEngine"
+                  type="button"
+                  class="wb-thv-restore-btn"
+                  data-restore-target="before"
+                  :disabled="!beforeRestorePlan.canRestore || Boolean(restorePreviewingTarget) || restoreApplying"
+                  :title="beforeRestorePlan.canRestore ? t('tableHistory.restore.toBeforeHint') : restoreDisabledReason(beforeRestorePlan)"
+                  @click="requestRestore('before')"
+                >
+                  <RotateCcw :size="12" :stroke-width="2" aria-hidden="true" />
+                  <span>{{ restorePreviewingTarget === 'before' ? t('tableHistory.restore.checking') : t('tableHistory.restore.toBefore') }}</span>
+                </button>
+              </span>
             </header>
 
             <div
               ref="beforeScrollerRef"
               class="wb-thv-grid-scroller"
-              @scroll="onGridScroll('before', $event)"
+              @mouseenter="claimScrollDriver('before')"
+              @pointerdown.passive="claimScrollDriver('before')"
+              @wheel.passive="claimScrollDriver('before')"
+              @touchstart.passive="claimScrollDriver('before')"
+              @scroll.passive="onGridScroll('before', $event)"
             >
               <div class="wb-thv-grid-canvas" :style="{ width: gridTotalWidth }">
                 <div class="wb-thv-grid-header" :style="{ gridTemplateColumns }">
@@ -1265,13 +1491,37 @@ onBeforeUnmount(() => {
                 <span class="wb-thv-pane-dot is-after" aria-hidden="true"></span>
                 <strong>{{ t('tableHistory.afterPaneTitle') }}</strong>
               </span>
-              <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ shortTime(selectedRevision.ts) }}</span>
+              <span class="wb-thv-pane-right">
+                <span class="wb-thv-pane-time" :title="fullTime(selectedRevision.ts)">{{ shortTime(selectedRevision.ts) }}</span>
+                <span
+                  v-if="selectedRevisionFullIndex === 0 && !afterRestorePlan.canRestore && isFullTableMode"
+                  class="wb-thv-live-pill"
+                >
+                  {{ t('tableHistory.restore.currentLiveTag') }}
+                </span>
+                <button
+                  v-else-if="canRestoreEngine && selectedRevisionFullIndex > 0"
+                  type="button"
+                  class="wb-thv-restore-btn"
+                  data-restore-target="after"
+                  :disabled="!afterRestorePlan.canRestore || Boolean(restorePreviewingTarget) || restoreApplying"
+                  :title="afterRestorePlan.canRestore ? t('tableHistory.restore.toAfterHint') : restoreDisabledReason(afterRestorePlan)"
+                  @click="requestRestore('after')"
+                >
+                  <RotateCcw :size="12" :stroke-width="2" aria-hidden="true" />
+                  <span>{{ restorePreviewingTarget === 'after' ? t('tableHistory.restore.checking') : t('tableHistory.restore.toAfter') }}</span>
+                </button>
+              </span>
             </header>
 
             <div
               ref="afterScrollerRef"
               class="wb-thv-grid-scroller"
-              @scroll="onGridScroll('after', $event)"
+              @mouseenter="claimScrollDriver('after')"
+              @pointerdown.passive="claimScrollDriver('after')"
+              @wheel.passive="claimScrollDriver('after')"
+              @touchstart.passive="claimScrollDriver('after')"
+              @scroll.passive="onGridScroll('after', $event)"
             >
               <div class="wb-thv-grid-canvas" :style="{ width: gridTotalWidth }">
                 <div class="wb-thv-grid-header" :style="{ gridTemplateColumns }">
@@ -1497,5 +1747,72 @@ onBeforeUnmount(() => {
         </div>
       </main>
     </div>
+
+    <!-- Transactional Restore Confirmation Modal -->
+    <Teleport to="body">
+      <div
+        v-if="restoreModal"
+        class="wb-thv-restore-backdrop"
+        @pointerdown.self="closeRestoreModal"
+      >
+        <section
+          class="wb-thv-restore-dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="t('tableHistory.restore.dialogTitle', { table: tableName })"
+        >
+          <header class="wb-thv-restore-dialog-head">
+            <span class="wb-thv-restore-dialog-icon" aria-hidden="true">
+              <TriangleAlert :size="18" :stroke-width="2" />
+            </span>
+            <div class="wb-thv-restore-dialog-title">
+              <h3>{{ t('tableHistory.restore.dialogTitle', { table: tableName }) }}</h3>
+              <p>{{ t('tableHistory.restore.dialogSubtitle', { target: restoreModal.targetLabel }) }}</p>
+            </div>
+          </header>
+
+          <dl class="wb-thv-restore-facts">
+            <dt>{{ t('tableHistory.restore.factTarget') }}</dt>
+            <dd><strong>{{ restoreModal.targetLabel }}</strong></dd>
+            <dt>{{ t('tableHistory.restore.factScope') }}</dt>
+            <dd>{{ t('tableHistory.restore.factScopeValue', { revisions: restoreModal.undoneRevisions, rows: restoreModal.preview.total }) }}</dd>
+            <dt>{{ t('tableHistory.restore.factChanges') }}</dt>
+            <dd class="wb-thv-restore-counts">
+              <span class="wb-thv-count-pill" data-kind="update">{{ t('tableHistory.restore.countUpdate', { count: restoreModal.preview.updated }) }}</span>
+              <span class="wb-thv-count-pill" data-kind="insert">{{ t('tableHistory.restore.countInsert', { count: restoreModal.preview.inserted }) }}</span>
+              <span class="wb-thv-count-pill" data-kind="delete">{{ t('tableHistory.restore.countDelete', { count: restoreModal.preview.deleted }) }}</span>
+            </dd>
+          </dl>
+
+          <p v-if="externalNotice" class="wb-thv-restore-warn" role="status">
+            {{ t('tableHistory.restore.externalCaution', { time: externalNotice.modifiedAt }) }}
+          </p>
+          <p class="wb-thv-restore-note">{{ t('tableHistory.restore.safetyNote') }}</p>
+          <p v-if="restoreModal.error" class="wb-thv-restore-modal-error" role="alert">
+            {{ restoreModal.error }}
+          </p>
+
+          <footer class="wb-thv-restore-actions">
+            <button
+              type="button"
+              class="wb-thv-restore-cancel"
+              :disabled="restoreApplying"
+              @click="closeRestoreModal"
+            >
+              {{ t('m_2cd0f3be8738') }}
+            </button>
+            <button
+              type="button"
+              class="wb-thv-restore-confirm"
+              :disabled="restoreApplying"
+              @click="confirmRestore"
+            >
+              <RotateCcw :size="13" :stroke-width="2" aria-hidden="true" />
+              <span>{{ restoreApplying ? t('tableHistory.restore.applying') : t('tableHistory.restore.confirm') }}</span>
+            </button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

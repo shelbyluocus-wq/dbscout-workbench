@@ -178,6 +178,11 @@ function switchActiveDataTabView(mode, searchFieldWidth = 0) {
 function openTableHistoryBackupCenter(target) {
   tableHistoryContext?.openBackupCenter?.(target);
 }
+function handleTableHistoryRestored() {
+  const tab = activeDataTab.value;
+  if (!tab) return;
+  void props.fetchPage(tab, tab.page || 1, { inPlace: true });
+}
 const activeDesignTab = computed(() => (props.activeTab?.kind === "design" ? props.activeTab : null));
 const activeHomeTab = computed(() => (props.activeTab?.kind === "home" ? props.activeTab : null));
 const activeSqlTab = computed(() => (props.activeTab?.kind === "sql" ? props.activeTab : null));
@@ -2139,12 +2144,15 @@ onMounted(() => emitPaneState());
       :table-name="activeDataTab.tableName"
       :table-comment="activeDataTab.tableComment"
       :table-meta="activeDataTabMeta"
+      :read-only="activeDataReadOnly"
+      :engine-kind="activeEngineKind"
       :invoke-workbench="invokeWorkbench"
       :is-logged-in="tableHistoryIsLoggedIn"
       :can-open-backup-center="tableHistoryCanOpenBackupCenter"
       :paired-search-width="pairedHistorySearchWidth"
       @switch-view="switchActiveDataTabView"
       @open-backup-center="openTableHistoryBackupCenter"
+      @restored="handleTableHistoryRestored"
     />
 
     <DataGrid

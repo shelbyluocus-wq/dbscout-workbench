@@ -302,6 +302,8 @@ pub fn run() {
             audit_history::list_audit_operation_details,
             audit_restore::preview_audit_table_restore,
             audit_restore::restore_audit_table,
+            audit_restore::preview_history_state_restore,
+            audit_restore::apply_history_state_restore,
             commands::list_snapshots,
             commands::create_snapshot,
             commands::restore_snapshot,

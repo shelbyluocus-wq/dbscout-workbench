@@ -15,7 +15,10 @@ export function normalizeSnapshotColumns(rawColumns = [], primaryKeys = []) {
     const isPk = typeof col === "object"
       ? Boolean(col.isPrimaryKey ?? col.is_primary_key ?? col.primaryKey ?? pkLower.has(name.toLowerCase()))
       : pkLower.has(name.toLowerCase());
-    list.push({ name, comment, primaryKey: isPk });
+    const isGenerated = typeof col === "object"
+      ? Boolean(col.isGenerated ?? col.is_generated)
+      : false;
+    list.push({ name, comment, primaryKey: isPk, isGenerated });
   }
   return list;
 }

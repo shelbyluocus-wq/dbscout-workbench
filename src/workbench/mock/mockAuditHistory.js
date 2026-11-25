@@ -68,6 +68,51 @@ async function fingerprint(rows, entries) {
 
 export function createMockAuditHistory({ logs, getRows, getTable, onRestored = () => {} }) {
   return async function handle(command, request) {
+    if (command === "preview_history_state_restore" || command === "apply_history_state_restore") {
+      const ops = Array.isArray(request.operations) ? request.operations : [];
+      if (!ops.length) throw new Error("没有需要还原的数据变更");
+      const current = getRows(request);
+      const table = getTable(request);
+      const keys = (table.columns || []).filter((c) => c.is_primary_key || c.isPrimaryKey).map((c) => c.column_name || c.columnName);
+      if (!keys.length) throw new Error("该表未设置主键，无法按行精准还原");
+      const next = structuredClone(current);
+      for (const op of ops) {
+        const idxList = next
+          .map((row, index) => (matches(row, op.rowIdentity || {}) ? index : -1))
+          .filter((index) => index >= 0);
+        if (op.kind === "insert") {
+          if (idxList.length) throw new Error("目标主键行当前已存在，无法重新插入");
+          next.push({ ...(op.targetValues || {}) });
+        } else if (op.kind === "delete") {
+          if (idxList.length !== 1 || !matches(next[idxList[0]], op.expectedCurrent || {})) {
+            throw new Error("目标行当前值与历史记录不一致，无法直接还原");
+          }
+          next.splice(idxList[0], 1);
+        } else if (op.kind === "update") {
+          if (idxList.length !== 1 || !matches(next[idxList[0]], op.expectedCurrent || {})) {
+            throw new Error("目标行当前值与历史记录不一致，无法直接还原");
+          }
+          Object.assign(next[idxList[0]], op.targetValues || {});
+        } else {
+          throw new Error("不支持的还原操作类型");
+        }
+      }
+      const token = await fingerprint(current, ops);
+      if (command === "preview_history_state_restore") {
+        return {
+          token,
+          inserted: ops.filter((op) => op.kind === "insert").length,
+          updated: ops.filter((op) => op.kind === "update").length,
+          deleted: ops.filter((op) => op.kind === "delete").length,
+          total: ops.length,
+        };
+      }
+      if (token !== request.token) throw new Error("预览后表数据已变化，请重新预览；本次未修改数据");
+      recordMockTableDiff(logs, { connectionId: request.connectionId, database: request.database, tableName: request.tableName }, table, current, next, "rollback");
+      current.splice(0, current.length, ...next);
+      onRestored(request);
+      return request.targetLabel ? `已还原到 ${request.targetLabel}（演示数据）` : "已还原到所选历史状态（演示数据）";
+    }
     const rows = scope(logs, request).sort((a, b) => b.id - a.id);
     if (command === "list_audit_tables") {
       const groups = new Map();

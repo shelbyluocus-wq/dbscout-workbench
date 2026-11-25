@@ -2925,7 +2925,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
 
   // ---- Backup & audit (mock) ----
-  if (["list_audit_tables", "list_audit_operations", "list_audit_operation_details", "preview_audit_table_restore", "restore_audit_table"].includes(command)) {
+  if (["list_audit_tables", "list_audit_operations", "list_audit_operation_details", "preview_audit_table_restore", "restore_audit_table", "preview_history_state_restore", "apply_history_state_restore"].includes(command)) {
     return mockAuditHistory(command, payload.request || {});
   }
   if (command === "list_audit_logs") {
