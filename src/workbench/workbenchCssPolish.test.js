@@ -1521,3 +1521,14 @@ test("opaque inspector and table toolbar skip the invisible backdrop blur", () =
   assert.match(toolbarRule, /isolation:\s*isolate/);
   assert.match(ruleBody(".wb-context-menu"), /backdrop-filter:\s*blur\(18px\)/);
 });
+
+test("collapsed sidebar toggle does not pick up macOS vibrancy titlebar tint when wallpaper is off", () => {
+  assert.doesNotMatch(
+    css,
+    /:root\[data-wb-platform="macos"\]\.is-vibrancy\s+\.mysql-workbench:not\(\.has-wallpaper\)\s+\.wb-titlebar-sidebar\s*\{/,
+  );
+  assert.match(
+    ruleBody(':root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-titlebar-sidebar:not(.is-collapsed)'),
+    /background:\s*var\(--wb-vibrancy-titlebar\)/,
+  );
+});

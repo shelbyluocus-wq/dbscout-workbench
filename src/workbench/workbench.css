@@ -29244,13 +29244,10 @@ button.wb-table-mention:active {
 :root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-sidebar {
   background: var(--wb-vibrancy-sidebar);
 }
-:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-titlebar-sidebar {
-  background: var(--wb-vibrancy-titlebar);
-}
 /* Collapsed, the slot is just the toggle beside the traffic lights; tinting
    it alone would leave a lighter square in the opaque title bar. */
-:root[data-wb-platform="macos"].is-vibrancy .wb-titlebar-sidebar.is-collapsed {
-  background: transparent;
+:root[data-wb-platform="macos"].is-vibrancy .mysql-workbench:not(.has-wallpaper) .wb-titlebar-sidebar:not(.is-collapsed) {
+  background: var(--wb-vibrancy-titlebar);
 }
 
 /* External-AI activity glow: soft inner edge ring + status pill. */
