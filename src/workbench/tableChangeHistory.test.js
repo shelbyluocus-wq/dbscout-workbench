@@ -3,13 +3,21 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  EXTERNAL_ACTOR_FILTER,
   computeInlineDiff,
   detectExternalNewerModification,
   extractEntryChanges,
   filterRevisionItems,
+  findNewerExternalRevision,
   groupAuditRevisions,
   mergeTableAuditEntries,
+  mergeTableExternalChanges,
+  mergeTimelineRevisions,
 } from "./utils/tableChangeHistory.js";
+import { buildHistoryRestorePlan } from "./utils/tableHistoryRestore.js";
+import zhCN from "./i18n/zhCN.js";
+import zhTW from "./i18n/zhTW.js";
+import en from "./i18n/en.js";
 import {
   buildFallbackComparisonTable,
   canReconstructRevision,
@@ -645,4 +653,267 @@ test("buildFallbackComparisonTable shapes legacy UPDATE, INSERT, DELETE, and DDL
   assert.equal(table.rows[0].cellDiffs.GMDesc.before.changed, "建筑");
   assert.equal(table.rows[0].cellDiffs.GMDesc.after.changed, "圣物");
   assert.deepEqual(table.ddlItems, []);
+});
+
+test("mergeTableExternalChanges deduplicates across workstations, upgrades detected to exact, and suppresses Blackcat echoes", () => {
+  const auditRevisions = groupAuditRevisions(mergeTableAuditEntries({
+    sharedEntries: [
+      {
+        clientId: "a1",
+        ts: "2026-11-26T02:00:00Z",
+        displayName: "杨奭宸",
+        operation: "UPDATE",
+        columnName: "Name",
+        oldValue: "旧",
+        newValue: "新",
+        rowIdentity: { ID: "1" },
+        status: "committed",
+        source: "grid",
+      },
+    ],
+  }));
+
+  const tAudit = Date.parse("2026-11-26T02:00:00Z");
+  const tNavicat = Date.parse("2026-11-26T02:05:00Z");
+  const external = mergeTableExternalChanges({
+    auditRevisions,
+    localEntries: [
+      // Echo of Blackcat audit (+4s) -> must be suppressed
+      {
+        eventId: "ext-echo",
+        ts: "2026-11-26T02:00:04Z",
+        tsMs: tAudit + 4_000,
+        timeKind: "exact",
+        signal: "update_time",
+        origin: "local",
+      },
+      // Approximate discovery of real Navicat edit (+30s after edit)
+      {
+        eventId: "ext-approx",
+        ts: "2026-11-26T02:05:30Z",
+        tsMs: tNavicat + 30_000,
+        timeKind: "detected",
+        signal: "write_count",
+        origin: "local",
+      },
+    ],
+    sharedEntries: [
+      // Teammate observed the exact UPDATE_TIME for that Navicat edit -> absorbs ext-approx
+      {
+        eventId: "ext-exact",
+        ts: "2026-11-26T02:05:00Z",
+        tsMs: tNavicat,
+        timeKind: "exact",
+        signal: "update_time",
+        origin: "shared",
+      },
+      // Another teammate saw exact +2s -> coalesced
+      {
+        eventId: "ext-exact-dup",
+        ts: "2026-11-26T02:05:02Z",
+        tsMs: tNavicat + 2_000,
+        timeKind: "exact",
+        signal: "update_time",
+        origin: "shared",
+      },
+    ],
+  });
+
+  assert.equal(external.length, 1);
+  assert.equal(external[0].isExternal, true);
+  assert.equal(external[0].timeKind, "exact");
+  assert.equal(external[0].tsMs, tNavicat);
+
+  const timeline = mergeTimelineRevisions(auditRevisions, external);
+  assert.equal(timeline.length, 2);
+  assert.equal(timeline[0].isExternal, true);
+  assert.equal(timeline[1].isExternal, false);
+  assert.equal(findNewerExternalRevision(timeline, 1)?.eventId, "ext-exact");
+  assert.equal(findNewerExternalRevision(timeline, 0), null);
+});
+
+test("useTableChangeHistory interleaves shared & observed external changes, replays across them, and guards restore", async () => {
+  const history = useTableChangeHistory({
+    isLoggedIn: () => true,
+    invokeWorkbench(command) {
+      if (command === "list_audit_logs") {
+        return Promise.resolve([
+          {
+            id: 1,
+            clientId: "cid-1",
+            ts: "2026-11-26T01:00:00Z",
+            operation: "UPDATE",
+            columnName: "Reward",
+            oldValue: "10",
+            newValue: "20",
+            rowIdentity: { ID: "7" },
+            status: "committed",
+            source: "grid",
+            actor: "刘岳松",
+          },
+        ]);
+      }
+      if (command === "list_shared_audit_logs") {
+        return Promise.resolve([
+          {
+            clientId: "cid-2",
+            ts: "2026-11-26T03:00:00Z",
+            username: "ysc",
+            displayName: "杨奭宸",
+            operation: "UPDATE",
+            columnName: "Title",
+            oldValue: "旧标题",
+            newValue: "新标题",
+            rowIdentity: { ID: "7" },
+            status: "committed",
+            source: "grid",
+          },
+        ]);
+      }
+      if (command === "list_table_external_changes") {
+        return Promise.resolve([]);
+      }
+      if (command === "list_shared_table_external_changes") {
+        return Promise.resolve([
+          {
+            eventId: "ext-mid",
+            ts: "2026-11-26T02:00:00Z",
+            tsMs: Date.parse("2026-11-26T02:00:00Z"),
+            timeKind: "exact",
+            signal: "update_time",
+            origin: "shared",
+          },
+        ]);
+      }
+      if (command === "observe_table_external_change") {
+        return Promise.resolve({
+          tableMeta: {
+            tableName: "uniontaskprop",
+            modifiedAt: "2026-11-26 12:00:00",
+            modifiedSource: "database",
+          },
+          detectedEvent: {
+            eventId: "ext-latest",
+            ts: "2026-11-26T04:00:00Z",
+            tsMs: Date.parse("2026-11-26T04:00:00Z"),
+            timeKind: "detected",
+            signal: "write_count",
+            origin: "local",
+          },
+        });
+      }
+      if (command === "open_table_session") {
+        return Promise.resolve({
+          sessionId: "sess-ext-1",
+          primaryKeys: ["ID"],
+          columns: [
+            { columnName: "ID", columnComment: "编号", isPrimaryKey: true },
+            { columnName: "Title", columnComment: "标题", isPrimaryKey: false },
+            { columnName: "Reward", columnComment: "奖励", isPrimaryKey: false },
+          ],
+          rows: [{ ID: "7", Title: "新标题", Reward: "20" }],
+          nullCells: [[]],
+          hasMore: false,
+        });
+      }
+      if (command === "close_table_session") return Promise.resolve(true);
+      return Promise.resolve([]);
+    },
+  });
+
+  await history.loadForTable({
+    connectionId: "mysql-2",
+    database: "newsg_4cfg",
+    tableName: "uniontaskprop",
+  });
+
+  // Timeline order: ext-latest (04:00) -> cid-2 (03:00) -> ext-mid (02:00) -> cid-1 (01:00)
+  assert.equal(history.state.revisions.length, 4);
+  assert.equal(history.state.revisions[0].isExternal, true);
+  assert.equal(history.state.revisions[0].eventId, "ext-latest");
+  assert.equal(history.state.revisions[1].actor, "杨奭宸");
+  assert.equal(history.state.revisions[2].isExternal, true);
+  assert.equal(history.state.revisions[2].eventId, "ext-mid");
+  assert.equal(history.state.revisions[3].actor, "刘岳松");
+
+  // Default selected revision is newest (external) -> external mode, no duplicate top banner
+  assert.equal(history.snapshot.value.mode, "external");
+  assert.equal(history.externalNotice.value, null);
+
+  // Restore directly on external node is blocked
+  const directExternalPlan = buildHistoryRestorePlan({
+    columns: history.state.liveColumns,
+    primaryKeys: history.state.livePrimaryKeys,
+    liveRows: history.state.liveRows,
+    revisions: history.state.revisions,
+    targetIndex: 0,
+    target: "before",
+  });
+  assert.equal(directExternalPlan.canRestore, false);
+  assert.equal(directExternalPlan.reason, "external-change");
+
+  // Selecting earliest Blackcat edit (index 3) replays across ext-latest & ext-mid cleanly
+  history.selectRevision(history.state.revisions[3].id);
+  assert.equal(history.snapshot.value.mode, "full-table");
+  assert.equal(history.snapshot.value.partialReplayWarning, true);
+  assert.equal(history.displayRows.value[0].before.Reward, "10");
+  assert.equal(history.displayRows.value[0].after.Reward, "20");
+  assert.equal(history.externalNotice.value?.modifiedAt, "2026-11-26T04:00:00Z");
+
+  // Restore plan across intervening external changes counts only Blackcat revisions and records crossedExternalTime
+  const restoreAcross = buildHistoryRestorePlan({
+    columns: history.state.liveColumns,
+    primaryKeys: history.state.livePrimaryKeys,
+    liveRows: history.state.liveRows,
+    revisions: history.state.revisions,
+    targetIndex: 3,
+    target: "before",
+  });
+  assert.equal(restoreAcross.canRestore, true);
+  assert.equal(restoreAcross.undoneRevisions, 2);
+  assert.equal(restoreAcross.crossedExternalTime, "2026-11-26T04:00:00Z");
+
+  // Actor filter includes external chip and filters cleanly
+  assert.ok(history.actors.value.some((a) => a.name === EXTERNAL_ACTOR_FILTER && a.isExternal && a.count === 2));
+  history.setActorFilter(EXTERNAL_ACTOR_FILTER);
+  assert.equal(history.filteredRevisions.value.length, 2);
+  assert.ok(history.filteredRevisions.value.every((r) => r.isExternal));
+});
+
+test("TableChangeHistoryView renders external nodes cleanly and all 3 i18n locales include external keys", () => {
+  const view = readFileSync(new URL("./components/TableChangeHistoryView.vue", import.meta.url), "utf8");
+  assert.match(view, /wb-thv-external-stage/);
+  assert.match(view, /data-revision-kind/);
+  assert.match(view, /tableHistory\.external\.cardTitle/);
+
+  const requiredKeys = [
+    "tableHistory.restore.reasonExternal",
+    "tableHistory.external.actorLabel",
+    "tableHistory.external.sourceBadge",
+    "tableHistory.external.sourceRebuild",
+    "tableHistory.external.noDiffPill",
+    "tableHistory.external.approxClock",
+    "tableHistory.external.cardTitle",
+    "tableHistory.external.cardTitleRebuild",
+    "tableHistory.external.cardDescription",
+    "tableHistory.external.factTimeExact",
+    "tableHistory.external.factTimeDetected",
+    "tableHistory.external.timeDetectedHint",
+    "tableHistory.external.factSignal",
+    "tableHistory.external.signalUpdateTime",
+    "tableHistory.external.signalCreateTime",
+    "tableHistory.external.signalWriteCount",
+    "tableHistory.external.factOrigin",
+    "tableHistory.external.originShared",
+    "tableHistory.external.originLocal",
+    "tableHistory.external.originObserved",
+    "tableHistory.external.factDiff",
+    "tableHistory.external.factDiffUnavailable",
+    "tableHistory.external.jumpNearestAudit",
+  ];
+  for (const key of requiredKeys) {
+    assert.ok(zhCN[key], `zhCN missing ${key}`);
+    assert.ok(zhTW[key], `zhTW missing ${key}`);
+    assert.ok(en[key], `en missing ${key}`);
+  }
 });

@@ -119,6 +119,15 @@ const externalNotice = history.externalNotice;
 
 const isFullTableMode = computed(() => snapshot.value.mode === "full-table");
 const isFieldDiffMode = computed(() => snapshot.value.mode === "field-diff");
+const isExternalMode = computed(() => (
+  snapshot.value.mode === "external" && Boolean(selectedRevision.value?.isExternal)
+));
+const nearestAuditRevision = computed(() => (
+  state.revisions.find((rev) => !rev.isExternal) || null
+));
+const restoreExternalCautionTime = computed(() => (
+  restoreModal.value?.crossedExternalTime || externalNotice.value?.modifiedAt || ""
+));
 const isInitialLoading = computed(() => (
   (state.loading || state.liveLoading) && state.revisions.length === 0
 ));
@@ -337,6 +346,8 @@ function restoreDisabledReason(plan) {
       return t("tableHistory.restore.reasonIncompleteRow");
     case "already-current":
       return t("tableHistory.restore.reasonAlreadyCurrent");
+    case "external-change":
+      return t("tableHistory.restore.reasonExternal");
     default:
       return "";
   }
@@ -370,6 +381,7 @@ async function requestRestore(target) {
       targetLabel,
       operations: plan.operations,
       undoneRevisions: plan.undoneRevisions,
+      crossedExternalTime: plan.crossedExternalTime || "",
       preview,
       error: "",
     };
@@ -782,6 +794,39 @@ function clockTime(ts) {
   return /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(full) ? full.slice(11, 19) : shortTime(ts);
 }
 
+function actorChipLabel(item) {
+  return item?.isExternal ? t("tableHistory.external.actorLabel") : item?.name || "";
+}
+
+function revisionClockText(rev) {
+  const clock = clockTime(rev?.ts);
+  if (rev?.isExternal && rev?.timeKind === "detected" && clock) {
+    return t("tableHistory.external.approxClock", { time: clock });
+  }
+  return clock;
+}
+
+function externalSignalLabel(signal) {
+  if (signal === "create_time") return t("tableHistory.external.signalCreateTime");
+  if (signal === "write_count") return t("tableHistory.external.signalWriteCount");
+  return t("tableHistory.external.signalUpdateTime");
+}
+
+function externalOriginLabel(origin) {
+  if (origin === "shared" || origin === "merged") return t("tableHistory.external.originShared");
+  if (origin === "observed") return t("tableHistory.external.originObserved");
+  return t("tableHistory.external.originLocal");
+}
+
+function jumpToNearestAudit() {
+  const target = nearestAuditRevision.value;
+  if (!target) return;
+  if (state.actorFilter) {
+    history.setActorFilter(state.actorFilter);
+  }
+  history.selectRevision(target.id);
+}
+
 const revisionGroups = computed(() => groupRevisionsByDay(filteredRevisions.value, {
   parseMs: (rev) => rev?.tsMs || parseAuditTimestampMs(rev?.ts),
 }));
@@ -860,6 +905,17 @@ watch(
     });
   },
   { immediate: true },
+);
+
+watch(
+  () => [
+    props.tableMeta?.modifiedAt ?? props.tableMeta?.modified_at ?? "",
+    props.tableMeta?.modifiedSource ?? props.tableMeta?.modified_source ?? "",
+  ],
+  () => {
+    if (!props.database || !props.tableName) return;
+    history.setTableMeta(props.tableMeta);
+  },
 );
 
 // Re-fetch when user signs into team account so shared history loads immediately
@@ -1163,7 +1219,7 @@ onBeforeUnmount(() => {
     <!-- Conditional honest banners (only rendered when applicable) -->
     <div v-if="externalNotice" class="wb-thv-banner is-warn" role="status">
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
-      <span>{{ t('tableHistory.externalNewerNotice', { time: externalNotice.modifiedAt }) }}</span>
+      <span>{{ t('tableHistory.externalNewerNotice', { time: fullTime(externalNotice.modifiedAt) }) }}</span>
     </div>
     <div v-else-if="state.sharedStatus === 'logged-out'" class="wb-thv-banner is-info" role="status">
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
@@ -1225,10 +1281,10 @@ onBeforeUnmount(() => {
             :key="item.name"
             type="button"
             class="wb-thv-actor-chip"
-            :class="{ 'is-active': state.actorFilter === item.name }"
+            :class="{ 'is-active': state.actorFilter === item.name, 'is-external': item.isExternal }"
             @click="history.setActorFilter(item.name)"
           >
-            <span>{{ item.name }}</span>
+            <span>{{ actorChipLabel(item) }}</span>
             <em>{{ item.count }}</em>
           </button>
         </div>
@@ -1255,35 +1311,53 @@ onBeforeUnmount(() => {
                 type="button"
                 role="option"
                 class="wb-thv-rev-item"
-                :class="{ 'is-active': selectedRevision?.id === rev.id }"
+                :class="{ 'is-active': selectedRevision?.id === rev.id, 'is-external': rev.isExternal }"
+                :data-revision-kind="rev.isExternal ? 'external' : 'audit'"
                 :aria-selected="selectedRevision?.id === rev.id"
                 @click="history.selectRevision(rev.id)"
               >
                 <div class="wb-thv-rev-top">
                   <span class="wb-thv-rev-actor">
-                    <span class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
-                    <span class="wb-thv-actor-name">{{ rev.actor }}</span>
+                    <span
+                      v-if="rev.isExternal"
+                      class="wb-thv-avatar is-external"
+                      aria-hidden="true"
+                    ><ExternalLink :size="12" :stroke-width="2.1" /></span>
+                    <span v-else class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
+                    <span class="wb-thv-actor-name">{{ rev.isExternal ? t('tableHistory.external.actorLabel') : rev.actor }}</span>
                   </span>
-                  <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ clockTime(rev.ts) }}</span>
+                  <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ revisionClockText(rev) }}</span>
                 </div>
                 <div class="wb-thv-rev-bottom">
-                  <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
-                    {{ sourceLabel(rev.source, rev.isRollback) }}
-                  </span>
-                  <span class="wb-thv-rev-badges">
-                    <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
-                      {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+                  <template v-if="rev.isExternal">
+                    <span class="wb-thv-rev-source" data-source="external">
+                      {{ rev.signal === 'create_time' ? t('tableHistory.external.sourceRebuild') : t('tableHistory.external.sourceBadge') }}
                     </span>
-                    <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
-                      {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                    <span class="wb-thv-rev-badges">
+                      <span class="wb-thv-count-pill" data-kind="external">
+                        {{ t('tableHistory.external.noDiffPill') }}
+                      </span>
                     </span>
-                    <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
-                      {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                  </template>
+                  <template v-else>
+                    <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
+                      {{ sourceLabel(rev.source, rev.isRollback) }}
                     </span>
-                    <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
-                      {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
+                    <span class="wb-thv-rev-badges">
+                      <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
+                        {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+                      </span>
+                      <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
+                        {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                      </span>
+                      <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
+                        {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                      </span>
+                      <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
+                        {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
+                      </span>
                     </span>
-                  </span>
+                  </template>
                 </div>
               </button>
             </template>
@@ -1330,6 +1404,61 @@ onBeforeUnmount(() => {
             <Table2 :size="14" :stroke-width="1.9" aria-hidden="true" />
             <span>{{ t('tableHistory.backToData') }}</span>
           </button>
+        </div>
+
+        <!-- External (Non-Blackcat) Change Event Notice -->
+        <div v-else-if="isExternalMode" class="wb-thv-external-stage">
+          <section class="wb-thv-external-card" :aria-label="t('tableHistory.external.actorLabel')">
+            <header class="wb-thv-external-head">
+              <span class="wb-thv-external-icon" aria-hidden="true">
+                <ExternalLink :size="18" :stroke-width="2" />
+              </span>
+              <div class="wb-thv-external-heading">
+                <strong>
+                  {{ selectedRevision.signal === 'create_time'
+                    ? t('tableHistory.external.cardTitleRebuild')
+                    : t('tableHistory.external.cardTitle') }}
+                </strong>
+                <p>{{ t('tableHistory.external.cardDescription') }}</p>
+              </div>
+            </header>
+
+            <dl class="wb-thv-external-facts">
+              <dt>
+                {{ selectedRevision.timeKind === 'detected'
+                  ? t('tableHistory.external.factTimeDetected')
+                  : t('tableHistory.external.factTimeExact') }}
+              </dt>
+              <dd>
+                <strong>{{ fullTime(selectedRevision.ts) }}</strong>
+                <span v-if="selectedRevision.timeKind === 'detected'" class="wb-thv-external-fact-hint">
+                  {{ t('tableHistory.external.timeDetectedHint') }}
+                </span>
+              </dd>
+              <dt>{{ t('tableHistory.external.factSignal') }}</dt>
+              <dd>{{ externalSignalLabel(selectedRevision.signal) }}</dd>
+              <dt>{{ t('tableHistory.external.factOrigin') }}</dt>
+              <dd>{{ externalOriginLabel(selectedRevision.origin) }}</dd>
+              <dt>{{ t('tableHistory.external.factDiff') }}</dt>
+              <dd>{{ t('tableHistory.external.factDiffUnavailable') }}</dd>
+            </dl>
+
+            <footer class="wb-thv-external-actions">
+              <button
+                v-if="nearestAuditRevision"
+                type="button"
+                class="wb-thv-empty-back-btn"
+                @click="jumpToNearestAudit"
+              >
+                <History :size="14" :stroke-width="1.9" aria-hidden="true" />
+                <span>{{ t('tableHistory.external.jumpNearestAudit') }}</span>
+              </button>
+              <button type="button" class="wb-thv-empty-back-btn" @click="emit('switch-view', 'data')">
+                <Table2 :size="14" :stroke-width="1.9" aria-hidden="true" />
+                <span>{{ t('tableHistory.backToData') }}</span>
+              </button>
+            </footer>
+          </section>
         </div>
 
         <!-- Unified Side-by-Side Split-Table Comparison (Full-Table AND Fallback UPDATE/INSERT/DELETE) -->
@@ -1901,8 +2030,8 @@ onBeforeUnmount(() => {
             </dd>
           </dl>
 
-          <p v-if="externalNotice" class="wb-thv-restore-warn" role="status">
-            {{ t('tableHistory.restore.externalCaution', { time: externalNotice.modifiedAt }) }}
+          <p v-if="restoreExternalCautionTime" class="wb-thv-restore-warn" role="status">
+            {{ t('tableHistory.restore.externalCaution', { time: fullTime(restoreExternalCautionTime) }) }}
           </p>
           <p class="wb-thv-restore-note">{{ t('tableHistory.restore.safetyNote') }}</p>
           <p v-if="restoreModal.error" class="wb-thv-restore-modal-error" role="alert">

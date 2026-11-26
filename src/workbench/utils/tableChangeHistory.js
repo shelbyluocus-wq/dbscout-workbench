@@ -3,7 +3,15 @@ import { auditChangeItems, auditChangeSql } from "./auditDisplay.js";
 const LEGACY_PLACEHOLDER_SERVER_KEY = "mysql://configured:3306";
 const DEFAULT_GROUP_WINDOW_MS = 2500;
 const EXTERNAL_NEWER_GRACE_MS = 120_000;
+const EXACT_AUDIT_MATCH_BEFORE_MS = 5_000;
+const EXACT_AUDIT_MATCH_AFTER_MS = 12_000;
+const DETECTED_AUDIT_MATCH_BEFORE_MS = 15_000;
+const DETECTED_AUDIT_MATCH_AFTER_MS = 90_000;
+const EXACT_COALESCE_WINDOW_MS = 5_000;
+const DETECTED_COALESCE_WINDOW_MS = 90_000;
 const VALID_STATUSES = new Set(["committed", "rolled_back"]);
+
+export const EXTERNAL_ACTOR_FILTER = "__external__";
 
 export function parseAuditTimestampMs(raw) {
   const text = String(raw || "").trim();
@@ -375,6 +383,8 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
 
     const rev = {
       id: `rev-${detailItem.id}-${revisions.length}`,
+      kind: "audit",
+      isExternal: false,
       ts: entry.ts,
       tsMs: entry.tsMs,
       actor: entry.actor,
@@ -434,6 +444,225 @@ export function detectExternalNewerModification(tableMeta, revisions = []) {
     modifiedAt,
     source,
   };
+}
+
+function normalizeExternalTimeKind(raw) {
+  return String(raw || "").toLowerCase() === "exact" ? "exact" : "detected";
+}
+
+function normalizeExternalSignal(raw, timeKind) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (s === "create_time" || s === "write_count" || s === "update_time") return s;
+  return timeKind === "exact" ? "update_time" : "write_count";
+}
+
+function externalMatchesAnyAuditRevision(ext, auditRevisions) {
+  for (const rev of Array.isArray(auditRevisions) ? auditRevisions : []) {
+    const auditMs = Number(rev?.tsMs || parseAuditTimestampMs(rev?.ts));
+    if (!auditMs) continue;
+    if (ext.timeKind === "exact") {
+      if (
+        ext.tsMs >= auditMs - EXACT_AUDIT_MATCH_BEFORE_MS
+        && ext.tsMs <= auditMs + EXACT_AUDIT_MATCH_AFTER_MS
+      ) {
+        return true;
+      }
+    } else if (
+      ext.tsMs >= auditMs - DETECTED_AUDIT_MATCH_BEFORE_MS
+      && ext.tsMs <= auditMs + DETECTED_AUDIT_MATCH_AFTER_MS
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const ORIGIN_RANK = { merged: 3, shared: 2, local: 1, observed: 0 };
+
+/**
+ * Merge local & team-shared external (non-Blackcat) table change events,
+ * deduplicate cross-workstation reports, include the current database
+ * `tableMeta` fallback when untouched, and suppress any event already explained
+ * by a Blackcat audit revision.
+ */
+export function mergeTableExternalChanges({
+  localEntries = [],
+  sharedEntries = [],
+  tableMeta = null,
+  auditRevisions = [],
+  serverKey = "",
+} = {}) {
+  const wantedServerKey = canonicalRealServerKey(serverKey);
+  const byEventId = new Map();
+
+  const ingest = (list, defaultOrigin) => {
+    for (const raw of Array.isArray(list) ? list : []) {
+      if (!raw || typeof raw !== "object") continue;
+      const entryServerKey = canonicalRealServerKey(raw.serverKey ?? raw.server_key);
+      if (wantedServerKey && entryServerKey && entryServerKey !== wantedServerKey) {
+        continue;
+      }
+      const rawTs = String(raw.ts || "").trim();
+      const tsMs = Number(raw.tsMs ?? raw.ts_ms) || parseAuditTimestampMs(rawTs);
+      if (!tsMs) continue;
+      const timeKind = normalizeExternalTimeKind(raw.timeKind ?? raw.time_kind);
+      const signal = normalizeExternalSignal(raw.signal, timeKind);
+      const eventId = String(raw.eventId ?? raw.event_id ?? `${defaultOrigin}-${tsMs}`).trim();
+      const origin = String(raw.origin || defaultOrigin);
+      const existing = byEventId.get(eventId);
+      if (existing) {
+        const mergedOrigin = existing.origin === origin ? origin : "merged";
+        const preferIncoming = timeKind === "exact" && existing.timeKind !== "exact";
+        byEventId.set(eventId, {
+          ...existing,
+          ...(preferIncoming ? { ts: rawTs || existing.ts, tsMs, timeKind, signal } : {}),
+          origin: mergedOrigin,
+        });
+      } else {
+        byEventId.set(eventId, {
+          eventId,
+          ts: rawTs || new Date(tsMs).toISOString(),
+          tsMs,
+          timeKind,
+          signal,
+          origin,
+        });
+      }
+    }
+  };
+
+  ingest(localEntries, "local");
+  ingest(sharedEntries, "shared");
+
+  // Process exact events before approximate ("detected") events so exact DB
+  // timestamps always absorb nearby approximate discoveries.
+  const candidates = [...byEventId.values()].sort((a, b) => {
+    if (a.timeKind !== b.timeKind) return a.timeKind === "exact" ? -1 : 1;
+    return a.tsMs - b.tsMs;
+  });
+
+  const deduped = [];
+  for (const item of candidates) {
+    if (item.timeKind === "exact") {
+      const dupIdx = deduped.findIndex(
+        (kept) => kept.timeKind === "exact" && Math.abs(kept.tsMs - item.tsMs) <= EXACT_COALESCE_WINDOW_MS,
+      );
+      if (dupIdx >= 0) {
+        const kept = deduped[dupIdx];
+        if ((ORIGIN_RANK[item.origin] || 0) > (ORIGIN_RANK[kept.origin] || 0)) {
+          deduped[dupIdx] = { ...kept, origin: item.origin === kept.origin ? kept.origin : "merged" };
+        }
+        continue;
+      }
+      deduped.push(item);
+    } else {
+      const coveredByExact = deduped.some(
+        (kept) => kept.timeKind === "exact"
+          && kept.tsMs <= item.tsMs + DETECTED_AUDIT_MATCH_BEFORE_MS
+          && item.tsMs <= kept.tsMs + DETECTED_COALESCE_WINDOW_MS,
+      );
+      if (coveredByExact) continue;
+      const dupIdx = deduped.findIndex(
+        (kept) => kept.timeKind !== "exact" && Math.abs(kept.tsMs - item.tsMs) <= DETECTED_COALESCE_WINDOW_MS,
+      );
+      if (dupIdx >= 0) {
+        const kept = deduped[dupIdx];
+        const mergedOrigin = kept.origin === item.origin ? kept.origin : "merged";
+        deduped[dupIdx] = item.tsMs < kept.tsMs
+          ? { ...item, origin: mergedOrigin }
+          : { ...kept, origin: mergedOrigin };
+        continue;
+      }
+      deduped.push(item);
+    }
+  }
+
+  // Fallback to current live `tableMeta` when a table has an observed database/
+  // external modification not yet recorded in `table_external_changes` (e.g. an
+  // untouched table that was edited outside Blackcat before first open).
+  const metaModifiedAt = String(tableMeta?.modifiedAt ?? tableMeta?.modified_at ?? "").trim();
+  const metaSource = String(tableMeta?.modifiedSource ?? tableMeta?.modified_source ?? "").trim();
+  if (metaModifiedAt && (metaSource === "database" || metaSource === "external")) {
+    const tableMs = parseAuditTimestampMs(metaModifiedAt);
+    const newestAuditMs = auditRevisions.reduce(
+      (max, rev) => Math.max(max, Number(rev?.tsMs || parseAuditTimestampMs(rev?.ts)) || 0),
+      0,
+    );
+    const notShadowedByAudit = !(newestAuditMs > 0 && tableMs <= newestAuditMs + EXTERNAL_NEWER_GRACE_MS);
+    const alreadyCovered = deduped.some((kept) => (
+      metaSource === "database"
+        ? Math.abs(kept.tsMs - tableMs) <= EXACT_COALESCE_WINDOW_MS
+        : Math.abs(kept.tsMs - tableMs) <= DETECTED_COALESCE_WINDOW_MS
+    ));
+    if (tableMs > 0 && notShadowedByAudit && !alreadyCovered) {
+      const timeKind = metaSource === "external" ? "detected" : "exact";
+      deduped.push({
+        eventId: `observed-${tableMs}`,
+        ts: metaModifiedAt,
+        tsMs: tableMs,
+        timeKind,
+        signal: metaSource === "external" ? "write_count" : "update_time",
+        origin: "observed",
+      });
+    }
+  }
+
+  return deduped
+    .filter((item) => !externalMatchesAnyAuditRevision(item, auditRevisions))
+    .sort((a, b) => b.tsMs - a.tsMs || String(b.eventId).localeCompare(String(a.eventId)))
+    .map((item) => ({
+      id: `ext-${item.eventId}`,
+      kind: "external",
+      isExternal: true,
+      eventId: item.eventId,
+      ts: item.ts,
+      tsMs: item.tsMs,
+      actor: "",
+      username: "",
+      isSelfFallback: false,
+      source: "external",
+      timeKind: item.timeKind,
+      signal: item.signal,
+      isRollback: false,
+      origin: item.origin,
+      counts: { update: 0, insert: 0, delete: 0, ddl: 0 },
+      fieldChangeCount: 0,
+      entryCount: 0,
+      items: [],
+    }));
+}
+
+/**
+ * Interleave Blackcat audit revisions and detected external change revisions in
+ * newest-first chronological order for the single-table change timeline.
+ */
+export function mergeTimelineRevisions(auditRevisions = [], externalRevisions = []) {
+  const normalizedAudit = (Array.isArray(auditRevisions) ? auditRevisions : []).map((rev) => (
+    rev?.kind ? rev : { ...rev, kind: "audit", isExternal: false }
+  ));
+  const combined = [...normalizedAudit, ...(Array.isArray(externalRevisions) ? externalRevisions : [])];
+  combined.sort((a, b) => {
+    const aMs = Number(a?.tsMs || parseAuditTimestampMs(a?.ts)) || 0;
+    const bMs = Number(b?.tsMs || parseAuditTimestampMs(b?.ts)) || 0;
+    if (bMs !== aMs) return bMs - aMs;
+    if (Boolean(a?.isExternal) !== Boolean(b?.isExternal)) {
+      return a?.isExternal ? -1 : 1;
+    }
+    return String(b?.id || "").localeCompare(String(a?.id || ""));
+  });
+  return combined;
+}
+
+/**
+ * Return the newest external change that occurred strictly after
+ * `revisions[targetIndex]`, or null when none intervened.
+ */
+export function findNewerExternalRevision(revisions = [], targetIndex = -1) {
+  if (!Array.isArray(revisions) || targetIndex <= 0) return null;
+  for (let i = 0; i < targetIndex && i < revisions.length; i += 1) {
+    if (revisions[i]?.isExternal) return revisions[i];
+  }
+  return null;
 }
 
 export function filterRevisionItems(items = [], rawQuery = "", columnComments = null) {

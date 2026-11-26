@@ -127,3 +127,126 @@ pub struct SharedTableLatestModified {
     pub display_name: String,
     pub source: String,
 }
+
+/// One externally observed table change pushed by a workstation.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalChangePushItem {
+    pub event_id: String,
+    #[serde(default)]
+    pub server_key: Option<String>,
+    pub database: String,
+    pub table_name: String,
+    pub ts: String,
+    pub ts_ms: i64,
+    pub time_kind: String,
+    pub signal: String,
+    pub host: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalChangePushRequest {
+    pub items: Vec<ExternalChangePushItem>,
+}
+
+/// One shared external change returned to clients for a table's history timeline.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedExternalChangeEntry {
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
+    pub database: String,
+    pub table_name: String,
+    pub ts: String,
+    pub ts_ms: i64,
+    pub time_kind: String,
+    pub signal: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalChangeQuery {
+    pub server_key: Option<String>,
+    pub database: Option<String>,
+    pub table_name: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+// ---- Read-only GM hourly backups (/home/servbin/dbback) --------------------
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupListQuery {
+    pub database: Option<String>,
+    pub date: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupItem {
+    pub date: String,
+    pub hour: String,
+    pub file_name: String,
+    pub host: String,
+    pub database: String,
+    pub ts: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupListResponse {
+    pub enabled: bool,
+    pub backup_dir_configured: bool,
+    pub databases: Vec<String>,
+    pub dates: Vec<String>,
+    pub items: Vec<GmBackupItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupTablesQuery {
+    pub date: String,
+    pub hour: String,
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupTableInfo {
+    pub name: String,
+    pub has_data: bool,
+    pub insert_batches: u32,
+    pub approx_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupTablesResponse {
+    pub database: String,
+    pub ts: String,
+    pub tables: Vec<GmBackupTableInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupExtractRequest {
+    pub date: String,
+    pub hour: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub tables: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmBackupExtractResponse {
+    pub database: String,
+    pub ts: String,
+    pub tables: Vec<String>,
+    pub sql: String,
+}

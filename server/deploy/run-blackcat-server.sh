@@ -95,6 +95,7 @@ start_service() {
     DBSCOUT_SERVER_BIND="$BIND_ADDR" \
     DBSCOUT_SERVER_DB="$DB_PATH" \
     DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE="${DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE:-20}" \
+    DBSCOUT_SERVER_GM_BACKUP_DIR="${DBSCOUT_SERVER_GM_BACKUP_DIR:-/home/servbin/dbback}" \
     RUST_LOG="${RUST_LOG:-dbscout_server=info,tower_http=info}" \
       nohup "$BIN" </dev/null >>"$LOG_FILE" 2>&1 &
     echo "$!" > "$PID_FILE"

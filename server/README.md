@@ -4,6 +4,7 @@ DB Scout Workbench（黑猫）的中心服务（局域网内部署）。提供**
 
 - 单一 SQLite 文件存储（WAL 模式），零外部依赖。
 - **每张表默认只保留最近 20 次改动**（启动时与每次写入后自动清理更早记录；同一次批量导入/多行保存按 2.5 秒窗口算作 1 次改动完整保留，避免打断历史对比；可通过环境变量 `DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE` 调整，设为 `0` 不清理）。
+- **只读读取 243 定时备份目录**（默认检测 `/home/servbin/dbback`，可通过 `DBSCOUT_SERVER_GM_BACKUP_DIR` 覆盖或设为 `off` 关闭）：扫描 MySQL 备份 `.zip` 列表、列出包内表清单、按表或整库提取 SQL，供黑猫客户端「备份中心 → 快照 → 243 服务器备份」一键还原；全程只读，绝不修改或删除原备份文件。
 - 仅用户名 + 不透明令牌登录，**不存密码**。安全假设：仅限公司局域网内使用，不对外网开放。
 - HTTP/JSON 接口，Bearer token 鉴权。
 - 独立部署在 `192.168.1.243:8766`（`/home/blackcat-server`），与 GM 服务端（`/home/gmserv`）完全隔离，互不干扰。
@@ -86,6 +87,11 @@ npm run server:deploy -- --backup
 | POST | `/audit` | Bearer | 批量推送审计摘要，按 `clientId` 幂等去重，返回 `{accepted, skipped}` |
 | GET  | `/audit/since` | Bearer | 增量拉取（同 `/audit` 查询参数） |
 | GET  | `/audit/table-latest` | Bearer | 按表聚合最新修改时间，支持 `database` + `serverKey` / `connectionId`（跨电脑不同本地连接 ID 也能按服务器匹配） |
+| GET  | `/external-changes` | Bearer | 查询单表的共享外部（非黑猫）变动节点，支持 `database`/`tableName`/`serverKey`/`limit`/`offset` |
+| POST | `/external-changes` | Bearer | 批量推送工作站检测到的非黑猫表变动，自动跨工作站去重并与黑猫审计日志互相核销 |
+| GET  | `/backups/gm` | Bearer | 只读扫描 243 定时备份目录（`/home/servbin/dbback`）下的 MySQL `.zip` 备份清单，支持 `database`/`date`/`limit` |
+| GET  | `/backups/gm/tables` | Bearer | 解析指定备份 `.zip` 内的全部数据表列表（带元数据缓存） |
+| POST | `/backups/gm/extract` | Bearer | 从指定备份 `.zip` 按表（`tables` 非空）或整库（`tables` 为空）提取 SQL 供客户端安全还原 |
 
 ## 安全说明
 

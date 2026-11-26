@@ -1,9 +1,13 @@
 import { computed, reactive } from "vue";
 import { invokeWorkbench as defaultInvokeWorkbench } from "../utils/tauriBridge.js";
 import {
+  EXTERNAL_ACTOR_FILTER,
   detectExternalNewerModification,
+  findNewerExternalRevision,
   groupAuditRevisions,
   mergeTableAuditEntries,
+  mergeTableExternalChanges,
+  mergeTimelineRevisions,
 } from "../utils/tableChangeHistory.js";
 import {
   normalizeSnapshotColumns,
@@ -34,6 +38,7 @@ export function useTableChangeHistory({
     tableName: "",
     tableComment: "",
     tableMeta: null,
+    observedTableMeta: null,
     loading: false,
     loadingMore: false,
     liveLoading: false,
@@ -47,6 +52,9 @@ export function useTableChangeHistory({
     sharedHasMore: false,
     rawLocal: [],
     rawShared: [],
+    rawLocalExternal: [],
+    rawSharedExternal: [],
+    observedExternal: null,
     revisions: [],
     selectedRevisionId: "",
     actorFilter: "",
@@ -62,19 +70,41 @@ export function useTableChangeHistory({
 
   let loadGeneration = 0;
 
+  const effectiveTableMeta = computed(() => state.observedTableMeta || state.tableMeta);
+
   const actors = computed(() => {
     const counts = new Map();
+    let externalCount = 0;
     for (const rev of state.revisions) {
+      if (rev.isExternal) {
+        externalCount += 1;
+        continue;
+      }
       const name = String(rev.actor || "").trim();
       if (!name) continue;
       counts.set(name, (counts.get(name) || 0) + 1);
     }
-    return [...counts.entries()].map(([name, count]) => ({ name, count }));
+    const list = [...counts.entries()].map(([name, count]) => ({
+      name,
+      count,
+      isExternal: false,
+    }));
+    if (externalCount > 0) {
+      list.push({
+        name: EXTERNAL_ACTOR_FILTER,
+        count: externalCount,
+        isExternal: true,
+      });
+    }
+    return list;
   });
 
   const filteredRevisions = computed(() => {
     if (!state.actorFilter) return state.revisions;
-    return state.revisions.filter((rev) => rev.actor === state.actorFilter);
+    if (state.actorFilter === EXTERNAL_ACTOR_FILTER) {
+      return state.revisions.filter((rev) => rev.isExternal);
+    }
+    return state.revisions.filter((rev) => !rev.isExternal && rev.actor === state.actorFilter);
   });
 
   const selectedRevision = computed(() => (
@@ -95,6 +125,20 @@ export function useTableChangeHistory({
       return {
         mode: "empty",
         reason: "empty",
+        columns: state.liveColumns,
+        primaryKeys: state.livePrimaryKeys,
+        rows: [],
+        changedRowIndices: [],
+        totalRows: 0,
+        changedCount: 0,
+        partialReplayWarning: false,
+        hasSynthesizedRows: false,
+      };
+    }
+    if (selectedRevision.value?.isExternal) {
+      return {
+        mode: "external",
+        reason: "external-change",
         columns: state.liveColumns,
         primaryKeys: state.livePrimaryKeys,
         rows: [],
@@ -175,9 +219,20 @@ export function useTableChangeHistory({
     return map;
   });
 
-  const externalNotice = computed(() => (
-    detectExternalNewerModification(state.tableMeta, state.revisions)
-  ));
+  const externalNotice = computed(() => {
+    const selected = selectedRevision.value;
+    if (selected?.isExternal) return null;
+    const newerExternal = findNewerExternalRevision(state.revisions, selectedRevisionFullIndex.value);
+    if (newerExternal) {
+      return {
+        modifiedAt: newerExternal.ts,
+        source: newerExternal.timeKind === "detected" ? "external" : "database",
+        timeKind: newerExternal.timeKind,
+      };
+    }
+    const auditOnly = state.revisions.filter((rev) => !rev.isExternal);
+    return detectExternalNewerModification(effectiveTableMeta.value, auditOnly);
+  });
 
   const hasMore = computed(() => state.localHasMore || state.sharedHasMore);
 
@@ -187,7 +242,17 @@ export function useTableChangeHistory({
       sharedEntries: state.rawShared,
       selfLabel: getSelfLabel(),
     });
-    state.revisions = groupAuditRevisions(merged);
+    const auditRevisions = groupAuditRevisions(merged);
+    const localExternal = state.observedExternal
+      ? [state.observedExternal, ...state.rawLocalExternal]
+      : state.rawLocalExternal;
+    const externalRevisions = mergeTableExternalChanges({
+      localEntries: localExternal,
+      sharedEntries: state.rawSharedExternal,
+      tableMeta: effectiveTableMeta.value,
+      auditRevisions,
+    });
+    state.revisions = mergeTimelineRevisions(auditRevisions, externalRevisions);
     if (
       state.selectedRevisionId
       && state.revisions.some((rev) => rev.id === state.selectedRevisionId)
@@ -305,6 +370,9 @@ export function useTableChangeHistory({
       state.sharedHasMore = false;
       state.rawLocal = [];
       state.rawShared = [];
+      state.rawLocalExternal = [];
+      state.rawSharedExternal = [];
+      state.observedExternal = null;
       state.revisions = [];
       state.selectedRevisionId = "";
       state.actorFilter = "";
@@ -343,13 +411,77 @@ export function useTableChangeHistory({
           .catch((error) => ({ ok: false, error: String(error?.message || error || "读取团队记录失败") }))
       : Promise.resolve({ ok: true, rows: null });
 
-    const [localRes, sharedRes] = await Promise.all([localPromise, sharedPromise]);
+    const localExternalPromise = !append
+      ? invokeWorkbench("list_table_external_changes", {
+          request: {
+            connectionId: state.connectionId || undefined,
+            database: state.database,
+            tableName: state.tableName,
+            limit: 100,
+            offset: 0,
+          },
+        }).then((rows) => (Array.isArray(rows) ? rows : []))
+          .catch(() => [])
+      : Promise.resolve(null);
+
+    const sharedExternalPromise = !append && signedIn
+      ? invokeWorkbench("list_shared_table_external_changes", {
+          request: {
+            connectionId: state.connectionId || undefined,
+            database: state.database,
+            tableName: state.tableName,
+            limit: 100,
+            offset: 0,
+          },
+        }).then((rows) => (Array.isArray(rows) ? rows : []))
+          .catch(() => [])
+      : Promise.resolve(null);
+
+    const observeExternalPromise = !append && state.connectionId
+      ? invokeWorkbench("observe_table_external_change", {
+          request: {
+            connectionId: state.connectionId,
+            database: state.database,
+            tableName: state.tableName,
+          },
+        }).then((res) => (res && typeof res === "object" && !Array.isArray(res) ? res : null))
+          .catch(() => null)
+      : Promise.resolve(null);
+
+    const [
+      localRes,
+      sharedRes,
+      localExternalRows,
+      sharedExternalRows,
+      observedRes,
+    ] = await Promise.all([
+      localPromise,
+      sharedPromise,
+      localExternalPromise,
+      sharedExternalPromise,
+      observeExternalPromise,
+    ]);
     if (activeGen !== loadGeneration) return;
 
     if (localRes.ok && Array.isArray(localRes.rows)) {
       state.localOffset += localRes.rows.length;
       state.localHasMore = localRes.rows.length >= AUDIT_PAGE_LIMIT;
       state.rawLocal = append ? [...state.rawLocal, ...localRes.rows] : localRes.rows;
+    }
+
+    if (Array.isArray(localExternalRows)) {
+      state.rawLocalExternal = localExternalRows;
+    }
+    if (Array.isArray(sharedExternalRows)) {
+      state.rawSharedExternal = sharedExternalRows;
+    }
+    if (observedRes) {
+      if (observedRes.tableMeta && typeof observedRes.tableMeta === "object") {
+        state.observedTableMeta = observedRes.tableMeta;
+      }
+      if (observedRes.detectedEvent && typeof observedRes.detectedEvent === "object") {
+        state.observedExternal = observedRes.detectedEvent;
+      }
     }
 
     if (!signedIn) {
@@ -389,6 +521,7 @@ export function useTableChangeHistory({
     state.tableName = String(tableName || "");
     state.tableComment = String(tableComment || "");
     state.tableMeta = tableMeta || null;
+    state.observedTableMeta = null;
     state.displayScope = "full";
     state.searchQuery = "";
     state.activeChangeIndex = 0;
@@ -461,6 +594,11 @@ export function useTableChangeHistory({
     await fetchAuditBatch({ append: true, generation: loadGeneration });
   }
 
+  function setTableMeta(tableMeta) {
+    state.tableMeta = tableMeta || null;
+    recomputeRevisions();
+  }
+
   return {
     state,
     actors,
@@ -476,6 +614,7 @@ export function useTableChangeHistory({
     externalNotice,
     hasMore,
     loadForTable,
+    setTableMeta,
     dispose,
     selectRevision,
     setActorFilter,

@@ -1261,6 +1261,14 @@ pub struct MysqlTableObservation {
 pub struct MysqlDatabaseObservation {
     pub tables: Vec<MysqlTableObservation>,
     pub server_boot_epoch_secs: Option<i64>,
+    pub server_now_epoch_secs: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MysqlSingleTableObservation {
+    pub table: MysqlTableObservation,
+    pub server_boot_epoch_secs: Option<i64>,
+    pub server_now_epoch_secs: Option<i64>,
 }
 
 fn list_tables_sql() -> &'static str {
@@ -1276,8 +1284,20 @@ fn observe_tables_sql() -> &'static str {
      DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s') AS MODIFIED_AT, \
      CAST(UNIX_TIMESTAMP(UPDATE_TIME) AS CHAR) AS UPDATE_TIME_UNIX, \
      DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s') AS CREATED_AT, \
-     CAST(UNIX_TIMESTAMP(CREATE_TIME) AS CHAR) AS CREATE_TIME_UNIX \
+     CAST(UNIX_TIMESTAMP(CREATE_TIME) AS CHAR) AS CREATE_TIME_UNIX, \
+     CAST(UNIX_TIMESTAMP() AS CHAR) AS SERVER_NOW_UNIX \
      FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME"
+}
+
+fn observe_single_table_sql() -> &'static str {
+    "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT, \
+     CAST(COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS CHAR) AS DATA_SIZE_BYTES, \
+     DATE_FORMAT(UPDATE_TIME, '%Y-%m-%d %H:%i:%s') AS MODIFIED_AT, \
+     CAST(UNIX_TIMESTAMP(UPDATE_TIME) AS CHAR) AS UPDATE_TIME_UNIX, \
+     DATE_FORMAT(CREATE_TIME, '%Y-%m-%d %H:%i:%s') AS CREATED_AT, \
+     CAST(UNIX_TIMESTAMP(CREATE_TIME) AS CHAR) AS CREATE_TIME_UNIX, \
+     CAST(UNIX_TIMESTAMP() AS CHAR) AS SERVER_NOW_UNIX \
+     FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1"
 }
 
 fn observe_perf_writes_sql() -> &'static str {
@@ -1288,6 +1308,15 @@ fn observe_perf_writes_sql() -> &'static str {
      FROM performance_schema.table_io_waits_summary_by_table \
      WHERE OBJECT_TYPE = 'TABLE' AND OBJECT_SCHEMA = ? \
      GROUP BY OBJECT_NAME"
+}
+
+fn observe_single_perf_writes_sql() -> &'static str {
+    "SELECT 'u' AS KIND, CAST(VARIABLE_VALUE AS CHAR) AS VAL \
+     FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Uptime' \
+     UNION ALL \
+     SELECT 't' AS KIND, CAST(COALESCE(SUM(COUNT_WRITE), 0) AS CHAR) AS VAL \
+     FROM performance_schema.table_io_waits_summary_by_table \
+     WHERE OBJECT_TYPE = 'TABLE' AND OBJECT_SCHEMA = ? AND OBJECT_NAME = ?"
 }
 
 fn parse_mysql_data_size(value: &str) -> Option<u64> {
@@ -1346,6 +1375,13 @@ pub async fn observe_tables_from_db(
             .await;
     }
     let rows = rows_result.map_err(|error| format!("读取表列表失败: {error}"))?;
+
+    let server_now_epoch_secs = rows.first().and_then(|row| {
+        mysql_text::optional_string(row, "SERVER_NOW_UNIX")
+            .unwrap_or(None)
+            .and_then(|raw| raw.trim().parse::<i64>().ok())
+            .filter(|secs| *secs > 0)
+    });
 
     let mut tables = rows
         .into_iter()
@@ -1438,7 +1474,138 @@ pub async fn observe_tables_from_db(
     Ok(MysqlDatabaseObservation {
         tables,
         server_boot_epoch_secs,
+        server_now_epoch_secs,
     })
+}
+
+pub async fn observe_single_table_from_db(
+    pool: &MySqlPool,
+    database: &str,
+    table_name: &str,
+    server_key: &str,
+    tracker: &crate::table_modified::TableModifiedState,
+) -> Result<Option<MysqlSingleTableObservation>, String> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("读取表状态失败: {error}"))?;
+    let caps = tracker.capabilities_for(server_key);
+    let mut stats_expiry_disabled = false;
+    if caps.stats_expiry_supported != Some(false) {
+        match sqlx::query("SET SESSION information_schema_stats_expiry = 0")
+            .execute(&mut *conn)
+            .await
+        {
+            Ok(_) => {
+                stats_expiry_disabled = true;
+                if caps.stats_expiry_supported.is_none() {
+                    tracker.set_stats_expiry_supported(server_key, true);
+                }
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if message.contains("1193") || message.contains("Unknown system variable") {
+                    tracker.set_stats_expiry_supported(server_key, false);
+                }
+            }
+        }
+    }
+
+    let row_result = sqlx::query(observe_single_table_sql())
+        .bind(database)
+        .bind(table_name)
+        .fetch_optional(&mut *conn)
+        .await;
+    if stats_expiry_disabled {
+        let _ = sqlx::query("SET SESSION information_schema_stats_expiry = DEFAULT")
+            .execute(&mut *conn)
+            .await;
+    }
+    let Some(row) = row_result.map_err(|error| format!("读取表状态失败: {error}"))? else {
+        return Ok(None);
+    };
+
+    let server_now_epoch_secs = mysql_text::optional_string(&row, "SERVER_NOW_UNIX")
+        .unwrap_or(None)
+        .and_then(|raw| raw.trim().parse::<i64>().ok())
+        .filter(|secs| *secs > 0);
+    let modified_at = mysql_text::optional_string(&row, "MODIFIED_AT").unwrap_or(None);
+    let update_unix = mysql_text::optional_string(&row, "UPDATE_TIME_UNIX").unwrap_or(None);
+    let create_time = mysql_text::optional_string(&row, "CREATED_AT").unwrap_or(None);
+    let create_unix = mysql_text::optional_string(&row, "CREATE_TIME_UNIX").unwrap_or(None);
+    let update_time_ms = parse_mysql_unix_ms(update_unix.as_deref(), modified_at.as_deref());
+    let create_time_ms = parse_mysql_unix_ms(create_unix.as_deref(), create_time.as_deref());
+    let mut table = MysqlTableObservation {
+        option: TableOption {
+            table_name: mysql_text::string(&row, "TABLE_NAME").unwrap_or_default(),
+            table_comment: mysql_text::string(&row, "TABLE_COMMENT").unwrap_or_default(),
+            column_count: None,
+            data_size_bytes: mysql_text::string(&row, "DATA_SIZE_BYTES")
+                .ok()
+                .and_then(|value| parse_mysql_data_size(&value)),
+            modified_at,
+            modified_source: None,
+            modified_actor: None,
+        },
+        update_time_ms,
+        create_time,
+        create_time_ms,
+        write_count: None,
+    };
+
+    let mut server_boot_epoch_secs = None;
+    if caps.perf_schema_supported != Some(false) {
+        let perf_query = tokio::time::timeout(
+            Duration::from_millis(600),
+            sqlx::query(observe_single_perf_writes_sql())
+                .bind(database)
+                .bind(&table.option.table_name)
+                .fetch_all(&mut *conn),
+        )
+        .await;
+        match perf_query {
+            Ok(Ok(perf_rows)) => {
+                let mut uptime_secs: Option<i64> = None;
+                let mut write_count: Option<i64> = None;
+                for perf_row in perf_rows {
+                    let kind = mysql_text::string(&perf_row, "KIND").unwrap_or_default();
+                    let val = mysql_text::optional_string(&perf_row, "VAL")
+                        .unwrap_or(None)
+                        .and_then(|raw| raw.trim().parse::<i64>().ok());
+                    if kind == "u" {
+                        uptime_secs = val;
+                    } else if kind == "t" {
+                        write_count = val;
+                    }
+                }
+                if let Some(uptime) = uptime_secs {
+                    if caps.perf_schema_supported.is_none() {
+                        tracker.set_perf_schema_supported(server_key, true);
+                    }
+                    server_boot_epoch_secs =
+                        Some(chrono::Utc::now().timestamp().saturating_sub(uptime));
+                    table.write_count = Some(write_count.unwrap_or(0));
+                }
+            }
+            Ok(Err(error)) => {
+                let message = error.to_string();
+                if message.contains("1142")
+                    || message.contains("1146")
+                    || message.contains("denied")
+                    || message.contains("doesn't exist")
+                {
+                    tracker.set_perf_schema_supported(server_key, false);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    Ok(Some(MysqlSingleTableObservation {
+        table,
+        server_boot_epoch_secs,
+        server_now_epoch_secs,
+    }))
 }
 
 pub async fn list_tables_from_db(

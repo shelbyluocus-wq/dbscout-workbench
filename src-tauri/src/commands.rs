@@ -10,6 +10,7 @@ use crate::agent::{project::ProjectDirectoryInfo, AgentConfig, AgentContext, Age
 use crate::audit;
 use crate::backup;
 use crate::clickhouse;
+use crate::gm_backup;
 use crate::mongodb;
 use crate::db::{
     connect_database, connect_table_count_database, escape_ident, list_tables_from_db,
@@ -1998,8 +1999,8 @@ async fn enrich_mysql_tables(
         .map(|item| item.option.clone())
         .collect();
 
-    let tables = match audit::ensure_audit_pool(app, state).await {
-        Ok(audit_pool) => crate::table_modified::reconcile_mysql_observation(
+    let (tables, recorded_external) = match audit::ensure_audit_pool(app, state).await {
+        Ok(audit_pool) => crate::table_modified::reconcile_mysql_observation_with_events(
             &audit_pool,
             server_key,
             connection_id,
@@ -2009,9 +2010,13 @@ async fn enrich_mysql_tables(
             crate::table_modified::now_ms(),
         )
         .await
-        .unwrap_or(fallback),
-        Err(_) => fallback,
+        .unwrap_or((fallback, false)),
+        Err(_) => (fallback, false),
     };
+
+    if recorded_external {
+        crate::audit_sync::trigger_immediate_sync(app);
+    }
 
     if !fetch_shared_inline {
         crate::table_modified::spawn_background_shared_refresh(
@@ -9901,6 +9906,61 @@ fn read_snapshot_database(snapshot_path: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn list_gm_backups(
+    request: Option<GmBackupListRequest>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GmBackupListResponse, String> {
+    gm_backup::list_gm_backups(&app, &state, &request.unwrap_or_default()).await
+}
+
+#[tauri::command]
+pub async fn list_gm_backup_tables(
+    request: GmBackupTablesRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GmBackupTablesResponse, String> {
+    gm_backup::list_gm_backup_tables(&app, &state, &request).await
+}
+
+#[tauri::command]
+pub async fn restore_gm_backup(
+    request: RestoreGmBackupRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RestoreGmBackupResponse, String> {
+    let mysql_url = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        if connection.kind.is_read_only() {
+            return Err(read_only_error(connection.kind));
+        }
+        reject_mongo(connection.kind, "还原服务器备份")?;
+        connection
+            .mysql_url
+            .clone()
+            .ok_or_else(|| "演示连接不支持还原服务器备份".to_string())?
+    };
+    let result = gm_backup::restore_gm_backup(&app, &state, &mysql_url, &request).await?;
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &result.database);
+    invalidate_database_count(&state, &request.connection_id, &result.database);
+    let _ = app.emit(
+        audit::BACKUP_JOB_EVENT,
+        serde_json::json!({
+            "kind": "restore",
+            "database": result.database,
+            "tables": result.restored_tables,
+        }),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn inspect_snapshot_file(
     request: InspectSnapshotFileRequest,
 ) -> Result<Option<SnapshotFileInspection>, String> {
@@ -10380,6 +10440,200 @@ pub async fn list_shared_audit_logs(
     resp.json::<Vec<SharedAuditLogEntry>>()
         .await
         .map_err(|e| format!("解析共享变更日志失败: {e}"))
+}
+
+/// List locally recorded external (non-Blackcat) modification events for one table.
+#[tauri::command]
+pub async fn list_table_external_changes(
+    request: crate::types::ListTableExternalChangesRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::types::TableExternalChangeEntry>, String> {
+    let connection_id = request.connection_id.as_deref().unwrap_or_default().trim();
+    if connection_id.is_empty()
+        || request.database.trim().is_empty()
+        || request.table_name.trim().is_empty()
+    {
+        return Ok(Vec::new());
+    }
+    let server_key = {
+        let rt = state.runtime.lock().await;
+        rt.connections
+            .get(connection_id)
+            .map(crate::table_modified::server_key_for_connection)
+    };
+    let Some(server_key) = server_key else {
+        return Ok(Vec::new());
+    };
+    let pool = crate::audit::ensure_audit_pool(&app, &state).await?;
+    crate::external_changes::list_local(
+        &pool,
+        &server_key,
+        &request.database,
+        &request.table_name,
+        request.limit.unwrap_or(100),
+        request.offset.unwrap_or(0),
+    )
+    .await
+}
+
+/// Fetch team-shared external (non-Blackcat) modification events for one table
+/// from the central server.
+#[tauri::command]
+pub async fn list_shared_table_external_changes(
+    request: crate::types::ListTableExternalChangesRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::types::TableExternalChangeEntry>, String> {
+    let _ = crate::account::ensure_loaded(&app, &state).await;
+    let base_url = crate::account::server_url(&state)
+        .await
+        .ok_or_else(|| "未配置中心服务地址".to_string())?;
+    let session = crate::account::current_session(&state)
+        .await
+        .ok_or_else(|| "未登录".to_string())?;
+    let server_key = match request
+        .connection_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(conn_id) => {
+            let rt = state.runtime.lock().await;
+            rt.connections
+                .get(conn_id)
+                .map(crate::table_modified::server_key_for_connection)
+                .filter(|key| !key.starts_with("demo://"))
+        }
+        None => None,
+    };
+    crate::external_changes::fetch_shared(
+        &state.account.http,
+        &base_url,
+        &session.token,
+        server_key.as_deref(),
+        &request.database,
+        &request.table_name,
+        request.limit.unwrap_or(100),
+        request.offset.unwrap_or(0),
+    )
+    .await
+}
+
+/// Fast, bounded single-table MySQL observation triggered when opening or
+/// refreshing a table's change history so external edits appear immediately.
+#[tauri::command]
+pub async fn observe_table_external_change(
+    request: crate::types::ObserveTableExternalChangeRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::types::ObserveTableExternalChangeResponse, String> {
+    let conn_id = request.connection_id.trim();
+    let database = request.database.trim();
+    let table_name = request.table_name.trim();
+    if conn_id.is_empty() || database.is_empty() || table_name.is_empty() {
+        return Ok(crate::types::ObserveTableExternalChangeResponse {
+            table_meta: None,
+            detected_event: None,
+        });
+    }
+    let (is_mysql, server_key) = {
+        let rt = state.runtime.lock().await;
+        match rt.connections.get(conn_id) {
+            Some(conn) => (
+                conn.kind == crate::types::DatabaseKind::MySql
+                    && conn
+                        .mysql_url
+                        .as_deref()
+                        .is_some_and(|url| !url.trim().is_empty()),
+                crate::table_modified::server_key_for_connection(conn),
+            ),
+            None => (false, String::new()),
+        }
+    };
+    if !is_mysql || server_key.is_empty() {
+        return Ok(crate::types::ObserveTableExternalChangeResponse {
+            table_meta: None,
+            detected_event: None,
+        });
+    }
+    let pool = match real_database_pool(conn_id, database, &state, &PerfContext::default()).await {
+        Ok(pool) => pool,
+        Err(_) => {
+            return Ok(crate::types::ObserveTableExternalChangeResponse {
+                table_meta: None,
+                detected_event: None,
+            });
+        }
+    };
+    let observation = match run_pool_work(
+        &state.work_scheduler,
+        &PoolKey::new(conn_id, database),
+        WorkClass::Background,
+        std::time::Duration::from_millis(2000),
+        crate::db::observe_single_table_from_db(
+            &pool,
+            database,
+            table_name,
+            &server_key,
+            &state.table_modified,
+        ),
+    )
+    .await
+    {
+        Ok(Some(obs)) => obs,
+        _ => {
+            return Ok(crate::types::ObserveTableExternalChangeResponse {
+                table_meta: None,
+                detected_event: None,
+            });
+        }
+    };
+
+    let shared_updates = crate::audit_sync::fetch_shared_table_latest(
+        &app,
+        &state,
+        &server_key,
+        conn_id,
+        database,
+    )
+    .await;
+    let shared_latest = shared_updates
+        .iter()
+        .find(|item| item.table_name.eq_ignore_ascii_case(table_name));
+
+    let Ok(audit_pool) = crate::audit::ensure_audit_pool(&app, &state).await else {
+        return Ok(crate::types::ObserveTableExternalChangeResponse {
+            table_meta: Some(observation.table.option),
+            detected_event: None,
+        });
+    };
+    let (option, detected_event) = crate::table_modified::reconcile_single_mysql_table(
+        &audit_pool,
+        &server_key,
+        conn_id,
+        database,
+        observation,
+        shared_latest,
+        crate::table_modified::now_ms(),
+    )
+    .await?;
+
+    if detected_event.is_some() {
+        crate::audit_sync::trigger_immediate_sync(&app);
+    }
+    crate::table_modified::emit_table_option_updates(
+        &app,
+        conn_id,
+        database,
+        &[],
+        std::slice::from_ref(&option),
+    );
+
+    Ok(crate::types::ObserveTableExternalChangeResponse {
+        table_meta: Some(option),
+        detected_event,
+    })
 }
 
 /// Manually trigger an outbox push now (e.g. after the user clicks "sync").

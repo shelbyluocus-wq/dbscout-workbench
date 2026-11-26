@@ -842,3 +842,94 @@ test("loadSnapshots and loadFilterDatabases exclude MySQL system schemas", async
   assert.deepEqual(backup.snapshots.value.map((item) => item.database), ["edota_3cfg"]);
   backup.dispose();
 });
+
+test("243 server backup listing, table picker, and restore flow", async () => {
+  const restoreCalls = [];
+  const listGmCalls = [];
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "list_gm_backups") {
+      listGmCalls.push(payload.request || {});
+      return Promise.resolve({
+        status: "ok",
+        enabled: true,
+        backupDirConfigured: true,
+        databases: ["newsg_4cfg", "newsgcfg"],
+        dates: ["2026-11-26"],
+        items: [
+          {
+            date: "2026-11-26",
+            hour: "13",
+            fileName: "192.168.1.243_mysql_newsg_4cfg_2026-11-26-13_50_02.zip",
+            host: "192.168.1.243",
+            database: "newsg_4cfg",
+            ts: "2026-11-26 13:50:02",
+            sizeBytes: 5420000,
+          },
+        ],
+        error: null,
+      });
+    }
+    if (command === "list_gm_backup_tables") {
+      return Promise.resolve({
+        database: "newsg_4cfg",
+        ts: "2026-11-26 13:50:02",
+        tables: [
+          { name: "heroprop", hasData: true, insertBatches: 2, approxBytes: 12000 },
+          { name: "skillprop", hasData: true, insertBatches: 3, approxBytes: 24000 },
+        ],
+      });
+    }
+    if (command === "restore_gm_backup") {
+      restoreCalls.push(payload.request || {});
+      return Promise.resolve({
+        database: payload.request.database,
+        sourceDatabase: "newsg_4cfg",
+        ts: "2026-11-26 13:50:02",
+        restoredTables: payload.request.tables.length ? payload.request.tables : ["heroprop", "skillprop"],
+        statementCount: 8,
+        preRestoreSnapshotPath: "/tmp/pre-gm-restore.sql",
+      });
+    }
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  assert.equal(backup.snapshotSource.mode, "server");
+
+  const ok = await backup.loadGmBackups({ database: "newsg_4cfg" });
+  assert.equal(ok, true);
+  assert.equal(listGmCalls[0].database, "newsg_4cfg");
+  assert.equal(backup.gmBackups.items.length, 1);
+
+  const item = backup.gmBackups.items[0];
+  const tablesOk = await backup.openGmBackupTables(item);
+  assert.equal(tablesOk, true);
+  assert.equal(backup.gmBackups.tables.length, 2);
+
+  backup.toggleGmBackupTable("heroprop");
+  backup.toggleGmBackupTable("skillprop");
+  backup.toggleGmBackupTable("skillprop");
+  assert.deepEqual(backup.gmBackups.selectedTables, ["heroprop"]);
+
+  const snapshotCallsBefore = backend.listSnapshotCalls;
+  const restored = await backup.restoreGmBackup({
+    connectionId: "demo",
+    database: "newsg_4cfg",
+    item,
+    tables: backup.gmBackups.selectedTables,
+  });
+  assert.deepEqual(restored.restoredTables, ["heroprop"]);
+  assert.deepEqual(restoreCalls[0], {
+    connectionId: "demo",
+    database: "newsg_4cfg",
+    date: "2026-11-26",
+    hour: "13",
+    fileName: "192.168.1.243_mysql_newsg_4cfg_2026-11-26-13_50_02.zip",
+    tables: ["heroprop"],
+  });
+  assert.equal(backup.gmBackups.activeBackup, null);
+  assert.ok(backend.listSnapshotCalls > snapshotCallsBefore);
+  backup.dispose();
+});

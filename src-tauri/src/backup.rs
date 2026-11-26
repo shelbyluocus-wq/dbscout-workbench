@@ -259,6 +259,32 @@ async fn stream_snapshot_with_progress<F>(
     database: &str,
     config: &BackupConfig,
     label: Option<&str>,
+    on_progress: F,
+) -> Result<(PathBuf, SnapshotManifest), String>
+where
+    F: FnMut(SyncSnapshotProgress),
+{
+    stream_snapshot_filtered_with_progress(
+        app,
+        pool,
+        connection_id,
+        database,
+        config,
+        label,
+        None,
+        on_progress,
+    )
+    .await
+}
+
+async fn stream_snapshot_filtered_with_progress<F>(
+    app: &AppHandle,
+    pool: &MySqlPool,
+    connection_id: &str,
+    database: &str,
+    config: &BackupConfig,
+    label: Option<&str>,
+    only_tables: Option<&[String]>,
     mut on_progress: F,
 ) -> Result<(PathBuf, SnapshotManifest), String>
 where
@@ -282,7 +308,15 @@ where
         current_table: None,
         message: "正在扫描目标库表列表".into(),
     });
-    let tables = list_base_tables(pool, database).await?;
+    let mut tables = list_base_tables(pool, database).await?;
+    if let Some(filter) = only_tables.filter(|list| !list.is_empty()) {
+        let wanted: HashSet<String> = filter
+            .iter()
+            .map(|name| name.trim().to_ascii_lowercase())
+            .filter(|name| !name.is_empty())
+            .collect();
+        tables.retain(|table| wanted.contains(&table.to_ascii_lowercase()));
+    }
     let total_tables = tables.len();
     on_progress(SyncSnapshotProgress {
         done: 0,
@@ -290,10 +324,14 @@ where
         current_table: None,
         message: format!("正在统计 {total_tables} 张表的数据量"),
     });
-    let (counts, mut columns_by_table) = tokio::try_join!(
-        count_rows(pool, database, &tables),
-        list_all_columns_with_type(pool, database)
-    )?;
+    let (counts, mut columns_by_table) = if tables.is_empty() {
+        (HashMap::new(), HashMap::new())
+    } else {
+        tokio::try_join!(
+            count_rows(pool, database, &tables),
+            list_all_columns_with_type(pool, database)
+        )?
+    };
 
     let raw_file = tokio::fs::File::create(&sql_path)
         .await
@@ -536,6 +574,42 @@ fn sync_protection_config(config: &BackupConfig) -> BackupConfig {
     let mut protection_config = config.clone();
     protection_config.large_table_threshold = u64::MAX;
     protection_config
+}
+
+/// Create a local pre-restore protection snapshot before restoring from a 243
+/// server backup. When `only_tables` is `Some` and non-empty, snapshots only
+/// the affected existing tables so single-table rollback stays near-instant.
+pub async fn create_gm_restore_protection_snapshot(
+    app: &AppHandle,
+    mysql_url: &str,
+    connection_id: &str,
+    database: &str,
+    config: &BackupConfig,
+    only_tables: Option<&[String]>,
+) -> Result<PathBuf, String> {
+    if is_system_database(database) {
+        return Err(format!("系统内置数据库 `{database}` 不支持创建保护快照"));
+    }
+    let protection_config = sync_protection_config(config);
+    let label = format!(
+        "pre-gm-restore-{}",
+        chrono::Utc::now().format("%Y%m%d-%H%M%S")
+    );
+    let pool = snapshot_pool(mysql_url).await?;
+    let result = stream_snapshot_filtered_with_progress(
+        app,
+        &pool,
+        connection_id,
+        database,
+        &protection_config,
+        Some(&label),
+        only_tables,
+        |_| {},
+    )
+    .await;
+    pool.close().await;
+    let (sql_path, _manifest) = result?;
+    Ok(sql_path)
 }
 
 async fn list_all_columns_with_type(
@@ -1011,45 +1085,180 @@ pub fn import_snapshot_file(
     snapshot_to_info(connection_id, database, &target_sql, None, "current")
 }
 
-/// Split a dump into individual statements on `;` while respecting single-quoted
-/// string literals and `--` line comments.
-fn split_statements(content: &str) -> Vec<String> {
+/// Split a MySQL dump into individual statements on `;` while properly tracking
+/// single-quoted strings (`\'`, `\\`, `''`), double-quoted strings, backtick
+/// identifiers, `--` / `#` line comments, regular `/* ... */` block comments,
+/// and MySQL executable conditional comments `/*!...*/`.
+pub(crate) fn split_statements(content: &str) -> Vec<String> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum BlockComment {
+        None,
+        Regular,
+        Executable,
+    }
+
     let mut statements = Vec::new();
     let mut current = String::new();
-    let mut in_string = false;
-    let mut prev = '\0';
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_backtick = false;
+    let mut escaped = false;
+    let mut block_comment = BlockComment::None;
+
     for line in content.lines() {
-        if !in_string && line.trim_start().starts_with("--") {
-            continue;
-        }
-        if !in_string && starts_legacy_statement_after_create(&current, line) {
-            statements.push(std::mem::take(&mut current));
-        }
-        for ch in line.chars() {
-            if in_string {
-                current.push(ch);
-                if ch == '\'' && prev != '\\' {
-                    in_string = false;
+        let in_plain =
+            !in_single_quote && !in_double_quote && !in_backtick && block_comment == BlockComment::None;
+        if in_plain {
+            let trimmed_start = line.trim_start();
+            if trimmed_start.starts_with("--") || trimmed_start.starts_with('#') {
+                continue;
+            }
+            if starts_legacy_statement_after_create(&current, line) {
+                let stmt = std::mem::take(&mut current);
+                if !stmt.trim().is_empty() {
+                    statements.push(stmt);
                 }
-                prev = ch;
+            }
+        }
+
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let ch = chars[i];
+            let next = chars.get(i + 1).copied();
+
+            if in_single_quote {
+                current.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '\'' {
+                    if next == Some('\'') {
+                        current.push('\'');
+                        i += 1;
+                    } else {
+                        in_single_quote = false;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+
+            if in_double_quote {
+                current.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    if next == Some('"') {
+                        current.push('"');
+                        i += 1;
+                    } else {
+                        in_double_quote = false;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+
+            if in_backtick {
+                current.push(ch);
+                if ch == '`' {
+                    if next == Some('`') {
+                        current.push('`');
+                        i += 1;
+                    } else {
+                        in_backtick = false;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+
+            match block_comment {
+                BlockComment::Regular => {
+                    if ch == '*' && next == Some('/') {
+                        block_comment = BlockComment::None;
+                        current.push(' ');
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                BlockComment::Executable => {
+                    current.push(ch);
+                    if ch == '*' && next == Some('/') {
+                        current.push('/');
+                        block_comment = BlockComment::None;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                BlockComment::None => {}
+            }
+
+            if ch == '-'
+                && next == Some('-')
+                && matches!(chars.get(i + 2).copied(), None | Some(' ') | Some('\t') | Some('\r'))
+            {
+                break;
+            }
+            if ch == '#' {
+                break;
+            }
+            if ch == '/' && next == Some('*') {
+                if chars.get(i + 2).copied() == Some('!') {
+                    block_comment = BlockComment::Executable;
+                    current.push('/');
+                    current.push('*');
+                    i += 2;
+                } else {
+                    block_comment = BlockComment::Regular;
+                    i += 2;
+                }
                 continue;
             }
             if ch == '\'' {
-                in_string = true;
+                in_single_quote = true;
+                escaped = false;
                 current.push(ch);
-                prev = ch;
+                i += 1;
+                continue;
+            }
+            if ch == '"' {
+                in_double_quote = true;
+                escaped = false;
+                current.push(ch);
+                i += 1;
+                continue;
+            }
+            if ch == '`' {
+                in_backtick = true;
+                current.push(ch);
+                i += 1;
                 continue;
             }
             if ch == ';' {
-                statements.push(std::mem::take(&mut current));
-                prev = ch;
+                let stmt = std::mem::take(&mut current);
+                if !stmt.trim().is_empty() {
+                    statements.push(stmt);
+                }
+                i += 1;
                 continue;
             }
+
             current.push(ch);
-            prev = ch;
+            i += 1;
         }
-        current.push('\n');
-        prev = '\n';
+
+        if block_comment != BlockComment::Regular {
+            current.push('\n');
+        }
     }
     if !current.trim().is_empty() {
         statements.push(current);
@@ -1708,7 +1917,29 @@ mod tests {
         let stmts = split_statements(content);
         // Comment-only chunks are skipped by the caller; just verify count of non-empty.
         let non_empty: Vec<&String> = stmts.iter().filter(|s| !s.trim().is_empty()).collect();
-        assert!(non_empty.len() >= 3);
+        assert_eq!(non_empty.len(), 3);
+    }
+
+    #[test]
+    fn split_statements_handles_escaped_trailing_backslash_and_mysqldump_conditionals() {
+        let content = r#"/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+DROP TABLE IF EXISTS `activentranceprop`;
+CREATE TABLE `activentranceprop` (
+  `Entrance` int NOT NULL COMMENT '活动入口类型ID，
+第二行;分号',
+  `Icon` text NOT NULL COMMENT '功能图标ID,填写完整图标名common\\functionButton\\',
+  PRIMARY KEY (`Entrance`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT INTO `activentranceprop` VALUES (1,'common\\functionButton\\'),(2,'it''s;fine');
+/* regular comment; ignored */
+SET FOREIGN_KEY_CHECKS=1;"#;
+        let stmts = split_statements(content);
+        assert_eq!(stmts.len(), 5);
+        assert!(stmts[0].trim().starts_with("/*!40101 SET"));
+        assert_eq!(stmts[1].trim(), "DROP TABLE IF EXISTS `activentranceprop`");
+        assert!(stmts[2].contains("common\\\\functionButton\\\\"));
+        assert!(stmts[3].trim().starts_with("INSERT INTO `activentranceprop`"));
+        assert_eq!(stmts[4].trim(), "SET FOREIGN_KEY_CHECKS=1");
     }
 
     #[test]

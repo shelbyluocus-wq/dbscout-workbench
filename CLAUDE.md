@@ -157,7 +157,13 @@ capabilities:
   on Linux via `npm run server:deploy`, retaining the latest 20 revisions per
   table by default; clients automatically migrate saved legacy
   `http://192.168.1.193:8765` / `http://192.168.1.243:8765` addresses once) that
-  aggregates a **shared audit log** across workstations.
+  aggregates a **shared audit log** across workstations and provides strictly
+  read-only access to the host's hourly MySQL backup archives
+  (`DBSCOUT_SERVER_GM_BACKUP_DIR`, default `/home/servbin/dbback` via
+  `/backups/gm`, `/backups/gm/tables`, `/backups/gm/extract`), surfaced under
+  Backup Center → Snapshots → 243 Server Backups for single-table or full-DB
+  restore (always preceded by a local protection snapshot and recorded in the
+  audit trail).
 - **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar whose
   large Node + native CLI runtime is downloaded from the SVN release directory
   on first use, with
@@ -1239,7 +1245,13 @@ them. In full-table scope a proportional change map on the right marks every
 added, deleted and updated row with the viewport and current change; clicking
 a mark selects that change, empty track scrolls there. Missing-row placeholders
 label only the start of each run (repeated in long runs), and the revision
-timeline is grouped under sticky day headers. Layout logic lives in
+timeline is grouped under sticky day headers. Non-Blackcat MySQL changes
+detected via table metadata/write counts are persisted separately in
+`table_external_changes` (local `external_changes.rs` + central server
+`/external-changes`, deduplicated across workstations and reconciled against
+Blackcat audits) and interleaved as read-only "External change" nodes in the
+single-table history timeline only (never in Backup Center), showing detection
+time/signal without fabricated field diffs. Layout logic lives in
 `utils/tableHistoryLayout.js`; checks: `node --test
 src/workbench/tableHistoryLayout.test.js src/workbench/tableChangeHistory.test.js
 src/workbench/tableHistoryScrollAndRestore.test.js`. Browser-mock seeding must

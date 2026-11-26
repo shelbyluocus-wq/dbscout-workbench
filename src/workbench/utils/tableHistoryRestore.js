@@ -90,6 +90,9 @@ export function buildHistoryRestorePlan({
   if (!Array.isArray(revisions) || targetIndex < 0 || targetIndex >= revisions.length) {
     return emptyPlan("no-revision");
   }
+  if (revisions[targetIndex]?.isExternal) {
+    return emptyPlan("external-change", 0);
+  }
 
   const endIndex = target === "after" ? targetIndex - 1 : targetIndex;
   if (endIndex < 0) return emptyPlan("already-current", 0);
@@ -101,15 +104,27 @@ export function buildHistoryRestorePlan({
     .map((col) => col.name);
   const writableColSet = new Set(writableColumns);
 
-  // Validate every revision in [0 .. endIndex] first.
+  // Validate every Blackcat revision in [0 .. endIndex] first; external nodes
+  // have no field-level diff so we track them for caution notices while the
+  // transactional expectedCurrent guard protects against row-level conflicts.
+  let auditRevisionsUndone = 0;
+  let crossedExternalTime = "";
   for (let revIdx = 0; revIdx <= endIndex; revIdx += 1) {
     const rev = revisions[revIdx];
+    if (rev?.isExternal) {
+      if (!crossedExternalTime) crossedExternalTime = String(rev.ts || "");
+      continue;
+    }
+    auditRevisionsUndone += 1;
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
-      if (op === "DDL") return emptyPlan("contains-ddl", endIndex + 1);
+      if (op === "DDL") return emptyPlan("contains-ddl", auditRevisionsUndone);
       const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
-      if (!identity.complete) return emptyPlan("missing-row-identity", endIndex + 1);
+      if (!identity.complete) return emptyPlan("missing-row-identity", auditRevisionsUndone);
     }
+  }
+  if (auditRevisionsUndone === 0) {
+    return emptyPlan("already-current", 0);
   }
 
   // Index current live rows by canonical PK identity.
@@ -151,6 +166,7 @@ export function buildHistoryRestorePlan({
 
   for (let revIdx = 0; revIdx <= endIndex; revIdx += 1) {
     const rev = revisions[revIdx];
+    if (rev?.isExternal) continue;
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
       const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
@@ -268,7 +284,7 @@ export function buildHistoryRestorePlan({
   }
 
   if (operations.length === 0) {
-    return emptyPlan("already-current", endIndex + 1);
+    return emptyPlan("already-current", auditRevisionsUndone);
   }
 
   return {
@@ -281,6 +297,7 @@ export function buildHistoryRestorePlan({
       delete: deleteCount,
       total: operations.length,
     },
-    undoneRevisions: endIndex + 1,
+    undoneRevisions: auditRevisionsUndone,
+    crossedExternalTime,
   };
 }

@@ -3138,6 +3138,81 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }, 80);
     return { preRestoreSnapshotPath: "mock://backup/pre-restore.sql", database: "game_db" };
   }
+  if (command === "list_gm_backups") {
+    const req = payload.request || {};
+    const allItems = [
+      {
+        date: "2026-11-26",
+        hour: "13",
+        fileName: "192.168.1.243_mysql_newsg_4cfg_2026-11-26-13_50_02.zip",
+        host: "192.168.1.243",
+        database: "newsg_4cfg",
+        ts: "2026-11-26 13:50:02",
+        sizeBytes: 5_420_000,
+      },
+      {
+        date: "2026-11-26",
+        hour: "12",
+        fileName: "192.168.1.243_mysql_newsg_4cfg_2026-11-26-12_50_02.zip",
+        host: "192.168.1.243",
+        database: "newsg_4cfg",
+        ts: "2026-11-26 12:50:02",
+        sizeBytes: 5_410_000,
+      },
+      {
+        date: "2026-11-26",
+        hour: "12",
+        fileName: "192.168.1.243_mysql_newsgcfg_2026-11-26-12_50_02.zip",
+        host: "192.168.1.243",
+        database: "newsgcfg",
+        ts: "2026-11-26 12:50:02",
+        sizeBytes: 5_100_000,
+      },
+    ];
+    const items = allItems.filter((item) => {
+      if (req.database && item.database.toLowerCase() !== String(req.database).toLowerCase()) return false;
+      if (req.date && item.date !== req.date) return false;
+      return true;
+    });
+    return {
+      status: "ok",
+      enabled: true,
+      backupDirConfigured: true,
+      databases: ["newsg_4cfg", "newsgcfg"],
+      dates: ["2026-11-26"],
+      items,
+      error: null,
+    };
+  }
+  if (command === "list_gm_backup_tables") {
+    const req = payload.request || {};
+    return {
+      database: "newsg_4cfg",
+      ts: `${req.date || "2026-11-26"} ${String(req.hour || "13").padStart(2, "0")}:50:02`,
+      tables: [
+        { name: "activentranceprop", hasData: true, insertBatches: 1, approxBytes: 18420 },
+        { name: "goodsprop", hasData: true, insertBatches: 4, approxBytes: 312400 },
+        { name: "heroprop", hasData: true, insertBatches: 2, approxBytes: 96100 },
+        { name: "skillprop", hasData: true, insertBatches: 5, approxBytes: 520100 },
+        { name: "emptyprop", hasData: false, insertBatches: 0, approxBytes: 420 },
+      ],
+    };
+  }
+  if (command === "restore_gm_backup") {
+    const req = payload.request || {};
+    const tables = Array.isArray(req.tables) && req.tables.length ? req.tables : ["heroprop", "skillprop"];
+    setTimeout(() => {
+      emitMockEvent("backup-job", { kind: "restore", database: req.database || "game_db", tables });
+    }, 80);
+    return {
+      database: req.database || "game_db",
+      sourceDatabase: "newsg_4cfg",
+      ts: `${req.date || "2026-11-26"} ${String(req.hour || "13").padStart(2, "0")}:50:02`,
+      restoredTables: tables,
+      statementCount: tables.length * 4,
+      preRestoreSnapshotPath: "mock://backup/pre-gm-restore.sql",
+    };
+  }
   if (command === "inspect_snapshot_file") {
     // Browser dev can't open a native file picker; simulate picking a
     // DB Scout snapshot so the import confirmation panel is exercisable.
@@ -3264,6 +3339,36 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const offset = req.offset || 0;
     return rows.slice(offset, offset + limit);
   }
+  if (command === "list_table_external_changes") {
+    const req = payload.request || {};
+    const dbLower = String(req.database || "").trim().toLowerCase();
+    const tableLower = String(req.tableName || "").trim().toLowerCase();
+    let rows = mockLocalExternalChanges.filter((r) => (
+      (!dbLower || String(r.database || "").toLowerCase() === dbLower)
+      && (!tableLower || String(r.tableName || "").toLowerCase() === tableLower)
+    ));
+    rows.sort((a, b) => (b.tsMs || 0) - (a.tsMs || 0));
+    const limit = req.limit || 100;
+    const offset = req.offset || 0;
+    return rows.slice(offset, offset + limit).map((r) => ({ ...r, origin: "local" }));
+  }
+  if (command === "list_shared_table_external_changes") {
+    if (!mockAccount.session) throw new Error("未登录");
+    const req = payload.request || {};
+    const dbLower = String(req.database || "").trim().toLowerCase();
+    const tableLower = String(req.tableName || "").trim().toLowerCase();
+    let rows = mockSharedExternalChanges.filter((r) => (
+      (!dbLower || String(r.database || "").toLowerCase() === dbLower)
+      && (!tableLower || String(r.tableName || "").toLowerCase() === tableLower)
+    ));
+    rows.sort((a, b) => (b.tsMs || 0) - (a.tsMs || 0));
+    const limit = req.limit || 100;
+    const offset = req.offset || 0;
+    return rows.slice(offset, offset + limit).map((r) => ({ ...r, origin: "shared" }));
+  }
+  if (command === "observe_table_external_change") {
+    return { tableMeta: null, detectedEvent: null };
+  }
   if (command === "sync_audit_now") {
     // Promote unsynced local audit rows into the shared log, attributed to the
     // current user. Mirrors the Rust outbox push.
@@ -3304,6 +3409,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       row.synced = true;
       accepted += 1;
     }
+    for (const ext of mockLocalExternalChanges) {
+      if (ext.synced) continue;
+      if (!mockSharedExternalChanges.some((s) => s.eventId === ext.eventId)) {
+        mockSharedExternalChanges.unshift({ ...ext, origin: "shared" });
+      }
+      ext.synced = true;
+    }
     return { accepted, skipped };
   }
   if (command === "macos_titlebar_double_click_action") return "zoom";
@@ -3316,6 +3428,15 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
 let mockAccount = { serverUrl: null, session: null };
 const mockUsers = new Map(); // username -> { userId, username, displayName, token }
 const mockSharedAudit = []; // shared change-log entries (all users)
+const mockLocalExternalChanges = []; // local observed non-Blackcat changes
+const mockSharedExternalChanges = []; // central-server shared non-Blackcat changes
+
+export function __seedMockExternalChanges({ local = [], shared = [] } = {}) {
+  mockLocalExternalChanges.length = 0;
+  mockSharedExternalChanges.length = 0;
+  for (const item of local) mockLocalExternalChanges.push({ ...item });
+  for (const item of shared) mockSharedExternalChanges.push({ ...item });
+}
 
 function mockMakeUser(username, displayName) {
   return {

@@ -268,6 +268,7 @@ function buildPackageReadme() {
 ## 关键说明
 
 - **与 GM 完全隔离**：默认安装到 \`/home/blackcat-server\`，监听 \`${DEFAULT_SERVER_PORT}/tcp\`，**不碰 \`/home/gmserv\`、GM 进程、8700/8701 端口及任何 MySQL 数据库**。
+- **只读读取 243 定时备份**：自动以只读方式读取 \`/home/servbin/dbback\`（可通过 \`DBSCOUT_SERVER_GM_BACKUP_DIR\` 覆盖或设为 \`off\` 关闭），供黑猫客户端在「备份中心 → 快照 → 243 服务器备份」里浏览每小时 MySQL 备份并按表/整库一键还原；绝不写入或删除 \`/home/servbin/dbback\` 下任何文件。
 - **仅限局域网访问**：本服务为公司内网无密码（用户名 + Token）共享变更日志服务，**请确认 243 防火墙仅对局域网放行 \`${DEFAULT_SERVER_PORT}/tcp\`，严禁对公网开放**。
 - **自动控体积**：默认每张表只保留最近 **20 次改动**（\`DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE=20\`），启动与每次写入自动清理旧记录，日常仅占几十 MB；同时配好每日 04:00 在线热备份到 \`/home/blackcat-server/backups/\`。
 

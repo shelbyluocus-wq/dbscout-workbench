@@ -26,8 +26,12 @@ use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::audit;
-use crate::db::MysqlDatabaseObservation;
-use crate::types::{AppState, DatabaseKind, RuntimeConnection, TableOption};
+use crate::db::{MysqlDatabaseObservation, MysqlSingleTableObservation};
+use crate::external_changes::{
+    self, ExternalChangeAction, SIGNAL_CREATE_TIME, SIGNAL_UPDATE_TIME, SIGNAL_WRITE_COUNT,
+    TIME_KIND_DETECTED, TIME_KIND_EXACT,
+};
+use crate::types::{AppState, DatabaseKind, RuntimeConnection, TableExternalChangeEntry, TableOption};
 
 pub const TABLE_MODIFIED_TIMES_UPDATED_EVENT: &str = "table-modified-times-updated";
 
@@ -39,6 +43,9 @@ pub const SOURCE_EXTERNAL: &str = "external";
 /// Grace window so minor clock skew between the MySQL server and local PC does
 /// not clobber `"blackcat"` / `"shared"` actor attribution right after a write.
 const CLOCK_SKEW_GRACE_MS: i64 = 120_000;
+const NORMALIZED_LOCAL_PENDING_GRACE_MS: i64 = 5_000;
+const NORMALIZED_AUDIT_GRACE_MS: i64 = 12_000;
+const CLOCK_SKEW_NORMALIZE_THRESHOLD_MS: i64 = 3_000;
 const SELF_ECHO_GRACE_MS: i64 = 5_000;
 const SERVER_BOOT_TOLERANCE_SECS: i64 = 120;
 const SHARED_REFRESH_DEBOUNCE: Duration = Duration::from_secs(15);
@@ -333,6 +340,7 @@ pub(crate) async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
             return Err(format!("迁移表修改时间共享时间戳列失败: {error}"));
         }
     }
+    external_changes::ensure_schema(pool).await?;
     Ok(())
 }
 
@@ -604,14 +612,36 @@ fn apply_shared_to_row(state: &mut SavedRow, shared: &SharedTableLatest) -> bool
     }
 }
 
+fn normalize_db_timestamp_ms(
+    raw_ms: Option<i64>,
+    server_now_epoch_secs: Option<i64>,
+    local_now_ms: i64,
+) -> Option<i64> {
+    let raw = raw_ms?;
+    let Some(server_secs) = server_now_epoch_secs.filter(|secs| *secs > 0) else {
+        return Some(raw);
+    };
+    let skew_ms = server_secs.saturating_mul(1000).saturating_sub(local_now_ms);
+    if skew_ms.abs() >= CLOCK_SKEW_NORMALIZE_THRESHOLD_MS {
+        Some(raw.saturating_sub(skew_ms))
+    } else {
+        Some(raw)
+    }
+}
+
 fn reconcile_mysql_row(
     saved: Option<&SavedRow>,
     obs: &crate::db::MysqlTableObservation,
     shared: Option<&SharedTableLatest>,
     server_boot_epoch: Option<i64>,
+    server_now_epoch_secs: Option<i64>,
     has_observed_db: bool,
     now_ms: i64,
-) -> (SavedRow, bool) {
+) -> (SavedRow, bool, Option<ExternalChangeAction>) {
+    let initial_ms = saved.and_then(|row| row.modified_at_ms);
+    let initial_source = saved.and_then(|row| row.modified_source.clone());
+    let had_known_baseline = saved.is_some();
+
     let mut state = saved
         .cloned()
         .unwrap_or_else(|| SavedRow::new(&obs.option.table_name));
@@ -620,6 +650,16 @@ fn reconcile_mysql_row(
     let shared_changed = shared
         .map(|entry| apply_shared_to_row(&mut state, entry))
         .unwrap_or(false);
+    let shared_claimed_external = shared_changed
+        && matches!(
+            initial_source.as_deref(),
+            Some(SOURCE_DATABASE | SOURCE_EXTERNAL)
+        );
+
+    let norm_update_ms =
+        normalize_db_timestamp_ms(obs.update_time_ms, server_now_epoch_secs, now_ms);
+    let norm_create_ms =
+        normalize_db_timestamp_ms(obs.create_time_ms, server_now_epoch_secs, now_ms);
 
     let same_boot = match (state.observed_server_boot, server_boot_epoch) {
         (Some(old), Some(new)) => (new - old).abs() <= SERVER_BOOT_TOLERANCE_SECS,
@@ -648,13 +688,35 @@ fn reconcile_mysql_row(
     let newly_appeared = saved.is_none() && has_observed_db;
     let has_pending_local = state.pending_local_write_ms.is_some();
 
+    let pre_db_ms = state.modified_at_ms;
+    let pre_db_source = state.modified_source.clone();
+
     let grace_ms = match state.modified_source.as_deref() {
-        Some(SOURCE_BLACKCAT | SOURCE_SHARED) => CLOCK_SKEW_GRACE_MS,
+        Some(SOURCE_BLACKCAT) => {
+            if server_now_epoch_secs.is_some() {
+                if has_pending_local {
+                    NORMALIZED_LOCAL_PENDING_GRACE_MS
+                } else {
+                    NORMALIZED_AUDIT_GRACE_MS
+                }
+            } else {
+                CLOCK_SKEW_GRACE_MS
+            }
+        }
+        Some(SOURCE_SHARED) => {
+            if server_now_epoch_secs.is_some() {
+                NORMALIZED_AUDIT_GRACE_MS
+            } else {
+                CLOCK_SKEW_GRACE_MS
+            }
+        }
         _ => 0,
     };
 
     let mut db_updated = false;
-    if let Some(db_ms) = obs.update_time_ms {
+    let mut external_action: Option<ExternalChangeAction> = None;
+
+    if let Some(db_ms) = norm_update_ms {
         let should_apply_db_time = match state.modified_at_ms {
             None => true,
             Some(current_ms) => {
@@ -672,15 +734,43 @@ fn reconcile_mysql_row(
             state.modified_source = Some(SOURCE_DATABASE.into());
             state.modified_actor = None;
             db_updated = true;
+
+            if pre_db_source.as_deref() == Some(SOURCE_EXTERNAL)
+                && pre_db_ms.is_some_and(|prev| (db_ms - prev).abs() <= CLOCK_SKEW_GRACE_MS)
+            {
+                external_action = Some(ExternalChangeAction::RefineToExact {
+                    approx_ts_ms: pre_db_ms.unwrap_or(db_ms),
+                    exact_ts_ms: db_ms,
+                    signal: SIGNAL_UPDATE_TIME,
+                });
+            } else if had_known_baseline || pre_db_ms.is_some() {
+                let archive_prior = if pre_db_source.as_deref() == Some(SOURCE_DATABASE) {
+                    pre_db_ms
+                } else {
+                    None
+                };
+                external_action = Some(ExternalChangeAction::Record {
+                    ts_ms: db_ms,
+                    time_kind: TIME_KIND_EXACT,
+                    signal: SIGNAL_UPDATE_TIME,
+                    archive_prior_exact_ms: archive_prior,
+                });
+            }
         }
     }
 
     if !db_updated && newly_appeared && state.modified_at_ms.is_none() {
-        if let Some(create_ms) = obs.create_time_ms {
+        if let Some(create_ms) = norm_create_ms {
             state.modified_at_ms = Some(create_ms);
             state.modified_source = Some(SOURCE_DATABASE.into());
             state.modified_actor = None;
             db_updated = true;
+            external_action = Some(ExternalChangeAction::Record {
+                ts_ms: create_ms,
+                time_kind: TIME_KIND_EXACT,
+                signal: SIGNAL_CREATE_TIME,
+                archive_prior_exact_ms: None,
+            });
         }
     }
 
@@ -690,24 +780,61 @@ fn reconcile_mysql_row(
         && (write_increased || create_changed || post_restart_write)
     {
         let current_ms = state.modified_at_ms.unwrap_or(i64::MIN);
-        if let Some(db_ms) = obs.update_time_ms.filter(|ms| *ms > current_ms) {
+        let archive_prior = if pre_db_source.as_deref() == Some(SOURCE_DATABASE) {
+            pre_db_ms
+        } else {
+            None
+        };
+        if let Some(db_ms) = norm_update_ms.filter(|ms| *ms > current_ms) {
             state.modified_at_ms = Some(db_ms);
             state.modified_source = Some(SOURCE_DATABASE.into());
             state.modified_actor = None;
+            external_action = Some(ExternalChangeAction::Record {
+                ts_ms: db_ms,
+                time_kind: TIME_KIND_EXACT,
+                signal: SIGNAL_UPDATE_TIME,
+                archive_prior_exact_ms: archive_prior,
+            });
         } else if create_changed {
-            if let Some(create_ms) = obs.create_time_ms.filter(|ms| *ms > current_ms) {
+            if let Some(create_ms) = norm_create_ms.filter(|ms| *ms > current_ms) {
                 state.modified_at_ms = Some(create_ms);
                 state.modified_source = Some(SOURCE_DATABASE.into());
                 state.modified_actor = None;
+                external_action = Some(ExternalChangeAction::Record {
+                    ts_ms: create_ms,
+                    time_kind: TIME_KIND_EXACT,
+                    signal: SIGNAL_CREATE_TIME,
+                    archive_prior_exact_ms: archive_prior,
+                });
             } else if now_ms > current_ms {
                 state.modified_at_ms = Some(now_ms);
                 state.modified_source = Some(SOURCE_EXTERNAL.into());
                 state.modified_actor = None;
+                external_action = Some(ExternalChangeAction::Record {
+                    ts_ms: now_ms,
+                    time_kind: TIME_KIND_DETECTED,
+                    signal: SIGNAL_CREATE_TIME,
+                    archive_prior_exact_ms: archive_prior,
+                });
             }
         } else if now_ms > current_ms {
             state.modified_at_ms = Some(now_ms);
             state.modified_source = Some(SOURCE_EXTERNAL.into());
             state.modified_actor = None;
+            external_action = Some(ExternalChangeAction::Record {
+                ts_ms: now_ms,
+                time_kind: TIME_KIND_DETECTED,
+                signal: SIGNAL_WRITE_COUNT,
+                archive_prior_exact_ms: archive_prior,
+            });
+        }
+    }
+
+    if external_action.is_none() && shared_claimed_external {
+        if let Some(old_ms) = initial_ms {
+            external_action = Some(ExternalChangeAction::Retract {
+                approx_ts_ms: old_ms,
+            });
         }
     }
 
@@ -723,7 +850,7 @@ fn reconcile_mysql_row(
     state.pending_local_write_ms = None;
 
     let dirty = saved.map(|previous| *previous != state).unwrap_or(true);
-    (state, dirty)
+    (state, dirty, external_action)
 }
 
 fn apply_state_to_option(option: &mut TableOption, state: &SavedRow) {
@@ -821,7 +948,7 @@ pub fn emit_table_option_updates(
     emit_updates(app, connection_id, database, updates);
 }
 
-pub async fn reconcile_mysql_observation(
+pub async fn reconcile_mysql_observation_with_events(
     pool: &SqlitePool,
     server_key: &str,
     connection_id: &str,
@@ -829,7 +956,7 @@ pub async fn reconcile_mysql_observation(
     observation: MysqlDatabaseObservation,
     shared_updates: &[SharedTableLatest],
     now_ms: i64,
-) -> Result<Vec<TableOption>, String> {
+) -> Result<(Vec<TableOption>, bool), String> {
     let database_key = database.to_lowercase();
     let (backfilled_id, has_observed_db) = load_meta(pool, server_key, &database_key).await?;
     let mut saved = load_saved_rows(pool, server_key, &database_key).await?;
@@ -851,15 +978,17 @@ pub async fn reconcile_mysql_observation(
 
     let mut result = Vec::with_capacity(observation.tables.len());
     let mut rows_to_persist = Vec::new();
+    let mut external_actions: Vec<(String, ExternalChangeAction)> = Vec::new();
     for obs in observation.tables {
         let key = obs.option.table_name.to_lowercase();
         let existing = saved.get(&key);
         let shared = shared_by_table.get(&key).copied();
-        let (next_state, dirty) = reconcile_mysql_row(
+        let (next_state, dirty, action) = reconcile_mysql_row(
             existing,
             &obs,
             shared,
             observation.server_boot_epoch_secs,
+            observation.server_now_epoch_secs,
             has_observed_db,
             now_ms,
         );
@@ -868,20 +997,32 @@ pub async fn reconcile_mysql_observation(
         if dirty {
             rows_to_persist.push(next_state.clone());
         }
+        if let Some(action) = action {
+            external_actions.push((next_state.table_name.clone(), action));
+        }
         saved.insert(key, next_state);
         result.push(option);
     }
 
-    // Persist any audit-backfilled rows for tables not in current list? No need
-    // to leak dropped tables; only persist current tables + meta update.
     let need_meta_write = !has_observed_db || new_backfilled_id > backfilled_id;
-    if !rows_to_persist.is_empty() || need_meta_write {
+    let mut recorded_external = false;
+    if !rows_to_persist.is_empty() || !external_actions.is_empty() || need_meta_write {
         let mut tx = pool
             .begin()
             .await
             .map_err(|error| format!("开启表修改时间写入事务失败: {error}"))?;
         for row in &rows_to_persist {
             upsert_saved_row(&mut tx, server_key, &database_key, row, now_ms).await?;
+        }
+        for (table_name, action) in &external_actions {
+            if external_changes::apply_action_in_tx(
+                &mut tx, server_key, database, table_name, action, now_ms,
+            )
+            .await?
+            .is_some()
+            {
+                recorded_external = true;
+            }
         }
         if need_meta_write {
             save_meta(&mut tx, server_key, &database_key, new_backfilled_id, true).await?;
@@ -891,7 +1032,100 @@ pub async fn reconcile_mysql_observation(
             .map_err(|error| format!("提交表修改时间状态失败: {error}"))?;
     }
 
-    Ok(result)
+    Ok((result, recorded_external))
+}
+
+pub async fn reconcile_mysql_observation(
+    pool: &SqlitePool,
+    server_key: &str,
+    connection_id: &str,
+    database: &str,
+    observation: MysqlDatabaseObservation,
+    shared_updates: &[SharedTableLatest],
+    now_ms: i64,
+) -> Result<Vec<TableOption>, String> {
+    let (tables, _) = reconcile_mysql_observation_with_events(
+        pool,
+        server_key,
+        connection_id,
+        database,
+        observation,
+        shared_updates,
+        now_ms,
+    )
+    .await?;
+    Ok(tables)
+}
+
+/// Reconcile a single-table observation (used when opening or refreshing one
+/// table's change history) without marking the entire database as observed.
+pub async fn reconcile_single_mysql_table(
+    pool: &SqlitePool,
+    server_key: &str,
+    connection_id: &str,
+    database: &str,
+    observation: MysqlSingleTableObservation,
+    shared_latest: Option<&SharedTableLatest>,
+    now_ms: i64,
+) -> Result<(TableOption, Option<TableExternalChangeEntry>), String> {
+    let database_key = database.to_lowercase();
+    let table_key = observation.table.option.table_name.to_lowercase();
+    let (backfilled_id, _has_observed_db) = load_meta(pool, server_key, &database_key).await?;
+    let mut saved = load_saved_rows(pool, server_key, &database_key).await?;
+    let mut dirty_keys = Vec::new();
+    let new_backfilled_id = fold_local_audit_backfill(
+        pool,
+        connection_id,
+        &database_key,
+        backfilled_id,
+        &mut saved,
+        &mut dirty_keys,
+    )
+    .await?;
+
+    let existing = saved.get(&table_key);
+    let (next_state, dirty, action) = reconcile_mysql_row(
+        existing,
+        &observation.table,
+        shared_latest,
+        observation.server_boot_epoch_secs,
+        observation.server_now_epoch_secs,
+        false,
+        now_ms,
+    );
+    let mut option = observation.table.option;
+    apply_state_to_option(&mut option, &next_state);
+
+    let mut detected_event = None;
+    let need_backfill_meta = new_backfilled_id > backfilled_id;
+    if dirty || action.is_some() || need_backfill_meta {
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|error| format!("开启单表状态写入事务失败: {error}"))?;
+        if dirty {
+            upsert_saved_row(&mut tx, server_key, &database_key, &next_state, now_ms).await?;
+        }
+        if let Some(action) = action.as_ref() {
+            detected_event = external_changes::apply_action_in_tx(
+                &mut tx,
+                server_key,
+                database,
+                &next_state.table_name,
+                action,
+                now_ms,
+            )
+            .await?;
+        }
+        if need_backfill_meta {
+            save_meta(&mut tx, server_key, &database_key, new_backfilled_id, false).await?;
+        }
+        tx.commit()
+            .await
+            .map_err(|error| format!("提交单表状态失败: {error}"))?;
+    }
+
+    Ok((option, detected_event))
 }
 
 /// Persistent merge for ClickHouse / MongoDB table lists.
@@ -991,6 +1225,7 @@ async fn apply_shared_updates_to_store(
     let database_key = database.to_lowercase();
     let mut saved = load_saved_rows(pool, server_key, &database_key).await?;
     let mut changed_rows = Vec::new();
+    let mut retracted_external: Vec<(String, i64)> = Vec::new();
     let mut emitted = Vec::new();
     for entry in shared_updates {
         let key = entry.table_name.to_lowercase();
@@ -1001,10 +1236,20 @@ async fn apply_shared_updates_to_store(
             .get(&key)
             .cloned()
             .unwrap_or_else(|| SavedRow::new(&entry.table_name));
+        let prev_source = state.modified_source.clone();
+        let prev_ms = state.modified_at_ms;
         if state.table_name.is_empty() {
             state.table_name = entry.table_name.clone();
         }
         if apply_shared_to_row(&mut state, entry) {
+            if matches!(
+                prev_source.as_deref(),
+                Some(SOURCE_DATABASE | SOURCE_EXTERNAL)
+            ) {
+                if let Some(old_ms) = prev_ms {
+                    retracted_external.push((key.clone(), old_ms));
+                }
+            }
             if let Some(ms) = state.modified_at_ms {
                 emitted.push(TableModifiedUpdateItem {
                     table_name: state.table_name.clone(),
@@ -1020,13 +1265,23 @@ async fn apply_shared_updates_to_store(
             saved.insert(key, state);
         }
     }
-    if !changed_rows.is_empty() {
+    if !changed_rows.is_empty() || !retracted_external.is_empty() {
         let mut tx = pool
             .begin()
             .await
             .map_err(|error| format!("开启共享修改时间事务失败: {error}"))?;
         for row in &changed_rows {
             upsert_saved_row(&mut tx, server_key, &database_key, row, now_ms).await?;
+        }
+        for (table_key, old_ms) in &retracted_external {
+            let _ = external_changes::retract_around_in_tx(
+                &mut tx,
+                server_key,
+                &database_key,
+                table_key,
+                *old_ms,
+            )
+            .await?;
         }
         tx.commit()
             .await
@@ -1088,6 +1343,7 @@ pub async fn record_local_change(
 
     let mut seen = std::collections::HashSet::new();
     let mut rows_to_save = Vec::new();
+    let mut archived_externals: Vec<(String, i64, bool)> = Vec::new();
     let mut updates = Vec::new();
     let formatted = format_local_ms(now);
     for raw_name in table_names {
@@ -1103,6 +1359,18 @@ pub async fn record_local_change(
             .get(&key)
             .cloned()
             .unwrap_or_else(|| SavedRow::new(name));
+        if matches!(
+            row.modified_source.as_deref(),
+            Some(SOURCE_DATABASE | SOURCE_EXTERNAL)
+        ) {
+            if let Some(prev_ms) = row.modified_at_ms {
+                archived_externals.push((
+                    name.to_string(),
+                    prev_ms,
+                    row.modified_source.as_deref() == Some(SOURCE_DATABASE),
+                ));
+            }
+        }
         row.table_name = name.to_string();
         row.modified_at_ms = Some(now);
         row.modified_source = Some(SOURCE_BLACKCAT.into());
@@ -1121,6 +1389,18 @@ pub async fn record_local_change(
     }
     if let Ok(mut tx) = pool.begin().await {
         let mut ok = true;
+        for (table_name, prev_ms, is_exact) in &archived_externals {
+            let _ = external_changes::archive_prior_external_in_tx(
+                &mut tx,
+                &server_key,
+                database,
+                table_name,
+                *prev_ms,
+                *is_exact,
+                now,
+            )
+            .await;
+        }
         for row in &rows_to_save {
             if upsert_saved_row(&mut tx, &server_key, &database_key, row, now)
                 .await
@@ -1309,6 +1589,7 @@ mod tests {
                     mysql_obs("heroprop", None, Some("2026-01-01 00:00:00"), None, Some(5)),
                 ],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[],
             t1 + 10_000,
@@ -1333,6 +1614,7 @@ mod tests {
                     mysql_obs("heroprop", None, Some("2026-01-01 00:00:00"), None, Some(6)),
                 ],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[],
             t2,
@@ -1361,6 +1643,7 @@ mod tests {
                     mysql_obs("heroprop", None, Some("2026-01-01 00:00:00"), None, Some(0)),
                 ],
                 server_boot_epoch_secs: Some(boot2),
+                server_now_epoch_secs: None,
             },
             &[],
             t3,
@@ -1386,6 +1669,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", None, None, None, Some(10))],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[],
             t1,
@@ -1403,6 +1687,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", None, None, None, Some(11))],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[],
             detected_at,
@@ -1422,6 +1707,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", None, None, None, Some(11))],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[SharedTableLatest {
                 table_name: "goodsprop".into(),
@@ -1446,6 +1732,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(navicat_ts), None, None, Some(12))],
                 server_boot_epoch_secs: Some(boot1),
+                server_now_epoch_secs: None,
             },
             &[SharedTableLatest {
                 table_name: "goodsprop".into(),
@@ -1484,6 +1771,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", None, None, None, Some(0))],
                 server_boot_epoch_secs: Some(1_760_000_000),
+                server_now_epoch_secs: None,
             },
             &[],
             1_760_100_000_000,
@@ -1512,6 +1800,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", None, None, None, Some(10))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[],
             t0,
@@ -1553,6 +1842,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(t1 + 3_000), None, None, Some(11))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[],
             t1 + 30_000,
@@ -1658,6 +1948,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(db_ts), None, None, Some(11))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[],
             db_ts + 2_000,
@@ -1676,6 +1967,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(db_ts), None, None, Some(11))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[SharedTableLatest {
                 table_name: "goodsprop".into(),
@@ -1700,6 +1992,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(navicat_ts), None, None, Some(12))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[SharedTableLatest {
                 table_name: "goodsprop".into(),
@@ -1723,6 +2016,7 @@ mod tests {
             MysqlDatabaseObservation {
                 tables: vec![mysql_obs("goodsprop", Some(navicat_ts), None, None, Some(12))],
                 server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: None,
             },
             &[SharedTableLatest {
                 table_name: "goodsprop".into(),
@@ -1825,5 +2119,221 @@ mod tests {
         assert!(upgraded);
         assert_eq!(offline_local.modified_source.as_deref(), Some(SOURCE_BLACKCAT));
         assert_eq!(offline_local.modified_actor.as_deref(), Some("刘岳松"));
+    }
+
+    #[tokio::test]
+    async fn records_refines_retracts_and_normalizes_external_change_events() {
+        let pool = memory_pool().await;
+        let server_key = "mysql://192.168.1.243:8306";
+        let boot = 1_760_000_000_i64;
+        let t0 = 1_760_010_000_000_i64;
+
+        // 1) Initial baseline does not spam untouched tables into table_external_changes.
+        let (_, recorded0) = reconcile_mysql_observation_with_events(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![
+                    mysql_obs("goodsprop", Some(t0 - 300_000), Some("2026-01-01 00:00:00"), None, Some(10)),
+                    mysql_obs("heroprop", None, Some("2026-01-01 00:00:00"), None, Some(5)),
+                ],
+                server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: Some(t0 / 1000),
+            },
+            &[],
+            t0,
+        )
+        .await
+        .unwrap();
+        assert!(!recorded0);
+        assert!(external_changes::list_local(&pool, server_key, "newsg_4cfg", "goodsprop", 50, 0)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // 2) External write on heroprop bumps write_count 5 -> 6 (approximate detection),
+        //    then 20s later MySQL flushes UPDATE_TIME -> refines to exact without duplicating.
+        let t_detect = t0 + 30_000;
+        let (_, recorded1) = reconcile_mysql_observation_with_events(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![
+                    mysql_obs("goodsprop", Some(t0 - 300_000), Some("2026-01-01 00:00:00"), None, Some(10)),
+                    mysql_obs("heroprop", None, Some("2026-01-01 00:00:00"), None, Some(6)),
+                ],
+                server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: Some(t_detect / 1000),
+            },
+            &[],
+            t_detect,
+        )
+        .await
+        .unwrap();
+        assert!(recorded1);
+        let hero_events_1 = external_changes::list_local(&pool, server_key, "newsg_4cfg", "heroprop", 50, 0)
+            .await
+            .unwrap();
+        assert_eq!(hero_events_1.len(), 1);
+        assert_eq!(hero_events_1[0].time_kind, TIME_KIND_DETECTED);
+        assert_eq!(hero_events_1[0].signal, SIGNAL_WRITE_COUNT);
+
+        let exact_ts = t_detect - 5_000;
+        let _ = reconcile_mysql_observation_with_events(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlDatabaseObservation {
+                tables: vec![
+                    mysql_obs("goodsprop", Some(t0 - 300_000), Some("2026-01-01 00:00:00"), None, Some(10)),
+                    mysql_obs("heroprop", Some(exact_ts), Some("2026-01-01 00:00:00"), None, Some(6)),
+                ],
+                server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: Some((t_detect + 20_000) / 1000),
+            },
+            &[],
+            t_detect + 20_000,
+        )
+        .await
+        .unwrap();
+        let hero_events_2 = external_changes::list_local(&pool, server_key, "newsg_4cfg", "heroprop", 50, 0)
+            .await
+            .unwrap();
+        assert_eq!(hero_events_2.len(), 1);
+        assert_eq!(hero_events_2[0].time_kind, TIME_KIND_EXACT);
+        assert_eq!(hero_events_2[0].ts_ms, exact_ts);
+
+        // 3) If a teammate's shared Blackcat audit claims that exact_ts shortly after,
+        //    the suspected external change is retracted cleanly.
+        let _ = apply_shared_updates_to_store(
+            &pool,
+            server_key,
+            "newsg_4cfg",
+            &[SharedTableLatest {
+                table_name: "heroprop".into(),
+                ts_ms: exact_ts - 2_000,
+                actor: Some("Alice".into()),
+            }],
+            t_detect + 25_000,
+        )
+        .await
+        .unwrap();
+        let hero_events_3 = external_changes::list_local(&pool, server_key, "newsg_4cfg", "heroprop", 50, 0)
+            .await
+            .unwrap();
+        assert!(hero_events_3.is_empty());
+
+        // 4) Clock-skew normalization: MySQL clock is 47s ahead of local PC.
+        //    Local Blackcat write commits at t_bc; Navicat edits 8s later.
+        let t_bc = t0 + 120_000;
+        let skew_ms = 47_000_i64;
+        let mut tx = pool.begin().await.unwrap();
+        upsert_saved_row(
+            &mut tx,
+            server_key,
+            "newsg_4cfg",
+            &SavedRow {
+                table_key: "goodsprop".into(),
+                table_name: "goodsprop".into(),
+                modified_at_ms: Some(t_bc),
+                modified_source: Some(SOURCE_BLACKCAT.into()),
+                modified_actor: Some("我".into()),
+                pending_local_write_ms: Some(t_bc),
+                observed_write_count: Some(10),
+                observed_create_time: Some("2026-01-01 00:00:00".into()),
+                observed_server_boot: Some(boot),
+                last_shared_ts_ms: None,
+            },
+            t_bc,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        // First: poll sees only our own Blackcat commit (MySQL raw UPDATE_TIME = t_bc + 47s).
+        // Must NOT trigger external change!
+        let poll_self = t_bc + 4_000;
+        let (_, evt_self) = reconcile_single_mysql_table(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlSingleTableObservation {
+                table: mysql_obs(
+                    "goodsprop",
+                    Some(t_bc + skew_ms),
+                    Some("2026-01-01 00:00:00"),
+                    None,
+                    Some(11),
+                ),
+                server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: Some((poll_self + skew_ms) / 1000),
+            },
+            None,
+            poll_self,
+        )
+        .await
+        .unwrap();
+        assert!(evt_self.is_none());
+
+        // Second: Navicat edits 15s after t_bc (MySQL raw UPDATE_TIME = t_bc + 15s + 47s).
+        let t_navicat = t_bc + 15_000;
+        let poll_navicat = t_navicat + 3_000;
+        let (opt_navicat, evt_navicat) = reconcile_single_mysql_table(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlSingleTableObservation {
+                table: mysql_obs(
+                    "goodsprop",
+                    Some(t_navicat + skew_ms),
+                    Some("2026-01-01 00:00:00"),
+                    None,
+                    Some(12),
+                ),
+                server_boot_epoch_secs: Some(boot),
+                server_now_epoch_secs: Some((poll_navicat + skew_ms) / 1000),
+            },
+            None,
+            poll_navicat,
+        )
+        .await
+        .unwrap();
+        assert_eq!(opt_navicat.modified_source.as_deref(), Some(SOURCE_DATABASE));
+        let detected = evt_navicat.expect("should record fast Navicat edit after Blackcat write");
+        assert_eq!(detected.time_kind, TIME_KIND_EXACT);
+        assert!((detected.ts_ms - t_navicat).abs() <= 1_000);
+    }
+
+    #[tokio::test]
+    async fn single_table_observation_does_not_mark_whole_database_observed() {
+        let pool = memory_pool().await;
+        let server_key = "mysql://192.168.1.243:8306";
+        let t0 = 1_760_010_000_000_i64;
+
+        let _ = reconcile_single_mysql_table(
+            &pool,
+            server_key,
+            "mysql-1",
+            "newsg_4cfg",
+            MysqlSingleTableObservation {
+                table: mysql_obs("goodsprop", Some(t0 - 10_000), Some("2026-01-01 00:00:00"), None, Some(1)),
+                server_boot_epoch_secs: Some(1_760_000_000),
+                server_now_epoch_secs: Some(t0 / 1000),
+            },
+            None,
+            t0,
+        )
+        .await
+        .unwrap();
+
+        let (_, has_observed_db) = load_meta(&pool, server_key, "newsg_4cfg").await.unwrap();
+        assert!(!has_observed_db);
     }
 }

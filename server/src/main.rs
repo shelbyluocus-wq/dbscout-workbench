@@ -11,6 +11,7 @@
 
 mod auth;
 mod db;
+mod gm_backups;
 mod handlers;
 mod models;
 
@@ -43,13 +44,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pool = db::connect(&db_path).await?;
     let pruned = db::prune_all_tables(&pool, max_revisions_per_table).await?;
+    let pruned_ext = db::prune_all_external_changes(&pool, max_revisions_per_table).await?;
     tracing::info!(
-        "中心服务数据库就绪: {db_path} (每表保留最近 {max_revisions_per_table} 次改动, 启动清理 {pruned} 条旧记录)"
+        "中心服务数据库就绪: {db_path} (每表保留最近 {max_revisions_per_table} 次改动, 启动清理 {pruned} 条旧审计 / {pruned_ext} 条旧外部变动)"
     );
+
+    let gm_backup_dir = gm_backups::resolve_gm_backup_dir();
+    match gm_backup_dir.as_deref() {
+        Some(dir) if dir.is_dir() => {
+            tracing::info!("GM 定时备份只读目录已就绪: {}", dir.display());
+        }
+        Some(dir) => {
+            tracing::warn!(
+                "GM 定时备份目录不存在，相关只读接口将返回未启用: {}",
+                dir.display()
+            );
+        }
+        None => {
+            tracing::info!("未启用 GM 定时备份只读目录");
+        }
+    }
 
     let state = handlers::ServerState {
         pool: pool.clone(),
         max_revisions_per_table,
+        gm_backup_dir,
+        gm_backup_table_cache: gm_backups::GmBackupTableCache::new(),
     };
 
     let cors = CorsLayer::new()
@@ -72,6 +92,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/audit/since", get(handlers::list_audit))
         .route("/audit/table-latest", get(handlers::table_latest))
+        .route(
+            "/external-changes",
+            get(handlers::list_external_changes).post(handlers::push_external_changes),
+        )
+        .route("/backups/gm", get(handlers::list_gm_backups))
+        .route("/backups/gm/tables", get(handlers::list_gm_backup_tables))
+        .route("/backups/gm/extract", post(handlers::extract_gm_backup))
         .layer(middleware::from_fn_with_state(
             pool.clone(),
             auth::require_auth,

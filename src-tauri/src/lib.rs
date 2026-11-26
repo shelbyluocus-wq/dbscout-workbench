@@ -17,7 +17,9 @@ mod config_relations;
 mod control_server;
 mod database_sync_jobs;
 mod db;
+mod external_changes;
 mod frontend_log;
+mod gm_backup;
 mod macos_appearance;
 mod ddl;
 mod demo;
@@ -311,6 +313,9 @@ pub fn run() {
             commands::list_snapshots,
             commands::create_snapshot,
             commands::restore_snapshot,
+            commands::list_gm_backups,
+            commands::list_gm_backup_tables,
+            commands::restore_gm_backup,
             commands::inspect_snapshot_file,
             commands::import_snapshot,
             commands::get_backup_config,
@@ -352,6 +357,9 @@ pub fn run() {
             commands::login_account,
             commands::logout_account,
             commands::list_shared_audit_logs,
+            commands::list_table_external_changes,
+            commands::list_shared_table_external_changes,
+            commands::observe_table_external_change,
             commands::sync_audit_now,
             commands::register_global_shortcut,
             commands::unregister_global_shortcut,

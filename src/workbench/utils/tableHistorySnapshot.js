@@ -114,6 +114,9 @@ export function normalizeItemRowIdentity(item, primaryKeys = [], colNameMap = ne
  * full-table before/after comparison without fabricating row placement.
  */
 export function canReconstructRevision(revision, primaryKeys = [], columns = []) {
+  if (revision?.isExternal) {
+    return { ok: false, reason: "external-change" };
+  }
   if (!Array.isArray(primaryKeys) || primaryKeys.length === 0) {
     return { ok: false, reason: "no-primary-key" };
   }
@@ -176,6 +179,20 @@ export function reconstructRevisionFullTable({
   const primaryKeys = Array.isArray(rawPrimaryKeys) ? rawPrimaryKeys.filter(Boolean) : [];
   const columns = normalizeSnapshotColumns(rawColumns, primaryKeys);
   const targetRevision = revisions[targetIndex] || null;
+  if (targetRevision?.isExternal) {
+    return {
+      mode: "external",
+      reason: "external-change",
+      columns,
+      primaryKeys,
+      rows: [],
+      changedRowIndices: [],
+      totalRows: 0,
+      changedCount: 0,
+      partialReplayWarning: false,
+      hasSynthesizedRows: false,
+    };
+  }
   const check = canReconstructRevision(targetRevision, primaryKeys, columns);
   if (!check.ok) {
     return {
@@ -248,6 +265,10 @@ export function reconstructRevisionFullTable({
   // Revisions are sorted newest-first; items inside a revision are also newest-first.
   for (let revIdx = 0; revIdx < targetIndex; revIdx += 1) {
     const rev = revisions[revIdx];
+    if (rev?.isExternal) {
+      partialReplayWarning = true;
+      continue;
+    }
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
       if (op === "DDL") {

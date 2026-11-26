@@ -185,45 +185,59 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
             .collect()
     };
     let pool = crate::audit::ensure_audit_pool(app, state).await?;
+    let host = hostname();
     let batch = collect_outbox(&pool, &session, &server_keys, 500).await?;
-    if batch.is_empty() {
-        return Ok(AuditPushResult {
+    let result = if batch.is_empty() {
+        AuditPushResult {
             accepted: 0,
             skipped: 0,
-        });
-    }
+        }
+    } else {
+        let items: Vec<AuditPushItem> = batch.iter().map(|(_, item)| item.clone()).collect();
+        let ids: Vec<i64> = batch.iter().map(|(id, _)| *id).collect();
+        let body = serde_json::to_value(AuditPushRequest { items })
+            .map_err(|e| format!("序列化同步请求失败: {e}"))?;
 
-    let items: Vec<AuditPushItem> = batch.iter().map(|(_, item)| item.clone()).collect();
-    let ids: Vec<i64> = batch.iter().map(|(id, _)| *id).collect();
-    let body = serde_json::to_value(AuditPushRequest { items })
-        .map_err(|e| format!("序列化同步请求失败: {e}"))?;
+        let url = format!("{base_url}/audit");
+        let resp = state
+            .account
+            .http
+            .post(&url)
+            .bearer_auth(&session.token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("同步请求失败: {e}"))?;
 
-    let url = format!("{base_url}/audit");
-    let resp = state
-        .account
-        .http
-        .post(&url)
-        .bearer_auth(&session.token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("同步请求失败: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("同步失败: {status} {text}"));
+        }
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("同步失败: {status} {text}"));
-    }
+        let result: AuditPushResult = resp
+            .json()
+            .await
+            .map_err(|e| format!("解析同步响应失败: {e}"))?;
 
-    let result: AuditPushResult = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析同步响应失败: {e}"))?;
+        // Only mark synced after a successful response. On partial failure (which
+        // the server doesn't produce today — it's all-or-nothing per batch), rows
+        // would stay pending and retry.
+        mark_synced(&pool, &ids).await?;
+        result
+    };
 
-    // Only mark synced after a successful response. On partial failure (which
-    // the server doesn't produce today — it's all-or-nothing per batch), rows
-    // would stay pending and retry.
-    mark_synced(&pool, &ids).await?;
+    // Push externally observed table changes after audit rows so Blackcat edits
+    // always reach the central server first and reconcile any race cleanly.
+    let _ = crate::external_changes::push_outbox(
+        &pool,
+        &state.account.http,
+        &base_url,
+        &session.token,
+        host,
+    )
+    .await;
+
     Ok(result)
 }
 

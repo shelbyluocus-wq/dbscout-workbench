@@ -240,6 +240,7 @@ async function onDatabaseFilterChange() {
         aria-labelledby="wb-backup-title"
         :backup="backup"
         :connections="connections"
+        :account="account"
         @connection-change="onConnectionFilterChange"
         @database-change="onDatabaseFilterChange"
         @open-settings="switchTab('config')"

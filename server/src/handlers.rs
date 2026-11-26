@@ -1,6 +1,7 @@
 //! HTTP handlers: health / register / login / me / audit (GET + POST) / audit/since.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use axum::{
     extract::{Extension, Query, State},
@@ -13,14 +14,19 @@ use uuid::Uuid;
 
 use crate::auth::account_info;
 use crate::db::{
-    canonical_server_scope, find_user_by_username, insert_user, prune_table_revisions, UserRow,
+    canonical_server_scope, clear_external_changes_matching_audit, find_user_by_username,
+    insert_user, parse_audit_ts_ms, prune_table_external_changes, prune_table_revisions,
+    upsert_external_change, ExternalChangeInsert, UserRow,
 };
+use crate::gm_backups::{self, GmBackupTableCache};
 use crate::models::*;
 
 #[derive(Clone)]
 pub struct ServerState {
     pub pool: SqlitePool,
     pub max_revisions_per_table: usize,
+    pub gm_backup_dir: Option<PathBuf>,
+    pub gm_backup_table_cache: GmBackupTableCache,
 }
 
 fn trim_username(value: &str) -> Option<String> {
@@ -161,11 +167,22 @@ pub async fn push_audit(
         })?;
         if res.rows_affected() > 0 {
             accepted += 1;
-            touched_tables.insert((
-                canonical_server_scope(item.server_key.as_deref()),
-                item.database.trim().to_ascii_lowercase(),
-                item.table_name.trim().to_ascii_lowercase(),
-            ));
+            let scope = canonical_server_scope(item.server_key.as_deref());
+            let db_lower = item.database.trim().to_ascii_lowercase();
+            let table_lower = item.table_name.trim().to_ascii_lowercase();
+            if matches!(item.status.as_str(), "committed" | "rolled_back") {
+                if let Some(audit_ms) = parse_audit_ts_ms(&item.ts) {
+                    let _ = clear_external_changes_matching_audit(
+                        &state.pool,
+                        &scope,
+                        &db_lower,
+                        &table_lower,
+                        audit_ms,
+                    )
+                    .await;
+                }
+            }
+            touched_tables.insert((scope, db_lower, table_lower));
         } else {
             skipped += 1;
         }
@@ -357,6 +374,194 @@ pub async fn table_latest(
     Ok(Json(items))
 }
 
+pub async fn push_external_changes(
+    State(state): State<ServerState>,
+    Extension(user): Extension<UserRow>,
+    Json(req): Json<ExternalChangePushRequest>,
+) -> Result<Json<AuditPushResponse>, (StatusCode, String)> {
+    if req.items.is_empty() {
+        return Ok(Json(AuditPushResponse {
+            accepted: 0,
+            skipped: 0,
+        }));
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut accepted: u64 = 0;
+    let mut skipped: u64 = 0;
+    let mut touched_tables: HashSet<(String, String, String)> = HashSet::new();
+
+    for item in &req.items {
+        let changed = upsert_external_change(
+            &state.pool,
+            &ExternalChangeInsert {
+                event_id: &item.event_id,
+                server_key: item.server_key.as_deref(),
+                database: &item.database,
+                table_name: &item.table_name,
+                ts: &item.ts,
+                ts_ms: item.ts_ms,
+                time_kind: &item.time_kind,
+                signal: &item.signal,
+                reported_by_user_id: &user.id,
+                reported_by_username: &user.username,
+                host: item.host.as_deref(),
+                synced_at: &now,
+            },
+        )
+        .await
+        .map_err(server_err)?;
+        if changed {
+            accepted += 1;
+            touched_tables.insert((
+                canonical_server_scope(item.server_key.as_deref()),
+                item.database.trim().to_ascii_lowercase(),
+                item.table_name.trim().to_ascii_lowercase(),
+            ));
+        } else {
+            skipped += 1;
+        }
+    }
+
+    if state.max_revisions_per_table > 0 {
+        for (scope, db_lower, table_lower) in touched_tables {
+            let _ = prune_table_external_changes(
+                &state.pool,
+                &scope,
+                &db_lower,
+                &table_lower,
+                state.max_revisions_per_table,
+            )
+            .await;
+        }
+    }
+
+    Ok(Json(AuditPushResponse { accepted, skipped }))
+}
+
+pub async fn list_external_changes(
+    State(state): State<ServerState>,
+    Query(q): Query<ExternalChangeQuery>,
+) -> Result<Json<Vec<SharedExternalChangeEntry>>, (StatusCode, String)> {
+    let limit = q.limit.unwrap_or(100).min(500) as i64;
+    let offset = q.offset.unwrap_or(0) as i64;
+    let server_scope = canonical_server_scope(q.server_key.as_deref());
+    let database = q.database.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let table_name = q
+        .table_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let mut sql = String::from(
+        "SELECT event_id, server_key, database, table_name, ts, ts_ms, time_kind, signal \
+         FROM table_external_changes",
+    );
+    let mut clauses: Vec<&'static str> = Vec::new();
+    if database.is_some() {
+        clauses.push("LOWER(TRIM(database)) = LOWER(?)");
+    }
+    if table_name.is_some() {
+        clauses.push("LOWER(TRIM(table_name)) = LOWER(?)");
+    }
+    if !server_scope.is_empty() {
+        clauses.push(
+            "(server_key IS NULL OR TRIM(server_key) = '' \
+              OR LOWER(TRIM(server_key)) = 'mysql://configured:3306' \
+              OR LOWER(TRIM(server_key)) = ?)",
+        );
+    }
+    if !clauses.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&clauses.join(" AND "));
+    }
+    sql.push_str(" ORDER BY ts_ms DESC, rowid DESC LIMIT ? OFFSET ?");
+
+    let mut query = sqlx::query(&sql);
+    if let Some(v) = database {
+        query = query.bind(v);
+    }
+    if let Some(v) = table_name {
+        query = query.bind(v);
+    }
+    if !server_scope.is_empty() {
+        query = query.bind(&server_scope);
+    }
+    query = query.bind(limit).bind(offset);
+
+    let rows = query.fetch_all(&state.pool).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("查询共享外部变动失败: {e}"),
+        )
+    })?;
+
+    let entries = rows
+        .into_iter()
+        .map(|r| SharedExternalChangeEntry {
+            event_id: r.try_get("event_id").unwrap_or_default(),
+            server_key: r.try_get("server_key").ok().flatten(),
+            database: r.try_get("database").unwrap_or_default(),
+            table_name: r.try_get("table_name").unwrap_or_default(),
+            ts: r.try_get("ts").unwrap_or_default(),
+            ts_ms: r.try_get("ts_ms").unwrap_or(0),
+            time_kind: r.try_get("time_kind").unwrap_or_default(),
+            signal: r.try_get("signal").unwrap_or_default(),
+        })
+        .collect();
+    Ok(Json(entries))
+}
+
+pub async fn list_gm_backups(
+    State(state): State<ServerState>,
+    Query(q): Query<GmBackupListQuery>,
+) -> Result<Json<GmBackupListResponse>, (StatusCode, String)> {
+    let dir = state.gm_backup_dir.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        gm_backups::list_backups(
+            dir.as_deref(),
+            q.database.as_deref(),
+            q.date.as_deref(),
+            q.limit,
+        )
+    })
+    .await
+    .map_err(|e| server_err(format!("扫描备份目录任务异常: {e}")))??;
+    Ok(Json(result))
+}
+
+pub async fn list_gm_backup_tables(
+    State(state): State<ServerState>,
+    Query(q): Query<GmBackupTablesQuery>,
+) -> Result<Json<GmBackupTablesResponse>, (StatusCode, String)> {
+    let dir = state.gm_backup_dir.clone();
+    let cache = state.gm_backup_table_cache.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        gm_backups::list_backup_tables(dir.as_deref(), &cache, &q.date, &q.hour, &q.file_name)
+    })
+    .await
+    .map_err(|e| server_err(format!("读取备份表列表任务异常: {e}")))??;
+    Ok(Json(result))
+}
+
+pub async fn extract_gm_backup(
+    State(state): State<ServerState>,
+    Json(req): Json<GmBackupExtractRequest>,
+) -> Result<Json<GmBackupExtractResponse>, (StatusCode, String)> {
+    let dir = state.gm_backup_dir.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        gm_backups::extract_backup_sql(
+            dir.as_deref(),
+            &req.date,
+            &req.hour,
+            &req.file_name,
+            &req.tables,
+        )
+    })
+    .await
+    .map_err(|e| server_err(format!("提取备份 SQL 任务异常: {e}")))??;
+    Ok(Json(result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +571,8 @@ mod tests {
         ServerState {
             pool,
             max_revisions_per_table: DEFAULT_MAX_REVISIONS_PER_TABLE,
+            gm_backup_dir: None,
+            gm_backup_table_cache: GmBackupTableCache::new(),
         }
     }
 
@@ -641,6 +848,8 @@ mod tests {
         let unpruned_state = ServerState {
             pool: pool.clone(),
             max_revisions_per_table: 0,
+            gm_backup_dir: None,
+            gm_backup_table_cache: GmBackupTableCache::new(),
         };
         let items: Vec<_> = (1..=24)
             .map(|i| {
@@ -676,5 +885,327 @@ mod tests {
         assert_eq!(entries.len(), 20);
         assert_eq!(entries[0].client_id, "legacy-24");
         assert_eq!(entries.last().unwrap().client_id, "legacy-05");
+    }
+
+    fn test_user(id: &str, username: &str) -> UserRow {
+        UserRow {
+            id: id.into(),
+            username: username.into(),
+            display_name: username.into(),
+            token: "tok".into(),
+        }
+    }
+
+    fn ext_item(
+        event_id: &str,
+        server_key: Option<&str>,
+        table_name: &str,
+        ts: &str,
+        ts_ms: i64,
+        time_kind: &str,
+        signal: &str,
+    ) -> ExternalChangePushItem {
+        ExternalChangePushItem {
+            event_id: event_id.into(),
+            server_key: server_key.map(Into::into),
+            database: "newsg_4cfg".into(),
+            table_name: table_name.into(),
+            ts: ts.into(),
+            ts_ms,
+            time_kind: time_kind.into(),
+            signal: signal.into(),
+            host: Some("pc-1".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn external_changes_deduplicate_across_workstations_and_upgrade_detected_to_exact() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok1", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+        insert_user(&pool, "u2", "bob", "Bob", "tok2", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+
+        let t0 = parse_audit_ts_ms("2026-11-26T02:00:00Z").unwrap();
+        // 1) Alice's workstation detects write_count bump at t0 + 25s (approximate).
+        let Json(r1) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u1", "alice")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-a-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "2026-11-26T02:00:25Z",
+                    t0 + 25_000,
+                    "detected",
+                    "write_count",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r1.accepted, 1);
+
+        // 2) Bob detects the same bump 15s later -> coalesced (skipped).
+        let Json(r2) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u2", "bob")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-b-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "2026-11-26T02:00:40Z",
+                    t0 + 40_000,
+                    "detected",
+                    "write_count",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r2.accepted, 0);
+        assert_eq!(r2.skipped, 1);
+
+        // 3) Exact MySQL UPDATE_TIME at t0 arrives -> upgrades the existing row to exact.
+        let Json(r3) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u2", "bob")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-b-exact",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "2026-11-26T02:00:00Z",
+                    t0,
+                    "exact",
+                    "update_time",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r3.accepted, 1);
+
+        // 4) Another workstation pushes exact t0 + 2s -> coalesced.
+        let Json(r4) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u1", "alice")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-a-exact-dup",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "2026-11-26T02:00:02Z",
+                    t0 + 2_000,
+                    "exact",
+                    "update_time",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r4.accepted, 0);
+        assert_eq!(r4.skipped, 1);
+
+        // 5) Different MySQL server with same DB/table stays isolated.
+        let _ = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u1", "alice")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-other-server",
+                    Some("mysql://192.168.1.223:8306"),
+                    "goodsprop",
+                    "2026-11-26T02:05:00Z",
+                    t0 + 300_000,
+                    "exact",
+                    "update_time",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let Json(list) = list_external_changes(
+            State(test_state(pool)),
+            Query(ExternalChangeQuery {
+                server_key: Some("mysql://192.168.1.243:8306".into()),
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("goodsprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].time_kind, "exact");
+        assert_eq!(list[0].ts_ms, t0);
+        assert_eq!(list[0].signal, "update_time");
+    }
+
+    #[tokio::test]
+    async fn external_changes_reconcile_against_blackcat_audits_in_both_orders() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok1", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+        insert_user(&pool, "u2", "bob", "Bob", "tok2", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+
+        let t_audit1 = parse_audit_ts_ms("2026-11-26T03:00:00Z").unwrap();
+        let t_audit2 = parse_audit_ts_ms("2026-11-26T03:10:00Z").unwrap();
+        let t_navicat = parse_audit_ts_ms("2026-11-26T03:10:25Z").unwrap(); // 25s after audit2 -> real!
+
+        // Order A: Blackcat audit1 lands first, then Bob reports an external observation 3s later -> rejected.
+        let _ = push_audit(
+            State(test_state(pool.clone())),
+            Json(AuditPushRequest {
+                items: vec![push_item(
+                    "cid-1",
+                    "2026-11-26T03:00:00Z",
+                    "mysql-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "committed",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let Json(resp_a) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u2", "bob")),
+            Json(ExternalChangePushRequest {
+                items: vec![ext_item(
+                    "ext-race-a",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "2026-11-26T03:00:03Z",
+                    t_audit1 + 3_000,
+                    "exact",
+                    "update_time",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp_a.accepted, 0);
+
+        // Order B: Bob reports suspected external change BEFORE Alice's audit2 lands,
+        // AND also reports a genuine Navicat edit 25s after audit2.
+        let Json(resp_b) = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u2", "bob")),
+            Json(ExternalChangePushRequest {
+                items: vec![
+                    ext_item(
+                        "ext-race-b",
+                        Some("mysql://192.168.1.243:8306"),
+                        "goodsprop",
+                        "2026-11-26T03:10:04Z",
+                        t_audit2 + 4_000,
+                        "exact",
+                        "update_time",
+                    ),
+                    ext_item(
+                        "ext-real-navicat",
+                        Some("mysql://192.168.1.243:8306"),
+                        "goodsprop",
+                        "2026-11-26T03:10:25Z",
+                        t_navicat,
+                        "exact",
+                        "update_time",
+                    ),
+                ],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp_b.accepted, 2);
+
+        // Now Alice's audit2 arrives: clears ext-race-b, preserves ext-real-navicat!
+        let _ = push_audit(
+            State(test_state(pool.clone())),
+            Json(AuditPushRequest {
+                items: vec![push_item(
+                    "cid-2",
+                    "2026-11-26T03:10:00Z",
+                    "mysql-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "committed",
+                )],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let Json(list) = list_external_changes(
+            State(test_state(pool)),
+            Query(ExternalChangeQuery {
+                server_key: Some("mysql://192.168.1.243:8306".into()),
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("goodsprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].event_id, "ext-real-navicat");
+    }
+
+    #[tokio::test]
+    async fn external_changes_prune_independently_to_max_per_table() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "alice", "Alice", "tok1", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+        let base = parse_audit_ts_ms("2026-11-26T01:00:00Z").unwrap();
+        let items: Vec<_> = (1..=25)
+            .map(|i| {
+                let ts_ms = base + i * 60_000;
+                let ts = chrono::DateTime::from_timestamp_millis(ts_ms)
+                    .unwrap()
+                    .to_rfc3339();
+                ext_item(
+                    &format!("ext-{i:02}"),
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    &ts,
+                    ts_ms,
+                    "exact",
+                    "update_time",
+                )
+            })
+            .collect();
+        let _ = push_external_changes(
+            State(test_state(pool.clone())),
+            Extension(test_user("u1", "alice")),
+            Json(ExternalChangePushRequest { items }),
+        )
+        .await
+        .unwrap();
+
+        let Json(list) = list_external_changes(
+            State(test_state(pool)),
+            Query(ExternalChangeQuery {
+                server_key: Some("mysql://192.168.1.243:8306".into()),
+                database: Some("newsg_4cfg".into()),
+                table_name: Some("goodsprop".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 20);
+        assert_eq!(list[0].event_id, "ext-25");
+        assert_eq!(list.last().unwrap().event_id, "ext-06");
     }
 }
