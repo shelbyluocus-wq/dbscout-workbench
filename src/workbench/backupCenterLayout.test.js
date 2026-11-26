@@ -27,6 +27,8 @@ test("243 server backup panel keeps target and archive filters on one toolbar wi
 
   assert.match(panel, /class="wb-backup-toolbar wb-backup-snapshot-toolbar wb-backup-gm-toolbar"/);
   assert.match(panel, /class="wb-backup-gm-picker"/);
+  assert.match(panel, /resolveConnectionAlias\(connection\.id,\s*connection\.label\)/);
+  assert.match(read("./components/BackupCenterDialog.vue"), /resolveConnectionAlias\(connection\.id,\s*connection\.label\)/);
   assert.doesNotMatch(panel, /createSnapshotFromFilters|onImportSnapshot|onPruneSnapshots|wb-backup-auto/);
   assert.doesNotMatch(settings, /draftConfig\.(enabled|intervalMinutes|largeTableThreshold|maxPerDb)/);
   assert.doesNotMatch(dialog, /class="wb-backup-enable-conn"/);

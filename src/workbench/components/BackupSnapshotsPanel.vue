@@ -322,9 +322,20 @@ const progressStyle = computed(() => ({
       <div class="wb-backup-filter-fields">
         <label class="wb-backup-filter">
           <span>{{ t('backup.gm.targetConnection') }}</span>
-          <select v-model="filters.connectionId" :aria-label="t('backup.gm.targetConnection')" :disabled="busy.restoring" @change="onConnectionFilterChange">
+          <select
+            v-model="filters.connectionId"
+            :aria-label="t('backup.gm.targetConnection')"
+            :title="connections.find((item) => item.id === filters.connectionId)?.label || ''"
+            :disabled="busy.restoring"
+            @change="onConnectionFilterChange"
+          >
             <option value="">{{ t('m_f85168b69fc0') }}</option>
-            <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
+            <option
+              v-for="connection in connections"
+              :key="connection.id"
+              :value="connection.id"
+              :title="connection.label"
+            >{{ resolveConnectionAlias(connection.id, connection.label) }}</option>
           </select>
         </label>
         <label class="wb-backup-filter">

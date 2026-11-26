@@ -6,6 +6,7 @@ import { CloudUpload, History, RefreshCw, Server, Settings, ShieldCheck, X } fro
 import AuditTableHistory from "./AuditTableHistory.vue";
 import BackupSettingsPanel from "./BackupSettingsPanel.vue";
 import BackupSnapshotsPanel from "./BackupSnapshotsPanel.vue";
+import { useAliases } from "../composables/aliasStore.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { useEscClose } from "../composables/useEscClose.js";
 
@@ -37,6 +38,7 @@ const filters = computed(() => props.backup.filters);
 const accountBusy = computed(() => account.value?.busy?.value || account.value?.busy || {});
 
 const { alert } = useConfirm();
+const { connectionLabel: resolveConnectionAlias } = useAliases();
 
 const isBusy = computed(() => (
   Object.values(busy.value || {}).some(Boolean)
@@ -183,9 +185,20 @@ async function onDatabaseFilterChange() {
             >{{ t('m_62f97aa58516') }}</button>
           </div>
           <div class="wb-backup-filter-fields">
-            <select v-model="filters.connectionId" class="wb-backup-select" :aria-label="t('m_8bec5f76301e')" @change="onConnectionFilterChange">
+            <select
+              v-model="filters.connectionId"
+              class="wb-backup-select"
+              :aria-label="t('m_8bec5f76301e')"
+              :title="connections.find((item) => item.id === filters.connectionId)?.label || ''"
+              @change="onConnectionFilterChange"
+            >
               <option value="">{{ t('m_dbb2c7b44300') }}</option>
-              <option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.label }}</option>
+              <option
+                v-for="connection in connections"
+                :key="connection.id"
+                :value="connection.id"
+                :title="connection.label"
+              >{{ resolveConnectionAlias(connection.id, connection.label) }}</option>
             </select>
             <select
               v-model="filters.database"
