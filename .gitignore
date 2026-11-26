@@ -19,6 +19,7 @@ mcps/
 .DS_Store
 *.log
 .dev-server.tauri.json
+.svn-sync.local.json
 dbscout-server.sqlite
 dbscout-server.sqlite-*
 agent-tools/

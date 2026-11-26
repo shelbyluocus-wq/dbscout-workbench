@@ -20,6 +20,7 @@
     "release:svn-manifest": "node scripts/svn-updater-manifest.mjs",
     "server:deploy": "node scripts/deploy-blackcat-server.mjs",
     "server:package": "node scripts/package-blackcat-server.mjs",
+    "sync:svn": "node scripts/sync-source-to-svn.mjs",
     "quality:duplication": "jscpd src sidecar scripts src-tauri/src server/src vite.config.js"
   },
   "dependencies": {

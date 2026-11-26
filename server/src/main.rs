@@ -5,7 +5,7 @@
 //! Data is kept in a single SQLite file. Run with:
 //!
 //! ```sh
-//! DBSCOUT_SERVER_BIND=0.0.0.0:8766 DBSCOUT_SERVER_DB=./dbscout-server.sqlite \
+//! DBSCOUT_SERVER_BIND=0.0.0.0:8765 DBSCOUT_SERVER_DB=./dbscout-server.sqlite \
 //!   cargo run -p dbscout-server
 //! ```
 
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let bind = env::var("DBSCOUT_SERVER_BIND").unwrap_or_else(|_| "0.0.0.0:8766".into());
+    let bind = env::var("DBSCOUT_SERVER_BIND").unwrap_or_else(|_| "0.0.0.0:8765".into());
     let db_path =
         env::var("DBSCOUT_SERVER_DB").unwrap_or_else(|_| "./dbscout-server.sqlite".into());
     let max_revisions_per_table = env::var("DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE")

@@ -22,9 +22,9 @@ pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.243:8766";
 
 /// Previous default central server addresses that should migrate once to
 /// `DEFAULT_SERVER_URL` when upgrading existing installations.
-const LEGACY_DEFAULT_SERVER_URLS: &[&str] = &[
-    "http://192.168.1.193:8765",
-    "http://192.168.1.243:8765",
+const LEGACY_DEFAULT_SERVER_URLS: &[(&str, u32)] = &[
+    ("http://192.168.1.193:8765", 1),
+    ("http://192.168.1.243:8765", 2),
 ];
 
 /// Current schema version for one-time `server_url` default migrations.
@@ -32,11 +32,13 @@ pub const SERVER_URL_MIGRATION_VERSION: u32 = 2;
 
 const STARTUP_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
-fn is_legacy_default_server_url(url: &str) -> bool {
+fn is_legacy_default_server_url(url: &str, migration_version: u32) -> bool {
     let normalized = url.trim().trim_end_matches('/');
     LEGACY_DEFAULT_SERVER_URLS
         .iter()
-        .any(|legacy| normalized.eq_ignore_ascii_case(legacy))
+        .any(|(legacy, version)| {
+            migration_version < *version && normalized.eq_ignore_ascii_case(legacy)
+        })
 }
 
 fn apply_default_and_migrate_server_url(mut config: AccountConfig) -> (AccountConfig, bool) {
@@ -46,11 +48,12 @@ fn apply_default_and_migrate_server_url(mut config: AccountConfig) -> (AccountCo
         return (config, false);
     }
 
-    if config.server_url_migration_version.unwrap_or(0) < SERVER_URL_MIGRATION_VERSION {
+    let migration_version = config.server_url_migration_version.unwrap_or(0);
+    if migration_version < SERVER_URL_MIGRATION_VERSION {
         let should_migrate = config
             .server_url
             .as_deref()
-            .map(is_legacy_default_server_url)
+            .map(|url| is_legacy_default_server_url(url, migration_version))
             .unwrap_or(false);
         config.server_url_migration_version = Some(SERVER_URL_MIGRATION_VERSION);
         if should_migrate {
@@ -254,18 +257,35 @@ mod tests {
         assert!(persist_v1);
 
         // Once marked migrated, an explicit override back to a legacy host is respected.
-        let (explicit_rollback, persist_rollback) =
+        let (explicit_rollback_v1, persist_rollback_v1) =
             apply_default_and_migrate_server_url(AccountConfig {
                 server_url: Some("http://192.168.1.193:8765".into()),
+                session: None,
+                server_url_migration_version: Some(1),
+                loaded: false,
+            });
+        assert_eq!(
+            explicit_rollback_v1.server_url.as_deref(),
+            Some("http://192.168.1.193:8765")
+        );
+        assert_eq!(
+            explicit_rollback_v1.server_url_migration_version,
+            Some(SERVER_URL_MIGRATION_VERSION)
+        );
+        assert!(!persist_rollback_v1);
+
+        let (explicit_rollback_v2, persist_rollback_v2) =
+            apply_default_and_migrate_server_url(AccountConfig {
+                server_url: Some("http://192.168.1.243:8765".into()),
                 session: None,
                 server_url_migration_version: Some(SERVER_URL_MIGRATION_VERSION),
                 loaded: false,
             });
         assert_eq!(
-            explicit_rollback.server_url.as_deref(),
-            Some("http://192.168.1.193:8765")
+            explicit_rollback_v2.server_url.as_deref(),
+            Some("http://192.168.1.243:8765")
         );
-        assert!(!persist_rollback);
+        assert!(!persist_rollback_v2);
 
         let (custom, persist_custom) = apply_default_and_migrate_server_url(AccountConfig {
             server_url: Some("http://10.0.0.5:8765".into()),

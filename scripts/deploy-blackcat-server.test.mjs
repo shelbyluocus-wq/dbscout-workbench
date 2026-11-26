@@ -23,6 +23,9 @@ test("parseArgs applies defaults and parses deploy/migrate/status flags", () => 
   assert.equal(defaults.host, DEFAULT_DEPLOY_HOST);
   assert.equal(defaults.remoteDir, DEFAULT_REMOTE_DIR);
   assert.equal(defaults.serverPort, DEFAULT_SERVER_PORT);
+  assert.equal(defaults.serverPort, 8766);
+  assert.equal(parseArgs(["--host", "192.168.1.193"], {}).serverPort, 8765);
+  assert.equal(parseArgs(["--port", "9876"], { DBSCOUT_SERVER_PORT: "9877" }).serverPort, 9876);
 
   const migrated = parseArgs(
     ["--host", "192.168.1.243", "--migrate-db", "./old.sqlite", "--force-overwrite-db", "--dry-run"],
@@ -94,6 +97,10 @@ test("renderDeployTemplates rewrites root dir and port with LF line endings", ()
   assert.match(rendered["blackcat-server.service"], /DBSCOUT_SERVER_BIND=0\.0\.0\.0:9876/);
   assert.doesNotMatch(rendered["run-blackcat-server.sh"], /\r\n/);
   assert.doesNotMatch(rendered["backup-blackcat-db.sh"], /\r\n/);
+
+  const for243 = renderDeployTemplates(parseArgs([], {}));
+  assert.match(for243["blackcat-server.service"], /DBSCOUT_SERVER_BIND=192\.168\.1\.243:8766/);
+  assert.match(for243["run-blackcat-server.sh"], /DBSCOUT_SERVER_BIND:-192\.168\.1\.243:8766/);
 });
 
 test("main --dry-run succeeds without touching remote host", () => {

@@ -492,14 +492,20 @@ Release with `npm run release:package`; it builds the desktop app, renames the
 Windows installer to `blackcat_<version>_x64-setup.exe`, and updates
 `latest.json` to that exact filename. Pass `--notes-file <path>` (or `--notes
 "<text>"`) to write real release notes into the `latest.json` `notes` field —
-they surface in the in-app update notice and dialog. The
-`.agents/skills/blackcat-release` skill automates the everyday flow (version
-bump + notes summary + package + commit/push to main) only when the user explicitly
-requests "打包流程". On macOS, a plain "打包" request means building the current
+they surface in the in-app update notice and dialog. The `.agents/skills/blackcat-release` skill automates the everyday flow (version
+bump + notes summary + package + release-artifact SVN sync + commit/push to main
++ source SVN mirror via `npm run sync:svn -- --svn-dir <dir> --svn-update --head`)
+only when the user explicitly requests "打包流程". Each full release run must
+specify both the SVN release directory (`navicat*`) and the SVN source directory,
+and stops immediately if `svn cleanup` or `svn update` fails on either directory.
+On macOS, a plain "打包" request means building the current
 working-tree code and installing it locally, without an SVN path, version bump,
 or automatic commit/push. Lower-level helpers are
-`npm run release:sync-version` (sync application versions) and
-`npm run release:svn-manifest` (generate the SVN updater manifest). There is no
+`npm run release:sync-version` (sync application versions),
+`npm run release:svn-manifest` (generate the SVN updater manifest), and
+`npm run sync:svn` (`scripts/sync-source-to-svn.mjs`, on-demand Git → SVN source
+mirror with CRLF preservation, baseline anti-clobber checks, and `--svn-update`
+fail-fast). There is no
 lint script defined in `package.json`. `release:package` rejects any
 configuration that puts Node / the native Claude CLI back into the main bundle.
 Windows builds fetch a pinned Apache

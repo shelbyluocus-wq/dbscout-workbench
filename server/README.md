@@ -11,11 +11,11 @@ DB Scout Workbench（黑猫）的中心服务（局域网内部署）。提供**
 ## 本地运行
 
 ```sh
-# 默认监听 0.0.0.0:8766，数据库 ./dbscout-server.sqlite
+# 默认监听 0.0.0.0:8765，数据库 ./dbscout-server.sqlite
 cargo run -p dbscout-server
 
 # 自定义
-DBSCOUT_SERVER_BIND=0.0.0.0:8766 \
+DBSCOUT_SERVER_BIND=0.0.0.0:8765 \
 DBSCOUT_SERVER_DB=/data/dbscout-server.sqlite \
 cargo run -p dbscout-server
 ```
@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts/export-dbscout-server-db.ps1
 npm run server:deploy -- --migrate-db /path/to/dbscout-server.sqlite
 ```
 
-迁移完成后，老用户升级新版黑猫启动时会自动把保存的旧地址 `http://192.168.1.193:8765` / `http://192.168.1.243:8765` 静默切到 `http://192.168.1.243:8766`，原账号和登录态继续有效，无需重新注册或登录。
+升级后的黑猫客户端会将保存的旧默认地址 `http://192.168.1.193:8765` 或 `http://192.168.1.243:8765` 更新为 `http://192.168.1.243:8766`。旧库迁移完成后，原账号和登录态可继续使用。
 
 ### 3. 日常运维命令
 

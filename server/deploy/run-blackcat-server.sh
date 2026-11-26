@@ -6,8 +6,14 @@ set -euo pipefail
 ROOT="${BLACKCAT_SERVER_ROOT:-/home/blackcat-server}"
 BIN="${BLACKCAT_SERVER_BIN:-$ROOT/bin/dbscout-server}"
 DB_PATH="${DBSCOUT_SERVER_DB:-$ROOT/data/dbscout-server.sqlite}"
-BIND_ADDR="${DBSCOUT_SERVER_BIND:-0.0.0.0:8766}"
+BIND_ADDR="${DBSCOUT_SERVER_BIND:-0.0.0.0:8765}"
 PORT="${BLACKCAT_SERVER_PORT:-${BIND_ADDR##*:}}"
+HEALTH_HOST="${BIND_ADDR%:*}"
+case "$HEALTH_HOST" in
+  0.0.0.0) HEALTH_HOST=127.0.0.1 ;;
+  '[::]') HEALTH_HOST='[::1]' ;;
+esac
+HEALTH_URL="http://$HEALTH_HOST:$PORT"
 SERVICE_NAME="${BLACKCAT_SERVICE_NAME:-blackcat-server}"
 PID_FILE="$ROOT/run/server.pid"
 LOG_FILE="$ROOT/logs/server.log"
@@ -32,9 +38,9 @@ read_pid() {
 
 http_status() {
   local path="$1"
-  local url="http://127.0.0.1:${PORT}${path}"
+  local url="$HEALTH_URL$path"
   if command -v curl >/dev/null 2>&1; then
-    curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "$url" 2>/dev/null || echo "000"
+    curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 2 "$url" 2>/dev/null || echo "000"
     return
   fi
   if command -v python3 >/dev/null 2>&1; then
@@ -97,7 +103,7 @@ start_service() {
     echo "错误: blackcat-server 启动后健康检查失败 (port=$PORT)" >&2
     return 1
   fi
-  echo "blackcat-server 启动成功 (http://127.0.0.1:${PORT})"
+  echo "blackcat-server 启动成功 ($HEALTH_URL)"
 }
 
 stop_service() {
@@ -127,7 +133,7 @@ restart_service() {
       echo "错误: blackcat-server 重启后健康检查失败 (port=$PORT)" >&2
       return 1
     fi
-    echo "blackcat-server 重启成功 (http://127.0.0.1:${PORT})"
+    echo "blackcat-server 重启成功 ($HEALTH_URL)"
   else
     stop_service
     start_service

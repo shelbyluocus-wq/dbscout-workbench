@@ -203,4 +203,8 @@ test("the skill requires the SVN path before build and documents optional AI syn
   assert.match(skill, /提交到 main 并 push/);
   assert.match(skill, /chore\(release\): bump version to/);
   assert.match(skill, /不要在普通打包请求中执行 `svn commit`/);
+  assert.match(skill, /SVN 源码目录/);
+  assert.match(skill, /npm run sync:svn/);
+  assert.match(skill, /--svn-update/);
+  assert.match(skill, /svn update.*报错.*立即停止/s);
 });

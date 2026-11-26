@@ -109,16 +109,17 @@ export function validateMigrationSqliteFile(filePath, { allowWal = false } = {})
   return resolved;
 }
 
-export function renderDeployTemplates({ remoteDir, serverPort }) {
+export function renderDeployTemplates({ remoteDir, serverPort, host }) {
   const safeDir = assertSafeRemoteDir(remoteDir);
   const port = assertSafePort(serverPort, "服务端口");
+  const bindHost = host === DEFAULT_DEPLOY_HOST ? DEFAULT_DEPLOY_HOST : "0.0.0.0";
   const deployDir = path.join(REPO_ROOT, "server", "deploy");
   const readTemplate = (name) =>
     fs
       .readFileSync(path.join(deployDir, name), "utf8")
       .replace(/\r\n/g, "\n")
       .replaceAll("/home/blackcat-server", safeDir)
-      .replaceAll("0.0.0.0:8766", `0.0.0.0:${port}`);
+      .replaceAll("0.0.0.0:8765", `${bindHost}:${port}`);
 
   return {
     "run-blackcat-server.sh": readTemplate("run-blackcat-server.sh"),
@@ -136,7 +137,9 @@ export function parseArgs(argv, env = process.env) {
     user: env.DBSCOUT_DEPLOY_USER || DEFAULT_DEPLOY_USER,
     sshPort: assertSafePort(env.DBSCOUT_DEPLOY_SSH_PORT || DEFAULT_SSH_PORT, "SSH 端口"),
     remoteDir: assertSafeRemoteDir(env.DBSCOUT_REMOTE_DIR || DEFAULT_REMOTE_DIR),
-    serverPort: assertSafePort(env.DBSCOUT_SERVER_PORT || DEFAULT_SERVER_PORT, "服务端口"),
+    serverPort: env.DBSCOUT_SERVER_PORT
+      ? assertSafePort(env.DBSCOUT_SERVER_PORT, "服务端口")
+      : undefined,
     binaryPath: null,
     migrateDbPath: null,
     forceOverwriteDb: false,
@@ -200,6 +203,7 @@ export function parseArgs(argv, env = process.env) {
   if (!config.user) {
     throw new Error("SSH 用户名不能为空");
   }
+  config.serverPort ??= config.host === DEFAULT_DEPLOY_HOST ? DEFAULT_SERVER_PORT : 8765;
   return config;
 }
 
@@ -221,7 +225,7 @@ function printHelp() {
   --user <用户>           SSH 用户名（默认: ${DEFAULT_DEPLOY_USER}，环境变量 DBSCOUT_DEPLOY_USER）
   --ssh-port <端口>       SSH 端口（默认: ${DEFAULT_SSH_PORT}，环境变量 DBSCOUT_DEPLOY_SSH_PORT）
   --remote-dir <目录>     远端独立目录（默认: ${DEFAULT_REMOTE_DIR}，严禁指向 /home/gmserv）
-  --port <端口>           服务监听端口（默认: ${DEFAULT_SERVER_PORT}）
+  --port <端口>           服务监听端口（243 默认 ${DEFAULT_SERVER_PORT}，其他主机默认 8765）
   --force-overwrite-db    配合 --migrate-db，允许覆盖 243 上已有非空库（仍会先自动备份）
   --dry-run               仅校验本地文件并打印将要执行的步骤，不连接远端
   -h, --help              显示此帮助

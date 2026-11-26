@@ -4,13 +4,13 @@
     {
       "id": 1,
       "prompt": "执行黑猫打包流程。",
-      "expected_output": "在修改版本号或构建前，只询问一次本次 SVN 更新目录的完整路径。",
+      "expected_output": "在修改版本号或构建前，先询问本次 SVN 更新目录（含 navicat）和 SVN 源码目录两个完整路径，不静默读取缓存路径。",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "执行打包流程并同步，SVN 更新目录是 E:\\company-svn\\navicat-release。",
-      "expected_output": "不重复询问路径；验证工作副本，打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步本次文件，再把版本清单提交到 main 并 push。",
+      "prompt": "执行打包流程并同步，SVN 更新目录是 E:\\company-svn\\navicat-release，SVN 源码目录是 E:\\company-svn\\blackcat。",
+      "expected_output": "不重复询问路径；验证并 svn update 两个工作副本（任一更新失败立即停止），打主安装包，并在首次缺少 AI 清单时生成 AI v1，校验后同步安装包到更新目录，把版本清单提交到 main 并 push，再通过 npm run sync:svn -- --svn-dir <源码目录> --svn-update --head 同步最新源码（不自动 svn commit）。",
       "files": []
     },
     {
@@ -35,6 +35,12 @@
       "id": 6,
       "prompt": "给这个 skill 修改一下，只有当我说打包流程的时候才触发流程。",
       "expected_output": "仅修改 skill 规则，不因规则中的“打包流程”文字而开始构建或发版。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "执行打包流程，SVN 更新目录是 E:\\company-svn\\navicat-release，SVN 源码目录是 E:\\company-svn\\blackcat（此时 svn update 报错无法连接内网）。",
+      "expected_output": "在 svn update 报错时立即停止，不修改版本号、不开始构建、不跳过更新也不强制覆盖任何 SVN 文件，并如实报告错误。",
       "files": []
     }
   ]
