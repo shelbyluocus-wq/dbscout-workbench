@@ -50,6 +50,10 @@ watch(
   async (open) => {
     if (!open) return;
     mode.value = "login";
+    const remembered = String(props.account?.lastKnownUsername?.value || "").trim();
+    if (!username.value.trim() && remembered) {
+      username.value = remembered;
+    }
     localError.value = "";
     props.account?.clearError?.();
     await nextTick();

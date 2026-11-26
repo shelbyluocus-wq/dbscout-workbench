@@ -17,7 +17,10 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::account::{audit_actor_and_id, current_session, ensure_loaded, server_url};
+use crate::account::{
+    audit_actor_and_id, current_session, ensure_loaded, recover_unauthorized_session, server_url,
+    SessionRecovery,
+};
 use crate::audit::{self, AuditContext, PendingAudit, SOURCE_ROLLBACK, STRATEGY_MANUAL};
 use crate::audit_sync;
 use crate::backup::{self, SNAPSHOT_PROGRESS_EVENT};
@@ -236,7 +239,19 @@ pub async fn list_gm_backups(
             Some("请先在设置中登录黑猫账号，再读取 243 服务器定时备份".into()),
         ));
     };
-    Ok(fetch_gm_backup_list(&state.account.http, &base_url, &session.token, request).await)
+    let response =
+        fetch_gm_backup_list(&state.account.http, &base_url, &session.token, request).await;
+    if response.status == "unauthorized" {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            return Ok(
+                fetch_gm_backup_list(&state.account.http, &base_url, &refreshed.token, request)
+                    .await,
+            );
+        }
+    }
+    Ok(response)
 }
 
 pub async fn list_gm_backup_tables(
@@ -259,21 +274,37 @@ pub async fn list_gm_backup_tables(
         .append_pair("hour", request.hour.trim())
         .append_pair("fileName", request.file_name.trim());
 
-    let resp = state
+    let mut resp = state
         .account
         .http
-        .get(url)
+        .get(url.clone())
         .bearer_auth(&session.token)
         .timeout(TABLES_TIMEOUT)
         .send()
         .await
         .map_err(|error| format!("读取备份表列表失败: {error}"))?;
 
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            resp = state
+                .account
+                .http
+                .get(url)
+                .bearer_auth(&refreshed.token)
+                .timeout(TABLES_TIMEOUT)
+                .send()
+                .await
+                .map_err(|error| format!("读取备份表列表失败: {error}"))?;
+        }
+    }
+
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(match status {
-            StatusCode::UNAUTHORIZED => "登录状态已失效，请在设置中重新登录".into(),
+            StatusCode::UNAUTHORIZED => "登录状态已失效，请在设置中重新登录黑猫账号".into(),
             StatusCode::NOT_FOUND if body.trim().is_empty() => {
                 "243 中心服务暂不支持查看备份表列表或备份文件已被清理".into()
             }
@@ -437,18 +468,19 @@ pub async fn restore_gm_backup(
     );
 
     let extract_url = format!("{base_url}/backups/gm/extract");
-    let extract_resp = state
+    let extract_payload = ServerGmBackupExtractRequest {
+        date: request.date.trim(),
+        hour: request.hour.trim(),
+        file_name: request.file_name.trim(),
+        tables: &requested_tables,
+    };
+    let mut extract_resp = state
         .account
         .http
         .post(&extract_url)
         .bearer_auth(&session.token)
         .timeout(EXTRACT_TIMEOUT)
-        .json(&ServerGmBackupExtractRequest {
-            date: request.date.trim(),
-            hour: request.hour.trim(),
-            file_name: request.file_name.trim(),
-            tables: &requested_tables,
-        })
+        .json(&extract_payload)
         .send()
         .await
         .map_err(|error| {
@@ -465,6 +497,35 @@ pub async fn restore_gm_backup(
             format!("从 243 服务器提取备份失败: {error}")
         })?;
 
+    if extract_resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            extract_resp = state
+                .account
+                .http
+                .post(&extract_url)
+                .bearer_auth(&refreshed.token)
+                .timeout(EXTRACT_TIMEOUT)
+                .json(&extract_payload)
+                .send()
+                .await
+                .map_err(|error| {
+                    emit_restore_progress(
+                        app,
+                        &job_id,
+                        &request.connection_id,
+                        target_db,
+                        0,
+                        100,
+                        "failed",
+                        "从 243 服务器拉取备份失败",
+                    );
+                    format!("从 243 服务器提取备份失败: {error}")
+                })?;
+        }
+    }
+
     if !extract_resp.status().is_success() {
         let status = extract_resp.status();
         let body = extract_resp.text().await.unwrap_or_default();
@@ -478,6 +539,9 @@ pub async fn restore_gm_backup(
             "failed",
             "提取备份失败",
         );
+        if status == StatusCode::UNAUTHORIZED {
+            return Err("登录状态已失效，请在设置中重新登录黑猫账号".into());
+        }
         let detail = body.trim();
         return Err(if detail.is_empty() {
             format!("提取 243 备份失败 ({status})")

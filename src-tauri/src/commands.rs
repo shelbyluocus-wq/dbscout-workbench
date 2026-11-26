@@ -10213,34 +10213,33 @@ pub async fn get_account(
 }
 
 /// Non-blocking startup probe: loads persisted account settings (defaulting to
-/// the team central server URL when unset) and checks whether the server is
-/// reachable when no user session is signed in yet.
+/// the team central server URL when unset), verifies any saved session against
+/// `/me` (silently re-logging in on 401 or clearing stale sessions whose
+/// account does not exist on the current server), and checks reachability when
+/// signed out.
 #[tauri::command]
 pub async fn probe_account_server(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<AccountStartupProbeView, String> {
     let _ = crate::account::ensure_loaded(&app, &state).await;
-    let (server_url, session) = {
+    let server_url = {
         let config = state.account.config.lock().await;
-        (config.server_url.clone(), config.session.clone())
+        config.server_url.clone()
     };
-    if session.is_some() {
+    let Some(base_url) = crate::account::server_url(&state).await else {
+        let session = crate::account::current_session(&state).await;
         return Ok(AccountStartupProbeView {
             server_url,
             session,
             reachable: false,
         });
-    }
-    let reachable = match crate::account::server_url(&state).await {
-        Some(base_url) => {
-            crate::account::probe_server_reachable(&state.account.http, &base_url).await
-        }
-        None => false,
     };
+    let (session, reachable) =
+        crate::account::validate_or_recover_session(&app, &state, &base_url).await;
     Ok(AccountStartupProbeView {
         server_url,
-        session: None,
+        session,
         reachable,
     })
 }
@@ -10252,12 +10251,37 @@ pub async fn set_account_server(
     state: State<'_, AppState>,
 ) -> Result<AccountView, String> {
     let _ = crate::account::ensure_loaded(&app, &state).await;
-    let mut config = state.account.config.lock().await;
-    config.server_url = Some(request.server_url.trim().to_string());
-    config.server_url_migration_version = Some(crate::account::SERVER_URL_MIGRATION_VERSION);
-    let snapshot = config.clone();
-    drop(config);
+    let next_url = request.server_url.trim().to_string();
+    let (snapshot, changed_url, had_session) = {
+        let mut config = state.account.config.lock().await;
+        let prev_normalized = config
+            .server_url
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
+        let next_normalized = next_url.trim_end_matches('/').to_string();
+        let changed = !prev_normalized.eq_ignore_ascii_case(&next_normalized);
+        config.server_url = Some(next_url.clone());
+        config.server_url_migration_version = Some(crate::account::SERVER_URL_MIGRATION_VERSION);
+        if next_normalized.is_empty() {
+            config.session = None;
+        }
+        let had_session = config.session.is_some();
+        (config.clone(), changed, had_session)
+    };
     crate::account::save_account(&app, &snapshot)?;
+
+    if changed_url && had_session && !next_url.trim_end_matches('/').is_empty() {
+        let (session, _) =
+            crate::account::validate_or_recover_session(&app, &state, &next_url).await;
+        return Ok(AccountView {
+            server_url: snapshot.server_url,
+            session,
+        });
+    }
+
     Ok(AccountView {
         server_url: snapshot.server_url,
         session: snapshot.session,
@@ -10424,7 +10448,7 @@ pub async fn list_shared_audit_logs(
         .join("&");
     let url = format!("{base_url}/audit?{query}");
 
-    let resp = state
+    let mut resp = state
         .account
         .http
         .get(&url)
@@ -10432,8 +10456,25 @@ pub async fn list_shared_audit_logs(
         .send()
         .await
         .map_err(|e| format!("查询共享变更日志失败: {e}"))?;
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let crate::account::SessionRecovery::Refreshed(refreshed) =
+            crate::account::recover_unauthorized_session(&app, &state, &base_url, &session).await
+        {
+            resp = state
+                .account
+                .http
+                .get(&url)
+                .bearer_auth(&refreshed.token)
+                .send()
+                .await
+                .map_err(|e| format!("查询共享变更日志失败: {e}"))?;
+        }
+    }
     if !resp.status().is_success() {
         let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err("登录状态已失效，请在设置中重新登录黑猫账号".into());
+        }
         let text = resp.text().await.unwrap_or_default();
         return Err(format!("中心服务返回 {status}: {text}"));
     }
@@ -10507,17 +10548,47 @@ pub async fn list_shared_table_external_changes(
         }
         None => None,
     };
-    crate::external_changes::fetch_shared(
+    let limit = request.limit.unwrap_or(100);
+    let offset = request.offset.unwrap_or(0);
+    match crate::external_changes::fetch_shared_outcome(
         &state.account.http,
         &base_url,
         &session.token,
         server_key.as_deref(),
         &request.database,
         &request.table_name,
-        request.limit.unwrap_or(100),
-        request.offset.unwrap_or(0),
+        limit,
+        offset,
     )
-    .await
+    .await?
+    {
+        crate::external_changes::SharedFetchOutcome::Ok(rows) => Ok(rows),
+        crate::external_changes::SharedFetchOutcome::Unauthorized(_) => {
+            if let crate::account::SessionRecovery::Refreshed(refreshed) =
+                crate::account::recover_unauthorized_session(&app, &state, &base_url, &session)
+                    .await
+            {
+                return match crate::external_changes::fetch_shared_outcome(
+                    &state.account.http,
+                    &base_url,
+                    &refreshed.token,
+                    server_key.as_deref(),
+                    &request.database,
+                    &request.table_name,
+                    limit,
+                    offset,
+                )
+                .await?
+                {
+                    crate::external_changes::SharedFetchOutcome::Ok(rows) => Ok(rows),
+                    crate::external_changes::SharedFetchOutcome::Unauthorized(_) => {
+                        Err("登录状态已失效，请在设置中重新登录黑猫账号".into())
+                    }
+                };
+            }
+            Err("登录状态已失效，请在设置中重新登录黑猫账号".into())
+        }
+    }
 }
 
 /// Fast, bounded single-table MySQL observation triggered when opening or

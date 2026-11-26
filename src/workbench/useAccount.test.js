@@ -239,3 +239,103 @@ test("probeStartupLogin prompts only when server is reachable and user is logged
   assert.equal(res4.shouldPrompt, false);
   assert.equal(failingAcc.lastError.value, "");
 });
+
+test("account-session-changed event clears expired session, remembers username, and fires onSessionChanged", async () => {
+  const listeners = new Map();
+  const backend = createBackend({ serverUrl: "http://192.168.1.243:8766" });
+  let changed = 0;
+  const account = useAccount({
+    ...backend,
+    listen(eventName, handler) {
+      if (!listeners.has(eventName)) listeners.set(eventName, new Set());
+      listeners.get(eventName).add(handler);
+      return () => listeners.get(eventName)?.delete(handler);
+    },
+    onSessionChanged: () => { changed += 1; },
+  });
+
+  await account.register("liuyuesong", "刘岳松");
+  assert.equal(account.isLoggedIn.value, true);
+  assert.equal(account.lastKnownUsername.value, "liuyuesong");
+  assert.equal(changed, 1);
+
+  // Flush microtask so async listen registration settles.
+  await Promise.resolve();
+
+  // Backend emits session cleared after 401 + 404.
+  for (const handler of listeners.get("account-session-changed") || []) {
+    handler({ payload: { serverUrl: "http://192.168.1.243:8766", session: null } });
+  }
+  assert.equal(account.isLoggedIn.value, false);
+  assert.equal(account.currentUser.value, null);
+  assert.equal(account.lastKnownUsername.value, "liuyuesong");
+  assert.equal(changed, 2);
+
+  // Backend emits silent re-login refresh with a new token.
+  for (const handler of listeners.get("account-session-changed") || []) {
+    handler({
+      payload: {
+        serverUrl: "http://192.168.1.243:8766",
+        session: { userId: "u-2", username: "liuyuesong", displayName: "刘岳松", token: "tok-fresh" },
+      },
+    });
+  }
+  assert.equal(account.isLoggedIn.value, true);
+  assert.equal(account.currentUser.value.token, "tok-fresh");
+  assert.equal(changed, 3);
+
+  // Explicit logout clears lastKnownUsername.
+  await account.logout();
+  assert.equal(account.isLoggedIn.value, false);
+  assert.equal(account.lastKnownUsername.value, "");
+  assert.equal(changed, 4);
+
+  account.dispose();
+});
+
+test("setServer and probeStartupLogin notify when backend invalidates a stale session", async () => {
+  let changed = 0;
+  let current = {
+    serverUrl: "http://192.168.1.243:8766",
+    session: { userId: "u-old", username: "alice", displayName: "Alice", token: "stale-tok" },
+  };
+  const account = useAccount({
+    listen: () => () => {},
+    onSessionChanged: () => { changed += 1; },
+    invokeWorkbench(command) {
+      if (command === "get_account") return Promise.resolve({ ...current });
+      if (command === "probe_account_server") {
+        current = { serverUrl: current.serverUrl, session: null };
+        return Promise.resolve({ ...current, reachable: true });
+      }
+      if (command === "set_account_server") {
+        current = { serverUrl: "http://10.0.0.9:8766", session: null };
+        return Promise.resolve({ ...current });
+      }
+      return Promise.resolve(null);
+    },
+  });
+
+  await account.loadAccount();
+  assert.equal(account.isLoggedIn.value, true);
+  assert.equal(account.lastKnownUsername.value, "alice");
+  assert.equal(changed, 0);
+
+  const probe = await account.probeStartupLogin();
+  assert.equal(probe.shouldPrompt, true);
+  assert.equal(account.isLoggedIn.value, false);
+  assert.equal(account.lastKnownUsername.value, "alice");
+  assert.equal(changed, 1);
+
+  // Restore session and verify setServer clearing it also notifies.
+  account.account.value = {
+    serverUrl: "http://192.168.1.243:8766",
+    session: { userId: "u-old", username: "alice", displayName: "Alice", token: "stale-tok" },
+  };
+  await account.setServer("http://10.0.0.9:8766");
+  assert.equal(account.isLoggedIn.value, false);
+  assert.equal(account.serverUrl.value, "http://10.0.0.9:8766");
+  assert.equal(changed, 2);
+
+  account.dispose();
+});
