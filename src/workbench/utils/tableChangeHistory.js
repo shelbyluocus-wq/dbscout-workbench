@@ -266,10 +266,14 @@ export function mergeTableAuditEntries({
   for (const raw of Array.isArray(localEntries) ? localEntries : []) {
     if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
     const clientId = String(raw.clientId || "").trim();
+    const operationId = String(raw.operationId ?? raw.operation_id ?? "").trim();
+    const operationSize = Math.max(0, Number(raw.operationSize ?? raw.operation_size) || 0);
     const actorInfo = normalizeActor(raw, selfLabel);
     const normalized = {
       ...raw,
       clientId,
+      operationId,
+      operationSize,
       tsMs: parseAuditTimestampMs(raw.ts),
       actor: actorInfo.actor,
       username: actorInfo.username,
@@ -283,20 +287,26 @@ export function mergeTableAuditEntries({
     }
   }
 
-  for (const raw of Array.isArray(sharedEntries) ? sharedEntries : []) {
+  const safeShared = Array.isArray(sharedEntries) ? sharedEntries : [];
+  for (let sharedIndex = 0; sharedIndex < safeShared.length; sharedIndex += 1) {
+    const raw = safeShared[sharedIndex];
     if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
     const entryServerKey = canonicalRealServerKey(raw.serverKey);
     if (wantedServerKey && entryServerKey && entryServerKey !== wantedServerKey) {
       continue;
     }
     const clientId = String(raw.clientId || "").trim();
+    const operationId = String(raw.operationId ?? raw.operation_id ?? "").trim();
+    const operationSize = Math.max(0, Number(raw.operationSize ?? raw.operation_size) || 0);
     const actorInfo = normalizeActor(raw, selfLabel);
     const existing = clientId ? byClientId.get(clientId) : null;
     if (existing) {
       byClientId.set(clientId, {
         ...existing,
+        operationId: existing.operationId || operationId,
+        operationSize: Math.max(existing.operationSize || 0, operationSize),
         // Prefer central-server display name/username while preserving local
-        // rowIdentity, sessionId, forwardSql, and notes.
+        // rowIdentity, forwardSql, and notes.
         displayName: raw.displayName || existing.displayName,
         username: actorInfo.username || existing.username,
         actor: actorInfo.isSelfFallback ? existing.actor : actorInfo.actor,
@@ -307,11 +317,14 @@ export function mergeTableAuditEntries({
       const normalized = {
         ...raw,
         clientId,
+        operationId,
+        operationSize,
         tsMs: parseAuditTimestampMs(raw.ts),
         actor: actorInfo.actor,
         username: actorInfo.username,
         isSelfFallback: actorInfo.isSelfFallback,
         origin: "shared",
+        _sharedOrder: sharedIndex,
       };
       if (clientId) {
         byClientId.set(clientId, normalized);
@@ -326,24 +339,83 @@ export function mergeTableAuditEntries({
     if (b.tsMs !== a.tsMs) return b.tsMs - a.tsMs;
     const aId = Number(a.id) || 0;
     const bId = Number(b.id) || 0;
-    if (bId !== aId) return bId - aId;
+    if (aId > 0 && bId > 0 && bId !== aId) return bId - aId;
+    if (Number.isInteger(a._sharedOrder) && Number.isInteger(b._sharedOrder) && a._sharedOrder !== b._sharedOrder) {
+      return a._sharedOrder - b._sharedOrder;
+    }
     return String(b.clientId || "").localeCompare(String(a.clientId || ""));
   });
-  return merged;
+  return merged.map(({ _sharedOrder, ...entry }) => entry);
 }
 
 function sameRevisionBucket(currentGroup, entry, windowMs) {
   const last = currentGroup._lastEntry;
   if (!last) return false;
-  if (currentGroup.items.length >= 500) return false;
-  if (last.sessionId && entry.sessionId && last.sessionId === entry.sessionId) {
-    return true;
+  const lastOpId = String(last.operationId || "").trim();
+  const entryOpId = String(entry.operationId || "").trim();
+  if (lastOpId || entryOpId) {
+    return Boolean(lastOpId && entryOpId && lastOpId === entryOpId);
   }
-  const sameActor = last.actor.toLowerCase() === entry.actor.toLowerCase();
+  const sameActor = String(last.actor || "").toLowerCase() === String(entry.actor || "").toLowerCase();
   const sameSource = String(last.source || "") === String(entry.source || "");
   const sameRollback = Boolean(last.isRollback) === Boolean(entry.isRollback);
   if (!sameActor || !sameSource || !sameRollback) return false;
-  return Math.abs(last.tsMs - entry.tsMs) <= windowMs;
+  return Math.abs((last.tsMs || 0) - (entry.tsMs || 0)) <= windowMs;
+}
+
+/**
+ * Compute the unclosed boundary horizon for a paginated raw audit stream
+ * ordered newest-first (`ts DESC`). When `hasMore` is true, the last revision
+ * bucket touching the page tail may continue on the next page, so its maximum
+ * timestamp defines the safe horizon above which this stream is 100% complete.
+ */
+export function inspectStreamRevisionHorizon(
+  rawEntries = [],
+  hasMore = false,
+  { selfLabel = "我", windowMs = DEFAULT_GROUP_WINDOW_MS } = {},
+) {
+  if (!hasMore) {
+    return {
+      groupCount: 0,
+      closedGroupCount: 0,
+      horizonMs: Number.NEGATIVE_INFINITY,
+    };
+  }
+  const groups = [];
+  for (const raw of Array.isArray(rawEntries) ? rawEntries : []) {
+    if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
+    const actorInfo = normalizeActor(raw, selfLabel);
+    const entry = {
+      operationId: String(raw.operationId ?? raw.operation_id ?? "").trim(),
+      actor: actorInfo.actor,
+      source: raw.source || "",
+      isRollback: Boolean(raw.isRollback),
+      tsMs: parseAuditTimestampMs(raw.ts),
+    };
+    const current = groups[groups.length - 1];
+    if (current && sameRevisionBucket(current, entry, windowMs)) {
+      current._lastEntry = entry;
+      if (entry.tsMs > current.maxTsMs) current.maxTsMs = entry.tsMs;
+      continue;
+    }
+    groups.push({
+      maxTsMs: entry.tsMs,
+      _lastEntry: entry,
+    });
+  }
+  if (groups.length <= 1) {
+    return {
+      groupCount: groups.length,
+      closedGroupCount: 0,
+      horizonMs: Number.POSITIVE_INFINITY,
+    };
+  }
+  const tailGroup = groups[groups.length - 1];
+  return {
+    groupCount: groups.length,
+    closedGroupCount: groups.length - 1,
+    horizonMs: tailGroup.maxTsMs,
+  };
 }
 
 /**
@@ -356,6 +428,8 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
 
   for (const entry of entries) {
     const parsed = extractEntryChanges(entry);
+    const entryOpId = String(entry.operationId ?? entry.operation_id ?? "").trim();
+    const entryOpSize = Math.max(0, Number(entry.operationSize ?? entry.operation_size) || 0);
     const detailItem = {
       id: entry.clientId || `local-${entry.id || revisions.length}`,
       ts: entry.ts,
@@ -376,6 +450,12 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
     if (current && sameRevisionBucket(current, entry, windowMs)) {
       current.items.push(detailItem);
       current._lastEntry = entry;
+      if (entryOpSize > current.expectedEntryCount) {
+        current.expectedEntryCount = entryOpSize;
+      }
+      if (entry._forceIncomplete) {
+        current._forceIncomplete = true;
+      }
       accumulateRevisionCounts(current, detailItem);
       if (current.origin !== entry.origin) current.origin = "merged";
       continue;
@@ -385,6 +465,7 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
       id: `rev-${detailItem.id}-${revisions.length}`,
       kind: "audit",
       isExternal: false,
+      operationId: entryOpId,
       ts: entry.ts,
       tsMs: entry.tsMs,
       actor: entry.actor,
@@ -396,14 +477,22 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
       counts: { update: 0, insert: 0, delete: 0, ddl: 0 },
       fieldChangeCount: 0,
       entryCount: 0,
+      expectedEntryCount: entryOpSize,
       items: [detailItem],
+      _forceIncomplete: Boolean(entry._forceIncomplete),
       _lastEntry: entry,
     };
     accumulateRevisionCounts(rev, detailItem);
     revisions.push(rev);
   }
 
-  return revisions.map(({ _lastEntry, ...rev }) => rev);
+  return revisions.map(({ _lastEntry, _forceIncomplete, ...rev }) => ({
+    ...rev,
+    isIncomplete: Boolean(
+      _forceIncomplete
+      || (rev.expectedEntryCount > 0 && rev.entryCount < rev.expectedEntryCount),
+    ),
+  }));
 }
 
 function accumulateRevisionCounts(rev, item) {

@@ -22,20 +22,46 @@ const s = computed(() => props.history.state);
 const SOURCES = new Set(["import", "grid", "rollback", "ddl", "agent", "sql_console"]);
 const stamp = (value) => new Date(value).toLocaleString(language.intlLocale.value, { hour12: false });
 const connectionLabel = (row) => {
-  const raw = props.connections.find((c) => c.id === row.connectionId)?.label || row.connectionId;
-  return resolveConnectionAlias(row.connectionId, raw);
+  const matched = props.connections.find((c) => c.id === row.connectionId);
+  if (matched) {
+    return resolveConnectionAlias(matched.id, matched.label || matched.id);
+  }
+  if (row.serverKey) {
+    const serverAddr = String(row.serverKey).replace(/^[a-z]+:\/\//i, "");
+    const byHost = props.connections.find((c) => {
+      const hostPort = c.host ? `${c.host}:${c.port || 3306}` : "";
+      return hostPort && hostPort.toLowerCase() === serverAddr.toLowerCase();
+    });
+    if (byHost) {
+      return resolveConnectionAlias(byHost.id, byHost.label || byHost.id);
+    }
+    if (serverAddr) return serverAddr;
+  }
+  return resolveConnectionAlias(row.connectionId, row.host || row.connectionId);
 };
 let didAutoSelect = false;
 watch(
+  () => [props.preferredConnectionId, props.preferredDatabase, props.preferredTable],
+  () => {
+    didAutoSelect = false;
+  },
+);
+watch(
   () => s.value.tables,
   (tables) => {
-    if (didAutoSelect || s.value.selected || !Array.isArray(tables) || tables.length === 0) return;
+    if (!Array.isArray(tables) || tables.length === 0) {
+      if (!s.value.selected) didAutoSelect = false;
+      return;
+    }
+    if (didAutoSelect || s.value.selected) return;
     didAutoSelect = true;
-    const preferred = props.preferredTable
+    const wantTable = String(props.preferredTable || "").trim().toLowerCase();
+    const wantDb = String(props.preferredDatabase || "").trim().toLowerCase();
+    const preferred = wantTable
       ? tables.find((row) => (
-          row.tableName === props.preferredTable
-          && (!props.preferredDatabase || row.database === props.preferredDatabase)
-          && (!props.preferredConnectionId || row.connectionId === props.preferredConnectionId)
+          String(row.tableName || "").toLowerCase() === wantTable
+          && (!wantDb || String(row.database || "").toLowerCase() === wantDb)
+          && (readOnly.value || !props.preferredConnectionId || row.connectionId === props.preferredConnectionId)
         ))
       : null;
     void props.history.selectTable(preferred || tables[0]);

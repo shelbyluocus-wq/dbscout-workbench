@@ -910,10 +910,230 @@ test("TableChangeHistoryView renders external nodes cleanly and all 3 i18n local
     "tableHistory.external.factDiff",
     "tableHistory.external.factDiffUnavailable",
     "tableHistory.external.jumpNearestAudit",
+    "tableHistory.incompleteSyncNotice",
+    "tableHistory.incompleteLargeNotice",
+    "tableHistory.restore.reasonIncompleteRevision",
   ];
   for (const key of requiredKeys) {
     assert.ok(zhCN[key], `zhCN missing ${key}`);
     assert.ok(zhTW[key], `zhTW missing ${key}`);
     assert.ok(en[key], `en missing ${key}`);
   }
+});
+
+test("useTableChangeHistory drains multi-page 4500-row Excel imports without 200/500 truncation and restores all 4500 rows", async () => {
+  const TOTAL_ROWS = 4500;
+  const importTs = "2026-11-26T08:53:15.000Z";
+  const allSharedEntries = [];
+  for (let id = TOTAL_ROWS; id >= 1; id -= 1) {
+    allSharedEntries.push({
+      clientId: `imp-${id}`,
+      ts: importTs,
+      username: "hyp",
+      displayName: "黄亚鹏",
+      operation: "UPDATE",
+      rowIdentity: { ID: String(id) },
+      oldValue: JSON.stringify({ HideBag: "2" }),
+      newValue: JSON.stringify({ HideBag: "1" }),
+      source: "import",
+      status: "committed",
+      operationId: "op-goodsprop-4500",
+      operationSize: TOTAL_ROWS,
+    });
+  }
+  const liveRows = Array.from({ length: TOTAL_ROWS }, (_, idx) => ({
+    ID: String(idx + 1),
+    HideBag: "1",
+    OpenCond: idx + 1 === 15 ? "and|B232" : "",
+  }));
+
+  let sharedPageCalls = 0;
+  const history = useTableChangeHistory({
+    isLoggedIn: () => true,
+    invokeWorkbench(command, payload) {
+      if (command === "list_audit_logs") return Promise.resolve([]);
+      if (command === "list_shared_audit_logs") {
+        sharedPageCalls += 1;
+        const { offset = 0, limit = 200 } = payload.request || {};
+        // Mirror backend/server 2000-row max per request
+        const effectiveLimit = Math.min(limit, 2000);
+        return Promise.resolve(allSharedEntries.slice(offset, offset + effectiveLimit));
+      }
+      if (command === "open_table_session") {
+        return Promise.resolve({
+          sessionId: "sess-goodsprop",
+          primaryKeys: ["ID"],
+          columns: [
+            { columnName: "ID", columnComment: "道具id", isPrimaryKey: true },
+            { columnName: "HideBag", columnComment: "是否隐藏", isPrimaryKey: false },
+            { columnName: "OpenCond", columnComment: "开放条件", isPrimaryKey: false },
+          ],
+          rows: liveRows.slice(0, 1000),
+          nullCells: [],
+          hasMore: true,
+        });
+      }
+      if (command === "fetch_table_page") {
+        const { offset = 0, pageSize = 1000 } = payload.request || {};
+        const slice = liveRows.slice(offset, offset + pageSize);
+        return Promise.resolve({
+          rows: slice,
+          nullCells: [],
+          hasMore: offset + slice.length < liveRows.length,
+        });
+      }
+      if (command === "close_table_session") return Promise.resolve(true);
+      return Promise.resolve([]);
+    },
+  });
+
+  await history.loadForTable({
+    connectionId: "mysql-1",
+    database: "newsg_4cfg",
+    tableName: "goodsprop",
+  });
+
+  assert.equal(sharedPageCalls, 3, "should drain 2000 + 2000 + 500 across 3 pages automatically");
+  assert.equal(history.hasMore.value, false);
+  assert.equal(history.state.liveTruncated, false, "4500-row table fits cleanly inside raised live row window");
+  assert.equal(history.state.revisions.length, 1);
+  assert.equal(history.selectedRevision.value?.actor, "黄亚鹏");
+  assert.equal(history.selectedRevision.value?.counts.update, TOTAL_ROWS);
+  assert.equal(history.selectedRevision.value?.isIncomplete, false);
+  assert.equal(history.snapshot.value.totalRows, TOTAL_ROWS);
+  assert.equal(history.snapshot.value.changedCount, TOTAL_ROWS);
+  assert.equal(history.displayRows.value[0].before.HideBag, "2");
+  assert.equal(history.displayRows.value[0].after.HideBag, "1");
+  assert.equal(history.displayRows.value[TOTAL_ROWS - 1].before.HideBag, "2");
+  assert.equal(history.displayRows.value[TOTAL_ROWS - 1].after.HideBag, "1");
+
+  const restorePlan = buildHistoryRestorePlan({
+    columns: history.state.liveColumns,
+    primaryKeys: history.state.livePrimaryKeys,
+    liveRows: history.state.liveRows,
+    revisions: history.state.revisions,
+    targetIndex: 0,
+    target: "before",
+  });
+  assert.equal(restorePlan.canRestore, true);
+  assert.equal(restorePlan.counts.update, TOTAL_ROWS);
+  assert.equal(restorePlan.operations.length, TOTAL_ROWS);
+});
+
+test("useTableChangeHistory holds back boundary-split revisions until loadMore completes them", async () => {
+  // 15 distinct Excel imports (each 300 rows = 4500 rows total), 10 minutes apart,
+  // WITHOUT operationId (simulating legacy/un-migrated shared entries).
+  const baseMs = Date.parse("2026-11-26T10:00:00Z");
+  const allShared = [];
+  for (let revNum = 0; revNum < 15; revNum += 1) {
+    const ts = new Date(baseMs - revNum * 600_000).toISOString();
+    for (let row = 1; row <= 300; row += 1) {
+      allShared.push({
+        clientId: `legacy-${revNum}-${row}`,
+        ts,
+        username: "hyp",
+        displayName: "黄亚鹏",
+        operation: "UPDATE",
+        rowIdentity: { ID: String(row) },
+        columnName: "HideBag",
+        oldValue: "2",
+        newValue: "1",
+        source: "import",
+        status: "committed",
+      });
+    }
+  }
+
+  const history = useTableChangeHistory({
+    isLoggedIn: () => true,
+    invokeWorkbench(command, payload) {
+      if (command === "list_audit_logs") return Promise.resolve([]);
+      if (command === "list_shared_audit_logs") {
+        const { offset = 0, limit = 2000 } = payload.request || {};
+        return Promise.resolve(allShared.slice(offset, offset + Math.min(limit, 2000)));
+      }
+      if (command === "open_table_session") {
+        return Promise.resolve({
+          sessionId: "sess-1",
+          primaryKeys: ["ID"],
+          columns: [
+            { columnName: "ID", isPrimaryKey: true },
+            { columnName: "HideBag", isPrimaryKey: false },
+          ],
+          rows: [{ ID: "1", HideBag: "1" }],
+          hasMore: false,
+        });
+      }
+      if (command === "close_table_session") return Promise.resolve(true);
+      return Promise.resolve([]);
+    },
+  });
+
+  await history.loadForTable({
+    connectionId: "mysql-1",
+    database: "newsg_4cfg",
+    tableName: "goodsprop",
+  });
+
+  // First 2 pages (4000 rows) cover 13 full 300-row imports (3900 rows) + 100 rows of import #14.
+  // Import #14 MUST be held back rather than shown as a misleading "改 100"!
+  assert.equal(history.state.revisions.length, 13);
+  assert.ok(
+    history.state.revisions.every((rev) => rev.counts.update === 300),
+    "every visible revision must have its complete 300-row count",
+  );
+  assert.equal(history.hasMore.value, true);
+
+  await history.loadMore();
+  assert.equal(history.state.revisions.length, 15);
+  assert.ok(history.state.revisions.every((rev) => rev.counts.update === 300));
+  assert.equal(history.hasMore.value, false);
+});
+
+test("groupAuditRevisions keeps >500-row imports whole and separates distinct operationIds at identical timestamps", () => {
+  const ts = "2026-11-26T08:53:15.000Z";
+  const localEntries = [];
+  for (let i = 1; i <= 650; i += 1) {
+    localEntries.push({
+      id: i,
+      clientId: `opA-${i}`,
+      ts,
+      operation: "UPDATE",
+      columnName: "Val",
+      oldValue: "1",
+      newValue: "2",
+      rowIdentity: { ID: String(i) },
+      source: "import",
+      status: "committed",
+      actor: "黄亚鹏",
+      operationId: "op-batch-a",
+      operationSize: 650,
+    });
+  }
+  for (let i = 1; i <= 620; i += 1) {
+    localEntries.push({
+      id: 1000 + i,
+      clientId: `opB-${i}`,
+      ts,
+      operation: "UPDATE",
+      columnName: "Val",
+      oldValue: "2",
+      newValue: "3",
+      rowIdentity: { ID: String(i) },
+      source: "import",
+      status: "committed",
+      actor: "黄亚鹏",
+      operationId: "op-batch-b",
+      operationSize: 620,
+    });
+  }
+
+  const revisions = groupAuditRevisions(mergeTableAuditEntries({ localEntries }));
+  assert.equal(revisions.length, 2);
+  assert.equal(revisions[0].operationId, "op-batch-b");
+  assert.equal(revisions[0].counts.update, 620);
+  assert.equal(revisions[0].isIncomplete, false);
+  assert.equal(revisions[1].operationId, "op-batch-a");
+  assert.equal(revisions[1].counts.update, 650);
+  assert.equal(revisions[1].isIncomplete, false);
 });

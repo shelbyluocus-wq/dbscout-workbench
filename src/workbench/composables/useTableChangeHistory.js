@@ -5,6 +5,7 @@ import {
   detectExternalNewerModification,
   findNewerExternalRevision,
   groupAuditRevisions,
+  inspectStreamRevisionHorizon,
   mergeTableAuditEntries,
   mergeTableExternalChanges,
   mergeTimelineRevisions,
@@ -16,9 +17,11 @@ import {
   searchFullTableComparisonRows,
 } from "../utils/tableHistorySnapshot.js";
 
-const AUDIT_PAGE_LIMIT = 200;
-const LIVE_PAGE_SIZE = 500;
-export const DEFAULT_MAX_LIVE_ROWS = 3000;
+const AUDIT_PAGE_LIMIT = 2000;
+const REVISIONS_PER_BATCH = 10;
+const MAX_PAGES_PER_BATCH = 60;
+const LIVE_PAGE_SIZE = 1000;
+export const DEFAULT_MAX_LIVE_ROWS = 10000;
 
 /**
  * Per-tab table change-history & synchronized full-table before/after diff state.
@@ -50,6 +53,7 @@ export function useTableChangeHistory({
     sharedOffset: 0,
     localHasMore: false,
     sharedHasMore: false,
+    hasHeldBackRevisions: false,
     rawLocal: [],
     rawShared: [],
     rawLocalExternal: [],
@@ -234,15 +238,57 @@ export function useTableChangeHistory({
     return detectExternalNewerModification(effectiveTableMeta.value, auditOnly);
   });
 
-  const hasMore = computed(() => state.localHasMore || state.sharedHasMore);
+  const hasMore = computed(() => (
+    state.localHasMore || state.sharedHasMore || state.hasHeldBackRevisions
+  ));
 
-  function recomputeRevisions() {
+  function buildAuditRevisionsSlice({ allowIncompleteFallback = false } = {}) {
+    const selfLabel = getSelfLabel();
     const merged = mergeTableAuditEntries({
       localEntries: state.rawLocal,
       sharedEntries: state.rawShared,
-      selfLabel: getSelfLabel(),
+      selfLabel,
     });
-    const auditRevisions = groupAuditRevisions(merged);
+    const allAuditRevisions = groupAuditRevisions(merged);
+    if (!state.localHasMore && !state.sharedHasMore) {
+      return {
+        auditRevisions: allAuditRevisions,
+        hasHeldBack: false,
+        localHorizon: { horizonMs: Number.NEGATIVE_INFINITY },
+        sharedHorizon: { horizonMs: Number.NEGATIVE_INFINITY },
+      };
+    }
+
+    const localHorizon = inspectStreamRevisionHorizon(state.rawLocal, state.localHasMore, { selfLabel });
+    const sharedHorizon = inspectStreamRevisionHorizon(state.rawShared, state.sharedHasMore, { selfLabel });
+    const safeHorizonMs = Math.max(localHorizon.horizonMs, sharedHorizon.horizonMs);
+
+    const completePrefix = allAuditRevisions.filter((rev) => rev.tsMs > safeHorizonMs);
+    if (completePrefix.length > 0 || !allowIncompleteFallback) {
+      return {
+        auditRevisions: completePrefix,
+        hasHeldBack: completePrefix.length < allAuditRevisions.length,
+        localHorizon,
+        sharedHorizon,
+      };
+    }
+
+    // Safety fallback if a single extraordinary operation exceeded MAX_PAGES_PER_BATCH:
+    // surface what is loaded so the screen is not blank, but flag unclosed boundary
+    // revisions as incomplete so partial restore is strictly blocked.
+    return {
+      auditRevisions: allAuditRevisions.map((rev) => (
+        rev.tsMs <= safeHorizonMs ? { ...rev, isIncomplete: true } : rev
+      )),
+      hasHeldBack: false,
+      localHorizon,
+      sharedHorizon,
+    };
+  }
+
+  function recomputeRevisions({ allowIncompleteFallback = false } = {}) {
+    const { auditRevisions, hasHeldBack } = buildAuditRevisionsSlice({ allowIncompleteFallback });
+    state.hasHeldBackRevisions = hasHeldBack;
     const localExternal = state.observedExternal
       ? [state.observedExternal, ...state.rawLocalExternal]
       : state.rawLocalExternal;
@@ -252,7 +298,10 @@ export function useTableChangeHistory({
       tableMeta: effectiveTableMeta.value,
       auditRevisions,
     });
-    state.revisions = mergeTimelineRevisions(auditRevisions, externalRevisions);
+    const visibleExternal = (state.localHasMore || state.sharedHasMore) && auditRevisions.length > 0
+      ? externalRevisions.filter((ext) => ext.tsMs >= (auditRevisions[auditRevisions.length - 1]?.tsMs || 0))
+      : externalRevisions;
+    state.revisions = mergeTimelineRevisions(auditRevisions, visibleExternal);
     if (
       state.selectedRevisionId
       && state.revisions.some((rev) => rev.id === state.selectedRevisionId)
@@ -357,6 +406,11 @@ export function useTableChangeHistory({
   async function fetchAuditBatch({ append = false, generation } = {}) {
     if (!state.tableName || !state.database) return;
     const activeGen = generation ?? (append ? loadGeneration : ++loadGeneration);
+    const previousAuditCount = append
+      ? state.revisions.filter((rev) => !rev.isExternal).length
+      : 0;
+    const targetAuditCount = previousAuditCount + REVISIONS_PER_BATCH;
+
     if (append) {
       if (state.loading || state.loadingMore || !hasMore.value) return;
       state.loadingMore = true;
@@ -368,6 +422,7 @@ export function useTableChangeHistory({
       state.sharedOffset = 0;
       state.localHasMore = false;
       state.sharedHasMore = false;
+      state.hasHeldBackRevisions = false;
       state.rawLocal = [];
       state.rawShared = [];
       state.rawLocalExternal = [];
@@ -381,35 +436,37 @@ export function useTableChangeHistory({
     }
 
     const signedIn = Boolean(isLoggedIn());
-    const shouldLoadLocal = !append || state.localHasMore;
-    const shouldLoadShared = signedIn && (!append || state.sharedHasMore);
+    if (!signedIn) {
+      state.sharedStatus = "logged-out";
+      state.sharedHasMore = false;
+    }
 
-    const localPromise = shouldLoadLocal
-      ? invokeWorkbench("list_audit_logs", {
-          request: {
-            connectionId: state.connectionId || undefined,
-            database: state.database,
-            tableName: state.tableName,
-            limit: AUDIT_PAGE_LIMIT,
-            offset: state.localOffset,
-          },
-        }).then((rows) => ({ ok: true, rows: Array.isArray(rows) ? rows : [] }))
-          .catch((error) => ({ ok: false, error: String(error?.message || error || "读取本机记录失败") }))
-      : Promise.resolve({ ok: true, rows: null });
+    const fetchLocalPage = () => invokeWorkbench("list_audit_logs", {
+      request: {
+        connectionId: state.connectionId || undefined,
+        database: state.database,
+        tableName: state.tableName,
+        committedOnly: true,
+        limit: AUDIT_PAGE_LIMIT,
+        offset: state.localOffset,
+      },
+    }).then((rows) => ({ ok: true, rows: Array.isArray(rows) ? rows : [] }))
+      .catch((error) => ({ ok: false, error: String(error?.message || error || "读取本机记录失败") }));
 
-    const sharedPromise = shouldLoadShared
-      ? invokeWorkbench("list_shared_audit_logs", {
-          request: {
-            // Omit connectionId intentionally so teammates whose local
-            // connection numbering differs still match this table.
-            database: state.database,
-            tableName: state.tableName,
-            limit: AUDIT_PAGE_LIMIT,
-            offset: state.sharedOffset,
-          },
-        }).then((rows) => ({ ok: true, rows: Array.isArray(rows) ? rows : [] }))
-          .catch((error) => ({ ok: false, error: String(error?.message || error || "读取团队记录失败") }))
-      : Promise.resolve({ ok: true, rows: null });
+    const fetchSharedPage = () => invokeWorkbench("list_shared_audit_logs", {
+      request: {
+        // Omit connectionId intentionally so teammates whose local
+        // connection numbering differs still match this table; scope by
+        // serverScopeConnectionId when available.
+        serverScopeConnectionId: state.connectionId || undefined,
+        database: state.database,
+        tableName: state.tableName,
+        committedOnly: true,
+        limit: AUDIT_PAGE_LIMIT,
+        offset: state.sharedOffset,
+      },
+    }).then((rows) => ({ ok: true, rows: Array.isArray(rows) ? rows : [] }))
+      .catch((error) => ({ ok: false, error: String(error?.message || error || "读取团队记录失败") }));
 
     const localExternalPromise = !append
       ? invokeWorkbench("list_table_external_changes", {
@@ -448,26 +505,62 @@ export function useTableChangeHistory({
           .catch(() => null)
       : Promise.resolve(null);
 
+    let needLocal = !append || state.localHasMore;
+    let needShared = signedIn && (!append || state.sharedHasMore);
+    let pagesFetched = 0;
+    let localFailed = false;
+    let localErrorMsg = "";
+    let sharedFailed = false;
+
     const [
-      localRes,
-      sharedRes,
+      firstLocalRes,
+      firstSharedRes,
       localExternalRows,
       sharedExternalRows,
       observedRes,
     ] = await Promise.all([
-      localPromise,
-      sharedPromise,
+      needLocal ? fetchLocalPage() : Promise.resolve({ ok: true, rows: null }),
+      needShared ? fetchSharedPage() : Promise.resolve({ ok: true, rows: null }),
       localExternalPromise,
       sharedExternalPromise,
       observeExternalPromise,
     ]);
     if (activeGen !== loadGeneration) return;
 
-    if (localRes.ok && Array.isArray(localRes.rows)) {
-      state.localOffset += localRes.rows.length;
-      state.localHasMore = localRes.rows.length >= AUDIT_PAGE_LIMIT;
-      state.rawLocal = append ? [...state.rawLocal, ...localRes.rows] : localRes.rows;
-    }
+    const applyPageResults = (localRes, sharedRes) => {
+      if (localRes && localRes.rows !== null) {
+        if (localRes.ok && Array.isArray(localRes.rows)) {
+          state.localOffset += localRes.rows.length;
+          state.localHasMore = localRes.rows.length >= AUDIT_PAGE_LIMIT;
+          state.rawLocal = state.rawLocal.length
+            ? [...state.rawLocal, ...localRes.rows]
+            : localRes.rows;
+        } else if (!localRes.ok) {
+          localFailed = true;
+          localErrorMsg = localRes.error || "";
+          state.localHasMore = false;
+        }
+      }
+
+      if (signedIn && sharedRes && sharedRes.rows !== null) {
+        if (sharedRes.ok && Array.isArray(sharedRes.rows)) {
+          state.sharedStatus = "loaded";
+          state.sharedOffset += sharedRes.rows.length;
+          state.sharedHasMore = sharedRes.rows.length >= AUDIT_PAGE_LIMIT;
+          state.rawShared = state.rawShared.length
+            ? [...state.rawShared, ...sharedRes.rows]
+            : sharedRes.rows;
+        } else if (!sharedRes.ok) {
+          sharedFailed = true;
+          state.sharedStatus = "error";
+          state.sharedError = sharedRes.error || "";
+          state.sharedHasMore = false;
+        }
+      }
+    };
+
+    if (needLocal || needShared) pagesFetched += 1;
+    applyPageResults(firstLocalRes, firstSharedRes);
 
     if (Array.isArray(localExternalRows)) {
       state.rawLocalExternal = localExternalRows;
@@ -484,25 +577,38 @@ export function useTableChangeHistory({
       }
     }
 
-    if (!signedIn) {
-      state.sharedStatus = "logged-out";
-      state.sharedHasMore = false;
-    } else if (sharedRes.ok && Array.isArray(sharedRes.rows)) {
-      state.sharedStatus = "loaded";
-      state.sharedOffset += sharedRes.rows.length;
-      state.sharedHasMore = sharedRes.rows.length >= AUDIT_PAGE_LIMIT;
-      state.rawShared = append ? [...state.rawShared, ...sharedRes.rows] : sharedRes.rows;
-    } else if (!sharedRes.ok) {
-      state.sharedStatus = "error";
-      state.sharedError = sharedRes.error || "";
-      state.sharedHasMore = false;
+    // Drain additional pages automatically until every visible revision's batch
+    // boundary is closed (preventing partial counts like "改 200" on multi-row
+    // Excel imports) and we have advanced the gapless timeline horizon.
+    while (pagesFetched < MAX_PAGES_PER_BATCH && (state.localHasMore || state.sharedHasMore)) {
+      const slice = buildAuditRevisionsSlice({ allowIncompleteFallback: false });
+      if (slice.auditRevisions.length >= targetAuditCount) {
+        break;
+      }
+      const nextLocal = state.localHasMore && (
+        !state.sharedHasMore || slice.localHorizon.horizonMs >= slice.sharedHorizon.horizonMs
+      );
+      const nextShared = signedIn && state.sharedHasMore && (
+        !state.localHasMore || slice.sharedHorizon.horizonMs >= slice.localHorizon.horizonMs
+      );
+      if (!nextLocal && !nextShared) break;
+
+      pagesFetched += 1;
+      const [moreLocal, moreShared] = await Promise.all([
+        nextLocal ? fetchLocalPage() : Promise.resolve({ ok: true, rows: null }),
+        nextShared ? fetchSharedPage() : Promise.resolve({ ok: true, rows: null }),
+      ]);
+      if (activeGen !== loadGeneration) return;
+      applyPageResults(moreLocal, moreShared);
     }
 
-    if (!localRes.ok && (!signedIn || !sharedRes.ok)) {
-      state.error = localRes.error || sharedRes.error || "读取修改历史失败";
+    if (localFailed && (!signedIn || sharedFailed) && !state.rawLocal.length && !state.rawShared.length) {
+      state.error = localErrorMsg || state.sharedError || "读取修改历史失败";
     }
 
-    recomputeRevisions();
+    recomputeRevisions({
+      allowIncompleteFallback: pagesFetched >= MAX_PAGES_PER_BATCH,
+    });
     state.loading = false;
     state.loadingMore = false;
   }

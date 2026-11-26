@@ -134,12 +134,17 @@ pub async fn push_audit(
             .row_identity
             .as_ref()
             .and_then(|value| serde_json::to_string(value).ok());
+        let operation_id = item
+            .operation_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let res = sqlx::query(
             "INSERT OR IGNORE INTO audit_log \
              (client_id, ts, user_id, username, connection_id, database, table_name, \
               operation, row_identity, column_name, old_value, new_value, source, status, \
-              is_rollback, rollback_of_client_id, host, synced_at, server_key) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              is_rollback, rollback_of_client_id, host, synced_at, server_key, operation_id, operation_size) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&item.client_id)
         .bind(&item.ts)
@@ -160,6 +165,8 @@ pub async fn push_audit(
         .bind(&item.host)
         .bind(&now)
         .bind(&item.server_key)
+        .bind(operation_id)
+        .bind(item.operation_size)
         .execute(&state.pool)
         .await
         .map_err(|e| {
@@ -211,12 +218,14 @@ pub async fn list_audit(
 ) -> Result<Json<Vec<SharedAuditLogEntry>>, (StatusCode, String)> {
     let limit = q.limit.unwrap_or(200).min(2000) as i64;
     let offset = q.offset.unwrap_or(0) as i64;
+    let server_scope = canonical_server_scope(q.server_key.as_deref());
 
     let mut sql = String::from(
         "SELECT a.client_id, a.ts, a.user_id, a.username, u.display_name, \
          a.connection_id, a.database, a.table_name, a.operation, a.row_identity, a.column_name, \
          a.old_value, a.new_value, a.source, a.status, a.is_rollback, \
-         a.rollback_of_client_id, a.host, a.server_key, a.svn_username \
+         a.rollback_of_client_id, a.host, a.server_key, a.svn_username, \
+         a.operation_id, a.operation_size \
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id",
     );
     let mut clauses: Vec<&'static str> = Vec::new();
@@ -224,10 +233,17 @@ pub async fn list_audit(
         clauses.push("a.connection_id = ?");
     }
     if q.database.is_some() {
-        clauses.push("a.database = ?");
+        clauses.push("LOWER(TRIM(a.database)) = LOWER(TRIM(?))");
     }
     if q.table_name.is_some() {
-        clauses.push("a.table_name = ?");
+        clauses.push("LOWER(TRIM(a.table_name)) = LOWER(TRIM(?))");
+    }
+    if !server_scope.is_empty() {
+        clauses.push(
+            "(a.server_key IS NULL OR TRIM(a.server_key) = '' \
+              OR LOWER(TRIM(a.server_key)) = 'mysql://configured:3306' \
+              OR LOWER(TRIM(a.server_key)) = ?)",
+        );
     }
     if q.user_id.is_some() {
         clauses.push("a.user_id = ?");
@@ -238,11 +254,14 @@ pub async fn list_audit(
     if q.to_ts.is_some() {
         clauses.push("a.ts <= ?");
     }
+    if q.committed_only {
+        clauses.push("a.status IN ('committed', 'rolled_back')");
+    }
     if !clauses.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&clauses.join(" AND "));
     }
-    sql.push_str(" ORDER BY a.ts DESC LIMIT ? OFFSET ?");
+    sql.push_str(" ORDER BY a.ts DESC, a.rowid DESC LIMIT ? OFFSET ?");
 
     let mut query = sqlx::query(&sql);
     if let Some(v) = &q.connection_id {
@@ -253,6 +272,9 @@ pub async fn list_audit(
     }
     if let Some(v) = &q.table_name {
         query = query.bind(v);
+    }
+    if !server_scope.is_empty() {
+        query = query.bind(&server_scope);
     }
     if let Some(v) = &q.user_id {
         query = query.bind(v);
@@ -298,6 +320,12 @@ pub async fn list_audit(
             rollback_of_client_id: r.try_get("rollback_of_client_id").ok().flatten(),
             host: r.try_get("host").ok().flatten(),
             server_key: r.try_get("server_key").ok().flatten(),
+            operation_id: r
+                .try_get::<Option<String>, _>("operation_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            operation_size: r.try_get("operation_size").ok().flatten(),
         })
         .collect();
     Ok(Json(entries))
@@ -607,6 +635,8 @@ mod tests {
             rollback_of_client_id: None,
             host: Some("pc-a".into()),
             server_key: server_key.map(Into::into),
+            operation_id: None,
+            operation_size: None,
         }
     }
 
@@ -1211,5 +1241,132 @@ mod tests {
         assert_eq!(list.len(), 20);
         assert_eq!(list[0].event_id, "ext-25");
         assert_eq!(list.last().unwrap().event_id, "ext-06");
+    }
+
+    #[tokio::test]
+    async fn push_audit_keeps_multi_thousand_row_import_as_single_revision_and_round_trips_operation_meta() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        insert_user(&pool, "u1", "hyp", "黄亚鹏", "tok", "2026-11-26T00:00:00Z")
+            .await
+            .unwrap();
+
+        // Seed 20 older single-row edits (1 minute apart).
+        let mut seed_items = Vec::new();
+        for i in 1..=20 {
+            seed_items.push(push_item(
+                &format!("older-{i:02}"),
+                &format!("2026-11-26T07:{i:02}:00Z"),
+                "mysql-1",
+                Some("mysql://192.168.1.243:8306"),
+                "goodsprop",
+                "committed",
+            ));
+        }
+        let _ = push_audit(
+            State(test_state(pool.clone())),
+            Json(AuditPushRequest { items: seed_items }),
+        )
+        .await
+        .unwrap();
+
+        // Push a 2,500-row Excel import in 5 separate 500-row HTTP batches sharing one operation_id.
+        // Previously MAX_ITEMS_PER_REVISION=500 treated 2,500 rows as 5 revisions (and >10,000 rows
+        // deleted part of the import itself!). Now all 2,500 rows count as 1 revision, so 19 older
+        // revisions survive alongside all 2,500 rows of the import (total = 2,519 rows).
+        for chunk_idx in 0..5 {
+            let mut batch = Vec::with_capacity(500);
+            for offset in 0..500 {
+                let row_num = chunk_idx * 500 + offset + 1;
+                let mut item = push_item(
+                    &format!("imp-row-{row_num:04}"),
+                    "2026-11-26T08:53:15Z",
+                    "mysql-1",
+                    Some("mysql://192.168.1.243:8306"),
+                    "goodsprop",
+                    "committed",
+                );
+                item.source = "import".into();
+                item.row_identity = Some(serde_json::json!({ "ID": row_num.to_string() }));
+                item.operation_id = Some("op-import-2500".into());
+                item.operation_size = Some(2500);
+                batch.push(item);
+            }
+            let Json(resp) = push_audit(
+                State(test_state(pool.clone())),
+                Json(AuditPushRequest { items: batch }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(resp.accepted, 500);
+        }
+
+        // Also push an edit on another MySQL server's `goodsprop` and an aborted row;
+        // `server_key` + `committed_only` must isolate them cleanly.
+        let mut other_server = push_item(
+            "other-srv-1",
+            "2026-11-26T09:00:00Z",
+            "mysql-9",
+            Some("mysql://192.168.1.223:8306"),
+            "goodsprop",
+            "committed",
+        );
+        other_server.operation_id = Some("op-other-srv".into());
+        other_server.operation_size = Some(1);
+        let aborted_row = push_item(
+            "aborted-1",
+            "2026-11-26T08:55:00Z",
+            "mysql-1",
+            Some("mysql://192.168.1.243:8306"),
+            "goodsprop",
+            "aborted",
+        );
+        let _ = push_audit(
+            State(test_state(pool.clone())),
+            Json(AuditPushRequest {
+                items: vec![other_server, aborted_row],
+            }),
+        )
+        .await
+        .unwrap();
+
+        let mut all_fetched = Vec::new();
+        let mut offset = 0;
+        loop {
+            let Json(page) = list_audit(
+                State(test_state(pool.clone())),
+                Query(AuditQuery {
+                    server_key: Some("mysql://192.168.1.243:8306".into()),
+                    database: Some("newsg_4cfg".into()),
+                    table_name: Some("GoodsProp".into()),
+                    committed_only: true,
+                    limit: Some(2000),
+                    offset: Some(offset),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+            let count = page.len() as u32;
+            all_fetched.extend(page);
+            offset += count;
+            if count < 2000 {
+                break;
+            }
+        }
+
+        // 2,500 import rows + 19 retained older revisions (older-02 .. older-20) = 2,519 rows!
+        // Wait: the aborted_row at 08:55 counted as 1 stored revision in prune_table_revisions,
+        // so 18 committed older revisions + 1 aborted + 1 import = 20 revisions => 2,518 committed rows!
+        let import_rows: Vec<_> = all_fetched
+            .iter()
+            .filter(|e| e.operation_id.as_deref() == Some("op-import-2500"))
+            .collect();
+        assert_eq!(import_rows.len(), 2500, "all 2500 import rows must be retained intact");
+        assert!(import_rows.iter().all(|e| e.operation_size == Some(2500)));
+        assert!(all_fetched.iter().all(|e| e.status == "committed"));
+        assert!(all_fetched.iter().all(|e| e.client_id != "other-srv-1"));
+        // Deterministic descending rowid order across the 2000-row page boundary
+        assert_eq!(import_rows[0].client_id, "imp-row-2500");
+        assert_eq!(import_rows[2499].client_id, "imp-row-0001");
     }
 }

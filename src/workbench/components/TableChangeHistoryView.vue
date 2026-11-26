@@ -344,6 +344,8 @@ function restoreDisabledReason(plan) {
       return t("tableHistory.restore.reasonMissingIdentity");
     case "incomplete-row-data":
       return t("tableHistory.restore.reasonIncompleteRow");
+    case "incomplete-revision":
+      return t("tableHistory.restore.reasonIncompleteRevision");
     case "already-current":
       return t("tableHistory.restore.reasonAlreadyCurrent");
     case "external-change":
@@ -887,6 +889,12 @@ function openInBackupCenter() {
     connectionId: props.connectionId,
     database: props.database,
     tableName: props.tableName,
+    preferShared: Boolean(
+      props.isLoggedIn
+      && selectedRevision.value
+      && !selectedRevision.value.isExternal
+      && selectedRevision.value.origin === "shared",
+    ),
   });
 }
 
@@ -1225,6 +1233,19 @@ onBeforeUnmount(() => {
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
       <span>{{ t('tableHistory.loggedOutNotice') }}</span>
     </div>
+    <div v-if="selectedRevision && !selectedRevision.isExternal && selectedRevision.isIncomplete" class="wb-thv-banner is-warn" role="status">
+      <Info :size="14" :stroke-width="2" aria-hidden="true" />
+      <span>{{
+        selectedRevision.expectedEntryCount > selectedRevision.entryCount
+          ? t('tableHistory.incompleteSyncNotice', {
+              loaded: selectedRevision.entryCount,
+              total: selectedRevision.expectedEntryCount,
+            })
+          : t('tableHistory.incompleteLargeNotice', {
+              loaded: selectedRevision.entryCount,
+            })
+      }}</span>
+    </div>
     <div v-if="state.liveTruncated && isFullTableMode" class="wb-thv-banner is-info" role="status">
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
       <span>{{ t('tableHistory.liveTruncatedNotice', { limit: state.liveRows.length }) }}</span>
@@ -1375,6 +1396,15 @@ onBeforeUnmount(() => {
           <div v-else class="wb-thv-rail-empty">
             <History :size="20" :stroke-width="1.6" aria-hidden="true" />
             <span>{{ t('tableHistory.noRevisionsShort') }}</span>
+            <button
+              v-if="history.hasMore.value"
+              type="button"
+              class="wb-thv-load-more"
+              :disabled="state.loadingMore"
+              @click="history.loadMore()"
+            >
+              {{ state.loadingMore ? t('tableHistory.loadingMore') : t('tableHistory.loadMore') }}
+            </button>
           </div>
         </div>
 

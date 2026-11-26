@@ -1333,6 +1333,8 @@ impl BackupConfigResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ListAuditLogsRequest {
     pub connection_id: Option<String>,
+    #[serde(default)]
+    pub server_scope_connection_id: Option<String>,
     pub database: Option<String>,
     pub table_name: Option<String>,
     #[serde(default)]
@@ -1341,6 +1343,8 @@ pub struct ListAuditLogsRequest {
     pub offset: Option<u32>,
     pub from_ts: Option<String>,
     pub to_ts: Option<String>,
+    #[serde(default)]
+    pub committed_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1370,6 +1374,12 @@ pub struct AuditLogEntry {
     /// Client-generated UUID; the idempotency key for syncing to the server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// Atomic batch identifier shared by all rows of a single user operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    /// Committed entry count belonging to `operation_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_size: Option<i64>,
 }
 
 /// A shared change-log entry fetched from the central server. Mirrors the
@@ -1399,6 +1409,18 @@ pub struct SharedAuditLogEntry {
     pub host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedAuditTableEntry {
+    pub database: String,
+    pub table_name: String,
+    pub latest_ts: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

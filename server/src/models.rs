@@ -53,6 +53,10 @@ pub struct AuditPushItem {
     pub host: Option<String>,
     #[serde(default)]
     pub server_key: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub operation_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,17 +100,25 @@ pub struct SharedAuditLogEntry {
     pub host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditQuery {
     pub connection_id: Option<String>,
+    #[serde(default)]
+    pub server_key: Option<String>,
     pub database: Option<String>,
     pub table_name: Option<String>,
     pub user_id: Option<String>,
     pub from_ts: Option<String>,
     pub to_ts: Option<String>,
+    #[serde(default)]
+    pub committed_only: bool,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }

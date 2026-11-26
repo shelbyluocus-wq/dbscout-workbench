@@ -302,6 +302,38 @@ test("buildHistoryRestorePlan blocks DDL, missing rowIdentity, and no-PK tables 
   });
   assert.equal(hasDdl.canRestore, false);
   assert.equal(hasDdl.reason, "contains-ddl");
+
+  // Mid-sync incomplete batch (e.g. 500 of 3500 rows synced so far) MUST block partial restore!
+  const midSyncEntries = mergeTableAuditEntries({
+    sharedEntries: Array.from({ length: 500 }, (_, idx) => ({
+      clientId: `partial-${idx + 1}`,
+      ts: "2026-11-26T08:53:15Z",
+      displayName: "黄亚鹏",
+      operation: "UPDATE",
+      rowIdentity: { ID: String(idx + 1) },
+      columnName: "Name",
+      oldValue: "Old",
+      newValue: "New",
+      source: "import",
+      status: "committed",
+      operationId: "op-syncing-3500",
+      operationSize: 3500,
+    })),
+  });
+  const midSyncRevisions = groupAuditRevisions(midSyncEntries);
+  assert.equal(midSyncRevisions.length, 1);
+  assert.equal(midSyncRevisions[0].isIncomplete, true);
+  assert.equal(midSyncRevisions[0].expectedEntryCount, 3500);
+  const incompletePlan = buildHistoryRestorePlan({
+    columns,
+    primaryKeys: ["ID"],
+    liveRows,
+    revisions: midSyncRevisions,
+    targetIndex: 0,
+    target: "before",
+  });
+  assert.equal(incompletePlan.canRestore, false);
+  assert.equal(incompletePlan.reason, "incomplete-revision");
 });
 
 test("mockAuditHistory preview_history_state_restore and apply_history_state_restore restore rows and record rollback audit", async () => {

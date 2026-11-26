@@ -1321,9 +1321,12 @@ function openBackupCenterForTable(target = {}) {
   backupCenter.setFilters({
     connectionId: target.connectionId || "",
     database: target.database || "",
-    tableName: target.tableName || "",
+    tableName: "",
   });
-  backupCenter.open({ tab: "audit" });
+  backupCenter.open({
+    tab: "audit",
+    auditMode: target.preferShared ? "shared" : undefined,
+  });
   void account.loadAccount();
 }
 

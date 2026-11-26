@@ -246,7 +246,11 @@ export function useBackupCenter(options = {}) {
   async function loadSharedAuditLogs() {
     beginListing();
     try {
-      const ok = await sharedHistory.loadTables(filters);
+      const ok = await sharedHistory.loadTables({
+        serverScopeConnectionId: filters.connectionId || "",
+        database: filters.database || "",
+        tableName: filters.tableName || "",
+      });
       lastError.value = sharedHistory.state.error;
       return ok;
     } finally {
@@ -740,10 +744,15 @@ export function useBackupCenter(options = {}) {
 
   let stopListeners = null;
 
-  async function open({ tab = "audit", connectionId, database } = {}) {
+  async function open({ tab = "audit", connectionId, database, auditMode: nextAuditMode } = {}) {
     // Default to the audit log tab when opening from the sidebar entry; callers
     // such as the release database page can land directly on snapshots.
     dialog.tab = ["audit", "snapshots", "settings"].includes(tab) ? tab : "audit";
+    if (nextAuditMode === "shared" || nextAuditMode === "local") {
+      history.dispose();
+      sharedHistory.dispose();
+      auditMode.mode = nextAuditMode;
+    }
     if (connectionId !== undefined || database !== undefined) {
       setFilters({
         connectionId: connectionId ?? filters.connectionId,

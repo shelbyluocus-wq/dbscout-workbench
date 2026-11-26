@@ -3329,12 +3329,29 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     mockAccount.session = null;
     return { serverUrl: mockAccount.serverUrl, session: null };
   }
+  if (command === "list_shared_audit_tables") {
+    const req = payload.request || {};
+    const dbLower = String(req.database || "").trim().toLowerCase();
+    const byTable = new Map();
+    for (const r of mockSharedAudit) {
+      if (r.status && r.status !== "committed" && r.status !== "rolled_back") continue;
+      if (dbLower && String(r.database || "").toLowerCase() !== dbLower) continue;
+      if (!r.tableName || String(r.tableName).startsWith("(")) continue;
+      const key = String(r.tableName).toLowerCase();
+      const prev = byTable.get(key);
+      if (!prev || r.ts > prev.latestTs) {
+        byTable.set(key, { database: r.database, tableName: r.tableName, latestTs: r.ts });
+      }
+    }
+    return [...byTable.values()].sort((a, b) => String(b.latestTs).localeCompare(String(a.latestTs)));
+  }
   if (command === "list_shared_audit_logs") {
     let rows = mockSharedAudit.slice();
     const req = payload.request || {};
     if (req.connectionId) rows = rows.filter((r) => r.connectionId === req.connectionId);
-    if (req.database) rows = rows.filter((r) => r.database === req.database);
-    if (req.tableName) rows = rows.filter((r) => r.tableName === req.tableName);
+    if (req.database) rows = rows.filter((r) => String(r.database || "").toLowerCase() === String(req.database).toLowerCase());
+    if (req.tableName) rows = rows.filter((r) => String(r.tableName || "").toLowerCase() === String(req.tableName).toLowerCase());
+    if (req.committedOnly) rows = rows.filter((r) => r.status === "committed" || r.status === "rolled_back");
     const limit = req.limit || 200;
     const offset = req.offset || 0;
     return rows.slice(offset, offset + limit);
@@ -3381,6 +3398,13 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         skipped += 1;
         continue;
       }
+      if (row.status === "pending") {
+        continue;
+      }
+      if (row.status === "aborted") {
+        row.synced = true;
+        continue;
+      }
       const exists = mockSharedAudit.some((s) => s.clientId === row.clientId);
       if (exists) {
         skipped += 1;
@@ -3404,6 +3428,8 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
         status: row.status,
         isRollback: Boolean(row.isRollback),
         rollbackOfClientId: row.rollbackOfClientId || null,
+        operationId: row.operationId || undefined,
+        operationSize: row.operationSize || undefined,
         host: "mock-host",
       });
       row.synced = true;
@@ -3530,6 +3556,7 @@ function mockAuditLogs(request) {
   if (request.connectionId) rows = rows.filter((row) => row.connectionId === request.connectionId);
   if (request.database) rows = rows.filter((row) => row.database === request.database);
   if (request.tableName) rows = rows.filter((row) => row.tableName === request.tableName);
+  if (request.committedOnly) rows = rows.filter((row) => row.status === "committed" || row.status === "rolled_back");
   const limit = request.limit || 200;
   const offset = request.offset || 0;
   return rows.slice(offset, offset + limit);

@@ -303,6 +303,10 @@ pub async fn record_pending(
     Ok(result.last_insert_rowid())
 }
 
+pub fn new_operation_meta() -> (String, String) {
+    (now_ts(), uuid::Uuid::new_v4().to_string())
+}
+
 /// Batch variant of `record_pending`: writes all pending rows inside ONE SQLite
 /// transaction (a single WAL fsync instead of one per row). Returns ids in input order.
 pub async fn record_pending_batch(
@@ -310,8 +314,29 @@ pub async fn record_pending_batch(
     ctx: &AuditContext,
     pendings: &[PendingAudit],
 ) -> Result<Vec<i64>, String> {
-    let ts = now_ts();
-    let operation_id = uuid::Uuid::new_v4().to_string();
+    let (ts, operation_id) = new_operation_meta();
+    record_pending_batch_in_operation(
+        pool,
+        ctx,
+        pendings,
+        &ts,
+        &operation_id,
+        pendings.len() as i64,
+    )
+    .await
+}
+
+/// Chunked-operation variant of `record_pending_batch`: allows a multi-chunk
+/// single-transaction command (such as large `delete_rows`) to share one
+/// `ts`, `operation_id`, and `operation_size` across all chunks.
+pub async fn record_pending_batch_in_operation(
+    pool: &SqlitePool,
+    ctx: &AuditContext,
+    pendings: &[PendingAudit],
+    ts: &str,
+    operation_id: &str,
+    operation_size: i64,
+) -> Result<Vec<i64>, String> {
     let mut tx = pool
         .begin()
         .await
@@ -331,7 +356,7 @@ pub async fn record_pending_batch(
                  rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced, operation_id, operation_size) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?)",
         )
-        .bind(&ts)
+        .bind(ts)
         .bind(&ctx.connection_id)
         .bind(&ctx.database)
         .bind(&ctx.table_name)
@@ -351,8 +376,8 @@ pub async fn record_pending_batch(
         .bind(&pending.notes)
         .bind(&ctx.actor)
         .bind(&client_id)
-        .bind(&operation_id)
-        .bind(pendings.len() as i64)
+        .bind(operation_id)
+        .bind(operation_size)
         .execute(&mut *tx)
         .await;
         let result = match result {
@@ -655,6 +680,44 @@ pub async fn record_rollback(
     Ok(result.last_insert_rowid())
 }
 
+pub(crate) async fn committed_operation_sizes(
+    pool: &SqlitePool,
+    operation_ids: &[String],
+) -> Result<std::collections::HashMap<String, i64>, String> {
+    let mut counts = std::collections::HashMap::new();
+    if operation_ids.is_empty() {
+        return Ok(counts);
+    }
+    for chunk in operation_ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(", ");
+        let sql = format!(
+            "SELECT operation_id, COUNT(*) AS cnt FROM audit_log \
+             WHERE status IN ('committed', 'rolled_back') AND operation_id IN ({placeholders}) \
+             GROUP BY operation_id"
+        );
+        let mut query = sqlx::query(&sql);
+        for op_id in chunk {
+            query = query.bind(op_id);
+        }
+        let rows = query
+            .fetch_all(pool)
+            .await
+            .map_err(|error| format!("查询审计批次规模失败: {error}"))?;
+        for row in rows {
+            if let Some(op_id) = row
+                .try_get::<Option<String>, _>("operation_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+            {
+                let cnt: i64 = row.try_get("cnt").unwrap_or(0);
+                counts.insert(op_id, cnt);
+            }
+        }
+    }
+    Ok(counts)
+}
+
 pub async fn list_audit_logs(
     pool: &SqlitePool,
     req: &ListAuditLogsRequest,
@@ -677,7 +740,10 @@ pub async fn list_audit_logs(
     if req.to_ts.is_some() {
         sql.push_str(" AND ts <= ?");
     }
-    sql.push_str(" ORDER BY ts DESC LIMIT ? OFFSET ?");
+    if req.committed_only {
+        sql.push_str(" AND status IN ('committed', 'rolled_back')");
+    }
+    sql.push_str(" ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?");
 
     let mut query = sqlx::query(&sql);
     if let Some(value) = &req.connection_id {
@@ -701,7 +767,27 @@ pub async fn list_audit_logs(
         .fetch_all(pool)
         .await
         .map_err(|error| format!("查询审计记录失败: {error}"))?;
-    Ok(rows.iter().map(audit_log_entry).collect())
+    let mut entries: Vec<AuditLogEntry> = rows.iter().map(audit_log_entry).collect();
+    let mut distinct_ops: Vec<String> = entries
+        .iter()
+        .filter(|e| matches!(e.status.as_str(), "committed" | "rolled_back"))
+        .filter_map(|e| e.operation_id.clone())
+        .collect();
+    distinct_ops.sort();
+    distinct_ops.dedup();
+    if !distinct_ops.is_empty() {
+        let committed_sizes = committed_operation_sizes(pool, &distinct_ops).await?;
+        for entry in &mut entries {
+            if matches!(entry.status.as_str(), "committed" | "rolled_back") {
+                if let Some(op_id) = &entry.operation_id {
+                    if let Some(&size) = committed_sizes.get(op_id) {
+                        entry.operation_size = Some(size);
+                    }
+                }
+            }
+        }
+    }
+    Ok(entries)
 }
 
 pub(crate) fn audit_log_entry(row: &sqlx::sqlite::SqliteRow) -> AuditLogEntry {
@@ -731,6 +817,12 @@ pub(crate) fn audit_log_entry(row: &sqlx::sqlite::SqliteRow) -> AuditLogEntry {
         notes: row.try_get("notes").ok().flatten(),
         actor: row.try_get("actor").ok().flatten(),
         client_id: row.try_get("client_id").ok().flatten(),
+        operation_id: row
+            .try_get::<Option<String>, _>("operation_id")
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty()),
+        operation_size: row.try_get("operation_size").ok().flatten(),
     }
 }
 
@@ -1581,6 +1673,114 @@ mod tests {
                 let entry = fetch_audit_entry(&pool, ids[0]).await.unwrap();
                 assert_eq!(entry.status, STATUS_PENDING);
                 assert!(entry.row_identity.is_none());
+            });
+    }
+
+    #[test]
+    fn list_audit_logs_filters_committed_computes_exact_committed_operation_size_and_orders_deterministically() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let pendings: Vec<_> = (1..=5)
+                    .map(|i| PendingAudit {
+                        operation: "UPDATE",
+                        column_name: Some("HideBag".into()),
+                        old_value: Some("2".into()),
+                        new_value: Some("1".into()),
+                        row_identity: Some(serde_json::json!({ "ID": i.to_string() })),
+                        forward_sql: "UPDATE `hero` SET `HideBag` = ? WHERE `ID` = ?".into(),
+                        forward_binds: vec!["1".into(), i.to_string()],
+                        inverse_sql: Some("UPDATE `hero` SET `HideBag` = ? WHERE `ID` = ?".into()),
+                        inverse_binds: vec!["2".into(), i.to_string()],
+                        rollback_strategy: STRATEGY_AUTO,
+                        notes: None,
+                    })
+                    .collect();
+                let ids = record_pending_batch(&pool, &ctx, &pendings).await.unwrap();
+                // Simulate 2 normalize-equal rows marked aborted and 3 committed rows
+                mark_aborted_required_batch(&pool, &ids[0..2]).await.unwrap();
+                mark_committed_required_batch(&pool, &ids[2..5]).await.unwrap();
+
+                // Also add an in-flight pending batch that must not clog committed_only queries
+                let _pending_ids = record_pending_batch(&pool, &ctx, &pendings[0..2]).await.unwrap();
+
+                let committed = list_audit_logs(
+                    &pool,
+                    &ListAuditLogsRequest {
+                        connection_id: Some(ctx.connection_id.clone()),
+                        server_scope_connection_id: None,
+                        database: Some(ctx.database.clone()),
+                        table_name: Some(ctx.table_name.clone()),
+                        limit: Some(200),
+                        offset: Some(0),
+                        from_ts: None,
+                        to_ts: None,
+                        committed_only: true,
+                    },
+                )
+                .await
+                .unwrap();
+
+                assert_eq!(committed.len(), 3);
+                // Deterministic id DESC order on identical batch timestamp
+                assert_eq!(committed[0].id, ids[4]);
+                assert_eq!(committed[1].id, ids[3]);
+                assert_eq!(committed[2].id, ids[2]);
+                assert!(committed[0].operation_id.is_some());
+                // Exact committed operation_size is 3 (excluding the 2 normalize-equal aborted rows)
+                assert_eq!(committed[0].operation_size, Some(3));
+            });
+    }
+
+    #[test]
+    fn record_pending_batch_in_operation_keeps_multi_chunk_deletes_in_one_operation() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let (ts, op_id) = new_operation_meta();
+                let mut pending = test_pending_audit("DELETE", "DELETE FROM `hero` WHERE `id` = ?");
+                pending.inverse_sql = Some("INSERT INTO `hero` (`id`) VALUES (?)".into());
+                pending.rollback_strategy = STRATEGY_AUTO;
+                let chunk = vec![pending.clone(); 256];
+                let tail = vec![pending; 88];
+                let total = (chunk.len() + tail.len()) as i64;
+
+                let mut ids = record_pending_batch_in_operation(&pool, &ctx, &chunk, &ts, &op_id, total)
+                    .await
+                    .unwrap();
+                ids.extend(
+                    record_pending_batch_in_operation(&pool, &ctx, &tail, &ts, &op_id, total)
+                        .await
+                        .unwrap(),
+                );
+                mark_committed_required_batch(&pool, &ids).await.unwrap();
+
+                let ops = crate::audit_history::operations(
+                    &pool,
+                    &crate::audit_history::HistoryRequest {
+                        connection_id: Some(ctx.connection_id),
+                        database: Some(ctx.database),
+                        table_name: Some(ctx.table_name),
+                        search: None,
+                        offset: None,
+                        audit_id: None,
+                        token: None,
+                    },
+                )
+                .await
+                .unwrap();
+                assert_eq!(ops.items.len(), 1);
+                assert_eq!(ops.items[0].entry_count, 344);
+                assert_eq!(ops.items[0].deleted, 344);
+                assert!(!ops.items[0].blocked);
             });
     }
 }

@@ -116,6 +116,9 @@ export function buildHistoryRestorePlan({
       continue;
     }
     auditRevisionsUndone += 1;
+    if (rev?.isIncomplete) {
+      return emptyPlan("incomplete-revision", auditRevisionsUndone);
+    }
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
       if (op === "DDL") return emptyPlan("contains-ddl", auditRevisionsUndone);
@@ -127,17 +130,34 @@ export function buildHistoryRestorePlan({
     return emptyPlan("already-current", 0);
   }
 
-  // Index current live rows by canonical PK identity.
-  const liveByKey = new Map();
+  // Index current live rows by canonical PK identity; normalize full column
+  // values lazily only for rows actually touched in the undone range.
+  const pkLookup = new Map(primaryKeys.map((pk) => [pk.toLowerCase(), pk]));
+  const liveRawByKey = new Map();
   for (const rawRow of Array.isArray(liveRows) ? liveRows : []) {
+    if (!rawRow || typeof rawRow !== "object") continue;
+    let idKey = "";
+    if (primaryKeys.every((pk) => Object.hasOwn(rawRow, pk))) {
+      idKey = buildIdentityKey(primaryKeys, rawRow);
+    } else {
+      const pkObj = {};
+      for (const [k, v] of Object.entries(rawRow)) {
+        const pk = pkLookup.get(String(k || "").trim().toLowerCase());
+        if (pk) pkObj[pk] = v;
+      }
+      idKey = buildIdentityKey(primaryKeys, pkObj);
+    }
+    liveRawByKey.set(idKey, rawRow);
+  }
+
+  const normalizeLiveRow = (rawRow) => {
     const row = {};
-    for (const [k, v] of Object.entries(rawRow || {})) {
+    for (const [k, v] of Object.entries(rawRow)) {
       const canonical = resolveColumnName(k, colNameMap);
       row[canonical] = toWireValue(v);
     }
-    const idKey = buildIdentityKey(primaryKeys, row);
-    liveByKey.set(idKey, row);
-  }
+    return row;
+  };
 
   // Walk newest -> oldest across [0 .. endIndex] tracking net row transitions.
   // Order is preserved deterministically by first encounter.
@@ -146,10 +166,11 @@ export function buildHistoryRestorePlan({
 
   function ensureTracked(idKey, identityMap, fallbackExists, fallbackRow) {
     if (tracked.has(idKey)) return tracked.get(idKey);
-    const liveRow = liveByKey.get(idKey);
+    const rawLiveRow = liveRawByKey.get(idKey);
+    const liveRow = rawLiveRow ? normalizeLiveRow(rawLiveRow) : null;
     const liveExists = liveRow ? true : Boolean(fallbackExists);
     const currentKnown = liveRow
-      ? { ...liveRow }
+      ? liveRow
       : (fallbackRow ? { ...fallbackRow } : null);
     const entry = {
       idKey,

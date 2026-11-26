@@ -354,6 +354,7 @@ pub fn run() {
             commands::login_account,
             commands::logout_account,
             commands::list_shared_audit_logs,
+            commands::list_shared_audit_tables,
             commands::list_table_external_changes,
             commands::list_shared_table_external_changes,
             commands::observe_table_external_change,

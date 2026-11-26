@@ -46,7 +46,13 @@ struct AuditPushItem {
     host: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     server_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation_size: Option<i64>,
 }
+
+const OUTBOX_BATCH_SIZE: i64 = 500;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,10 +75,19 @@ fn hostname() -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// Fetch up to `batch` unsynced rows as push items. Rows are joined with the
-/// current session (user_id/username) — an audit row written while logged out
-/// is still pushed but attributed to the current user at sync time; this is
-/// acceptable for an internal tool and avoids dropping offline edits.
+/// Retire settled aborted rows locally so failed imports do not remain in the
+/// outbox or flood the central server with non-committed noise.
+async fn retire_aborted_outbox(pool: &SqlitePool) -> Result<(), String> {
+    sqlx::query("UPDATE audit_log SET synced = 1 WHERE synced = 0 AND status = 'aborted'")
+        .execute(pool)
+        .await
+        .map_err(|e| format!("清理已取消审计待同步状态失败: {e}"))?;
+    Ok(())
+}
+
+/// Fetch up to `batch` unsynced committed/rolled-back rows as push items.
+/// Pending rows are intentionally skipped until their transaction settles so
+/// the central server never receives a permanent `status = 'pending'` row.
 async fn collect_outbox(
     pool: &SqlitePool,
     session: &crate::types::UserSession,
@@ -82,13 +97,26 @@ async fn collect_outbox(
     let host = hostname();
     let rows = sqlx::query(
         "SELECT id, ts, connection_id, database, table_name, operation, row_identity, column_name, \
-         old_value, new_value, source, status, is_rollback, client_id, actor \
-         FROM audit_log WHERE synced = 0 ORDER BY id ASC LIMIT ?",
+         old_value, new_value, source, status, is_rollback, client_id, actor, operation_id, operation_size \
+         FROM audit_log WHERE synced = 0 AND status IN ('committed', 'rolled_back') ORDER BY id ASC LIMIT ?",
     )
     .bind(batch)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("查询待同步审计失败: {e}"))?;
+
+    let mut distinct_ops: Vec<String> = rows
+        .iter()
+        .filter_map(|r| {
+            r.try_get::<Option<String>, _>("operation_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+        })
+        .collect();
+    distinct_ops.sort();
+    distinct_ops.dedup();
+    let committed_sizes = crate::audit::committed_operation_sizes(pool, &distinct_ops).await?;
 
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
@@ -107,6 +135,15 @@ async fn collect_outbox(
             .ok()
             .flatten()
             .and_then(|raw| serde_json::from_str(&raw).ok());
+        let operation_id = row
+            .try_get::<Option<String>, _>("operation_id")
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty());
+        let operation_size = operation_id
+            .as_ref()
+            .and_then(|op_id| committed_sizes.get(op_id).copied())
+            .or_else(|| row.try_get("operation_size").ok().flatten());
         items.push((
             id,
             AuditPushItem {
@@ -128,6 +165,8 @@ async fn collect_outbox(
                 rollback_of_client_id: None,
                 host: host.clone(),
                 server_key,
+                operation_id,
+                operation_size,
             },
         ));
     }
@@ -186,20 +225,26 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
     };
     let pool = crate::audit::ensure_audit_pool(app, state).await?;
     let host = hostname();
-    let batch = collect_outbox(&pool, &session, &server_keys, 500).await?;
+    let _ = retire_aborted_outbox(&pool).await;
     let mut active_session = session;
-    let result = if batch.is_empty() {
-        AuditPushResult {
-            accepted: 0,
-            skipped: 0,
+    let mut total_accepted: u64 = 0;
+    let mut total_skipped: u64 = 0;
+    let url = format!("{base_url}/audit");
+
+    // Drain the committed outbox completely in bounded chunks so multi-thousand-row
+    // Excel imports reach the central server in one immediate pass instead of
+    // trickling 500 rows every 30 seconds.
+    loop {
+        let batch = collect_outbox(&pool, &active_session, &server_keys, OUTBOX_BATCH_SIZE).await?;
+        if batch.is_empty() {
+            break;
         }
-    } else {
+        let batch_len = batch.len() as i64;
         let items: Vec<AuditPushItem> = batch.iter().map(|(_, item)| item.clone()).collect();
         let ids: Vec<i64> = batch.iter().map(|(id, _)| *id).collect();
         let body = serde_json::to_value(AuditPushRequest { items })
             .map_err(|e| format!("序列化同步请求失败: {e}"))?;
 
-        let url = format!("{base_url}/audit");
         let mut resp = state
             .account
             .http
@@ -236,16 +281,24 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
             return Err(format!("同步失败: {status} {text}"));
         }
 
-        let result: AuditPushResult = resp
+        let batch_result: AuditPushResult = resp
             .json()
             .await
             .map_err(|e| format!("解析同步响应失败: {e}"))?;
 
-        // Only mark synced after a successful response. On partial failure (which
-        // the server doesn't produce today — it's all-or-nothing per batch), rows
-        // would stay pending and retry.
+        // Only mark synced after a successful response. On failure, remaining
+        // unsynced rows stay pending and retry cleanly on the next tick.
         mark_synced(&pool, &ids).await?;
-        result
+        total_accepted += batch_result.accepted;
+        total_skipped += batch_result.skipped;
+
+        if batch_len < OUTBOX_BATCH_SIZE {
+            break;
+        }
+    }
+    let result = AuditPushResult {
+        accepted: total_accepted,
+        skipped: total_skipped,
     };
 
     // Push externally observed table changes after audit rows so Blackcat edits
@@ -710,5 +763,90 @@ mod tests {
         );
         assert_eq!(latest[1].table_name, "heroprop");
         assert_eq!(latest[1].actor.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn outbox_skips_in_flight_pending_rows_retires_aborted_and_carries_committed_operation_size() {
+        test_runtime().block_on(async {
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .unwrap();
+            crate::audit::ensure_schema(&pool).await.unwrap();
+
+            let ctx = crate::audit::AuditContext {
+                connection_id: "mysql-1".into(),
+                database: "newsg_4cfg".into(),
+                table_name: "goodsprop".into(),
+                session_id: None,
+                source: crate::audit::SOURCE_IMPORT,
+                actor: Some("黄亚鹏".into()),
+                client_id: "cid-unused".into(),
+            };
+            let sample = crate::audit::PendingAudit {
+                operation: "UPDATE",
+                column_name: Some("HideBag".into()),
+                old_value: Some("2".into()),
+                new_value: Some("1".into()),
+                row_identity: Some(serde_json::json!({ "ID": "1" })),
+                forward_sql: "UPDATE `goodsprop` SET `HideBag` = ? WHERE `ID` = ?".into(),
+                forward_binds: vec!["1".into(), "1".into()],
+                inverse_sql: Some("UPDATE `goodsprop` SET `HideBag` = ? WHERE `ID` = ?".into()),
+                inverse_binds: vec!["2".into(), "1".into()],
+                rollback_strategy: crate::audit::STRATEGY_AUTO,
+                notes: None,
+            };
+
+            // 1) Batch A: 4 rows total -> 1 aborted (normalize-equal), 3 committed
+            let batch_a = crate::audit::record_pending_batch(&pool, &ctx, &vec![sample.clone(); 4])
+                .await
+                .unwrap();
+            crate::audit::mark_aborted_required_batch(&pool, &batch_a[0..1])
+                .await
+                .unwrap();
+            crate::audit::mark_committed_required_batch(&pool, &batch_a[1..4])
+                .await
+                .unwrap();
+
+            // 2) Batch B: 2 rows still in-flight (`pending`) — MUST NOT be collected yet!
+            let batch_b = crate::audit::record_pending_batch(&pool, &ctx, &vec![sample; 2])
+                .await
+                .unwrap();
+
+            retire_aborted_outbox(&pool).await.unwrap();
+            let session = crate::types::UserSession {
+                user_id: "u1".into(),
+                username: "hyp".into(),
+                display_name: "黄亚鹏".into(),
+                token: "tok".into(),
+            };
+            let server_keys = HashMap::from([("mysql-1".into(), "mysql://192.168.1.243:8306".into())]);
+            let outbox = collect_outbox(&pool, &session, &server_keys, OUTBOX_BATCH_SIZE)
+                .await
+                .unwrap();
+
+            assert_eq!(outbox.len(), 3, "only committed rows from Batch A should sync");
+            assert!(outbox.iter().all(|(_, item)| item.status == "committed"));
+            assert!(outbox.iter().all(|(_, item)| item.operation_id.is_some()));
+            assert!(outbox.iter().all(|(_, item)| item.operation_size == Some(3)));
+
+            mark_synced(
+                &pool,
+                &outbox.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            )
+            .await
+            .unwrap();
+
+            // Now Batch B commits and becomes eligible on the next sync pass!
+            crate::audit::mark_committed_required_batch(&pool, &batch_b)
+                .await
+                .unwrap();
+            let outbox_b = collect_outbox(&pool, &session, &server_keys, OUTBOX_BATCH_SIZE)
+                .await
+                .unwrap();
+            assert_eq!(outbox_b.len(), 2);
+            assert!(outbox_b.iter().all(|(_, item)| item.operation_size == Some(2)));
+        });
     }
 }

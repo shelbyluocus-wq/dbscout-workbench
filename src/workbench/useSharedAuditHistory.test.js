@@ -103,3 +103,106 @@ test("local enrichment requires both client identity and table scope; shared sta
   history.loadDetails(op);
   assert.equal(history.state.details[op.id].items[0].notes, null);
 });
+
+test("serverScopeConnectionId includes teammates across workstations, preserves sibling tables behind huge imports, and groups batch imports", async () => {
+  const goodsImportRows = Array.from({ length: 2450 }, (_, i) => row(`hyp-${i + 1}`, {
+    connectionId: "conn-hyp",
+    serverKey: "mysql://192.168.1.243:8306",
+    database: "newsg_4cfg",
+    tableName: "goodsprop",
+    ts: "2026-11-26T08:53:15Z",
+    operation: "UPDATE",
+    source: "import",
+    username: "黄亚鹏",
+    displayName: "黄亚鹏",
+    columnName: "HideBag",
+    oldValue: "2",
+    newValue: "1",
+  }));
+  const unionRows = [
+    row("lys-1", {
+      connectionId: "conn-lys",
+      serverKey: "mysql://192.168.1.243:8306",
+      database: "newsg_4cfg",
+      tableName: "unionevilbuffprop",
+      ts: "2026-11-26T06:42:20Z",
+      operation: "UPDATE",
+      source: "import",
+      username: "刘岳松",
+      displayName: "刘岳松",
+    }),
+    row("lys-2", {
+      connectionId: "conn-lys",
+      serverKey: "mysql://192.168.1.243:8306",
+      database: "newsg_4cfg",
+      tableName: "unionevilbuffprop",
+      ts: "2026-11-26T06:42:20Z",
+      operation: "INSERT",
+      source: "import",
+      username: "刘岳松",
+      displayName: "刘岳松",
+    }),
+    row("lys-3", {
+      connectionId: "conn-lys",
+      serverKey: "mysql://192.168.1.243:8306",
+      database: "newsg_4cfg",
+      tableName: "unionevilbuffprop",
+      ts: "2026-11-26T06:42:20Z",
+      operation: "INSERT",
+      source: "import",
+      username: "刘岳松",
+      displayName: "刘岳松",
+    }),
+  ];
+  const allRows = [...goodsImportRows, ...unionRows];
+  const calls = [];
+  const history = useSharedAuditHistory({
+    invokeWorkbench: async (command, { request }) => {
+      calls.push({ command, request });
+      if (command === "list_shared_audit_tables") {
+        return [
+          { database: "newsg_4cfg", tableName: "goodsprop", latestTs: "2026-11-26T08:53:15Z" },
+          { database: "newsg_4cfg", tableName: "unionevilbuffprop", latestTs: "2026-11-26T06:42:20Z" },
+        ];
+      }
+      assert.equal(command, "list_shared_audit_logs");
+      // Must NOT filter by local connectionId when serverScopeConnectionId is active!
+      assert.equal(request.connectionId, undefined);
+      return allRows
+        .filter((entry) => (!request.database || entry.database === request.database)
+          && (!request.tableName || entry.tableName === request.tableName))
+        .slice(request.offset, request.offset + request.limit);
+    },
+  });
+
+  await history.loadTables({ serverScopeConnectionId: "conn-lys", database: "newsg_4cfg" });
+  assert.deepEqual(
+    history.state.tables.map((t) => t.tableName),
+    ["goodsprop", "unionevilbuffprop"],
+  );
+  assert.ok(history.state.tables.every((t) => t.connectionId === "conn-lys"));
+  assert.equal(history.state.tablesMore, false);
+
+  // Selecting goodsprop drains the 2,000-row page boundary and merges all 2,450 rows into 1 operation card
+  await history.selectTable(history.state.tables[0]);
+  assert.equal(history.state.operations.length, 1);
+  assert.equal(history.state.operations[0].username, "黄亚鹏");
+  assert.equal(history.state.operations[0].updated, 2450);
+  assert.equal(history.state.operations[0].entryCount, 2450);
+
+  // Expanding details pages 50 rows at a time instead of rendering 2,450 DOM nodes at once
+  const goodsOp = history.state.operations[0];
+  history.loadDetails(goodsOp);
+  assert.equal(history.state.details[goodsOp.id].items.length, 50);
+  assert.equal(history.state.details[goodsOp.id].hasMore, true);
+  history.loadDetails(goodsOp, true);
+  assert.equal(history.state.details[goodsOp.id].items.length, 100);
+  assert.equal(history.state.details[goodsOp.id].hasMore, true);
+
+  // Selecting unionevilbuffprop merges the 1 UPDATE + 2 INSERT Excel import rows into 1 card
+  await history.selectTable(history.state.tables[1]);
+  assert.equal(history.state.operations.length, 1);
+  assert.equal(history.state.operations[0].updated, 1);
+  assert.equal(history.state.operations[0].inserted, 2);
+  assert.equal(history.state.operations[0].entryCount, 3);
+});

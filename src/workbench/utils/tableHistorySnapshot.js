@@ -223,27 +223,17 @@ export function reconstructRevisionFullTable({
     return Number(raw);
   };
 
+  let liveAscendingNumeric = Boolean(singleNumericPk);
+  let prevLivePkNum = Number.NEGATIVE_INFINITY;
+  let needsNumericOrderSort = false;
+
   const ensureInOrder = (idKey, rowObj = null, { sortedInsert = false } = {}) => {
     if (orderSet.has(idKey)) return;
     orderSet.add(idKey);
     const num = parseNumericPk(rowObj);
     if (Number.isFinite(num)) orderPkNum.set(idKey, num);
-    if (sortedInsert && Number.isFinite(num) && order.length > 0) {
-      // Insert deleted/synthesized row at its natural numeric PK slot when live rows are ascending
-      const firstNum = orderPkNum.get(order[0]);
-      const lastNum = orderPkNum.get(order[order.length - 1]);
-      if (Number.isFinite(firstNum) && Number.isFinite(lastNum) && firstNum <= lastNum) {
-        let insertAt = order.length;
-        for (let i = 0; i < order.length; i += 1) {
-          const existingNum = orderPkNum.get(order[i]);
-          if (Number.isFinite(existingNum) && existingNum > num) {
-            insertAt = i;
-            break;
-          }
-        }
-        order.splice(insertAt, 0, idKey);
-        return;
-      }
+    if (sortedInsert && liveAscendingNumeric && Number.isFinite(num)) {
+      needsNumericOrderSort = true;
     }
     order.push(idKey);
   };
@@ -256,6 +246,14 @@ export function reconstructRevisionFullTable({
     }
     const idKey = buildIdentityKey(primaryKeys, row);
     currentMap.set(idKey, row);
+    if (liveAscendingNumeric) {
+      const num = parseNumericPk(row);
+      if (!Number.isFinite(num) || num < prevLivePkNum) {
+        liveAscendingNumeric = false;
+      } else {
+        prevLivePkNum = num;
+      }
+    }
     ensureInOrder(idKey, row);
   }
 
@@ -378,6 +376,17 @@ export function reconstructRevisionFullTable({
   }
 
   // Phase C: build aligned comparison rows in stable table order.
+  if (needsNumericOrderSort && liveAscendingNumeric && order.length > 1) {
+    const originalRank = new Map(order.map((key, idx) => [key, idx]));
+    order.sort((a, b) => {
+      const aNum = orderPkNum.get(a);
+      const bNum = orderPkNum.get(b);
+      const aFinite = Number.isFinite(aNum);
+      const bFinite = Number.isFinite(bNum);
+      if (aFinite && bFinite && aNum !== bNum) return aNum - bNum;
+      return (originalRank.get(a) || 0) - (originalRank.get(b) || 0);
+    });
+  }
   const rows = [];
   const changedRowIndices = [];
 

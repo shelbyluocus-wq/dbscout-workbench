@@ -6803,6 +6803,8 @@ pub async fn delete_rows(
         // rollback image aligned with the exact version that is removed.
         let mut audit_ids: Vec<i64> = Vec::new();
         let mut pendings = Vec::with_capacity(256);
+        let (delete_ts, delete_operation_id) = audit::new_operation_meta();
+        let total_delete_count = plans.len() as i64;
         for (index, (identity, (forward_sql, forward_binds))) in
             request.row_identities.iter().zip(plans.iter()).enumerate()
         {
@@ -6848,9 +6850,18 @@ pub async fn delete_rows(
             };
             pendings.push(pending);
             // Bound before-image memory and durable SQLite commits without
-            // splitting the MySQL transaction or deleting any unaudited rows.
+            // splitting the MySQL transaction or the logical audit operation.
             if pendings.len() == 256 || index + 1 == plans.len() {
-                match audit::record_pending_batch(&audit_pool, &ctx, &pendings).await {
+                match audit::record_pending_batch_in_operation(
+                    &audit_pool,
+                    &ctx,
+                    &pendings,
+                    &delete_ts,
+                    &delete_operation_id,
+                    total_delete_count,
+                )
+                .await
+                {
                     Ok(ids) => audit_ids.extend(ids),
                     Err(error) => {
                         tx.rollback().await.ok();
@@ -10423,9 +10434,32 @@ pub async fn list_shared_audit_logs(
         .await
         .ok_or_else(|| "未登录".to_string())?;
 
+    let server_key = match request
+        .server_scope_connection_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(conn_id) => {
+            let rt = state.runtime.lock().await;
+            rt.connections
+                .get(conn_id)
+                .map(crate::table_modified::server_key_for_connection)
+                .filter(|key| {
+                    !key.is_empty()
+                        && !key.starts_with("demo://")
+                        && !key.eq_ignore_ascii_case("mysql://configured:3306")
+                })
+        }
+        None => None,
+    };
+
     let mut params: Vec<(String, String)> = Vec::new();
     if let Some(v) = &request.connection_id {
         params.push(("connectionId".into(), v.clone()));
+    }
+    if let Some(v) = &server_key {
+        params.push(("serverKey".into(), v.clone()));
     }
     if let Some(v) = &request.database {
         params.push(("database".into(), v.clone()));
@@ -10438,6 +10472,9 @@ pub async fn list_shared_audit_logs(
     }
     if let Some(v) = &request.to_ts {
         params.push(("toTs".into(), v.clone()));
+    }
+    if request.committed_only {
+        params.push(("committedOnly".into(), "true".into()));
     }
     params.push(("limit".into(), request.limit.unwrap_or(200).to_string()));
     params.push(("offset".into(), request.offset.unwrap_or(0).to_string()));
@@ -10478,9 +10515,77 @@ pub async fn list_shared_audit_logs(
         let text = resp.text().await.unwrap_or_default();
         return Err(format!("中心服务返回 {status}: {text}"));
     }
-    resp.json::<Vec<SharedAuditLogEntry>>()
+    let entries = resp
+        .json::<Vec<SharedAuditLogEntry>>()
         .await
-        .map_err(|e| format!("解析共享变更日志失败: {e}"))
+        .map_err(|e| format!("解析共享变更日志失败: {e}"))?;
+    if let Some(wanted) = &server_key {
+        return Ok(entries
+            .into_iter()
+            .filter(|entry| match entry.server_key.as_deref().map(str::trim) {
+                None | Some("") => true,
+                Some(k) if k.eq_ignore_ascii_case("mysql://configured:3306") => true,
+                Some(k) => k.eq_ignore_ascii_case(wanted),
+            })
+            .collect());
+    }
+    Ok(entries)
+}
+
+/// Discover every modified table in one database across all workstations via
+/// `/audit/table-latest` so a single multi-thousand-row Excel import cannot
+/// push other modified tables out of Backup Center's shared table list.
+#[tauri::command]
+pub async fn list_shared_audit_tables(
+    request: ListAuditLogsRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::types::SharedAuditTableEntry>, String> {
+    let database = request
+        .database
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    let conn_id = request
+        .server_scope_connection_id
+        .as_deref()
+        .or(request.connection_id.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    if database.is_empty() || conn_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let server_key = {
+        let rt = state.runtime.lock().await;
+        rt.connections
+            .get(conn_id)
+            .map(crate::table_modified::server_key_for_connection)
+            .filter(|key| !key.is_empty() && !key.starts_with("demo://"))
+            .unwrap_or_default()
+    };
+    let latest = crate::audit_sync::fetch_shared_table_latest(
+        &app,
+        &state,
+        &server_key,
+        conn_id,
+        database,
+    )
+    .await;
+    let mut items: Vec<crate::types::SharedAuditTableEntry> = latest
+        .into_iter()
+        .filter_map(|item| {
+            let dt = chrono::DateTime::from_timestamp_millis(item.ts_ms)?;
+            Some(crate::types::SharedAuditTableEntry {
+                database: database.to_string(),
+                table_name: item.table_name,
+                latest_ts: dt.to_rfc3339(),
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| b.latest_ts.cmp(&a.latest_ts));
+    Ok(items)
 }
 
 /// List locally recorded external (non-Blackcat) modification events for one table.

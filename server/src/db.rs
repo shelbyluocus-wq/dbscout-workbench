@@ -13,7 +13,6 @@ pub const DEFAULT_MAX_REVISIONS_PER_TABLE: usize = 20;
 
 /// Revision grouping window matching the desktop client (`tableChangeHistory.js`).
 const REVISION_GROUP_WINDOW_MS: i64 = 2500;
-const MAX_ITEMS_PER_REVISION: usize = 500;
 const DELETE_CHUNK_SIZE: usize = 400;
 const LEGACY_PLACEHOLDER_SERVER_KEY: &str = "mysql://configured:3306";
 
@@ -125,12 +124,40 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
             return Err(format!("迁移中心服务 svn_username 列失败: {error}"));
         }
     }
+    if let Err(error) = sqlx::query("ALTER TABLE audit_log ADD COLUMN operation_id TEXT")
+        .execute(&pool)
+        .await
+    {
+        if !error.to_string().contains("duplicate column name") {
+            return Err(format!("迁移中心服务 operation_id 列失败: {error}"));
+        }
+    }
+    if let Err(error) = sqlx::query("ALTER TABLE audit_log ADD COLUMN operation_size INTEGER")
+        .execute(&pool)
+        .await
+    {
+        if !error.to_string().contains("duplicate column name") {
+            return Err(format!("迁移中心服务 operation_size 列失败: {error}"));
+        }
+    }
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS ix_audit_server_db_ts ON audit_log(server_key, database, ts DESC)",
     )
     .execute(&pool)
     .await
     .map_err(|e| format!("创建中心服务 server_key 索引失败: {e}"))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS ix_audit_operation_id ON audit_log(operation_id)",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("创建中心服务 operation_id 索引失败: {e}"))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS ix_audit_db_table_ts ON audit_log(database, table_name, ts DESC)",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("创建中心服务表历史索引失败: {e}"))?;
     Ok(pool)
 }
 
@@ -246,7 +273,7 @@ pub async fn prune_table_revisions(
 
     let rows = if server_scope.is_empty() {
         sqlx::query(
-            "SELECT rowid, ts, user_id, source, is_rollback \
+            "SELECT rowid, ts, user_id, source, is_rollback, operation_id \
              FROM audit_log \
              WHERE LOWER(TRIM(database)) = ? \
                AND LOWER(TRIM(table_name)) = ? \
@@ -264,7 +291,7 @@ pub async fn prune_table_revisions(
         .await
     } else {
         sqlx::query(
-            "SELECT rowid, ts, user_id, source, is_rollback \
+            "SELECT rowid, ts, user_id, source, is_rollback, operation_id \
              FROM audit_log \
              WHERE LOWER(TRIM(database)) = ? \
                AND LOWER(TRIM(table_name)) = ? \
@@ -281,8 +308,7 @@ pub async fn prune_table_revisions(
     .map_err(|e| format!("查询待清理审计记录失败: {e}"))?;
 
     let mut revision_count: usize = 0;
-    let mut bucket_len: usize = 0;
-    let mut prev: Option<(Option<i64>, String, String, i64)> = None;
+    let mut prev: Option<(Option<i64>, String, String, i64, Option<String>)> = None;
     let mut to_delete: Vec<i64> = Vec::new();
 
     for row in rows {
@@ -292,27 +318,34 @@ pub async fn prune_table_revisions(
         let user_id: String = row.try_get("user_id").unwrap_or_default();
         let source: String = row.try_get("source").unwrap_or_default();
         let is_rollback: i64 = row.try_get("is_rollback").unwrap_or(0);
+        let operation_id: Option<String> = row
+            .try_get::<Option<String>, _>("operation_id")
+            .ok()
+            .flatten()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
-        let joins_current = match (&prev, ts_ms) {
-            (Some((Some(prev_ms), prev_user, prev_source, prev_rb)), Some(curr_ms))
-                if bucket_len < MAX_ITEMS_PER_REVISION
-                    && *prev_user == user_id
-                    && *prev_source == source
-                    && *prev_rb == is_rollback =>
-            {
-                (prev_ms - curr_ms).abs() <= REVISION_GROUP_WINDOW_MS
+        let joins_current = match &prev {
+            Some((_, _, _, _, Some(prev_op))) => operation_id.as_deref() == Some(prev_op.as_str()),
+            Some((_, _, _, _, None)) if operation_id.is_some() => false,
+            Some((Some(prev_ms), prev_user, prev_source, prev_rb, None)) => {
+                if let Some(curr_ms) = ts_ms {
+                    *prev_user == user_id
+                        && *prev_source == source
+                        && *prev_rb == is_rollback
+                        && (prev_ms - curr_ms).abs() <= REVISION_GROUP_WINDOW_MS
+                } else {
+                    false
+                }
             }
             _ => false,
         };
 
-        if joins_current {
-            bucket_len += 1;
-        } else {
+        if !joins_current {
             revision_count += 1;
-            bucket_len = 1;
         }
 
-        prev = Some((ts_ms, user_id, source, is_rollback));
+        prev = Some((ts_ms, user_id, source, is_rollback, operation_id));
 
         if revision_count > max_revisions {
             to_delete.push(rowid);

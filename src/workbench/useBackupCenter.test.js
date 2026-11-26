@@ -692,14 +692,16 @@ test("setAuditMode('local') falls back to the local audit store", async () => {
   backup.dispose();
 });
 
-test("loadAuditLogs dispatches to the shared endpoint when in shared mode", async () => {
+test("loadAuditLogs dispatches to the shared endpoint using serverScopeConnectionId so teammates' local connection IDs match", async () => {
   const backend = createBackend();
   const backup = useBackupCenter({ ...backend });
   await backup.open();
   backup.setFilters({ connectionId: "demo", database: "game_db", tableName: "hero" });
   await backup.setAuditMode("shared");
-  // The shared request should carry the filters.
-  assert.equal(backend.lastSharedAuditRequest.connectionId, "demo");
+  // Shared mode scopes by serverScopeConnectionId (resolved to server_key on the
+  // backend) rather than filtering out teammates whose local connectionId differs.
+  assert.equal(backend.lastSharedAuditRequest.connectionId, undefined);
+  assert.equal(backend.lastSharedAuditRequest.serverScopeConnectionId, "demo");
   assert.equal(backend.lastSharedAuditRequest.database, "game_db");
   assert.equal(backend.lastSharedAuditRequest.tableName, "hero");
   backup.dispose();
