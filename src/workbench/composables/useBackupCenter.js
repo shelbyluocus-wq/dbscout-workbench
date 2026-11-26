@@ -304,6 +304,26 @@ export function useBackupCenter(options = {}) {
     gmBackups.tableSearch = "";
   }
 
+  function resetGmBackups() {
+    gmListToken += 1;
+    gmTablesToken += 1;
+    gmBackups.loading = false;
+    gmBackups.loadedOnce = false;
+    gmBackups.status = "idle";
+    gmBackups.enabled = false;
+    gmBackups.backupDirConfigured = false;
+    gmBackups.databases = [];
+    gmBackups.dates = [];
+    gmBackups.items = [];
+    gmBackups.error = "";
+    gmBackups.activeBackup = null;
+    gmBackups.tables = [];
+    gmBackups.tablesLoading = false;
+    gmBackups.tablesError = "";
+    gmBackups.selectedTables = [];
+    gmBackups.tableSearch = "";
+  }
+
   async function loadGmBackups(overrides = {}) {
     const token = ++gmListToken;
     gmBackups.loading = true;
@@ -817,6 +837,7 @@ export function useBackupCenter(options = {}) {
     loadSnapshots,
     setSnapshotSource,
     setGmBackupFilters,
+    resetGmBackups,
     loadGmBackups,
     openGmBackupTables,
     closeGmBackupTables,

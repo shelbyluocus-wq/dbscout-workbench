@@ -117,7 +117,11 @@ async function syncGmBackupDatabaseFilterAndLoad({ forceReload = false } = {}) {
 }
 
 onMounted(() => {
-  syncGmBackupDatabaseFilterAndLoad();
+  const needsAuthReload = isLoggedIn.value
+    && (gmBackups.value.status === "logged_out"
+      || gmBackups.value.status === "unauthorized"
+      || gmBackups.value.status === "not_configured");
+  syncGmBackupDatabaseFilterAndLoad({ forceReload: needsAuthReload });
 });
 
 watch(

@@ -137,6 +137,15 @@ watch(
   },
   { immediate: true },
 );
+watch(
+  () => [isLoggedIn.value, account.value?.lastKnownUsername?.value || ""],
+  ([loggedIn, remembered]) => {
+    if (!loggedIn && remembered && !accountDraft.value.username.trim()) {
+      accountDraft.value.username = remembered;
+    }
+  },
+  { immediate: true },
+);
 
 async function onSaveServerUrl() {
   const ok = await account.value?.setServer(accountDraft.value.serverUrl);

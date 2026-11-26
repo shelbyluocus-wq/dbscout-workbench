@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
 
-use crate::account::{current_session, server_url};
+use crate::account::{current_session, recover_unauthorized_session, server_url, SessionRecovery};
 use crate::table_modified::{parse_timestamp_ms, server_key_for_connection, SharedTableLatest};
 use crate::types::{AppState, AuditSyncSignal};
 
@@ -187,6 +187,7 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
     let pool = crate::audit::ensure_audit_pool(app, state).await?;
     let host = hostname();
     let batch = collect_outbox(&pool, &session, &server_keys, 500).await?;
+    let mut active_session = session;
     let result = if batch.is_empty() {
         AuditPushResult {
             accepted: 0,
@@ -199,18 +200,38 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
             .map_err(|e| format!("序列化同步请求失败: {e}"))?;
 
         let url = format!("{base_url}/audit");
-        let resp = state
+        let mut resp = state
             .account
             .http
             .post(&url)
-            .bearer_auth(&session.token)
+            .bearer_auth(&active_session.token)
             .json(&body)
             .send()
             .await
             .map_err(|e| format!("同步请求失败: {e}"))?;
 
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            if let SessionRecovery::Refreshed(refreshed) =
+                recover_unauthorized_session(app, state, &base_url, &active_session).await
+            {
+                active_session = refreshed;
+                resp = state
+                    .account
+                    .http
+                    .post(&url)
+                    .bearer_auth(&active_session.token)
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("同步请求失败: {e}"))?;
+            }
+        }
+
         if !resp.status().is_success() {
             let status = resp.status();
+            if status == StatusCode::UNAUTHORIZED {
+                return Err("登录状态已失效，请在设置中重新登录黑猫账号".into());
+            }
             let text = resp.text().await.unwrap_or_default();
             return Err(format!("同步失败: {status} {text}"));
         }
@@ -233,7 +254,7 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
         &pool,
         &state.account.http,
         &base_url,
-        &session.token,
+        &active_session.token,
         host,
     )
     .await;
@@ -482,17 +503,37 @@ pub async fn fetch_shared_table_latest(
         return Vec::new();
     };
 
-    let Ok(resp) = state
+    let mut active_session = session;
+    let Ok(mut resp) = state
         .account
         .http
-        .get(url)
-        .bearer_auth(&session.token)
+        .get(url.clone())
+        .bearer_auth(&active_session.token)
         .timeout(Duration::from_secs(3))
         .send()
         .await
     else {
         return Vec::new();
     };
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &active_session).await
+        {
+            active_session = refreshed;
+            let Ok(retried) = state
+                .account
+                .http
+                .get(url)
+                .bearer_auth(&active_session.token)
+                .timeout(Duration::from_secs(3))
+                .send()
+                .await
+            else {
+                return Vec::new();
+            };
+            resp = retried;
+        }
+    }
     let status = resp.status();
     if matches!(
         status,
@@ -501,7 +542,7 @@ pub async fn fetch_shared_table_latest(
         return fetch_shared_table_latest_via_audit_list(
             &state.account.http,
             &base_url,
-            &session.token,
+            &active_session.token,
             server_key,
             database,
         )

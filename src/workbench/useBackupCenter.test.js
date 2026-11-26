@@ -931,3 +931,50 @@ test("243 server backup listing, table picker, and restore flow", async () => {
   assert.equal(backup.gmBackups.activeBackup, null);
   backup.dispose();
 });
+
+test("resetGmBackups clears unauthorized cache so subsequent load refreshes cleanly", async () => {
+  let authed = false;
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "list_gm_backups") {
+      if (!authed) {
+        return Promise.resolve({
+          status: "unauthorized",
+          enabled: false,
+          backupDirConfigured: false,
+          databases: [],
+          dates: [],
+          items: [],
+          error: "登录状态已失效，请在设置中重新登录黑猫账号",
+        });
+      }
+      return Promise.resolve({
+        status: "ok",
+        enabled: true,
+        backupDirConfigured: true,
+        databases: ["newsg_4cfg"],
+        dates: ["2026-11-26"],
+        items: [{ date: "2026-11-26", hour: "13", fileName: "demo.zip", host: "192.168.1.243", database: "newsg_4cfg", ts: "2026-11-26 13:50:02", sizeBytes: 1024 }],
+        error: null,
+      });
+    }
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  assert.equal(await backup.loadGmBackups(), false);
+  assert.equal(backup.gmBackups.status, "unauthorized");
+  assert.equal(backup.gmBackups.loadedOnce, true);
+
+  backup.resetGmBackups();
+  assert.equal(backup.gmBackups.loadedOnce, false);
+  assert.equal(backup.gmBackups.status, "idle");
+  assert.equal(backup.gmBackups.error, "");
+
+  authed = true;
+  assert.equal(await backup.loadGmBackups(), true);
+  assert.equal(backup.gmBackups.status, "ok");
+  assert.equal(backup.gmBackups.items.length, 1);
+  backup.dispose();
+});

@@ -1187,7 +1187,7 @@ impl Default for BackupState {
 /// A logged-in user session. Persisted (token + identity) so the app can
 /// restore the session across restarts. Token-based (no password): the central
 /// server issues an opaque token on register/login.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserSession {
     pub user_id: String,
@@ -1216,10 +1216,12 @@ pub struct AccountConfig {
 }
 
 /// Runtime account state held in `AppState`. `config` is the persisted
-/// server-url + session (mutable, locked); `http` is a shared reqwest client.
+/// server-url + session (mutable, locked); `http` is a shared reqwest client;
+/// `recovery_lock` serializes concurrent 401 re-login / invalidation attempts.
 pub struct AccountState {
     pub config: tokio::sync::Mutex<AccountConfig>,
     pub http: reqwest::Client,
+    pub recovery_lock: tokio::sync::Mutex<()>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1808,6 +1810,7 @@ impl AppState {
                 // first use via account::ensure_loaded (mirrors ensure_audit_pool).
                 config: tokio::sync::Mutex::new(AccountConfig::default()),
                 http: build_account_http_client(),
+                recovery_lock: tokio::sync::Mutex::new(()),
             },
             perf: crate::perf::PerformanceRecorder::default(),
             table_transfer: crate::table_transfer::TableTransferJobs::default(),

@@ -1241,6 +1241,19 @@ const account = useAccount({
         await backupCenter.loadAuditLogs();
       }
     }
+    // Keep 243 server backup panel in sync with account transitions without
+    // clobbering an in-flight/just-returned unauthorized error message.
+    if (account.isLoggedIn.value) {
+      backupCenter.resetGmBackups();
+      if (backupCenter.dialog.open && backupCenter.dialog.tab === "snapshot") {
+        void backupCenter.loadGmBackups();
+      }
+    } else if (backupCenter.gmBackups.status !== "unauthorized" && !backupCenter.gmBackups.loading) {
+      backupCenter.resetGmBackups();
+      if (backupCenter.dialog.open && backupCenter.dialog.tab === "snapshot") {
+        void backupCenter.loadGmBackups();
+      }
+    }
     if (account.isLoggedIn.value && selectedConnectionId.value && selectedDatabase.value) {
       void refreshTableModifiedTimes().catch(() => {});
     }

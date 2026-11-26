@@ -13,9 +13,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::types::{AccountConfig, AppState, UserSession};
+use crate::types::{AccountConfig, AccountInfo, AccountView, AppState, UserSession};
+
+/// Event emitted whenever the backend refreshes or clears the persisted account
+/// session (for example after silent re-login or token invalidation on 401).
+pub const ACCOUNT_SESSION_CHANGED_EVENT: &str = "account-session-changed";
 
 /// Default LAN central server used when no custom server URL has been saved yet.
 pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.243:8766";
@@ -31,6 +35,7 @@ const LEGACY_DEFAULT_SERVER_URLS: &[(&str, u32)] = &[
 pub const SERVER_URL_MIGRATION_VERSION: u32 = 2;
 
 const STARTUP_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn is_legacy_default_server_url(url: &str, migration_version: u32) -> bool {
     let normalized = url.trim().trim_end_matches('/');
@@ -180,6 +185,324 @@ pub async fn probe_server_reachable(http: &reqwest::Client, base_url: &str) -> b
         return false;
     };
     resp.status() == StatusCode::UNAUTHORIZED || resp.status().is_success()
+}
+
+/// Result of attempting to silently re-login with the saved username after a
+/// central server rejected an expired/unknown token with 401 Unauthorized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReloginOutcome {
+    Refreshed(UserSession),
+    Rejected,
+    TransientError,
+}
+
+/// Outcome of `recover_unauthorized_session` for callers that received a 401.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionRecovery {
+    /// Silently obtained a fresh token for the same username (or another
+    /// concurrent request already refreshed the session).
+    Refreshed(UserSession),
+    /// Server confirmed the account cannot be re-authenticated (e.g. 404);
+    /// the stale local session has been cleared and the frontend notified.
+    Cleared,
+    /// Server was unreachable or returned 5xx; local session left untouched.
+    Unchanged,
+}
+
+/// Result of validating a stored session against `GET /me` (with silent
+/// `/login` fallback on 401).
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionCheckOutcome {
+    Valid(UserSession),
+    Refreshed(UserSession),
+    Cleared,
+    Unreachable,
+}
+
+fn emit_account_session_changed(app: &AppHandle, config: &AccountConfig) {
+    let _ = app.emit(
+        ACCOUNT_SESSION_CHANGED_EVENT,
+        AccountView {
+            server_url: config.server_url.clone(),
+            session: config.session.clone(),
+        },
+    );
+}
+
+fn session_from_account_info(info: AccountInfo) -> UserSession {
+    UserSession {
+        user_id: info.user_id,
+        username: info.username,
+        display_name: info.display_name,
+        token: info.token,
+    }
+}
+
+/// Attempt to silently re-login via `POST /login` for `username`.
+/// Because Blackcat central server uses username + opaque token (no password),
+/// this seamlessly restores sessions after a central-server migration or token
+/// rotation when the account exists on the target server, while distinguishing
+/// definitive rejections (4xx) from transient network/5xx errors.
+pub async fn try_relogin_with_username(
+    http: &reqwest::Client,
+    base_url: &str,
+    username: &str,
+    timeout: Duration,
+) -> ReloginOutcome {
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    let trimmed_user = username.trim();
+    if trimmed_base.is_empty() || trimmed_user.is_empty() {
+        return ReloginOutcome::Rejected;
+    }
+    let login_url = format!("{trimmed_base}/login");
+    let Ok(url) = reqwest::Url::parse(&login_url) else {
+        return ReloginOutcome::TransientError;
+    };
+    let resp = match http
+        .post(url)
+        .timeout(timeout)
+        .json(&serde_json::json!({ "username": trimmed_user }))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(_) => return ReloginOutcome::TransientError,
+    };
+    match resp.status() {
+        status if status.is_success() => match resp.json::<AccountInfo>().await {
+            Ok(info) if !info.token.trim().is_empty() => {
+                ReloginOutcome::Refreshed(session_from_account_info(info))
+            }
+            _ => ReloginOutcome::TransientError,
+        },
+        StatusCode::NOT_FOUND
+        | StatusCode::UNAUTHORIZED
+        | StatusCode::FORBIDDEN
+        | StatusCode::BAD_REQUEST => ReloginOutcome::Rejected,
+        _ => ReloginOutcome::TransientError,
+    }
+}
+
+/// Validate `session` against `GET /me`, falling back to `POST /login` on 401.
+#[cfg(test)]
+pub async fn check_session_with_server(
+    http: &reqwest::Client,
+    base_url: &str,
+    session: &UserSession,
+    timeout: Duration,
+) -> SessionCheckOutcome {
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    if trimmed_base.is_empty() {
+        return SessionCheckOutcome::Unreachable;
+    }
+    let me_url = format!("{trimmed_base}/me");
+    let Ok(url) = reqwest::Url::parse(&me_url) else {
+        return SessionCheckOutcome::Unreachable;
+    };
+    let resp = match http
+        .get(url)
+        .bearer_auth(&session.token)
+        .timeout(timeout)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(_) => return SessionCheckOutcome::Unreachable,
+    };
+    match resp.status() {
+        status if status.is_success() => match resp.json::<AccountInfo>().await {
+            Ok(info) if !info.token.trim().is_empty() => {
+                SessionCheckOutcome::Valid(session_from_account_info(info))
+            }
+            _ => SessionCheckOutcome::Valid(session.clone()),
+        },
+        StatusCode::UNAUTHORIZED => {
+            match try_relogin_with_username(http, trimmed_base, &session.username, timeout).await {
+                ReloginOutcome::Refreshed(refreshed) => SessionCheckOutcome::Refreshed(refreshed),
+                ReloginOutcome::Rejected => SessionCheckOutcome::Cleared,
+                ReloginOutcome::TransientError => SessionCheckOutcome::Unreachable,
+            }
+        }
+        _ => SessionCheckOutcome::Unreachable,
+    }
+}
+
+/// Handle a `401 Unauthorized` response from the central server:
+/// 1. Serializes concurrent 401s so multiple background/foreground requests
+///    coalesce into one recovery check.
+/// 2. Attempts silent `POST /login` with the saved username. If it succeeds,
+///    updates `session.json` and notifies the frontend so the caller can retry.
+/// 3. If the server explicitly rejects the username (e.g. 404 on a fresh 243
+///    server), clears the stale local session, persists `session.json`, and
+///    emits `account-session-changed` so the UI immediately reflects logged-out
+///    state instead of showing a misleading logged-in badge.
+/// 4. On transient network/5xx errors, leaves the local session intact.
+pub async fn recover_unauthorized_session(
+    app: &AppHandle,
+    state: &AppState,
+    base_url: &str,
+    failed_session: &UserSession,
+) -> SessionRecovery {
+    let _recovery_guard = state.account.recovery_lock.lock().await;
+
+    // Re-check current state in case another caller already refreshed/cleared
+    // or the user manually switched accounts while we waited for the lock.
+    {
+        let config = state.account.config.lock().await;
+        match config.session.as_ref() {
+            None => return SessionRecovery::Cleared,
+            Some(current) if current.token != failed_session.token => {
+                return SessionRecovery::Refreshed(current.clone());
+            }
+            Some(_) => {}
+        }
+    }
+
+    let outcome = try_relogin_with_username(
+        &state.account.http,
+        base_url,
+        &failed_session.username,
+        SESSION_RECOVERY_TIMEOUT,
+    )
+    .await;
+
+    match outcome {
+        ReloginOutcome::Refreshed(new_session) => {
+            let (snapshot, changed) = {
+                let mut config = state.account.config.lock().await;
+                let still_same = config
+                    .session
+                    .as_ref()
+                    .map(|s| s.token == failed_session.token)
+                    .unwrap_or(false);
+                if still_same {
+                    config.session = Some(new_session.clone());
+                    (config.clone(), true)
+                } else {
+                    (config.clone(), false)
+                }
+            };
+            if changed {
+                let _ = save_account(app, &snapshot);
+                emit_account_session_changed(app, &snapshot);
+                state.table_modified.clear_shared_fetch_debounce();
+                SessionRecovery::Refreshed(new_session)
+            } else {
+                match snapshot.session {
+                    Some(current) => SessionRecovery::Refreshed(current),
+                    None => SessionRecovery::Cleared,
+                }
+            }
+        }
+        ReloginOutcome::Rejected => {
+            let (snapshot, changed) = {
+                let mut config = state.account.config.lock().await;
+                let still_same = config
+                    .session
+                    .as_ref()
+                    .map(|s| s.token == failed_session.token)
+                    .unwrap_or(false);
+                if still_same {
+                    config.session = None;
+                    (config.clone(), true)
+                } else {
+                    (config.clone(), false)
+                }
+            };
+            if changed {
+                let _ = save_account(app, &snapshot);
+                emit_account_session_changed(app, &snapshot);
+                SessionRecovery::Cleared
+            } else {
+                match snapshot.session {
+                    Some(current) => SessionRecovery::Refreshed(current),
+                    None => SessionRecovery::Cleared,
+                }
+            }
+        }
+        ReloginOutcome::TransientError => SessionRecovery::Unchanged,
+    }
+}
+
+/// Validate any persisted session against `base_url` (used on startup probe and
+/// after changing the central server URL). Returns `(latest_session, reachable)`.
+/// Offline-first: if the server is unreachable, keeps the local session intact
+/// and returns `(session, false)`.
+pub async fn validate_or_recover_session(
+    app: &AppHandle,
+    state: &AppState,
+    base_url: &str,
+) -> (Option<UserSession>, bool) {
+    let Some(session) = current_session(state).await else {
+        let reachable = probe_server_reachable(&state.account.http, base_url).await;
+        return (None, reachable);
+    };
+
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    if trimmed_base.is_empty() {
+        return (Some(session), false);
+    }
+    let me_url = format!("{trimmed_base}/me");
+    let Ok(url) = reqwest::Url::parse(&me_url) else {
+        return (Some(session), false);
+    };
+
+    let resp = match state
+        .account
+        .http
+        .get(url)
+        .bearer_auth(&session.token)
+        .timeout(STARTUP_PROBE_TIMEOUT)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(_) => return (Some(session), false),
+    };
+
+    match resp.status() {
+        status if status.is_success() => {
+            if let Ok(info) = resp.json::<AccountInfo>().await {
+                if !info.token.trim().is_empty() {
+                    let latest = session_from_account_info(info);
+                    if latest.display_name != session.display_name
+                        || latest.user_id != session.user_id
+                        || latest.username != session.username
+                    {
+                        let (snapshot, updated) = {
+                            let mut config = state.account.config.lock().await;
+                            let still_same = config
+                                .session
+                                .as_ref()
+                                .map(|s| s.token == session.token)
+                                .unwrap_or(false);
+                            if still_same {
+                                config.session = Some(latest.clone());
+                                (config.clone(), true)
+                            } else {
+                                (config.clone(), false)
+                            }
+                        };
+                        if updated {
+                            let _ = save_account(app, &snapshot);
+                            emit_account_session_changed(app, &snapshot);
+                        }
+                        return (snapshot.session, true);
+                    }
+                }
+            }
+            (Some(session), true)
+        }
+        StatusCode::UNAUTHORIZED => {
+            match recover_unauthorized_session(app, state, trimmed_base, &session).await {
+                SessionRecovery::Refreshed(refreshed) => (Some(refreshed), true),
+                SessionRecovery::Cleared => (None, true),
+                SessionRecovery::Unchanged => (Some(session), false),
+            }
+        }
+        _ => (Some(session), false),
+    }
 }
 
 #[cfg(test)]
@@ -333,5 +656,117 @@ mod tests {
             !probe_server_reachable(&client, &format!("http://127.0.0.1:{closed_port}")).await
         );
         assert!(!probe_server_reachable(&client, "").await);
+    }
+
+    async fn spawn_routed_http_server(
+        routes: Vec<(&'static str, &'static str, &'static str)>,
+    ) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            for _ in 0..routes.len() {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0_u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let first_line = req.lines().next().unwrap_or("");
+                let (status_line, body) = routes
+                    .iter()
+                    .find(|(prefix, _, _)| first_line.starts_with(prefix))
+                    .map(|(_, status, body)| (*status, *body))
+                    .unwrap_or(("404 Not Found", ""));
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn check_session_with_server_handles_valid_relogin_rejected_and_offline() {
+        let client = reqwest::Client::new();
+        let saved = UserSession {
+            user_id: "u-old".into(),
+            username: "alice".into(),
+            display_name: "Alice".into(),
+            token: "old-token".into(),
+        };
+
+        // 1) /me returns 200 OK -> Valid with latest user info.
+        let valid_url = spawn_routed_http_server(vec![(
+            "GET /me",
+            "200 OK",
+            r#"{"userId":"u-old","username":"alice","displayName":"Alice Updated","token":"old-token"}"#,
+        )])
+        .await;
+        assert_eq!(
+            check_session_with_server(&client, &valid_url, &saved, Duration::from_secs(2)).await,
+            SessionCheckOutcome::Valid(UserSession {
+                user_id: "u-old".into(),
+                username: "alice".into(),
+                display_name: "Alice Updated".into(),
+                token: "old-token".into(),
+            })
+        );
+
+        // 2) /me returns 401 and /login succeeds -> silently Refreshed.
+        let refresh_url = spawn_routed_http_server(vec![
+            ("GET /me", "401 Unauthorized", "令牌无效或已失效"),
+            (
+                "POST /login",
+                "200 OK",
+                r#"{"userId":"u-new","username":"alice","displayName":"Alice","token":"fresh-token"}"#,
+            ),
+        ])
+        .await;
+        assert_eq!(
+            check_session_with_server(&client, &refresh_url, &saved, Duration::from_secs(2)).await,
+            SessionCheckOutcome::Refreshed(UserSession {
+                user_id: "u-new".into(),
+                username: "alice".into(),
+                display_name: "Alice".into(),
+                token: "fresh-token".into(),
+            })
+        );
+
+        // 3) /me returns 401 and /login returns 404 -> Cleared (account missing on new server).
+        let cleared_url = spawn_routed_http_server(vec![
+            ("GET /me", "401 Unauthorized", "令牌无效或已失效"),
+            ("POST /login", "404 Not Found", "用户不存在，请先注册"),
+        ])
+        .await;
+        assert_eq!(
+            check_session_with_server(&client, &cleared_url, &saved, Duration::from_secs(2)).await,
+            SessionCheckOutcome::Cleared
+        );
+
+        // 4) /me returns 401 and /login returns 500 -> Unreachable (offline-first: do not clear).
+        let transient_url = spawn_routed_http_server(vec![
+            ("GET /me", "401 Unauthorized", "令牌无效或已失效"),
+            ("POST /login", "500 Internal Server Error", "db busy"),
+        ])
+        .await;
+        assert_eq!(
+            check_session_with_server(&client, &transient_url, &saved, Duration::from_secs(2))
+                .await,
+            SessionCheckOutcome::Unreachable
+        );
+
+        // 5) /me returns 500 -> Unreachable (offline-first: keep local session).
+        let down_url = spawn_routed_http_server(vec![(
+            "GET /me",
+            "500 Internal Server Error",
+            "server error",
+        )])
+        .await;
+        assert_eq!(
+            check_session_with_server(&client, &down_url, &saved, Duration::from_secs(2)).await,
+            SessionCheckOutcome::Unreachable
+        );
     }
 }

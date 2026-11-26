@@ -600,9 +600,15 @@ pub async fn push_outbox(
     Ok(accepted)
 }
 
-/// Fetch team-shared external changes for one table from the central server.
-/// Older servers without `/external-changes` degrade cleanly to an empty list.
-pub async fn fetch_shared(
+pub enum SharedFetchOutcome {
+    Ok(Vec<TableExternalChangeEntry>),
+    Unauthorized(String),
+}
+
+/// Fetch team-shared external changes for one table from the central server,
+/// surfacing `401 Unauthorized` separately so callers can trigger session
+/// recovery and retry once.
+pub async fn fetch_shared_outcome(
     http: &reqwest::Client,
     base_url: &str,
     token: &str,
@@ -611,7 +617,7 @@ pub async fn fetch_shared(
     table_name: &str,
     limit: u32,
     offset: u32,
-) -> Result<Vec<TableExternalChangeEntry>, String> {
+) -> Result<SharedFetchOutcome, String> {
     let endpoint = format!("{base_url}/external-changes");
     let mut params: Vec<(&str, String)> = vec![
         ("database", database.to_string()),
@@ -634,11 +640,17 @@ pub async fn fetch_shared(
         .map_err(|error| format!("查询共享外部变动失败: {error}"))?;
 
     let status = resp.status();
+    if status == StatusCode::UNAUTHORIZED {
+        let text = resp.text().await.unwrap_or_default();
+        return Ok(SharedFetchOutcome::Unauthorized(format!(
+            "中心服务返回 {status}: {text}"
+        )));
+    }
     if matches!(
         status,
         StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED
     ) {
-        return Ok(Vec::new());
+        return Ok(SharedFetchOutcome::Ok(Vec::new()));
     }
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
@@ -649,18 +661,42 @@ pub async fn fetch_shared(
         .await
         .map_err(|error| format!("解析共享外部变动失败: {error}"))?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| TableExternalChangeEntry {
-            event_id: row.event_id,
-            server_key: row.server_key,
-            database: row.database,
-            table_name: row.table_name,
-            ts: row.ts,
-            ts_ms: row.ts_ms,
-            time_kind: row.time_kind,
-            signal: row.signal,
-            origin: "shared".to_string(),
-        })
-        .collect())
+    Ok(SharedFetchOutcome::Ok(
+        rows.into_iter()
+            .map(|row| TableExternalChangeEntry {
+                event_id: row.event_id,
+                server_key: row.server_key,
+                database: row.database,
+                table_name: row.table_name,
+                ts: row.ts,
+                ts_ms: row.ts_ms,
+                time_kind: row.time_kind,
+                signal: row.signal,
+                origin: "shared".to_string(),
+            })
+            .collect(),
+    ))
+}
+
+/// Fetch team-shared external changes for one table from the central server.
+/// Older servers without `/external-changes` degrade cleanly to an empty list.
+#[allow(dead_code)]
+pub async fn fetch_shared(
+    http: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    server_key: Option<&str>,
+    database: &str,
+    table_name: &str,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<TableExternalChangeEntry>, String> {
+    match fetch_shared_outcome(
+        http, base_url, token, server_key, database, table_name, limit, offset,
+    )
+    .await?
+    {
+        SharedFetchOutcome::Ok(rows) => Ok(rows),
+        SharedFetchOutcome::Unauthorized(err) => Err(err),
+    }
 }
