@@ -114,6 +114,9 @@ pub async fn push_audit(
     State(state): State<ServerState>,
     Json(req): Json<AuditPushRequest>,
 ) -> Result<Json<AuditPushResponse>, (StatusCode, String)> {
+    if req.items.iter().any(|item| item.client_id.starts_with("mcp:")) {
+        return Err((StatusCode::BAD_REQUEST, "MCP 操作记录由中心服务生成".into()));
+    }
     if req.items.is_empty() {
         return Ok(Json(AuditPushResponse {
             accepted: 0,
@@ -213,7 +216,7 @@ pub async fn list_audit(
         "SELECT a.client_id, a.ts, a.user_id, a.username, u.display_name, \
          a.connection_id, a.database, a.table_name, a.operation, a.row_identity, a.column_name, \
          a.old_value, a.new_value, a.source, a.status, a.is_rollback, \
-         a.rollback_of_client_id, a.host, a.server_key \
+         a.rollback_of_client_id, a.host, a.server_key, a.svn_username \
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id",
     );
     let mut clauses: Vec<&'static str> = Vec::new();
@@ -276,6 +279,7 @@ pub async fn list_audit(
             user_id: r.try_get("user_id").unwrap_or_default(),
             username: r.try_get("username").unwrap_or_default(),
             display_name: r.try_get("display_name").unwrap_or_default(),
+            svn_username: r.try_get("svn_username").ok().flatten(),
             connection_id: r.try_get("connection_id").unwrap_or_default(),
             database: r.try_get("database").unwrap_or_default(),
             table_name: r.try_get("table_name").unwrap_or_default(),

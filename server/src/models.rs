@@ -78,6 +78,8 @@ pub struct SharedAuditLogEntry {
     pub user_id: String,
     pub username: String,
     pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub svn_username: Option<String>,
     pub connection_id: String,
     pub database: String,
     pub table_name: String,

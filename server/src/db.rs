@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS audit_log (\
 CREATE INDEX IF NOT EXISTS ix_audit_user_ts ON audit_log(user_id, ts DESC);\
 CREATE INDEX IF NOT EXISTS ix_audit_conn_db_ts ON audit_log(connection_id, database, ts DESC);\
 CREATE INDEX IF NOT EXISTS ix_audit_synced ON audit_log(synced_at);\
+CREATE TABLE IF NOT EXISTS mcp_write_receipts (\
+    audit_id TEXT PRIMARY KEY,\
+    status TEXT NOT NULL\
+);\
 CREATE TABLE IF NOT EXISTS table_external_changes (\
     event_id TEXT PRIMARY KEY,\
     server_key TEXT,\
@@ -111,6 +115,14 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
     {
         if !error.to_string().contains("duplicate column name") {
             return Err(format!("迁移中心服务 row_identity 列失败: {error}"));
+        }
+    }
+    if let Err(error) = sqlx::query("ALTER TABLE audit_log ADD COLUMN svn_username TEXT")
+        .execute(&pool)
+        .await
+    {
+        if !error.to_string().contains("duplicate column name") {
+            return Err(format!("迁移中心服务 svn_username 列失败: {error}"));
         }
     }
     sqlx::query(
@@ -238,6 +250,7 @@ pub async fn prune_table_revisions(
              FROM audit_log \
              WHERE LOWER(TRIM(database)) = ? \
                AND LOWER(TRIM(table_name)) = ? \
+               AND status != 'mcp_pending' \
                AND ( \
                    server_key IS NULL \
                    OR TRIM(server_key) = '' \
@@ -255,6 +268,7 @@ pub async fn prune_table_revisions(
              FROM audit_log \
              WHERE LOWER(TRIM(database)) = ? \
                AND LOWER(TRIM(table_name)) = ? \
+               AND status != 'mcp_pending' \
                AND LOWER(TRIM(server_key)) = ? \
              ORDER BY ts DESC, rowid DESC",
         )

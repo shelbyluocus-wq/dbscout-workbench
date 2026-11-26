@@ -13,9 +13,14 @@ mod auth;
 mod db;
 mod gm_backups;
 mod handlers;
+mod mcp;
+mod mcp_mysql;
 mod models;
 
-use std::env;
+use std::{
+    env,
+    net::{Ipv4Addr, SocketAddr},
+};
 
 use axum::{
     middleware,
@@ -27,6 +32,14 @@ use tower_http::trace::TraceLayer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if let [mode, config_path, client] = args.as_slice() {
+        if mode == "--mcp-headers" {
+            println!("{}", mcp::client_headers(config_path, client).await?);
+            return Ok(());
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -112,6 +125,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
+    if let Some(config_path) = env::var_os("DBSCOUT_MCP_CONFIG") {
+        let mcp_bind = match env::var("DBSCOUT_MCP_BIND") {
+            Ok(bind) => bind.parse::<SocketAddr>()?,
+            Err(env::VarError::NotPresent) => {
+                let port = env::var("DBSCOUT_MCP_PORT")
+                    .unwrap_or_else(|_| "8767".into())
+                    .parse::<u16>()?;
+                SocketAddr::from((Ipv4Addr::LOCALHOST, port))
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let mcp_listener = tokio::net::TcpListener::bind(mcp_bind).await?;
+        let mcp_addr = mcp_listener.local_addr()?;
+        let mcp_app = mcp::router(config_path.into(), pool, max_revisions_per_table);
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(mcp_listener, mcp_app).await {
+                tracing::error!("Blackcat MCP 监听退出: {error}");
+            }
+        });
+        tracing::info!("Blackcat MCP 监听 http://{mcp_addr}/mcp");
+    }
     tracing::info!("dbscout-server 监听 http://{bind}");
     axum::serve(listener, app).await?;
     Ok(())

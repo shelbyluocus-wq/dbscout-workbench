@@ -93,6 +93,41 @@ npm run server:deploy -- --backup
 | GET  | `/backups/gm/tables` | Bearer | 解析指定备份 `.zip` 内的全部数据表列表（带元数据缓存） |
 | POST | `/backups/gm/extract` | Bearer | 从指定备份 `.zip` 按表（`tables` 非空）或整库（`tables` 为空）提取 SQL 供客户端安全还原 |
 
+## 服务端 MCP
+
+设置 `DBSCOUT_MCP_CONFIG` 指向只有服务账号可读的 JSON 文件后，MCP 默认监听 `127.0.0.1:8767`。243 内网部署将 `DBSCOUT_MCP_BIND` 设为 `192.168.1.243:8767`，入口为 `http://192.168.1.243:8767/mcp`。修改监听地址后重启服务，账号和连接配置在下一次请求生效。
+
+能访问该内网地址的电脑可配置 Codex 直连。由管理员给每位操作者签发绑定黑猫账号与 SVN 用户名的令牌，在启动 Codex 的环境里设置 `BLACKCAT_MCP_TOKEN`，然后执行以下命令并打开新会话。
+
+```sh
+codex mcp add blackcat --url http://192.168.1.243:8767/mcp --bearer-token-env-var BLACKCAT_MCP_TOKEN
+```
+
+其他支持 Streamable HTTP 的客户端可使用相同 URL，并在 `Authorization` 请求头中传入 `Bearer <令牌>`。HTTP 地址仅用于可信内网。
+
+```json
+{
+  "clients": [{
+    "id": "my-codex",
+    "token": "<64 位随机十六进制 MCP 令牌>",
+    "username": "<已注册的黑猫用户名>",
+    "svnUsername": "<SVN 用户名>",
+    "connections": ["config-db"],
+    "canWrite": false
+  }],
+  "connections": [{
+    "id": "config-db",
+    "name": "配置库",
+    "url": "mysql://<账号>:<密码>@<主机>:3306",
+    "database": "config",
+    "tables": ["activity"],
+    "writable": false
+  }]
+}
+```
+
+令牌与中心服务账号绑定。数据库连接和目标表由管理员配置，写入要求客户端与连接同时获准，并由工具校验主键、旧值和确认参数。写入记录可在黑猫的共享变更记录和 MCP 的 `list_operation_records` 中查看。管理配置和凭据放在部署目录的私有文件里。
+
 ## 安全说明
 
 仅用户名登录意味着任何知道用户名的人都能登录该账号。本设计面向公司内部局域网、单用户机器场景，请勿暴露到公网。如需更强身份校验，后续可在 `users` 表增加密码哈希并扩展 `/login`。
