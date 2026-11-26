@@ -926,6 +926,28 @@ test("batch import dialog can be dragged by its title to a new place", () => {
   assert.match(styles, /\.wb-batch-import-dialog\.is-moving \.wb-dialog-header\s*\{[^}]*cursor:\s*grabbing/s);
 });
 
+test("batch import dialog supports wide drag-and-drop with an enlarged empty drop zone", () => {
+  const orchestrator = read("./MySqlWorkbench.vue");
+  const dialog = read("./components/BatchImportDialog.vue");
+  const styles = read("./workbench.css");
+  const dropHelper = read("./utils/batchImportDrop.js");
+
+  assert.match(dialog, /@dragenter="onOverlayDragEnter"/);
+  assert.match(dialog, /@dragover="onOverlayDragOver"/);
+  assert.match(dialog, /@dragleave="onOverlayDragLeave"/);
+  assert.match(dialog, /@drop="onOverlayDrop"/);
+  assert.match(dialog, /is-file-dragging/);
+  assert.match(dialog, /wb-batch-import-drop-overlay/);
+  assert.match(dialog, /emit\("files-dropped"/);
+  assert.match(orchestrator, /@files-dropped="onBatchImportFilesDropped"/);
+  assert.match(orchestrator, /setBatchImportMode\(payload\.mode\)/);
+  assert.match(dropHelper, /export function planBatchImportDrop/);
+  assert.match(dropHelper, /export async function extractDroppedBatchImportFiles/);
+  assert.match(styles, /\.wb-batch-file-drop\.is-empty\s*\{[^}]*min-height:\s*240px/s);
+  assert.match(styles, /\.wb-batch-import-dialog\.is-user-sized \.wb-batch-file-drop\.is-empty\s*\{[^}]*flex:\s*1 1 auto/s);
+  assert.match(styles, /\.wb-batch-import-drop-overlay\s*\{[^}]*pointer-events:\s*none/s);
+});
+
 test("table comparison panes can be dragged to resize left, right, and the detail band", () => {
   const comparison = read("./components/BatchImportComparison.vue");
   const diffGrid = read("./components/BatchImportDiffGrid.vue");

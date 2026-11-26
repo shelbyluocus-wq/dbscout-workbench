@@ -1,8 +1,13 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { GitCompareArrows, X } from "lucide-vue-next";
+import { FileSpreadsheet, FileUp, GitCompareArrows, X } from "lucide-vue-next";
 import { useEscClose } from "../composables/useEscClose.js";
+import {
+  dataTransferHasFiles,
+  extractDroppedBatchImportFiles,
+  planBatchImportDrop,
+} from "../utils/batchImportDrop.js";
 import {
   centerDialogFrame,
   clampDialogFrame,
@@ -18,7 +23,7 @@ const props = defineProps({
   transfer: { type: Object, required: true },
 });
 
-const emit = defineEmits(["close", "file-selected", "execute"]);
+const emit = defineEmits(["close", "file-selected", "files-dropped", "execute"]);
 
 const fileInput = ref(null);
 const query = ref("");
@@ -30,6 +35,10 @@ let userPositioned = false;
 let placedViewport = null;
 const resizing = ref(false);
 const moving = ref(false);
+const draggingFile = ref(false);
+const dropError = ref("");
+const dropNotice = ref("");
+let dragDepth = 0;
 const resizeHandles = [
   { edge: "n", label: "调整窗口上边缘", orientation: "horizontal", edges: { top: true } },
   { edge: "s", label: "调整窗口下边缘", orientation: "horizontal", edges: { bottom: true } },
@@ -79,7 +88,21 @@ const modeOptions = [
   { value: "workbook", label: "合并工作簿" },
   { value: "separate", label: "每表一个 Excel" },
 ];
-const filePrompt = computed(() => (batch.value.mode === "separate" ? "选择多个 Excel 文件" : "选择 XLSX 文件"));
+const hasLoadedFile = computed(() => Boolean(batch.value.fileName));
+const canAcceptDrop = computed(() => !isBusy.value && !batch.value.readOnly && !comparisonFullscreen.value);
+const showDropCover = computed(() =>
+  draggingFile.value && canAcceptDrop.value && (hasLoadedFile.value || viewMode.value === "comparison")
+);
+const filePrompt = computed(() => (
+  batch.value.mode === "separate"
+    ? t("batchImport.dropPromptSeparate")
+    : t("batchImport.dropPromptWorkbook")
+));
+const fileDropHint = computed(() => (
+  batch.value.mode === "separate"
+    ? t("batchImport.dropHintSeparate")
+    : t("batchImport.dropHintWorkbook")
+));
 const searchPlaceholder = computed(() => (batch.value.mode === "separate" ? "搜索文件或目标表" : "搜索工作表或目标表"));
 const allSelected = computed({
   get() {
@@ -108,9 +131,86 @@ const progressPercent = computed(() => {
   return Math.min(100, Math.round((currentProgress.value.done / total) * 100));
 });
 
+function resetDragState() {
+  dragDepth = 0;
+  draggingFile.value = false;
+}
+
+function selectMode(mode) {
+  dropError.value = "";
+  dropNotice.value = "";
+  props.transfer.setBatchImportMode(mode);
+}
+
+function onFileInputChange(event) {
+  dropError.value = "";
+  dropNotice.value = "";
+  emit("file-selected", event);
+}
+
+function onOverlayDragEnter(event) {
+  if (!dataTransferHasFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  dragDepth += 1;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = canAcceptDrop.value ? "copy" : "none";
+  }
+  if (canAcceptDrop.value) {
+    draggingFile.value = true;
+    dropError.value = "";
+  }
+}
+
+function onOverlayDragOver(event) {
+  if (!dataTransferHasFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = canAcceptDrop.value ? "copy" : "none";
+  }
+  if (canAcceptDrop.value) {
+    draggingFile.value = true;
+  }
+}
+
+function onOverlayDragLeave(event) {
+  if (!draggingFile.value && dragDepth === 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0 || (event.relatedTarget && !event.currentTarget?.contains(event.relatedTarget))) {
+    resetDragState();
+  }
+}
+
+async function onOverlayDrop(event) {
+  const hasFiles = dataTransferHasFiles(event.dataTransfer);
+  resetDragState();
+  if (!hasFiles) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!canAcceptDrop.value) return;
+  dropError.value = "";
+  dropNotice.value = "";
+  const droppedFiles = await extractDroppedBatchImportFiles(event.dataTransfer);
+  const plan = planBatchImportDrop(droppedFiles, batch.value.mode);
+  if (!plan.accepted) {
+    dropError.value = t("batchImport.dropUnsupportedError");
+    return;
+  }
+  if (plan.skippedCount > 0) {
+    dropNotice.value = t("batchImport.dropSkippedNonExcel", { count: plan.skippedCount });
+  }
+  emit("files-dropped", { files: plan.files, mode: plan.mode });
+}
+
 watch(
   () => batch.value.open,
   (open) => {
+    resetDragState();
+    dropError.value = "";
+    dropNotice.value = "";
     if (open) {
       query.value = "";
       viewMode.value = "scope";
@@ -118,6 +218,10 @@ watch(
     }
   },
 );
+
+watch(canAcceptDrop, (allowed) => {
+  if (!allowed) resetDragState();
+});
 
 watch(
   () => batch.value.comparison.status,
@@ -309,17 +413,28 @@ function startMove(event) {
 
 onMounted(() => {
   globalThis.addEventListener?.("resize", keepFrameInViewport);
+  globalThis.addEventListener?.("dragend", resetDragState);
+  globalThis.addEventListener?.("blur", resetDragState);
 });
 
 onBeforeUnmount(() => {
   stopResize?.();
   stopMove?.();
+  resetDragState();
   globalThis.removeEventListener?.("resize", keepFrameInViewport);
+  globalThis.removeEventListener?.("dragend", resetDragState);
+  globalThis.removeEventListener?.("blur", resetDragState);
 });
 </script>
 
 <template>
-  <div class="wb-dialog-overlay">
+  <div
+    class="wb-dialog-overlay"
+    @dragenter="onOverlayDragEnter"
+    @dragover="onOverlayDragOver"
+    @dragleave="onOverlayDragLeave"
+    @drop="onOverlayDrop"
+  >
     <section
       ref="dialogRef"
       class="wb-dialog wb-batch-transfer-dialog wb-batch-import-dialog"
@@ -328,6 +443,7 @@ onBeforeUnmount(() => {
         'is-user-sized': frame != null,
         'is-resizing': resizing,
         'is-moving': moving,
+        'is-file-dragging': draggingFile && canAcceptDrop,
       }"
       :style="dialogStyle"
       role="dialog"
@@ -354,16 +470,42 @@ onBeforeUnmount(() => {
           :disabled="isBusy"
           :aria-checked="batch.mode === option.value"
           role="radio"
-          @click="transfer.setBatchImportMode(option.value)"
+          @click="selectMode(option.value)"
         >
           {{ option.label }}
         </button>
       </div>
 
-      <button type="button" class="wb-batch-file-drop" :disabled="isBusy" @click="fileInput?.click()">
-        <span v-if="!batch.fileName">{{ filePrompt }}</span>
-        <span v-else>{{ batch.fileName }}</span>
+      <button
+        type="button"
+        class="wb-batch-file-drop"
+        :class="{
+          'is-empty': !hasLoadedFile,
+          'has-file': hasLoadedFile,
+          'is-dragging': draggingFile && canAcceptDrop && !hasLoadedFile,
+        }"
+        :disabled="isBusy"
+        @click="fileInput?.click()"
+      >
+        <template v-if="!hasLoadedFile">
+          <span class="wb-batch-file-drop-icon" aria-hidden="true">
+            <FileUp :size="22" />
+          </span>
+          <strong class="wb-batch-file-drop-title">
+            {{ draggingFile && canAcceptDrop ? t('batchImport.dropRelease') : filePrompt }}
+          </strong>
+          <small class="wb-batch-file-drop-hint">{{ fileDropHint }}</small>
+        </template>
+        <template v-else>
+          <span class="wb-batch-file-drop-file">
+            <FileSpreadsheet :size="16" aria-hidden="true" />
+            <span class="wb-batch-file-drop-name">{{ batch.fileName }}</span>
+          </span>
+          <small class="wb-batch-file-drop-replace">{{ t('batchImport.replaceHint') }}</small>
+        </template>
       </button>
+      <p v-if="dropError" class="wb-dialog-error" role="alert">{{ dropError }}</p>
+      <p v-if="dropNotice" class="wb-import-info" role="status">{{ dropNotice }}</p>
       <p v-if="batch.ignoredSheetCount" class="wb-import-info" role="status"> {{ t('m_d1ff9f3343ad') }} {{ batch.ignoredSheetCount }} {{ t('m_a2710571dfe3') }} </p>
       <input
         ref="fileInput"
@@ -372,7 +514,7 @@ onBeforeUnmount(() => {
         :multiple="batch.mode === 'separate'"
         style="display: none"
         :disabled="isBusy"
-        @change="emit('file-selected', $event)"
+        @change="onFileInputChange"
       />
 
       <div v-if="comparisonAvailable" class="wb-batch-import-view-switch" role="tablist" :aria-label="t('m_31644d74d930')">
@@ -393,7 +535,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="viewMode === 'scope'" class="wb-batch-transfer-toolbar">
+      <div v-if="viewMode === 'scope' && hasLoadedFile" class="wb-batch-transfer-toolbar">
         <label class="wb-batch-transfer-check">
           <input v-model="allSelected" type="checkbox" :disabled="isBusy || !batch.sheets.length" />
           <span>{{ t('m_7ca9de237a29') }}</span>
@@ -402,7 +544,7 @@ onBeforeUnmount(() => {
         <span>{{ t('m_7ecf1cde6486') }} {{ selectedCount }} {{ t('m_1263443e3785') }} {{ matchedSheets }}</span>
       </div>
 
-      <div v-if="viewMode === 'scope' && filteredSheets.length" class="wb-batch-transfer-list">
+      <div v-if="viewMode === 'scope' && hasLoadedFile && filteredSheets.length" class="wb-batch-transfer-list">
         <label v-for="sheet in filteredSheets" :key="sheet.sheetName" class="wb-batch-transfer-row is-import-row">
           <input
             type="checkbox"
@@ -426,18 +568,25 @@ onBeforeUnmount(() => {
           <span class="wb-batch-transfer-state" :class="`is-${sheet.status}`" :title="sheet.message || sheet.status">{{ sheet.message || sheet.status }}</span>
         </label>
       </div>
-      <div v-else-if="viewMode === 'scope' && !batch.fileName" class="wb-batch-transfer-empty">
-        {{ batch.mode === "separate" ? t('m_64a778987ced') : t('m_2f986fa711a4') }}
-      </div>
-      <div v-else-if="viewMode === 'scope'" class="wb-batch-transfer-empty">
+      <div v-else-if="viewMode === 'scope' && hasLoadedFile && batch.status !== 'reading'" class="wb-batch-transfer-empty">
         {{ batch.mode === "separate" ? t('m_a7ad4c5e0dd9') : t('m_30255b8d4191') }}
       </div>
 
       <BatchImportComparison
-        v-else
+        v-else-if="viewMode === 'comparison'"
         :comparison="batch.comparison"
         @fullscreen-change="comparisonFullscreen = $event"
       />
+
+      <div v-if="showDropCover" class="wb-batch-import-drop-overlay" aria-hidden="true">
+        <div class="wb-batch-import-drop-card">
+          <span class="wb-batch-file-drop-icon">
+            <FileUp :size="24" />
+          </span>
+          <strong>{{ t('batchImport.dropReleaseReplace') }}</strong>
+          <small>{{ t('batchImport.dropOverlayHint') }}</small>
+        </div>
+      </div>
 
       <section v-if="isBusy || currentProgress.total > 0" class="wb-batch-transfer-progress">
         <div class="wb-batch-transfer-progress-line">

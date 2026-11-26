@@ -3784,9 +3784,7 @@ async function openBatchImport(source = null) {
   }
 }
 
-async function onBatchImportFileSelected(event) {
-  const files = Array.from(event.target.files || []);
-  if (event?.target) event.target.value = "";
+async function loadBatchImportFileList(files) {
   if (!files.length) return;
   try {
     await batchTransfer.loadBatchImportFiles(
@@ -3797,6 +3795,21 @@ async function onBatchImportFileSelected(event) {
     batchTransfer.batchImport.errorMessage = `读取文件失败：${String(error?.message || error)}`;
     statusText.value = batchTransfer.batchImport.errorMessage;
   }
+}
+
+async function onBatchImportFileSelected(event) {
+  const files = Array.from(event.target.files || []);
+  if (event?.target) event.target.value = "";
+  await loadBatchImportFileList(files);
+}
+
+async function onBatchImportFilesDropped(payload) {
+  const files = Array.isArray(payload) ? payload : Array.from(payload?.files || []);
+  if (!files.length) return;
+  if (payload?.mode && batchTransfer.batchImport.mode !== payload.mode) {
+    batchTransfer.setBatchImportMode(payload.mode);
+  }
+  await loadBatchImportFileList(files);
 }
 
 let batchImportConfirmationPending = false;
@@ -6616,6 +6629,7 @@ onBeforeUnmount(() => {
       :transfer="batchTransfer"
       @close="batchTransfer.closeBatchImport"
       @file-selected="onBatchImportFileSelected"
+      @files-dropped="onBatchImportFilesDropped"
       @execute="executeBatchImport"
     />
 
