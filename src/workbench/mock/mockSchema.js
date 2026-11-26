@@ -474,15 +474,25 @@ function createMongoFallbackTableDef(name) {
 }
 
 export function resolveMockSchema(connectionId, database, { tableCount = readRequestedMockTableCount() } = {}) {
-  const key = `${connectionId || "demo"}/${database || "game_db"}`;
+  const dbName = String(database || "game_db");
+  const key = `${connectionId || "demo"}/${dbName}`;
   if (key === `demo/${RELATION_LAB_DATABASE}` && !mockDatabaseSchemas[key]) return relationLabSchema();
   if (isMockMongoConnectionId(connectionId)) {
     const tableNames = mockDatabaseSchemas[key] || ["players", "loot"];
     return tableNames.map((name) => mockMongoTableDefs[name] || createMongoFallbackTableDef(name));
   }
+  if (!mockDatabaseSchemas[key] && String(connectionId || "").startsWith("mysql-lab-")) {
+    if (dbName.endsWith("_empty")) return [];
+    if (dbName.endsWith("_gm") || dbName.endsWith("gm")) {
+      return ["player", "item", "quest"].map((name) => mockTableDefs[name]);
+    }
+    const baseSchema = mockDatabaseSchemas["demo/game_db"].map((name) => mockTableDefs[name] || createFallbackTableDef(name));
+    if (dbName.includes("cfg")) return expandStressSchema(baseSchema, tableCount || 320);
+    return expandStressSchema(baseSchema, Math.min(48, tableCount || 36));
+  }
   const tableNames = mockDatabaseSchemas[key] || mockDatabaseSchemas["demo/game_db"];
   const schema = tableNames.map((name) => mockTableDefs[name] || createFallbackTableDef(name));
-  return (database || "game_db") === "game_db" ? expandStressSchema(schema, tableCount) : schema;
+  return dbName === "game_db" ? expandStressSchema(schema, tableCount) : schema;
 }
 
 export const mockSchema = resolveMockSchema("demo", "game_db");

@@ -1,4 +1,4 @@
-import { computed, customRef, reactive, ref } from "vue";
+import { computed, customRef, reactive, ref, watch } from "vue";
 import { normalizeTableName } from "../utils/normalize.js";
 import { loadWorkspaceSnapshot } from "../utils/workspacePersistence.js";
 import { markPerf, measureAsync } from "../utils/performanceMarks.js";
@@ -348,10 +348,18 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   function reorderDatabases(sourceDatabase, targetDatabase, { connectionId = selectedConnectionId.value, position = "before" } = {}) {
-    databases.value = moveItem(databases.value, sourceDatabase, targetDatabase, (database) => database, position);
-    if (connectionId) databasesByConnection[connectionId] = [...databases.value];
+    const resolvedId = String(connectionId || selectedConnectionId.value || "");
+    const isSelectedConn = resolvedId === String(selectedConnectionId.value || "");
+    const baseList = isSelectedConn && databases.value.length > 0
+      ? databases.value
+      : (databasesByConnection[resolvedId] || databases.value);
+    const nextList = moveItem(baseList, sourceDatabase, targetDatabase, (database) => database, position);
+    if (isSelectedConn) {
+      databases.value = nextList;
+    }
+    if (resolvedId) databasesByConnection[resolvedId] = [...nextList];
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
-    orderMap[databaseOrderKey(connectionId)] = [...databases.value];
+    orderMap[databaseOrderKey(resolvedId)] = [...nextList];
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
   }
 
@@ -410,14 +418,51 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   // 失败连接的错误信息：{ [connectionId]: { message, needsReconnect } }
   // needsReconnect=true 表示该连接是未恢复的 saved 连接，需要走 prefillConnDialog。
   const databaseFetchErrors = reactive({});
-  // 进行中的请求 token，避免同一连接并发重复拉取。
+  // 进行中的请求 token，避免同一连接并发重复拉取，并供侧栏按连接显示加载态。
   const inFlightConnections = new Set();
+  const loadingConnectionIds = reactive(new Set());
+  const tablesByDatabase = reactive({});
+
+  function sourceCacheKey(connectionId, database) {
+    const cid = String(connectionId || "").trim();
+    const db = String(database || "").trim().toLowerCase();
+    return cid && db ? `${cid}\u001f${db}` : "";
+  }
+
+  function rememberCachedTables(connectionId, database, list) {
+    const key = sourceCacheKey(connectionId, database);
+    if (!key || !Array.isArray(list)) return;
+    tablesByDatabase[key] = list;
+  }
+
+  function getCachedTables(connectionId, database) {
+    const key = sourceCacheKey(connectionId, database);
+    return key && Array.isArray(tablesByDatabase[key]) ? tablesByDatabase[key] : [];
+  }
+
+  function clearCachedTablesForConnection(connectionId) {
+    const prefix = `${String(connectionId || "").trim()}\u001f`;
+    if (prefix === "\u001f") return;
+    for (const key of Object.keys(tablesByDatabase)) {
+      if (key.startsWith(prefix)) delete tablesByDatabase[key];
+    }
+  }
+
+  watch(
+    () => [workspace.connectionId, workspace.database, workspace.tables],
+    ([connectionId, database, tables]) => {
+      if (connectionId && database && Array.isArray(tables)) {
+        rememberCachedTables(connectionId, database, tables);
+      }
+    },
+  );
 
   async function fetchDatabasesForConnection(connectionId) {
     const resolvedId = String(connectionId || "").trim();
     if (!resolvedId) return [];
     if (inFlightConnections.has(resolvedId)) return databasesByConnection[resolvedId] || [];
     inFlightConnections.add(resolvedId);
+    loadingConnectionIds.add(resolvedId);
     try {
       const connection = connections.value.find((item) => item.id === resolvedId);
       let runtimeId = resolvedId;
@@ -438,6 +483,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       const list = await invokeWorkbench("list_databases", { connectionId: runtimeId });
       const ordered = applyDatabaseOrder(runtimeId, Array.isArray(list) ? list : []);
       databasesByConnection[resolvedId] = ordered;
+      if (runtimeId !== resolvedId) databasesByConnection[runtimeId] = ordered;
       delete databaseFetchErrors[resolvedId];
       markPerf("database.cached", { connectionId: resolvedId, count: ordered.length });
       return ordered;
@@ -450,6 +496,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return [];
     } finally {
       inFlightConnections.delete(resolvedId);
+      loadingConnectionIds.delete(resolvedId);
     }
   }
 
@@ -543,10 +590,14 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     let selectedConnection;
 
     if (snapshot?.connectionId) {
-      selectedConnection =
-        connections.value.find((item) => item.id === snapshot.connectionId && item.connected) ||
-        connections.value.find((item) => item.id === snapshot.connectionId) ||
-        null;
+      const visibleIds = new Set(visibleConnections.value.map((item) => item.id));
+      const allowSnapshotId = visibleIds.size === 0 || visibleIds.has(snapshot.connectionId);
+      if (allowSnapshotId) {
+        selectedConnection =
+          connections.value.find((item) => item.id === snapshot.connectionId && item.connected) ||
+          connections.value.find((item) => item.id === snapshot.connectionId) ||
+          null;
+      }
     }
     if (!selectedConnection) {
       selectedConnection = chooseInitialConnection();
@@ -659,7 +710,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         merged.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
         merged.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
       if (restored) {
-        if (Array.isArray(restoredDatabases)) restoredDatabaseLists.set(restored.id, restoredDatabases);
+        if (Array.isArray(restoredDatabases)) {
+          restoredDatabaseLists.set(restored.id, restoredDatabases);
+          databasesByConnection[restored.id] = applyDatabaseOrder(restored.id, restoredDatabases);
+        }
         applySavedMetadata(restored, savedConn);
         migratePlaceholderAlias(placeholderId, restored.id, savedConn.alias);
         replaceConnectionOrderId(placeholderId, restored.id);
@@ -916,6 +970,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   function publishTables(tables, { connectionId, database, token }) {
     if (!isCurrentTableLoad(token, connectionId, database)) return [];
     workspace.tables = Array.isArray(tables) ? tables : [];
+    rememberCachedTables(connectionId, database, workspace.tables);
     markPerf("tables.loaded", { connectionId, database, count: workspace.tables.length });
     const readOnly = isReadOnlyConnection(connectionId);
     workspace.schema = workspace.tables.map((table) => schemaPlaceholder(table, connectionId, database, readOnly));
@@ -923,16 +978,29 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return workspace.tables;
   }
 
+  function nowTimestampMs() {
+    return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
+  }
+
+  function yieldToBrowserFrame() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   async function loadTableSchemasInBackground(tables, { connectionId, database, token }) {
     const unloadedTables = tables.filter((table) => (
       table?.schemaLoaded !== true
       && !(Array.isArray(table?.columns) && table.columns.length > 0)
     ));
+    let sliceStart = nowTimestampMs();
     // Publish every batch as it arrives, and continue until the whole database
     // is searchable. Foreground table opens remain independent of this work.
     for (let offset = 0; offset < unloadedTables.length; offset += SCHEMA_LOAD_BATCH_SIZE) {
       if (disposed || !isCurrentTableLoad(token, connectionId, database)) return;
       await loadSchemaBatch(unloadedTables.slice(offset, offset + SCHEMA_LOAD_BATCH_SIZE), { connectionId, database, token });
+      if (offset + SCHEMA_LOAD_BATCH_SIZE < unloadedTables.length && nowTimestampMs() - sliceStart >= 8) {
+        await yieldToBrowserFrame();
+        sliceStart = nowTimestampMs();
+      }
     }
   }
 
@@ -952,6 +1020,17 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         }),
       }));
     const results = await Promise.allSettled(requests.map((request) => request.promise));
+    const existingByName = new Map();
+    for (const item of workspace.schema) {
+      const name = normalizeTableName(item);
+      if (name) existingByName.set(name, item);
+    }
+    const batchByName = new Map();
+    for (const item of tables) {
+      const name = normalizeTableName(item);
+      if (name) batchByName.set(name, item);
+    }
+    const readOnly = isReadOnlyConnection(connectionId);
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
       if (result.status !== "fulfilled") continue;
@@ -963,9 +1042,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           result.value,
           connectionId,
           database,
-          isReadOnlyConnection(connectionId),
-          workspace.schema.find((table) => normalizeTableName(table) === tableName)
-            || tables.find((table) => normalizeTableName(table) === tableName),
+          readOnly,
+          existingByName.get(tableName) || batchByName.get(tableName),
         ),
       );
     }
@@ -1138,6 +1216,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     databaseDecorations.removeConnectionDecorations(connectionId);
     delete databasesByConnection[connectionId];
     delete databaseFetchErrors[connectionId];
+    loadingConnectionIds.delete(connectionId);
+    clearCachedTablesForConnection(connectionId);
     connections.value = connections.value.filter((item) => item.id !== connectionId);
     writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
@@ -1337,6 +1417,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     databases,
     databasesByConnection,
     databaseFetchErrors,
+    loadingConnectionIds,
+    getCachedTables,
     fetchDatabasesForConnection,
     fetchAllConnectionsDatabases,
     databaseAliases,

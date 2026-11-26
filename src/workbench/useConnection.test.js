@@ -1694,6 +1694,45 @@ test("restoreDisconnectedSavedConnections recovers saved servers in order after 
     assert.equal(recovered, true);
     assert.deepEqual(conn.connections.value.map((item) => item.id), ["mysql-1", "mysql-2"]);
     assert.equal(conn.connections.value[1].host, "192.168.1.243");
+    assert.deepEqual(conn.databasesByConnection["mysql-1"], ["edota_15cfg"]);
+    assert.deepEqual(conn.databasesByConnection["mysql-2"], ["newsg_4cfg"]);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("caches per-database table lists across switches and reorders non-selected connections cleanly", async () => {
+  const store = installLocalStorage();
+  const workspace = createWorkspaceState();
+  const conn = useConnection(workspace, async (command, payload = {}) => {
+    if (command === "select_database") {
+      return {
+        tables: payload.database === "edota_3cfg"
+          ? [{ table_name: "heroprop" }, { table_name: "skillprop" }]
+          : [{ table_name: "goodsprop" }],
+      };
+    }
+    if (command === "get_table_schemas") {
+      return payload.tableNames.map((table_name) => ({ table_name, columns: [{ column_name: "ID" }] }));
+    }
+    return [];
+  });
+  try {
+    conn.selectedConnectionId.value = "mysql-1";
+    conn.databases.value = ["edota_3cfg", "edota_8cfg"];
+    conn.databasesByConnection["mysql-1"] = ["edota_3cfg", "edota_8cfg"];
+    conn.databasesByConnection["mysql-2"] = ["newsg_4cfg", "newsg_17cfg", "newsggm"];
+
+    // Reordering databases in mysql-2 does not overwrite mysql-1's active database list:
+    conn.reorderDatabases("newsggm", "newsg_4cfg", { connectionId: "mysql-2", position: "before" });
+    assert.deepEqual(conn.databases.value, ["edota_3cfg", "edota_8cfg"]);
+    assert.deepEqual(conn.databasesByConnection["mysql-2"], ["newsggm", "newsg_4cfg", "newsg_17cfg"]);
+    assert.deepEqual(JSON.parse(store.dbscout_database_order)["mysql-2"], ["newsggm", "newsg_4cfg", "newsg_17cfg"]);
+
+    await conn.selectDatabase({ connectionId: "mysql-1", database: "edota_3cfg" });
+    await conn.selectDatabase({ connectionId: "mysql-2", database: "newsg_4cfg" });
+    assert.deepEqual(tableNames(conn.getCachedTables("mysql-1", "edota_3cfg")), ["heroprop", "skillprop"]);
+    assert.deepEqual(tableNames(conn.getCachedTables("mysql-2", "newsg_4cfg")), ["goodsprop"]);
   } finally {
     conn.dispose();
   }

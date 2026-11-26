@@ -3001,7 +3001,7 @@ test("Ctrl+P opens the Quick Open palette from anywhere (sidebar collapsed or no
   // The sidebar's own focusSearch path (v-for ref array normalization) is kept
   // intact for the inline sidebar search box; Ctrl+P no longer relies on it,
   // but clicking the sidebar search box still does.
-  assert.match(sidebar, /v-for="database in previewDatabases"[\s\S]*ref="searchPanelRef"/);
+  assert.match(sidebar, /v-for="database in databasesForConnection\(connection\.id\)"[\s\S]*ref="searchPanelRef"/);
   assert.match(sidebar, /Array\.isArray\(searchPanelRef\.value\)\s*\?\s*searchPanelRef\.value\s*:\s*\[searchPanelRef\.value\]/);
   assert.match(sidebar, /panel\.focusSearch\(\)/);
 });

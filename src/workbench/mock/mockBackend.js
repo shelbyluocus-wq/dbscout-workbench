@@ -80,12 +80,78 @@ function requestedBulkDatabases(search = globalThis.location?.search || "") {
   return Array.from({ length: total }, (_, index) => `bulk_db_${String(index + 1).padStart(3, "0")}`);
 }
 
+function requestedMockMySqlServers(search = globalThis.location?.search || "") {
+  let count = 0;
+  try {
+    count = Number(new URLSearchParams(String(search || "")).get("mockConnections"));
+  } catch {
+    count = 0;
+  }
+  const total = Number.isFinite(count) ? Math.max(0, Math.min(24, Math.floor(count))) : 0;
+  if (!total) return { connections: [], databases: {} };
+  const bulk = requestedBulkDatabases(search);
+  const presets = [
+    { name: "决胜1 主库", host: "192.168.1.223", port: 8306, prefix: "edota", dbs: ["edota_3cfg", "edota_3actcfg", "edota_8cfg", "edota_15cfg", "edota_15actcfg", "edota_30cfg", "edota_gm", "edota_empty"] },
+    { name: "决胜2 主库", host: "192.168.1.243", port: 8306, prefix: "newsg", dbs: ["newsg_4cfg", "newsg_4actcfg", "newsg_3cfg", "newsg_17cfg", "newsg_20cfg", "newsg_33cfg", "newsggm", "newsguc"] },
+    { name: "抖音渠道服", host: "192.168.1.211", port: 3306, prefix: "dy", dbs: ["dy_main_cfg", "dy_act_cfg", "dy_battle_log", "dy_pay_center", "dy_gm", "dy_archive"] },
+    { name: "TAP 渠道服", host: "192.168.1.212", port: 3306, prefix: "tap", dbs: ["tap_main_cfg", "tap_act_cfg", "tap_guild_db", "tap_rank_db", "tap_gm"] },
+    { name: "玩心联运服", host: "192.168.1.213", port: 3306, prefix: "wx", dbs: ["wx_main_cfg", "wx_act_cfg", "wx_cross_db", "wx_chat_log"] },
+    { name: "港澳台繁中服", host: "192.168.1.214", port: 3307, prefix: "tw", dbs: ["tw_main_cfg", "tw_i18n_cfg", "tw_pay_db", "tw_audit_db", "tw_empty"] },
+    { name: "QA 压测集群", host: "192.168.1.215", port: 3308, prefix: "qa", dbs: ["qa_stress_cfg", "qa_replay_db", "qa_snapshot_01", "qa_snapshot_02"] },
+    { name: "BI 数据仓库", host: "192.168.1.216", port: 3309, prefix: "bi", dbs: ["bi_daily_kpi", "bi_retention", "bi_economy", "bi_funnel"] },
+  ];
+  const connections = [];
+  const databases = {};
+  for (let i = 0; i < total; i += 1) {
+    const preset = presets[i % presets.length];
+    const id = `mysql-lab-${i + 1}`;
+    const suffix = i >= presets.length ? ` #${Math.floor(i / presets.length) + 1}` : "";
+    const host = i >= presets.length ? `192.168.2.${10 + i}` : preset.host;
+    const dbList = [
+      ...preset.dbs,
+      ...bulk.map((db) => `${preset.prefix}_${db}`),
+    ];
+    connections.push({
+      id,
+      kind: "mysql",
+      label: `${preset.name}${suffix} (${host}:${preset.port})`,
+      host,
+      port: preset.port,
+      username: "root",
+      database: dbList[0] || "game_db",
+      connected: true,
+      readOnly: false,
+    });
+    databases[id] = dbList;
+  }
+  return { connections, databases };
+}
+
+function requestedMockSourceLatencyMs(search = globalThis.location?.search || "") {
+  const runtimeOverride = globalThis.__DBSCOUT_MOCK_SOURCE_LATENCY_MS__;
+  if (runtimeOverride !== undefined && runtimeOverride !== null) {
+    return Math.max(0, Number(runtimeOverride) || 0);
+  }
+  try {
+    const value = Number(new URLSearchParams(String(search || "")).get("mockSourceLatency"));
+    return Number.isFinite(value) ? Math.max(0, Math.min(5000, Math.floor(value))) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+const extraMockCluster = requestedMockMySqlServers();
+if (extraMockCluster.connections.length) {
+  mockConnections.push(...extraMockCluster.connections);
+}
+
 const mockConnectionDatabases = {
   // `?relationLab=<tables>` adds a generated config database for the relation graph.
   demo: ["game_db", "game_config", ...(requestedRelationLabSize() ? [RELATION_LAB_DATABASE] : []), ...requestedBulkDatabases()],
   "demo-staging": ["game_db", "analytics_db", ...requestedBulkDatabases()],
   "demo-test": ["game_db", "game_db_archive", ...requestedBulkDatabases()],
   "demo-mongo": ["game_db"],
+  ...extraMockCluster.databases,
 };
 const PRIMARY_KEY_DUPLICATE_MESSAGE = "主键重复，不能保存";
 const schemaOverrides = new Map();
@@ -1450,7 +1516,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   // Same idea for switching source: a real server answers the database list
   // and the database selection some time after the switch began.
-  const mockSourceLatencyMs = Math.max(0, Number(globalThis.__DBSCOUT_MOCK_SOURCE_LATENCY_MS__) || 0);
+  const mockSourceLatencyMs = requestedMockSourceLatencyMs();
   if (mockSourceLatencyMs > 0 && (command === "list_databases" || command === "select_database")) {
     await new Promise((resolve) => setTimeout(resolve, mockSourceLatencyMs));
   }

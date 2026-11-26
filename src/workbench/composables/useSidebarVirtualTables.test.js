@@ -27,6 +27,8 @@ test("table branch height follows small table content and caps large databases",
   assert.equal(computeTableBranchMinHeight({ tableHeight: 1000 * 27, listTop: 40, maxHeight: 820 }), 820);
   assert.equal(computeTableBranchMinHeight({ tableHeight: 2 * 27, listTop: 40, maxHeight: 820 }), 97);
   assert.equal(computeTableBranchMinHeight({ tableHeight: 1000 * 27, listTop: 40, maxHeight: 320 }), 600);
+  assert.equal(computeTableBranchMinHeight({ tableHeight: 0, listTop: 40, loading: true }), 88);
+  assert.equal(computeTableBranchMinHeight({ tableHeight: 0, listTop: 40, loading: false }), 88);
 });
 
 test("total height always reflects full row count", () => {

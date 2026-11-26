@@ -125,9 +125,12 @@ export function createSidebarRowFollower({
     end();
   }
 
-  function follow() {
+  function follow(options = {}) {
     end();
     const container = getContainer();
+    const anchorOffset = Number.isFinite(options?.anchorViewportOffset)
+      ? Number(options.anchorViewportOffset)
+      : null;
     waiting = !isLaidOut(container);
     if (waiting) return false;
 
@@ -149,6 +152,13 @@ export function createSidebarRowFollower({
       const row = getRow();
       let offset = null;
       if (row) {
+        offset = rowContentOffset(container, row);
+        if (anchorOffset !== null) {
+          const desiredTop = Math.max(0, offset - anchorOffset);
+          if (Math.abs((Number(container.scrollTop) || 0) - desiredTop) >= 0.5) {
+            scrollToTop(container, desiredTop, "auto");
+          }
+        }
         revealSidebarNavigationRow(container, row);
         offset = rowContentOffset(container, row);
       }

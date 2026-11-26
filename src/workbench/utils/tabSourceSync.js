@@ -20,8 +20,8 @@ export function createTabSourceSync({ getSelected, selectConnection, selectDatab
       if (connectionId && connectionId !== String(selected.connectionId || "")) {
         // Pass the tab's database so the connection switch lands on it directly
         // instead of loading the connection's default database first.
-        await selectConnection(connectionId, { preferredDatabase: database });
-        if (current !== token) return false;
+        const outcome = await selectConnection(connectionId, { preferredDatabase: database });
+        if (current !== token || (outcome && outcome !== "selected")) return false;
       }
       const afterConnection = getSelected();
       if (

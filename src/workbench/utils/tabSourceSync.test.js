@@ -77,3 +77,23 @@ test("selection failures are swallowed because the status bar already reports th
   });
   assert.equal(await sync.syncToTab({ connectionId: "mysql-9", database: "x" }), false);
 });
+
+test("a connection switch superseded by a direct sidebar or rail click does not overwrite the new database", async () => {
+  const selected = { connectionId: "mysql-1", database: "app" };
+  const databaseCalls = [];
+  const sync = createTabSourceSync({
+    getSelected: () => ({ ...selected }),
+    async selectConnection() {
+      selected.connectionId = "mysql-2";
+      selected.database = "clicked_in_sidebar";
+      return "superseded";
+    },
+    async selectDatabase(payload) {
+      databaseCalls.push(payload);
+    },
+  });
+
+  assert.equal(await sync.syncToTab({ connectionId: "mysql-2", database: "stale_tab_db" }), false);
+  assert.deepEqual(databaseCalls, []);
+  assert.deepEqual(selected, { connectionId: "mysql-2", database: "clicked_in_sidebar" });
+});

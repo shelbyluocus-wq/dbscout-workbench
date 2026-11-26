@@ -18,10 +18,12 @@ import { useCellHighlight } from "../composables/useCellHighlight.js";
 import { useFieldCommentColor } from "../composables/useFieldCommentColor.js";
 import { GLOW_COLOR_PRESETS, resolveGlowColorCss, useGlowColor } from "../composables/useDatabaseSwitchGlow.js";
 import {
+  areAllConnectionsCollapsed,
   createSidebarTreeState,
   isConnectionExpanded,
   isDatabaseExpanded,
   revealConnection,
+  revealSelectedConnection,
   revealDatabase,
   settleDatabaseExpansion,
   toggleConnectionExpansion,
@@ -52,6 +54,9 @@ const props = defineProps({
   selectedDatabase: { type: String, default: "" },
   connections: { type: Array, default: () => [] },
   databases: { type: Array, default: () => [] },
+  databasesByConnection: { type: Object, default: null },
+  databaseFetchErrors: { type: Object, default: null },
+  loadingConnectionIds: { type: Object, default: null },
   filteredTables: { type: Array, default: () => [] },
   schemaSearchResults: { type: Array, default: () => [] },
   sidebarSearchState: { type: Object, default: null },
@@ -74,6 +79,8 @@ const emit = defineEmits([
   "update:treeQuery",
   "select-connection",
   "select-database",
+  "expand-connection",
+  "expand-all-connections",
   "open-table",
   "search-values",
   "cancel-search-values",
@@ -123,11 +130,12 @@ function databaseTextStyle(connectionId, database) {
 
 const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
-const dragState = reactive({ kind: "", sourceId: "", targetId: "", targetPosition: "before" });
+const dragState = reactive({ kind: "", connectionId: "", sourceId: "", targetId: "", targetPosition: "before" });
 const treeNavRef = ref(null);
 const tableScrollRef = ref(null);
 const tableListRef = ref(null);
 const databaseRowRefs = new Map();
+const databaseRowRefSetters = new Map();
 const settingsOpen = ref(false);
 const settingsSheetRef = ref(null);
 const searchPanelRef = ref(null);
@@ -146,12 +154,40 @@ const wallpaperName = computed(() => {
 const isDev = import.meta.env.DEV;
 const designDebugOpen = ref(false);
 
+function onBranchAfterEnter(element) {
+  element?.classList?.remove?.("wb-branch-enter-from", "wb-branch-enter-to");
+}
+
+function onTableBranchBeforeLeave(element) {
+  if (!element || typeof element.getBoundingClientRect !== "function") return;
+  const currentHeight = Math.round(element.getBoundingClientRect().height);
+  if (currentHeight > 0) {
+    element.style.setProperty("--wb-tree-table-min-h", `${currentHeight}px`);
+  }
+}
+
 function setTableScrollElement(element) {
-  tableScrollRef.value = element || null;
+  if (element) {
+    tableScrollRef.value = element;
+    return;
+  }
+  nextTick(() => {
+    if (tableScrollRef.value && !tableScrollRef.value.isConnected) {
+      tableScrollRef.value = null;
+    }
+  });
 }
 
 function setTableListElement(element) {
-  tableListRef.value = element || null;
+  if (element) {
+    tableListRef.value = element;
+    return;
+  }
+  nextTick(() => {
+    if (tableListRef.value && !tableListRef.value.isConnected) {
+      tableListRef.value = null;
+    }
+  });
 }
 const currentTheme = computed(() => (props.isDark ? "dark" : "light"));
 const { color: cellHighlightColor, setColor: setCellHighlightColor, clear: clearCellHighlightColor } = useCellHighlight({
@@ -175,15 +211,22 @@ function glowPresetSwatch(preset) {
   return currentTheme.value === "dark" ? preset.dark : preset.light;
 }
 
-const areAllCollapsed = computed(() => {
-  if (props.connections.length === 0) return false;
-  return props.connections.every((c) => treeState.collapsedConnectionIds.has(c.id));
-});
+const areAllCollapsed = computed(() =>
+  areAllConnectionsCollapsed(
+    treeState,
+    props.connections.map((c) => c.id),
+    props.selectedConnectionId,
+  ),
+);
 
 function toggleCollapseAll() {
   const ids = props.connections.map((c) => c.id);
   if (areAllCollapsed.value) {
-    expandAllConnections(treeState, ids);
+    const expandableIds = props.connections
+      .filter((c) => c.connected !== false || !c.saved)
+      .map((c) => c.id);
+    expandAllConnections(treeState, expandableIds.length ? expandableIds : ids);
+    emit("expand-all-connections");
   } else {
     collapseAllConnections(treeState, ids);
   }
@@ -280,24 +323,49 @@ const previewConnections = computed(() => {
   return props.connections;
 });
 
-const previewDatabases = computed(() => {
-  if (dragState.kind === "database" && dragState.sourceId && dragState.targetId) {
-    return previewDragOrder(props.databases, dragState.sourceId, dragState.targetId, {
+function rawDatabasesForConnection(connectionId) {
+  const mapped = props.databasesByConnection?.[connectionId];
+  if (Array.isArray(mapped)) return mapped;
+  return connectionId === props.selectedConnectionId ? props.databases : [];
+}
+
+function databasesForConnection(connectionId) {
+  const list = rawDatabasesForConnection(connectionId);
+  if (
+    dragState.kind === "database"
+    && (!dragState.connectionId || dragState.connectionId === connectionId)
+    && dragState.sourceId
+    && dragState.targetId
+  ) {
+    return previewDragOrder(list, dragState.sourceId, dragState.targetId, {
       position: dragState.targetPosition,
     });
   }
-  return props.databases;
-});
+  return list;
+}
 
-const dragSourceLabel = computed(() => {
-  if (dragState.kind === "connection") {
-    const conn = props.connections.find((c) => c.id === dragState.sourceId);
-    return conn?.label ?? "";
+const previewDatabases = computed(() => databasesForConnection(props.selectedConnectionId));
+
+function isConnectionLoading(connectionId) {
+  if (props.loadingConnectionIds?.has?.(connectionId)) return true;
+  return props.busy && connectionId === props.selectedConnectionId && rawDatabasesForConnection(connectionId).length === 0;
+}
+
+function connectionFetchError(connectionId) {
+  return props.databaseFetchErrors?.[connectionId] || null;
+}
+
+function retryConnectionFetch(connectionId) {
+  const err = connectionFetchError(connectionId);
+  if (err?.needsReconnect) {
+    emit("select-connection", connectionId);
+  } else {
+    emit("expand-connection", connectionId);
   }
-  return dragState.sourceId;
-});
+}
 
 const effectiveSchemaSearchResults = computed(() => {
+  if (!props.treeQuery.trim()) return [];
   if (props.schemaSearchResults.length > 0) return props.schemaSearchResults;
   return props.filteredTables.map((table, index) => {
     const name = table.tableName || table.table_name || index;
@@ -313,7 +381,11 @@ const effectiveSchemaSearchResults = computed(() => {
 });
 
 const effectiveSearchState = computed(() => props.sidebarSearchState || fallbackSearchState);
-const rawFilteredTables = computed(() => effectiveSchemaSearchResults.value.map((result) => result.table));
+const rawFilteredTables = computed(() => (
+  !props.treeQuery.trim()
+    ? props.filteredTables
+    : effectiveSchemaSearchResults.value.map((result) => result.table)
+));
 const { foldLocaleTables, toggleFoldLocaleTables } = useLocaleTableFoldPreference();
 const expandedLocaleBases = ref(new Set());
 const sidebarLocaleFold = computed(() => applyLocaleTableFolding(rawFilteredTables.value, {
@@ -350,6 +422,25 @@ const {
   tables: filteredTables,
 });
 
+const renderedVisibleTables = computed(() =>
+  visibleTables.value.map((entry) => ({
+    table: entry.table,
+    index: entry.index,
+    nameParts: splitMiddleEllipsis(entry.table.tableName),
+    localeMeta: sidebarLocaleMeta(entry.table),
+  })),
+);
+
+const activeBranchTableIcon = computed(() =>
+  tableTreeIcon(props.selectedConnectionId, props.selectedDatabase),
+);
+const activeBranchMarkerStyle = computed(() =>
+  databaseMarkerStyle(props.selectedConnectionId, props.selectedDatabase),
+);
+const activeBranchTextStyle = computed(() =>
+  databaseTextStyle(props.selectedConnectionId, props.selectedDatabase),
+);
+
 const activeTableName = computed(() => (
   props.activeTab?.connectionId === props.selectedConnectionId && props.activeTab?.database === props.selectedDatabase
     ? String(props.activeTab?.tableName || "")
@@ -364,14 +455,27 @@ watch(() => [props.selectedConnectionId, props.selectedDatabase], () => {
 watch(() => props.treeQuery.trim(), (query) => {
   if (query) tableSelection.clear();
 });
-watch(() => filteredTables.value.map((table) => table.tableName).join("\u001f"), () => tableSelection.prune());
+watch(filteredTables, () => {
+  if (tableSelection.isMultiple.value || tableSelection.selectedSet.value.size > 0) {
+    tableSelection.prune();
+  }
+});
 
 const treeViewportHeight = ref(0);
+const visibleDatabaseCount = computed(() => {
+  let count = 0;
+  for (const conn of previewConnections.value) {
+    if (isConnectionExpanded(treeState, conn.id, props.selectedConnectionId)) {
+      count += databasesForConnection(conn.id).length;
+    }
+  }
+  return count;
+});
 const tableBranchMaxHeight = computed(() => {
   const viewport = treeViewportHeight.value;
   if (viewport <= 0) return SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
   const connectionRows = Math.min(previewConnections.value.length, 6) * 30;
-  const databaseRows = Math.min(previewDatabases.value.length, 8) * 28;
+  const databaseRows = Math.min(visibleDatabaseCount.value || previewDatabases.value.length, 8) * 28;
   const available = viewport - connectionRows - databaseRows - 16;
   return Math.max(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, available);
 });
@@ -381,14 +485,11 @@ const tableBranchMinHeight = computed(() => {
     tableHeight: tableVirtualRange.value.totalHeight,
     listTop: tableListTop.value,
     searching: !!props.treeQuery.trim(),
+    loading: props.busy && !filteredTables.value.length,
     maxHeight: tableBranchMaxHeight.value,
   });
   return `${height}px`;
 });
-
-function tableNameParts(name) {
-  return splitMiddleEllipsis(name);
-}
 
 watch(
   () => props.activeTab?.id,
@@ -400,13 +501,23 @@ watch(
   },
 );
 
+let pendingSidebarClickAnchor = null;
+
 watch(
   () => [props.selectedConnectionId, props.selectedDatabase],
   ([connectionId, database], [previousConnectionId, previousDatabase]) => {
+    if (connectionId && connectionId !== previousConnectionId) {
+      revealSelectedConnection(treeState, connectionId);
+    }
     settleDatabaseExpansion(treeState, connectionId, database);
     if (!connectionId || !database) return;
     if (connectionId === previousConnectionId && database === previousDatabase) return;
-    revealSelectedDatabase();
+    const key = databaseRowKey(connectionId, database);
+    const anchorOffset = pendingSidebarClickAnchor?.key === key ? pendingSidebarClickAnchor.offset : null;
+    pendingSidebarClickAnchor = null;
+    if (!treeState.collapsedConnectionIds.has(connectionId)) {
+      revealSelectedDatabase(anchorOffset !== null ? { anchorViewportOffset: anchorOffset } : undefined);
+    }
     nextTick(() => revealActiveTable());
   },
 );
@@ -456,17 +567,29 @@ function setDatabaseRowRef(connectionId, database, element) {
   else databaseRowRefs.delete(key);
 }
 
-// 外部入口切换数据库时只做 nearest reveal，绝不把数据库吸到导航区顶部。
-// The branches around the row are still opening and closing when the source
-// changes, so the row is followed until they settle rather than revealed once.
+function getDatabaseRowRefSetter(connectionId, database) {
+  const key = databaseRowKey(connectionId, database);
+  let setter = databaseRowRefSetters.get(key);
+  if (!setter) {
+    setter = (element) => setDatabaseRowRef(connectionId, database, element);
+    databaseRowRefSetters.set(key, setter);
+  }
+  return setter;
+}
+
+// 外部入口切换数据库时只做 nearest reveal，绝不把数据库吸到导航区顶部；
+// 直接在侧栏点击已滚动树中的数据库行时，锚定鼠标下的行视口偏移，防止上方分支收起时整行跳走。
 const selectedDatabaseFollower = createSidebarRowFollower({
   getContainer: () => treeNavRef.value,
   getRow: () => databaseRowRefs.get(databaseRowKey(props.selectedConnectionId, props.selectedDatabase)),
 });
 
-function revealSelectedDatabase() {
+function revealSelectedDatabase(options) {
+  if (props.selectedConnectionId) {
+    revealSelectedConnection(treeState, props.selectedConnectionId);
+  }
   // After the DOM update, so the branch transitions of this change have begun.
-  return nextTick(() => selectedDatabaseFollower.follow());
+  return nextTick(() => selectedDatabaseFollower.follow(options));
 }
 
 // A collapsed sidebar has no layout to measure; a database chosen meanwhile
@@ -517,18 +640,34 @@ function revealActiveTable() {
 
 function onConnectionClick(connectionId) {
   const connection = props.connections.find((item) => item.id === connectionId);
-  if (connection?.connected && props.databases.length > 0 &&
-      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId)) {
-    if (shouldEmitSidebarDatabaseOpen({ activeTab: props.activeTab }) && props.selectedDatabase) {
-      emit("select-database", { connectionId, database: props.selectedDatabase });
-    }
+  if (connection && !connection.connected && connection.saved) {
+    revealConnection(treeState, connectionId);
+    emit("select-connection", connectionId);
     return;
   }
-  revealConnection(treeState, connectionId);
-  emit("select-connection", connectionId);
+  toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId);
+  if (!isConnectionExpanded(treeState, connectionId, props.selectedConnectionId)) {
+    return;
+  }
+  if (!props.selectedDatabase && shouldEmitSidebarDatabaseOpen({ activeTab: props.activeTab })) {
+    emit("select-connection", connectionId);
+    return;
+  }
+  emit("expand-connection", connectionId);
 }
 
-function onDatabaseClick(connectionId, database) {
+function captureRowViewportOffset(event) {
+  const container = treeNavRef.value;
+  const row = event?.currentTarget;
+  if (!container || !row || !(Number(container.scrollTop) > 0)) return null;
+  const containerRect = container.getBoundingClientRect?.();
+  const rowRect = row.getBoundingClientRect?.();
+  if (!containerRect || !rowRect) return null;
+  const offset = Number(rowRect.top) - Number(containerRect.top);
+  return Number.isFinite(offset) ? offset : null;
+}
+
+function onDatabaseClick(connectionId, database, event) {
   if (toggleDatabaseExpansion(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
     if (isDatabaseExpanded(treeState, connectionId, database, props.selectedConnectionId, props.selectedDatabase)) {
       nextTick(() => revealActiveTable());
@@ -538,8 +677,15 @@ function onDatabaseClick(connectionId, database) {
     }
     return;
   }
+  const anchorOffset = captureRowViewportOffset(event);
+  pendingSidebarClickAnchor = anchorOffset !== null
+    ? { key: databaseRowKey(connectionId, database), offset: anchorOffset }
+    : null;
   revealConnection(treeState, connectionId);
   revealDatabase(treeState, connectionId, database);
+  if (anchorOffset !== null) {
+    void revealSelectedDatabase({ anchorViewportOffset: anchorOffset });
+  }
   emit("select-database", { connectionId, database });
 }
 
@@ -724,6 +870,7 @@ function startTableDrag(connectionId, database, table, event) {
 
 function startSidebarDrag(kind, id, event, connectionId = "") {
   dragState.kind = kind;
+  dragState.connectionId = connectionId;
   dragState.sourceId = id;
   dragState.targetId = "";
   dragState.targetPosition = "before";
@@ -733,24 +880,29 @@ function startSidebarDrag(kind, id, event, connectionId = "") {
 
 function clearSidebarDrag() {
   dragState.kind = "";
+  dragState.connectionId = "";
   dragState.sourceId = "";
   dragState.targetId = "";
   dragState.targetPosition = "before";
   endDatabaseDrag();
 }
 
-function isDragSource(kind, id) {
-  return dragState.kind === kind && dragState.sourceId === id;
+function isDragSource(kind, id, connectionId = "") {
+  if (dragState.kind !== kind || dragState.sourceId !== id) return false;
+  if (kind === "database" && dragState.connectionId && dragState.connectionId !== connectionId) return false;
+  return true;
 }
 
-function isDragTarget(kind, id) {
-  return dragState.kind === kind && dragState.targetId === id && dragState.sourceId !== id;
+function isDragTarget(kind, id, connectionId = "") {
+  if (dragState.kind !== kind || dragState.targetId !== id || dragState.sourceId === id) return false;
+  if (kind === "database" && dragState.connectionId && dragState.connectionId !== connectionId) return false;
+  return true;
 }
 
-function dragNodeClass(kind, id) {
-  const source = isDragSource(kind, id);
-  const targetBefore = isDragTarget(kind, id) && dragState.targetPosition === "before";
-  const targetAfter = isDragTarget(kind, id) && dragState.targetPosition === "after";
+function dragNodeClass(kind, id, connectionId = "") {
+  const source = isDragSource(kind, id, connectionId);
+  const targetBefore = isDragTarget(kind, id, connectionId) && dragState.targetPosition === "before";
+  const targetAfter = isDragTarget(kind, id, connectionId) && dragState.targetPosition === "after";
   return {
     "is-drag-ghost": source,
     "is-drop-before": targetBefore,
@@ -758,9 +910,9 @@ function dragNodeClass(kind, id) {
   };
 }
 
-function dragRowClass(kind, id) {
-  const source = isDragSource(kind, id);
-  const target = isDragTarget(kind, id);
+function dragRowClass(kind, id, connectionId = "") {
+  const source = isDragSource(kind, id, connectionId);
+  const target = isDragTarget(kind, id, connectionId);
   return {
     "is-dragging-source": source,
     "is-drag-over": target,
@@ -768,8 +920,9 @@ function dragRowClass(kind, id) {
   };
 }
 
-function markDragTarget(kind, id, event) {
+function markDragTarget(kind, id, event, connectionId = "") {
   if (dragState.kind !== kind || dragState.sourceId === id) return;
+  if (kind === "database" && dragState.connectionId && dragState.connectionId !== connectionId) return;
   const position = dropPosition(event);
   if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
   if (sameDragTarget({ kind: dragState.kind, id: dragState.targetId, position: dragState.targetPosition }, kind, id, position)) return;
@@ -795,7 +948,11 @@ function dropConnection(connectionId, event) {
 }
 
 function dropDatabase(connectionId, database, event) {
-  if (dragState.kind === "database" && dragState.sourceId) {
+  if (
+    dragState.kind === "database"
+    && dragState.sourceId
+    && (!dragState.connectionId || dragState.connectionId === connectionId)
+  ) {
     const fallbackPosition = dragState.targetId === database ? dragState.targetPosition : dropPosition(event);
     const target = resolvePreviewDropTarget(dragState, database, fallbackPosition);
     if (dragState.sourceId !== target.targetId) {
@@ -875,11 +1032,12 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
       :style="{ '--wb-tree-table-min-h': tableBranchMinHeight }"
       :aria-label="t('m_46770f47d1a3')"
     >
-      <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list">
+      <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list" :class="{ 'is-reordering': dragState.kind === 'connection' }">
         <section
           v-for="connection in previewConnections"
           :key="connection.id"
           class="wb-source-connection"
+          :data-connection-id="connection.id"
           :class="[
             dragNodeClass('connection', connection.id),
             { 'is-expanded': isConnectionExpanded(treeState, connection.id, selectedConnectionId) },
@@ -907,32 +1065,37 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
             </span>
           </button>
 
-          <Transition name="wb-branch">
+          <Transition name="wb-branch" :duration="220" @after-enter="onBranchAfterEnter" @enter-cancelled="onBranchAfterEnter">
           <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
             <div class="wb-branch-inner">
-            <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-database-list">
+            <TransitionGroup
+              name="wb-tree-reorder"
+              tag="div"
+              class="wb-source-database-list"
+              :class="{ 'is-reordering': dragState.kind === 'database' && dragState.connectionId === connection.id }"
+            >
               <section
-                v-for="database in previewDatabases"
+                v-for="database in databasesForConnection(connection.id)"
                 :key="database"
                 class="wb-source-database"
                 :class="[
-                  dragNodeClass('database', database),
+                  dragNodeClass('database', database, connection.id),
                   { 'is-expanded': isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) },
                 ]"
               >
                 <button
-                  :ref="(element) => setDatabaseRowRef(connection.id, database, element)"
+                  :ref="getDatabaseRowRefSetter(connection.id, database)"
                   class="wb-tree-row wb-database-item"
-                  :class="[{ active: isCurrentDatabase(connection.id, database) }, dragRowClass('database', database)]"
+                  :class="[{ active: isCurrentDatabase(connection.id, database) }, dragRowClass('database', database, connection.id)]"
                   :title="databaseTooltip(connection.id, database)"
                   :aria-current="isCurrentDatabase(connection.id, database) ? 'true' : undefined"
                   :aria-expanded="isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)"
                   draggable="true"
                   @dragstart.stop="startSidebarDrag('database', database, $event, connection.id)"
-                  @dragover.prevent.stop="markDragTarget('database', database, $event)"
+                  @dragover.prevent.stop="markDragTarget('database', database, $event, connection.id)"
                   @drop.prevent.stop="dropDatabase(connection.id, database, $event)"
                   @dragend="clearSidebarDrag"
-                  @click="onDatabaseClick(connection.id, database)"
+                  @click="onDatabaseClick(connection.id, database, $event)"
                   @keydown="handleDatabaseKeydown($event, connection.id, database)"
                   @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'database', connectionId: connection.id, database })"
                 >
@@ -951,7 +1114,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                   </span>
                 </button>
 
-                <Transition name="wb-branch">
+                <Transition name="wb-branch" :duration="220" @after-enter="onBranchAfterEnter" @enter-cancelled="onBranchAfterEnter" @before-leave="onTableBranchBeforeLeave">
                 <section v-if="dragState.kind !== 'database' && isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase)" class="wb-table-branch">
                   <SidebarSearchPanel
                     ref="searchPanelRef"
@@ -998,7 +1161,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                         :style="{ transform: `translateY(${tableVirtualRange.padTop}px)` }"
                       >
                         <button
-                          v-for="entry in visibleTables"
+                          v-for="entry in renderedVisibleTables"
                           :key="entry.table.tableName"
                           class="wb-tree-row wb-table-item"
                           :data-table-name="entry.table.tableName"
@@ -1018,23 +1181,23 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                         >
                           <component :is="tableTreeIcon(connection.id, database)" :size="15" class="wb-tree-kind-icon" :style="databaseMarkerStyle(connection.id, database)" aria-hidden="true" />
                           <span class="wb-table-copy" :class="{ 'has-comment': entry.table.tableComment }">
-                            <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)" :class="{ 'is-middle-ellipsis': Boolean(tableNameParts(entry.table.tableName).tail) }" :aria-label="tableNameParts(entry.table.tableName).tail ? entry.table.tableName : undefined"><span class="wb-middle-ellipsis-head" :aria-hidden="tableNameParts(entry.table.tableName).tail ? 'true' : undefined">{{ tableNameParts(entry.table.tableName).head }}</span><span v-if="tableNameParts(entry.table.tableName).tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ tableNameParts(entry.table.tableName).tail }}</span></span>
+                            <span class="wb-table-name" :style="databaseTextStyle(connection.id, database)" :class="{ 'is-middle-ellipsis': Boolean(entry.nameParts.tail) }" :aria-label="entry.nameParts.tail ? entry.table.tableName : undefined"><span class="wb-middle-ellipsis-head" :aria-hidden="entry.nameParts.tail ? 'true' : undefined">{{ entry.nameParts.head }}</span><span v-if="entry.nameParts.tail" class="wb-middle-ellipsis-tail" aria-hidden="true">{{ entry.nameParts.tail }}</span></span>
                             <span v-if="entry.table.tableComment" class="wb-table-comment">{{ entry.table.tableComment }}</span>
                           </span>
                           <span
-                            v-if="sidebarLocaleMeta(entry.table)?.kind === 'base'"
+                            v-if="entry.localeMeta?.kind === 'base'"
                             role="button"
                             tabindex="0"
                             class="wb-locale-group-pill wb-sidebar-locale-pill"
-                            :class="{ 'is-expanded': sidebarLocaleMeta(entry.table).expanded }"
-                            :aria-expanded="sidebarLocaleMeta(entry.table).expanded ? 'true' : 'false'"
-                            :title="t('localeFold.expandGroup', { count: sidebarLocaleMeta(entry.table).variantCount, suffixes: sidebarLocaleMeta(entry.table).suffixes.join(' / ') })"
-                            @click.stop="toggleSidebarLocaleGroup(sidebarLocaleMeta(entry.table).baseLower)"
+                            :class="{ 'is-expanded': entry.localeMeta.expanded }"
+                            :aria-expanded="entry.localeMeta.expanded ? 'true' : 'false'"
+                            :title="t('localeFold.expandGroup', { count: entry.localeMeta.variantCount, suffixes: entry.localeMeta.suffixes.join(' / ') })"
+                            @click.stop="toggleSidebarLocaleGroup(entry.localeMeta.baseLower)"
                             @dblclick.stop
-                            @keydown.enter.space.prevent.stop="toggleSidebarLocaleGroup(sidebarLocaleMeta(entry.table).baseLower)"
+                            @keydown.enter.space.prevent.stop="toggleSidebarLocaleGroup(entry.localeMeta.baseLower)"
                           >
                             <ChevronRight :size="10" :stroke-width="2.2" class="wb-locale-group-chevron" aria-hidden="true" />
-                            <span>+{{ sidebarLocaleMeta(entry.table).variantCount }}</span>
+                            <span>+{{ entry.localeMeta.variantCount }}</span>
                           </span>
                         </button>
                       </div>
@@ -1049,8 +1212,14 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                 </Transition>
               </section>
             </TransitionGroup>
-            <p v-if="busy && !previewDatabases.length" class="wb-tree-loading">
+            <p v-if="isConnectionLoading(connection.id) && !databasesForConnection(connection.id).length" class="wb-tree-loading">
               <span class="wb-tree-loading-spinner" aria-hidden="true"></span> {{ t('m_4927a53bcc88') }} </p>
+            <div v-else-if="!databasesForConnection(connection.id).length && connectionFetchError(connection.id)" class="wb-tree-connection-error">
+              <span>{{ connectionFetchError(connection.id).message }}</span>
+              <button type="button" class="wb-tree-connection-retry" @click.stop="retryConnectionFetch(connection.id)">
+                {{ connectionFetchError(connection.id).needsReconnect ? t('m_1eff9b7d894c') : t('m_844b8cc8dff7') }}
+              </button>
+            </div>
             </div>
           </section>
           </Transition>

@@ -319,6 +319,8 @@ const {
   databases,
   databasesByConnection,
   databaseFetchErrors,
+  loadingConnectionIds,
+  getCachedTables,
   fetchDatabasesForConnection,
   fetchAllConnectionsDatabases,
   getDatabaseAlias,
@@ -532,8 +534,14 @@ const focusedInspectorTab = computed(() => {
   }
   return activeTab.value || null;
 });
+const isSelectedSourceCommitted = computed(() => (
+  String(workspace.connectionId || "") === String(selectedConnectionId.value || "")
+  && String(workspace.database || "") === String(selectedDatabase.value || "")
+));
 const sidebarTableList = computed(() => {
-  const source = workspace.tables.length ? workspace.tables : workspace.schema;
+  const source = isSelectedSourceCommitted.value
+    ? (workspace.tables.length ? workspace.tables : workspace.schema)
+    : getCachedTables(selectedConnectionId.value, selectedDatabase.value);
   return source.map((table) => ({
     tableName: normalizeTableName(table),
     tableComment: normalizeTableComment(table),
@@ -545,8 +553,11 @@ const sidebarTableList = computed(() => {
     },
   }));
 });
-const schemaSearchSource = computed(() =>
-  workspace.schema.map((table) => ({
+const schemaSearchSource = computed(() => {
+  const source = isSelectedSourceCommitted.value
+    ? workspace.schema
+    : getCachedTables(selectedConnectionId.value, selectedDatabase.value);
+  return source.map((table) => ({
     tableName: normalizeTableName(table),
     tableComment: normalizeTableComment(table),
     columns: table.columns || [],
@@ -555,18 +566,24 @@ const schemaSearchSource = computed(() =>
       connectionId: selectedConnectionId.value,
       database: selectedDatabase.value,
     },
-  })),
-);
+  }));
+});
 const schemaSearchResults = computed(() => {
   if (!treeQuery.value.trim()) {
-    return buildSchemaSearchResults(sidebarTableList.value, "");
+    return [];
   }
   return buildSchemaSearchResults(schemaSearchSource.value, treeQuery.value);
 });
-const quickOpenSchemaSearchResults = computed(() =>
-  buildSchemaSearchResults(schemaSearchSource.value, quickOpenQuery.value),
-);
-const filteredTables = computed(() => schemaSearchResults.value.map((result) => result.table));
+const quickOpenSchemaSearchResults = computed(() => (
+  quickOpenVisible.value || quickOpenQuery.value.trim()
+    ? buildSchemaSearchResults(schemaSearchSource.value, quickOpenQuery.value)
+    : []
+));
+const filteredTables = computed(() => (
+  !treeQuery.value.trim()
+    ? sidebarTableList.value
+    : schemaSearchResults.value.map((result) => result.table)
+));
 
 const {
   gridWrapRef,
@@ -1947,6 +1964,18 @@ async function selectConnectionWithHome(connectionId, options) {
     await restorePendingStartupOrEnsureHome();
   }
   return outcome;
+}
+
+async function handleSidebarExpandConnection(connectionId) {
+  const target = connections.value.find((item) => item.id === connectionId);
+  if (!target) return;
+  if (!target.connected && target.saved) {
+    await selectConnectionWithHome(connectionId);
+    return;
+  }
+  if (!Array.isArray(databasesByConnection[connectionId])) {
+    await fetchDatabasesForConnection(connectionId);
+  }
 }
 
 async function submitConnDialogWithHome() {
@@ -6272,6 +6301,9 @@ onBeforeUnmount(() => {
         :selected-database="selectedDatabase"
         :connections="visibleConnections"
         :databases="databases"
+        :databases-by-connection="databasesByConnection"
+        :database-fetch-errors="databaseFetchErrors"
+        :loading-connection-ids="loadingConnectionIds"
         :filtered-tables="filteredTables"
         :schema-search-results="schemaSearchResults"
         :sidebar-search-state="sidebarSearch"
@@ -6296,6 +6328,8 @@ onBeforeUnmount(() => {
         @open-value-result="openSidebarValueResult"
         @select-connection="selectConnectionWithHome($event)"
         @select-database="selectDatabaseWithHome($event)"
+        @expand-connection="handleSidebarExpandConnection($event)"
+        @expand-all-connections="fetchAllConnectionsDatabases()"
         @reorder-connections="reorderConnections"
         @reorder-databases="reorderDatabases"
         @open-table="openTableFromSidebar"

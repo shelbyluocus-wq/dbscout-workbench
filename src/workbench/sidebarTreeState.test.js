@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  areAllConnectionsCollapsed,
+  collapseAllConnections,
   createSidebarTreeState,
+  expandAllConnections,
   isConnectionExpanded,
   isDatabaseExpanded,
   revealConnection,
@@ -69,4 +72,43 @@ test("staying on the same database keeps a manually opened branch", () => {
 
   settleDatabaseExpansion(state, "mysql-main", "game_db");
   assert.equal(isDatabaseExpanded(state, ...source), true);
+});
+
+test("multiple MySQL connections can expand and collapse independently", () => {
+  const state = createSidebarTreeState();
+  const ids = ["mysql-1", "mysql-2", "mysql-3"];
+
+  assert.equal(isConnectionExpanded(state, "mysql-1", "mysql-1"), true);
+  assert.equal(isConnectionExpanded(state, "mysql-2", "mysql-1"), false);
+  assert.equal(areAllConnectionsCollapsed(state, ids, "mysql-1"), false);
+
+  assert.equal(toggleConnectionExpansion(state, "mysql-2", "mysql-1"), true);
+  assert.equal(isConnectionExpanded(state, "mysql-1", "mysql-1"), true);
+  assert.equal(isConnectionExpanded(state, "mysql-2", "mysql-1"), true);
+
+  collapseAllConnections(state, ids);
+  assert.equal(areAllConnectionsCollapsed(state, ids, "mysql-1"), true);
+  assert.equal(ids.every((id) => !isConnectionExpanded(state, id, "mysql-1")), true);
+
+  expandAllConnections(state, ids);
+  assert.equal(areAllConnectionsCollapsed(state, ids, "mysql-1"), false);
+  assert.equal(ids.every((id) => isConnectionExpanded(state, id, "mysql-1")), true);
+});
+
+test("cross-server database open survives transient empty selectedDatabase and can cancel mid-flight", () => {
+  const state = createSidebarTreeState();
+  revealConnection(state, "mysql-2");
+  revealDatabase(state, "mysql-2", "newsg_4cfg");
+
+  // Transient state while selectConnection awaits list_databases on mysql-2:
+  settleDatabaseExpansion(state, "mysql-2", "");
+  assert.equal(isDatabaseExpanded(state, "mysql-2", "newsg_4cfg", "mysql-2", ""), true);
+
+  // User clicks again mid-flight to collapse before select_database finishes:
+  assert.equal(toggleDatabaseExpansion(state, "mysql-2", "newsg_4cfg", "mysql-2", ""), true);
+  assert.equal(isDatabaseExpanded(state, "mysql-2", "newsg_4cfg", "mysql-2", ""), false);
+
+  // Late completion of select_database does not re-open the cancelled branch:
+  settleDatabaseExpansion(state, "mysql-2", "newsg_4cfg");
+  assert.equal(isDatabaseExpanded(state, "mysql-2", "newsg_4cfg", "mysql-2", "newsg_4cfg"), false);
 });

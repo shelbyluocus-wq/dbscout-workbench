@@ -13719,8 +13719,8 @@ label:has(input[type="checkbox"]:disabled) {
   min-height: min-content;
 }
 
-.wb-source-connection.is-expanded > .wb-database-branch,
-.wb-source-connection.is-expanded > .wb-database-branch > .wb-branch-inner,
+.wb-source-connection.is-expanded > .wb-database-branch:not(.wb-branch-enter-active):not(.wb-branch-leave-active),
+.wb-source-connection.is-expanded > .wb-database-branch:not(.wb-branch-enter-active):not(.wb-branch-leave-active) > .wb-branch-inner,
 .wb-source-connection.is-expanded .wb-source-database-list {
   display: flex;
   flex: 1 1 auto;
@@ -13748,6 +13748,21 @@ label:has(input[type="checkbox"]:disabled) {
     transform 0.18s cubic-bezier(0.2, 0.82, 0.2, 1);
 }
 
+.wb-source-connection-list:not(.is-reordering) > .wb-tree-reorder-move,
+.wb-source-connection-list:not(.is-reordering) > .wb-tree-reorder-enter-active,
+.wb-source-database-list:not(.is-reordering) > .wb-tree-reorder-move,
+.wb-source-database-list:not(.is-reordering) > .wb-tree-reorder-enter-active {
+  transition: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+}
+
+.wb-source-connection-list:not(.is-reordering) > .wb-tree-reorder-leave-active,
+.wb-source-database-list:not(.is-reordering) > .wb-tree-reorder-leave-active {
+  display: none !important;
+  transition: none !important;
+}
+
 .wb-tree-reorder-enter-from,
 .wb-tree-reorder-leave-to {
   opacity: 0;
@@ -13761,8 +13776,8 @@ label:has(input[type="checkbox"]:disabled) {
   display: grid;
   grid-template-rows: 1fr;
   transition:
-    grid-template-rows 0.3s cubic-bezier(0.22, 0.72, 0.2, 1),
-    opacity 0.24s ease;
+    grid-template-rows 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
   will-change: grid-template-rows;
 }
 
@@ -13786,21 +13801,27 @@ label:has(input[type="checkbox"]:disabled) {
   opacity: 0;
 }
 
-/* 表分支高度会随表数量变化。让分支自身从 0 过渡到目标高度，避免切库时
-   外层数据库节点直接套用新高度而产生整块跳变。 */
+/* 表分支高度会随表数量变化。用 min-height 与 max-height 同步从 0 过渡到目标高度，
+   确保收起结束与卸载帧之间 0px 跳变（搜索框在内也被完整裁剪为 0 高）。 */
 .wb-table-branch.wb-branch-enter-active,
 .wb-table-branch.wb-branch-leave-active {
   display: flex;
   min-height: var(--wb-tree-table-min-h, 600px);
+  max-height: var(--wb-tree-table-min-h, 600px);
   transition:
-    min-height 0.3s cubic-bezier(0.22, 0.72, 0.2, 1),
-    opacity 0.24s ease;
-  will-change: min-height;
+    min-height 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    max-height 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    padding-top 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
+  will-change: min-height, max-height;
 }
 
 .wb-table-branch.wb-branch-enter-from,
 .wb-table-branch.wb-branch-leave-to {
   min-height: 0;
+  max-height: 0;
+  padding-top: 0;
+  opacity: 0;
 }
 
 .wb-source-tree:has(.is-dragging-source) .wb-tree-row {
@@ -14146,10 +14167,45 @@ label:has(input[type="checkbox"]:disabled) {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: var(--wb-tree-table-min-h, 600px);
+  max-height: var(--wb-tree-table-min-h, 600px);
   margin-left: 14px;
   padding-top: 3px;
   overflow: hidden;
   contain: size;
+  transition:
+    min-height 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    max-height 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wb-tree-connection-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 2px 4px 4px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wb-danger) 10%, transparent);
+  color: var(--wb-danger-text, var(--wb-danger));
+  font-size: var(--wb-fs-caption);
+  line-height: 1.35;
+}
+
+.wb-tree-connection-retry {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid var(--wb-line);
+  border-radius: 5px;
+  background: var(--wb-toolbar-surface);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-caption);
+  cursor: pointer;
+}
+
+.wb-tree-connection-retry:hover,
+.wb-tree-connection-retry:focus-visible {
+  border-color: var(--wb-accent);
+  color: var(--wb-accent-strong);
 }
 
 .wb-table-scroll {

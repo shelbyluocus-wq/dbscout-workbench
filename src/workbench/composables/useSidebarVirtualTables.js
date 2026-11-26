@@ -4,6 +4,7 @@ import { SIDEBAR_TABLE_ROW_HEIGHT, VIRTUAL_BUFFER } from "../constants.js";
 export const SIDEBAR_TABLE_BRANCH_MAX_HEIGHT = 600;
 const SIDEBAR_TABLE_LIST_TOP_FALLBACK = 40;
 const SIDEBAR_TABLE_BRANCH_PADDING_TOP = 3;
+const SIDEBAR_TABLE_LOADING_MIN_HEIGHT = 88;
 
 /**
  * Sizes the expanded table branch to its content while preserving a scrollable
@@ -13,6 +14,7 @@ export function computeTableBranchMinHeight({
   tableHeight = 0,
   listTop = 0,
   searching = false,
+  loading = false,
   maxHeight = SIDEBAR_TABLE_BRANCH_MAX_HEIGHT,
 } = {}) {
   const cap = Number.isFinite(Number(maxHeight)) && Number(maxHeight) > 0
@@ -21,6 +23,9 @@ export function computeTableBranchMinHeight({
   if (searching) return cap;
 
   const contentHeight = Math.max(0, Number(tableHeight) || 0);
+  if (contentHeight === 0) {
+    return Math.min(cap, SIDEBAR_TABLE_LOADING_MIN_HEIGHT);
+  }
   const measuredListTop = Math.max(SIDEBAR_TABLE_LIST_TOP_FALLBACK, Number(listTop) || 0);
   const contentHeightWithChrome = measuredListTop + contentHeight + SIDEBAR_TABLE_BRANCH_PADDING_TOP;
   return Math.min(cap, contentHeightWithChrome);
@@ -153,8 +158,18 @@ export function useSidebarVirtualTables({ scrollContainerRef, listElRef, tables,
   function syncViewport() {
     const container = resolveListElement(scrollContainerRef.value);
     if (!container) return;
+    // While the branch is collapsing, keep the mounted virtual slice frozen so
+    // Vue never unmounts rows frame-by-frame during the CSS height transition.
+    if (typeof container.closest === "function" && container.closest(".wb-branch-leave-active")) {
+      return;
+    }
     stickyTopInset.value = measureStickyTopInset(container, stickyHeaderSelector);
-    viewportHeight.value = Math.max(0, container.clientHeight - stickyTopInset.value);
+    const liveHeight = Math.max(0, container.clientHeight - stickyTopInset.value);
+    if (typeof container.closest === "function" && container.closest(".wb-branch-enter-active")) {
+      viewportHeight.value = Math.max(viewportHeight.value, liveHeight, SIDEBAR_TABLE_BRANCH_MAX_HEIGHT - stickyTopInset.value);
+      return;
+    }
+    viewportHeight.value = liveHeight;
   }
 
   let remeasureRaf = 0;
