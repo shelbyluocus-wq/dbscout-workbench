@@ -19,28 +19,19 @@ function readBackupCenter() {
   ].map(read).join("\n");
 }
 
-test("snapshot range follows the top connection filter without a duplicate selector", () => {
+test("243 server backup panel keeps target and archive filters on one toolbar without local snapshot UI", () => {
   const dialog = readBackupCenter();
+  const panel = read("./components/BackupSnapshotsPanel.vue");
+  const settings = read("./components/BackupSettingsPanel.vue");
   const styles = read("./workbench.css");
 
-  assert.match(dialog, /class="wb-backup-toolbar wb-backup-snapshot-toolbar"/);
-  assert.match(dialog, /class="wb-backup-snapshot-layout"/);
+  assert.match(panel, /class="wb-backup-toolbar wb-backup-snapshot-toolbar wb-backup-gm-toolbar"/);
+  assert.match(panel, /class="wb-backup-gm-picker"/);
+  assert.doesNotMatch(panel, /createSnapshotFromFilters|onImportSnapshot|onPruneSnapshots|wb-backup-auto/);
+  assert.doesNotMatch(settings, /draftConfig\.(enabled|intervalMinutes|largeTableThreshold|maxPerDb)/);
   assert.doesNotMatch(dialog, /class="wb-backup-enable-conn"/);
   assert.doesNotMatch(dialog, /选择要管理快照范围的连接/);
   assert.doesNotMatch(styles, /\.wb-backup-enable-conn\b/);
-});
-
-test("snapshot scope keeps its natural height ahead of the snapshot list", () => {
-  const panel = read("./components/BackupSnapshotsPanel.vue");
-  const styles = read("./workbench.css");
-
-  // The scope editor is a collapsible section so the snapshot list stays primary.
-  assert.match(panel, /class="wb-backup-auto-toggle"[\s\S]*?:aria-expanded="scopeOpen"/);
-  assert.match(panel, /v-if="scopeOpen" id="wb-backup-snapshot-scope" class="wb-backup-snapshot-layout"/);
-
-  assert.match(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*flex:\s*none/s);
-  assert.doesNotMatch(styles, /\.wb-backup-snapshot-layout\s*\{[^}]*min-height:\s*0/s);
-  assert.match(styles, /@media\s*\(max-width:\s*980px\)\s*\{[\s\S]*\.wb-backup-snapshot-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
 });
 
 test("backup center close button has a stable header-specific target", () => {

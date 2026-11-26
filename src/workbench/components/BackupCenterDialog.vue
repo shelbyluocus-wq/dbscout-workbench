@@ -1,7 +1,7 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, ref } from "vue";
-import { Archive, CloudUpload, History, RefreshCw, Settings, ShieldCheck, X } from "lucide-vue-next";
+import { CloudUpload, History, RefreshCw, Server, Settings, ShieldCheck, X } from "lucide-vue-next";
 
 import AuditTableHistory from "./AuditTableHistory.vue";
 import BackupSettingsPanel from "./BackupSettingsPanel.vue";
@@ -23,7 +23,7 @@ const emit = defineEmits(["close"]);
 const dialog = computed(() => props.backup.dialog);
 const auditMode = computed(() => props.backup.auditMode?.mode || "local");
 const isSharedMode = computed(() => auditMode.value === "shared");
-const snapshotCount = computed(() => (props.backup.snapshots.value || []).length);
+const gmBackupCount = computed(() => (props.backup.gmBackups?.items || []).length);
 const account = computed(() => props.account || null);
 const isLoggedIn = computed(() => Boolean(account.value?.isLoggedIn?.value));
 const displayName = computed(() => account.value?.displayName?.value || "");
@@ -48,7 +48,7 @@ useEscClose(() => true, () => emit("close"), () => isBusy.value, { dialogRef });
 
 const tabs = computed(() => [
   { id: "audit", label: t("m_7bf9d4a5d756"), icon: History },
-  { id: "snapshot", label: t("backup.tab.snapshots"), icon: Archive, count: snapshotCount.value },
+  { id: "snapshot", label: t("backup.tab.snapshots"), icon: Server, count: gmBackupCount.value },
   { id: "config", label: t("m_df3d58c7d84b"), icon: Settings },
 ]);
 
@@ -90,17 +90,12 @@ async function switchTab(tab) {
       tableName: "",
     });
     await props.backup.loadFilterDatabases();
-    await props.backup.loadSnapshots();
   }
 }
 
 // Refreshing is silent when it works; only failures interrupt with a dialog.
 async function applyFilters({ silent = false } = {}) {
-  const [auditOk, snapshotOk] = await Promise.all([
-    props.backup.loadAuditLogs(),
-    props.backup.loadSnapshots(),
-  ]);
-  const ok = auditOk && snapshotOk;
+  const ok = await props.backup.loadAuditLogs();
   if (!ok && !silent) {
     await alert({
       title: t("backup.refreshFailedTitle"),

@@ -404,7 +404,6 @@ export function useBackupCenter(options = {}) {
         },
       });
       closeGmBackupTables();
-      await loadSnapshots();
       lastError.value = "";
       return result;
     } catch (error) {

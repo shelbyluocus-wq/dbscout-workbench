@@ -147,9 +147,9 @@ capabilities:
   read-only access to the host's hourly MySQL backup archives
   (`DBSCOUT_SERVER_GM_BACKUP_DIR`, default `/home/servbin/dbback` via
   `/backups/gm`, `/backups/gm/tables`, `/backups/gm/extract`), surfaced under
-  Backup Center → Snapshots → 243 Server Backups for single-table or full-DB
-  restore (always preceded by a local protection snapshot and recorded in the
-  audit trail).
+  Backup Center → 243 Backups for single-table or full-DB restore (recorded in
+  the audit trail; local scheduled snapshots UI and background scheduler are
+  removed).
 - **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar whose
   large Node + native CLI runtime is downloaded from the SVN release directory
   on first use, with

@@ -576,42 +576,6 @@ fn sync_protection_config(config: &BackupConfig) -> BackupConfig {
     protection_config
 }
 
-/// Create a local pre-restore protection snapshot before restoring from a 243
-/// server backup. When `only_tables` is `Some` and non-empty, snapshots only
-/// the affected existing tables so single-table rollback stays near-instant.
-pub async fn create_gm_restore_protection_snapshot(
-    app: &AppHandle,
-    mysql_url: &str,
-    connection_id: &str,
-    database: &str,
-    config: &BackupConfig,
-    only_tables: Option<&[String]>,
-) -> Result<PathBuf, String> {
-    if is_system_database(database) {
-        return Err(format!("系统内置数据库 `{database}` 不支持创建保护快照"));
-    }
-    let protection_config = sync_protection_config(config);
-    let label = format!(
-        "pre-gm-restore-{}",
-        chrono::Utc::now().format("%Y%m%d-%H%M%S")
-    );
-    let pool = snapshot_pool(mysql_url).await?;
-    let result = stream_snapshot_filtered_with_progress(
-        app,
-        &pool,
-        connection_id,
-        database,
-        &protection_config,
-        Some(&label),
-        only_tables,
-        |_| {},
-    )
-    .await;
-    pool.close().await;
-    let (sql_path, _manifest) = result?;
-    Ok(sql_path)
-}
-
 async fn list_all_columns_with_type(
     pool: &MySqlPool,
     database: &str,

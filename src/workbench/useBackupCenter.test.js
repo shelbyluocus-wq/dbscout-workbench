@@ -913,7 +913,6 @@ test("243 server backup listing, table picker, and restore flow", async () => {
   backup.toggleGmBackupTable("skillprop");
   assert.deepEqual(backup.gmBackups.selectedTables, ["heroprop"]);
 
-  const snapshotCallsBefore = backend.listSnapshotCalls;
   const restored = await backup.restoreGmBackup({
     connectionId: "demo",
     database: "newsg_4cfg",
@@ -930,6 +929,5 @@ test("243 server backup listing, table picker, and restore flow", async () => {
     tables: ["heroprop"],
   });
   assert.equal(backup.gmBackups.activeBackup, null);
-  assert.ok(backend.listSnapshotCalls > snapshotCallsBefore);
   backup.dispose();
 });

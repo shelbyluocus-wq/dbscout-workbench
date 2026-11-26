@@ -1498,23 +1498,20 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(settings, /await\s+alert\(\{[\s\S]*title:\s*t\("backup\.alert\.savedTitle"\)[\s\S]*message:\s*t\("backup\.alert\.saved"\)[\s\S]*emit\("close"\)/);
   assert.match(shell, /<BackupSettingsPanel[\s\S]*?@close="emit\('close'\)"/);
   assert.match(dialog, /props\.backup\.loadAuditLogs\(\)/);
-  assert.match(dialog, /props\.backup\.loadSnapshots\(\)/);
+  assert.match(snapshots, /props\.backup\.loadGmBackups/);
+  assert.match(snapshots, /props\.backup\.restoreGmBackup/);
   assert.match(dialog, /await\s+alert\(\{/);
   // Refresh is silent on success; only a failure interrupts with a dialog.
   assert.doesNotMatch(dialog, /"刷新完成"/);
   assert.match(shell, /if \(!ok && !silent\)[\s\S]*?title:\s*t\("backup\.refreshFailedTitle"\)/);
-  assert.match(dialog, /await\s+props\.backup\.pruneSnapshots\(\)/);
-  assert.match(dialog, /deletedCount/);
   assert.match(dialog, /wb-backup-snapshot-toolbar/);
   assert.match(dialog, /resolvedStorageDir/);
   assert.match(dialog, /openBackupPath/);
-  assert.match(dialog, /onOpenSnapshotFolder\(snapshot\)/);
   assert.match(dialog, /onOpenStorageDir/);
   assert.match(dialog, /draftConfig\.value\s*=\s*\{\s*\.\.\.draftConfig\.value,\s*storageDir:\s*dir,\s*resolvedStorageDir:\s*dir\s*\}/);
-  // Refreshed config (e.g. after toggling a database) keeps unsaved edits.
+  // Refreshed config keeps unsaved edits.
   assert.match(settings, /const edits = previous \? editedFields\(draftConfig\.value, previous\) : \{\};/);
   assert.doesNotMatch(dialog, /^\s*config\.value\s*=/m);
-  assert.match(snapshots, /\/>打开目录<\/button>/);
   assert.match(settings, /\/>打开<\/button>/);
   assert.match(composable, /async function openBackupPath/);
   assert.match(composable, /invokeWorkbench\(["']open_backup_path["'],\s*\{\s*path:\s*normalized\s*\}/);
@@ -1522,21 +1519,19 @@ test("backup center settings use scoped number steppers and close after saved fe
   assert.match(commands, /pub async fn open_backup_path/);
   assert.match(lib, /commands::open_backup_path/);
   assert.match(types, /resolved_storage_dir:\s*String/);
-  assert.match(dialog, /aria-label="快照按连接筛选"/);
-  assert.match(dialog, /aria-label="快照按数据库筛选"/);
+  assert.match(snapshots, /:aria-label="t\('backup\.gm\.targetConnection'\)"/);
+  assert.match(snapshots, /:aria-label="t\('backup\.gm\.targetDatabase'\)"/);
   assert.match(dialog, /@change="onConnectionFilterChange"/);
   assert.match(dialog, /@change="onDatabaseFilterChange"/);
   assert.match(shell, /@connection-change="onConnectionFilterChange"/);
   assert.match(shell, /@database-change="onDatabaseFilterChange"/);
-  assert.match(dialog, /createSnapshotFromFilters/);
+  assert.doesNotMatch(snapshots, /createSnapshotFromFilters|pruneSnapshots|onImportSnapshot/);
   assert.doesNotMatch(dialog, /wb-backup-config-layout/);
   assert.doesNotMatch(dialog, /wb-backup-config-main/);
   assert.doesNotMatch(dialog, /wb-backup-config-side/);
   assert.doesNotMatch(dialog, /<ConfirmDialog/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.intervalMinutes"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.largeTableThreshold"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.maxPerDb"/);
-  assert.match(dialog, /<BackupNumberInput\s+v-model="draftConfig\.auditRetentionDays"/);
+  assert.doesNotMatch(settings, /<BackupNumberInput\s+v-model="draftConfig\.(intervalMinutes|largeTableThreshold|maxPerDb)"/);
+  assert.match(settings, /<BackupNumberInput\s+v-model="draftConfig\.auditRetentionDays"/);
   assert.doesNotMatch(dialog, /<input\s+v-model\.number="config\.(intervalMinutes|largeTableThreshold|maxPerDb|auditRetentionDays)"/);
   assert.match(styles, /\.wb-backup-number-control:not\(:hover\):not\(:focus-within\) > \.wb-backup-number-stepper/);
   assert.match(styles, /\.wb-backup-number-stepper\s*\{[^}]*right:\s*3px/s);

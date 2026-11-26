@@ -138,7 +138,6 @@ pub fn run() {
             if !launch_headless {
                 window_reveal::reveal_main_window(app.handle());
             }
-            let handle = app.handle().clone();
 
             // System tray: provides "显示主窗口" and "退出" entries so the user
             // can fully quit the app after the close button is repurposed to
@@ -203,9 +202,7 @@ pub fn run() {
                 eprintln!("[dbscout] 全局快捷键 Alt+Shift+F 注册失败(可能已被其他程序占用): {error}; 主窗口快捷键本次不可用,其余功能不受影响");
             }
 
-            tauri::async_runtime::spawn(async move {
-                backup::scheduler::run(handle).await;
-            });
+            // Local scheduled DB snapshots are disabled: hourly backups live on 243 (/home/servbin/dbback).
             // Background outbox sync: pushes local audit rows to the central
             // server every 30s. No-op when logged out / unconfigured.
             audit_sync::spawn_background_sync(app.handle().clone());

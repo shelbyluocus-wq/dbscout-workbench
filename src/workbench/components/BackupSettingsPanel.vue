@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { FolderOpen, HardDrive, History, Clock, Trash2, UserRound } from "lucide-vue-next";
+import { FolderOpen, HardDrive, History, Trash2, UserRound } from "lucide-vue-next";
 
 import BackupNumberInput from "./BackupNumberInput.vue";
 import { t } from "../i18n/index.js";
@@ -34,7 +34,7 @@ function currentError(fallback) {
 // config lives in a shallowRef). Fields listed here are saved by "Save
 // settings"; everything else (such as the automatic snapshot scope) is saved
 // immediately elsewhere and must not be overwritten by a stale draft.
-const EDITABLE_FIELDS = ["enabled", "intervalMinutes", "largeTableThreshold", "maxPerDb", "auditRetentionDays", "storageDir"];
+const EDITABLE_FIELDS = ["auditRetentionDays", "storageDir"];
 
 const draftConfig = ref({});
 
@@ -192,43 +192,6 @@ async function onLogout() {
 <template>
   <div class="wb-backup-settings">
     <div class="wb-backup-settings-scroll">
-      <section class="wb-backup-settings-section" aria-labelledby="wb-backup-settings-auto">
-        <header class="wb-backup-settings-head">
-          <span class="wb-backup-settings-icon"><Clock :size="16" aria-hidden="true" /></span>
-          <div>
-            <h3 id="wb-backup-settings-auto">{{ t('backup.snapshot.autoTitle') }}</h3>
-            <p>{{ t('backup.settings.autoDescription') }}</p>
-          </div>
-        </header>
-        <div class="wb-backup-config-fields">
-          <label class="wb-backup-config-field">
-            <span>{{ t('m_f5079b1a5842') }}</span>
-            <input v-model="draftConfig.enabled" type="checkbox" class="wb-backup-switch" role="switch" />
-          </label>
-          <label class="wb-backup-config-field">
-            <span>{{ t('m_d736ef109829') }}</span>
-            <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.intervalMinutes" :min="1" :aria-label="t('m_0b6164b73611')" />
-              <em>{{ t('m_bd957bc497aa') }}</em>
-            </span>
-          </label>
-          <label class="wb-backup-config-field">
-            <span>{{ t('m_4675c6ffb1cd') }}</span>
-            <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.largeTableThreshold" :min="0" :aria-label="t('m_071ad1e6027c')" />
-              <em>{{ t('m_b34873f22860') }}</em>
-            </span>
-          </label>
-          <label class="wb-backup-config-field">
-            <span>{{ t('m_1a8ecd08a549') }}</span>
-            <span class="wb-backup-config-input">
-              <BackupNumberInput v-model="draftConfig.maxPerDb" :min="1" :aria-label="t('m_a2c28526a4fd')" />
-              <em>{{ t('m_80d496aa8259') }}</em>
-            </span>
-          </label>
-        </div>
-      </section>
-
       <section class="wb-backup-settings-section" aria-labelledby="wb-backup-settings-storage">
         <header class="wb-backup-settings-head">
           <span class="wb-backup-settings-icon"><HardDrive :size="16" aria-hidden="true" /></span>

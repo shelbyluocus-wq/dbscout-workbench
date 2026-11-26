@@ -3,9 +3,8 @@
 //!
 //! Safety guarantees:
 //! - Rejects system databases and read-only / non-MySQL connections.
-//! - Always takes a local pre-restore protection snapshot (table-scoped for
-//!   single/multi-table restore, full-DB for whole-database restore) before
-//!   mutating the target database.
+//! - Never writes local `.sql` snapshot files on disk (hourly backups already
+//!   live on 243 under `/home/servbin/dbback`).
 //! - Executes statements on one dedicated MySQL connection with
 //!   `FOREIGN_KEY_CHECKS=0` and `UNIQUE_CHECKS=0`, skips `LOCK TABLES` /
 //!   `UNLOCK TABLES` / `USE`, and guarantees re-enabling checks on exit.
@@ -516,50 +515,6 @@ pub async fn restore_gm_backup(
         return Err("备份文件中未解析到可执行的 SQL 语句".into());
     }
 
-    // Always snapshot the current target state locally first so the restore is reversible.
-    emit_restore_progress(
-        app,
-        &job_id,
-        &request.connection_id,
-        target_db,
-        10,
-        100,
-        "running",
-        if is_full_db {
-            "正在为目标库创建还原前本地保护快照..."
-        } else {
-            "正在为所选表创建还原前本地保护快照..."
-        },
-    );
-    let config = backup::load_config(app);
-    let only_tables_ref = if is_full_db {
-        None
-    } else {
-        Some(extracted.tables.as_slice())
-    };
-    let pre_restore_path = backup::create_gm_restore_protection_snapshot(
-        app,
-        mysql_url,
-        &request.connection_id,
-        target_db,
-        &config,
-        only_tables_ref,
-    )
-    .await
-    .map_err(|error| {
-        emit_restore_progress(
-            app,
-            &job_id,
-            &request.connection_id,
-            target_db,
-            0,
-            100,
-            "failed",
-            "创建还原前保护快照失败",
-        );
-        format!("创建还原前本地保护快照失败: {error}")
-    })?;
-
     let total_stmts = statements.len() as u64;
     emit_restore_progress(
         app,
@@ -680,7 +635,7 @@ pub async fn restore_gm_backup(
         ts: extracted.ts,
         restored_tables: extracted.tables,
         statement_count: statements.len(),
-        pre_restore_snapshot_path: pre_restore_path.to_string_lossy().to_string(),
+        pre_restore_snapshot_path: String::new(),
     })
 }
 
