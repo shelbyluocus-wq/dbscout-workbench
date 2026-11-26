@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="${BLACKCAT_SERVER_ROOT:-/home/blackcat-server}"
 BIN="${BLACKCAT_SERVER_BIN:-$ROOT/bin/dbscout-server}"
 DB_PATH="${DBSCOUT_SERVER_DB:-$ROOT/data/dbscout-server.sqlite}"
-BIND_ADDR="${DBSCOUT_SERVER_BIND:-0.0.0.0:8765}"
+BIND_ADDR="${DBSCOUT_SERVER_BIND:-0.0.0.0:8766}"
 PORT="${BLACKCAT_SERVER_PORT:-${BIND_ADDR##*:}}"
 SERVICE_NAME="${BLACKCAT_SERVICE_NAME:-blackcat-server}"
 PID_FILE="$ROOT/run/server.pid"

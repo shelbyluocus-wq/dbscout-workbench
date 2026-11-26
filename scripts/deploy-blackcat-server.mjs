@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Deploy, migrate, inspect, or back up the standalone Blackcat central server
- * (`dbscout-server`) on the Linux host (default: 192.168.1.243:8765).
+ * (`dbscout-server`) on the Linux host (default: 192.168.1.243:8766).
  *
  * Strictly isolated under `/home/blackcat-server` — refuses to target
  * `/home/gmserv` or touch any GM files/processes.
@@ -20,7 +20,7 @@ export const DEFAULT_DEPLOY_HOST = "192.168.1.243";
 export const DEFAULT_DEPLOY_USER = "root";
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_REMOTE_DIR = "/home/blackcat-server";
-export const DEFAULT_SERVER_PORT = 8765;
+export const DEFAULT_SERVER_PORT = 8766;
 
 const ELF_MAGIC = Buffer.from([0x7f, 0x45, 0x4c, 0x46]);
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "ascii");
@@ -118,7 +118,7 @@ export function renderDeployTemplates({ remoteDir, serverPort }) {
       .readFileSync(path.join(deployDir, name), "utf8")
       .replace(/\r\n/g, "\n")
       .replaceAll("/home/blackcat-server", safeDir)
-      .replaceAll("0.0.0.0:8765", `0.0.0.0:${port}`);
+      .replaceAll("0.0.0.0:8766", `0.0.0.0:${port}`);
 
   return {
     "run-blackcat-server.sh": readTemplate("run-blackcat-server.sh"),

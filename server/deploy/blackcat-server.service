@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/blackcat-server
-Environment=DBSCOUT_SERVER_BIND=0.0.0.0:8765
+Environment=DBSCOUT_SERVER_BIND=0.0.0.0:8766
 Environment=DBSCOUT_SERVER_DB=/home/blackcat-server/data/dbscout-server.sqlite
 Environment=DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE=20
 Environment=RUST_LOG=dbscout_server=info,tower_http=info

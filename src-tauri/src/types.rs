@@ -1197,7 +1197,7 @@ pub struct UserSession {
 }
 
 /// Persisted account config stored at `<app_data_dir>/account/session.json`.
-/// `server_url` is the central service base URL (e.g. http://192.168.1.243:8765);
+/// `server_url` is the central service base URL (e.g. http://192.168.1.243:8766);
 /// `session` is `None` when logged out. `server_url_migration_version` tracks
 /// one-time default-server migrations so manual overrides are never reverted.
 /// `loaded` is an in-memory-only flag (never serialized) tracking whether the

@@ -18,14 +18,17 @@ use tauri::{AppHandle, Manager};
 use crate::types::{AccountConfig, AppState, UserSession};
 
 /// Default LAN central server used when no custom server URL has been saved yet.
-pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.243:8765";
+pub const DEFAULT_SERVER_URL: &str = "http://192.168.1.243:8766";
 
 /// Previous default central server addresses that should migrate once to
 /// `DEFAULT_SERVER_URL` when upgrading existing installations.
-const LEGACY_DEFAULT_SERVER_URLS: &[&str] = &["http://192.168.1.193:8765"];
+const LEGACY_DEFAULT_SERVER_URLS: &[&str] = &[
+    "http://192.168.1.193:8765",
+    "http://192.168.1.243:8765",
+];
 
 /// Current schema version for one-time `server_url` default migrations.
-pub const SERVER_URL_MIGRATION_VERSION: u32 = 1;
+pub const SERVER_URL_MIGRATION_VERSION: u32 = 2;
 
 const STARTUP_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
@@ -232,7 +235,25 @@ mod tests {
         );
         assert!(persist_migrated);
 
-        // Once marked migrated, an explicit override back to the legacy host is respected.
+        // Installations previously migrated to 243:8765 (v1) also migrate once to 243:8766 (v2).
+        let (migrated_v1, persist_v1) = apply_default_and_migrate_server_url(AccountConfig {
+            server_url: Some("http://192.168.1.243:8765".into()),
+            session: Some(existing_session.clone()),
+            server_url_migration_version: Some(1),
+            loaded: false,
+        });
+        assert_eq!(migrated_v1.server_url.as_deref(), Some(DEFAULT_SERVER_URL));
+        assert_eq!(
+            migrated_v1.server_url_migration_version,
+            Some(SERVER_URL_MIGRATION_VERSION)
+        );
+        assert_eq!(
+            migrated_v1.session.as_ref().map(|s| s.token.as_str()),
+            Some("tok-1")
+        );
+        assert!(persist_v1);
+
+        // Once marked migrated, an explicit override back to a legacy host is respected.
         let (explicit_rollback, persist_rollback) =
             apply_default_and_migrate_server_url(AccountConfig {
                 server_url: Some("http://192.168.1.193:8765".into()),

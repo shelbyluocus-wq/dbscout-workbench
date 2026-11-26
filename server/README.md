@@ -6,16 +6,16 @@ DB Scout Workbench（黑猫）的中心服务（局域网内部署）。提供**
 - **每张表默认只保留最近 20 次改动**（启动时与每次写入后自动清理更早记录；同一次批量导入/多行保存按 2.5 秒窗口算作 1 次改动完整保留，避免打断历史对比；可通过环境变量 `DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE` 调整，设为 `0` 不清理）。
 - 仅用户名 + 不透明令牌登录，**不存密码**。安全假设：仅限公司局域网内使用，不对外网开放。
 - HTTP/JSON 接口，Bearer token 鉴权。
-- 独立部署在 `192.168.1.243:8765`（`/home/blackcat-server`），与 GM 服务端（`/home/gmserv`）完全隔离，互不干扰。
+- 独立部署在 `192.168.1.243:8766`（`/home/blackcat-server`），与 GM 服务端（`/home/gmserv`）完全隔离，互不干扰。
 
 ## 本地运行
 
 ```sh
-# 默认监听 0.0.0.0:8765，数据库 ./dbscout-server.sqlite
+# 默认监听 0.0.0.0:8766，数据库 ./dbscout-server.sqlite
 cargo run -p dbscout-server
 
 # 自定义
-DBSCOUT_SERVER_BIND=0.0.0.0:8765 \
+DBSCOUT_SERVER_BIND=0.0.0.0:8766 \
 DBSCOUT_SERVER_DB=/data/dbscout-server.sqlite \
 cargo run -p dbscout-server
 ```
@@ -46,7 +46,7 @@ npm run server:deploy -- --binary /path/to/linux/dbscout-server
 npm run server:deploy -- --dry-run
 ```
 
-> 首次开放内网访问前，请确认 243 防火墙已对局域网放行 `8765/tcp`。
+> 首次开放内网访问前，请确认 243 防火墙已对局域网放行 `8766/tcp`。
 
 ### 2. 从旧机 `192.168.1.193` 无损迁移账号与历史记录
 
@@ -62,7 +62,7 @@ powershell -ExecutionPolicy Bypass -File scripts/export-dbscout-server-db.ps1
 npm run server:deploy -- --migrate-db /path/to/dbscout-server.sqlite
 ```
 
-迁移完成后，老用户升级新版黑猫启动时会自动把保存的旧地址 `http://192.168.1.193:8765` 静默切到 `http://192.168.1.243:8765`，原账号和登录态继续有效，无需重新注册或登录。
+迁移完成后，老用户升级新版黑猫启动时会自动把保存的旧地址 `http://192.168.1.193:8765` / `http://192.168.1.243:8765` 静默切到 `http://192.168.1.243:8766`，原账号和登录态继续有效，无需重新注册或登录。
 
 ### 3. 日常运维命令
 

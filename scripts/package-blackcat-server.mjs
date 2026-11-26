@@ -51,7 +51,7 @@ while [[ \$# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "用法: bash install-on-243.sh [--binary /path/to/linux/dbscout-server] [--root /home/blackcat-server] [--port 8765]"
+      echo "用法: bash install-on-243.sh [--binary /path/to/linux/dbscout-server] [--root /home/blackcat-server] [--port 8766]"
       exit 0
       ;;
     *)
@@ -73,7 +73,7 @@ render_file() {
   local src="\$1" dst="\$2" mode="\$3"
   sed -e 's/\\r\$//' \
       -e "s|/home/blackcat-server|\$ROOT|g" \
-      -e "s|0.0.0.0:8765|0.0.0.0:\$PORT|g" \
+      -e "s|0.0.0.0:8766|0.0.0.0:\$PORT|g" \
       "\$src" > "\$dst"
   chmod "\$mode" "\$dst"
 }
@@ -266,8 +266,8 @@ function buildPackageReadme() {
 
 ## 关键说明
 
-- **与 GM 完全隔离**：默认安装到 \`/home/blackcat-server\`，监听 \`8765/tcp\`，**不碰 \`/home/gmserv\`、GM 进程、8700/8701 端口及任何 MySQL 数据库**。
-- **仅限局域网访问**：本服务为公司内网无密码（用户名 + Token）共享变更日志服务，**请确认 243 防火墙仅对局域网放行 \`8765/tcp\`，严禁对公网开放**。
+- **与 GM 完全隔离**：默认安装到 \`/home/blackcat-server\`，监听 \`8766/tcp\`，**不碰 \`/home/gmserv\`、GM 进程、8700/8701 端口及任何 MySQL 数据库**。
+- **仅限局域网访问**：本服务为公司内网无密码（用户名 + Token）共享变更日志服务，**请确认 243 防火墙仅对局域网放行 \`8766/tcp\`，严禁对公网开放**。
 - **自动控体积**：默认每张表只保留最近 **20 次改动**（\`DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE=20\`），启动与每次写入自动清理旧记录，日常仅占几十 MB；同时配好每日 04:00 在线热备份到 \`/home/blackcat-server/backups/\`。
 
 ## 第 1 步：在 243 上解压并部署启动
@@ -285,8 +285,8 @@ bash install-on-243.sh
 >    \`bash install-on-243.sh --binary /path/to/dbscout-server\`
 
 验证（从局域网其他电脑测试）：
-- \`GET http://192.168.1.243:8765/health\` → 返回 \`200\`（\`{"status":"ok"}\`）
-- \`GET http://192.168.1.243:8765/me\` → 返回 \`401\`（未携带 Token 时正常拦截）
+- \`GET http://192.168.1.243:8766/health\` → 返回 \`200\`（\`{"status":"ok"}\`）
+- \`GET http://192.168.1.243:8766/me\` → 返回 \`401\`（未携带 Token 时正常拦截）
 - 确认 GM \`8701/8700\` 不受任何影响。
 
 ## 第 2 步：导入旧机（192.168.1.193）导出的历史数据库
