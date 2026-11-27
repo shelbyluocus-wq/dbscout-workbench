@@ -2013,6 +2013,38 @@ test("copy_tables copies independent schema and row data across MySQL connection
   resetMockWorkbenchState();
 });
 
+test("copy_tables emits table-copy-progress events when operationId is provided", async () => {
+  resetMockDatabaseSchemas();
+  const { onMockEvent } = await import("./mock/mockEventBus.js");
+  const events = [];
+  const unlisten = onMockEvent("table-copy-progress", (event) => {
+    events.push(event.payload);
+  });
+
+  try {
+    await mockWorkbenchInvoke("copy_tables", {
+      request: {
+        sourceConnectionId: "demo",
+        sourceDatabase: "game_db",
+        targetConnectionId: "demo",
+        targetDatabase: "game_db",
+        tableNames: ["player", "hero"],
+        operationId: "paste-op-1",
+      },
+    });
+  } finally {
+    unlisten();
+    resetMockDatabaseSchemas();
+  }
+
+  assert.deepEqual(events, [
+    { operationId: "paste-op-1", done: 0, total: 2, copied: 0, currentTable: "player", stage: "copying" },
+    { operationId: "paste-op-1", done: 1, total: 2, copied: 1, currentTable: "player", stage: "copying" },
+    { operationId: "paste-op-1", done: 1, total: 2, copied: 1, currentTable: "hero", stage: "copying" },
+    { operationId: "paste-op-1", done: 2, total: 2, copied: 2, currentTable: "hero", stage: "copying" },
+  ]);
+});
+
 test("drop_tables removes schema metadata and rows from the mock database", async () => {
   resetMockDatabaseSchemas();
   await mockWorkbenchInvoke("copy_tables", {

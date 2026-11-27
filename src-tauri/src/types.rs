@@ -984,11 +984,25 @@ pub struct CopyTablesRequest {
     pub mode: String,
     #[serde(default)]
     pub structure_only: bool,
+    #[serde(default)]
+    pub operation_id: Option<String>,
 }
 
 /// 判断 copy_tables 请求是否为覆盖模式。
 pub fn is_overwrite_copy_mode(mode: &str) -> bool {
     mode.trim().eq_ignore_ascii_case("overwrite")
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyTablesProgressEvent {
+    pub operation_id: String,
+    pub done: usize,
+    pub total: usize,
+    pub copied: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_table: Option<String>,
+    pub stage: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

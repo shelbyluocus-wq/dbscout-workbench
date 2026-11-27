@@ -2728,6 +2728,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       throw new Error("只读连接不能发送表");
     }
     const copied = [];
+    const operationId = String(req.operationId || req.operation_id || "").trim();
     const overwrite = String(req.mode || "copy").toLowerCase() === "overwrite";
     const structureOnly = Boolean(req.structureOnly || req.structure_only);
     if (
@@ -2742,6 +2743,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       ...(mockDatabaseSchemas[schemaKey] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
     ];
     for (const tableName of tableNames) {
+      if (operationId) {
+        emitMockEvent("table-copy-progress", {
+          operationId,
+          done: copied.length,
+          total: tableNames.length,
+          copied: copied.length,
+          currentTable: tableName,
+          stage: "copying",
+        });
+      }
       // 覆盖模式：移除目标库同名表，用源表完全替换；否则重名自动添加 _copy 后缀。
       const existingIndex = targetSchema.findIndex(
         (name) => String(name).toLowerCase() === String(tableName).toLowerCase(),
@@ -2762,6 +2773,16 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       targetRows.length = 0;
       targetRows.push(...sourceRows.map((row) => ({ ...row })));
       copied.push({ originalName: tableName, targetName, rowCount: sourceRows.length });
+      if (operationId) {
+        emitMockEvent("table-copy-progress", {
+          operationId,
+          done: copied.length,
+          total: tableNames.length,
+          copied: copied.length,
+          currentTable: tableName,
+          stage: "copying",
+        });
+      }
     }
     return { status: "succeeded", copied, warnings: [] };
   }

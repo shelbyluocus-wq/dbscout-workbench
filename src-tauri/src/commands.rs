@@ -39,7 +39,7 @@ use crate::runtime_resources::{PoolKey, ServerPoolKey};
 use crate::svn_updater::{self, SvnCheckResponse, SvnUpdateConfig};
 use crate::sync::{self, DATABASE_SYNC_PROGRESS_EVENT};
 use crate::system_fonts;
-use crate::table_copy;
+use crate::table_copy::{self, TABLE_COPY_PROGRESS_EVENT};
 use crate::table_search::{TableSearchJob, TableSearchJobSpec};
 use crate::types::*;
 use crate::work_scheduler::{ScheduledWorkError, WorkCancellation, WorkClass, WorkScheduleError};
@@ -1347,15 +1347,49 @@ pub async fn copy_tables(
     {
         return Err("覆盖模式下不能将表发送到同一个数据库".into());
     }
+    let operation_id = request
+        .operation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToString::to_string);
+    let total_tables = request.table_names.len();
+    let emit_progress = |done: usize, copied: usize, current_table: Option<&str>| {
+        let Some(op_id) = operation_id.as_ref() else {
+            return;
+        };
+        let _ = app.emit(
+            TABLE_COPY_PROGRESS_EVENT,
+            CopyTablesProgressEvent {
+                operation_id: op_id.clone(),
+                done,
+                total: total_tables,
+                copied,
+                current_table: current_table.map(ToString::to_string),
+                stage: "copying".into(),
+            },
+        );
+    };
     if source_is_real && target_is_real {
         let source_pool =
             real_connection_pool(&request.source_connection_id, &state, &perf_context).await?;
         let result = if request.source_connection_id == request.target_connection_id {
-            table_copy::copy_tables_same_server(&source_pool, &request).await?
+            table_copy::copy_tables_same_server_with_progress(
+                &source_pool,
+                &request,
+                emit_progress,
+            )
+            .await?
         } else {
             let target_pool =
                 real_connection_pool(&request.target_connection_id, &state, &perf_context).await?;
-            table_copy::copy_tables_cross_server(&source_pool, &target_pool, &request).await?
+            table_copy::copy_tables_cross_server_with_progress(
+                &source_pool,
+                &target_pool,
+                &request,
+                emit_progress,
+            )
+            .await?
         };
         let copied_names: Vec<String> = result
             .copied
@@ -1421,6 +1455,7 @@ pub async fn copy_tables(
     let overwrite = crate::types::is_overwrite_copy_mode(&request.mode);
 
     for table_name in &request.table_names {
+        emit_progress(copied.len(), copied.len(), Some(table_name.as_str()));
         let source_table = source_schema
             .iter()
             .find(|t| t.table_name.eq_ignore_ascii_case(table_name))
@@ -1459,6 +1494,7 @@ pub async fn copy_tables(
             target_name,
             row_count,
         });
+        emit_progress(copied.len(), copied.len(), Some(table_name.as_str()));
     }
     rt.demo_schema_overrides = schemas;
     if rt.selected_database == request.target_database {

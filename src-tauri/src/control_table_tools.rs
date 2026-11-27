@@ -119,6 +119,7 @@ pub async fn run(app: &AppHandle, func: &str, args: Value) -> Result<Value, Stri
             target_database: required_string(&args, "targetDatabase")?,
             mode: args.get("mode").and_then(Value::as_str).unwrap_or("copy").into(),
             structure_only: args.get("structureOnly").and_then(Value::as_bool).unwrap_or(false),
+            operation_id: None,
         };
         return serialize(commands::copy_tables(request, PerfContext::default(), app.clone(), state).await?);
     }

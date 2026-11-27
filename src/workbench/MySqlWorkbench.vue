@@ -374,6 +374,9 @@ const {
 } = conn;
 
 const deleteTablesProgress = ref(null);
+const pasteTablesProgress = ref(null);
+let nextPasteOperationId = 1;
+let pendingPasteTotal = 0;
 
 const tableModifiedTimeAutoRefresh = createTableModifiedTimeAutoRefresh({
   refresh: refreshTableModifiedTimes,
@@ -390,6 +393,16 @@ const homeTablePasteCoordinator = createHomeTablePasteCoordinator({
   }),
   onWaitForNavigation: ({ database }) => {
     statusText.value = `正在切换到 ${database}，完成后继续粘贴…`;
+    if (typeof pasteTablesProgress !== "undefined" && pendingPasteTotal > 0) {
+      pasteTablesProgress.value = {
+        database,
+        done: 0,
+        total: pendingPasteTotal,
+        copied: 0,
+        currentTable: "",
+        phase: "switching",
+      };
+    }
   },
 });
 
@@ -4228,23 +4241,84 @@ async function pasteHomeTables({ target, payload, onSuccess } = {}) {
     blockUnsupportedEngine("粘贴表");
     return;
   }
+  const tableNames = [...source.tables];
+  const totalTables = tableNames.length;
+  const ownedPendingWait = !homeTablePasteCoordinator.isPasting?.();
+  if (ownedPendingWait && typeof pendingPasteTotal === "number") {
+    pendingPasteTotal = totalTables;
+  }
   try {
     const paste = await homeTablePasteCoordinator.runWhenReady({
       connectionId: targetConnectionId,
       database: targetDatabase,
     }, async () => {
       busy.value = true;
+      const operationId = `paste-${Date.now()}-${typeof nextPasteOperationId === "number" ? nextPasteOperationId++ : Math.random().toString(36).slice(2)}`;
+      let copiedSoFar = 0;
+      let unlistenProgress = null;
+      if (typeof pasteTablesProgress !== "undefined") {
+        pasteTablesProgress.value = {
+          database: targetDatabase,
+          done: 0,
+          total: totalTables,
+          copied: 0,
+          currentTable: tableNames[0] || "",
+          phase: "pasting",
+        };
+      }
+      statusText.value = `正在粘贴 ${totalTables} 张表，请稍候…`;
       try {
-        const result = await invokeWorkbench("copy_tables", {
-          request: {
-            sourceConnectionId: source.connectionId,
-            sourceDatabase: source.database,
-            tableNames: source.tables,
-            targetConnectionId,
-            targetDatabase,
-          },
-        });
+        if (typeof listenWorkbenchEvent === "function") {
+          unlistenProgress = await listenWorkbenchEvent("table-copy-progress", (event) => {
+            const progress = event?.payload ?? event;
+            if (!progress || progress.operationId !== operationId) return;
+            const total = Math.max(1, Number(progress.total || totalTables));
+            const done = Math.max(0, Math.min(total, Number(progress.done ?? 0)));
+            const copied = Math.max(0, Math.min(total, Number(progress.copied ?? done)));
+            copiedSoFar = Math.max(copiedSoFar, copied);
+            const currentTable = String(progress.currentTable || "");
+            if (typeof pasteTablesProgress !== "undefined") {
+              pasteTablesProgress.value = {
+                database: targetDatabase,
+                done,
+                total,
+                copied,
+                currentTable,
+                phase: "pasting",
+              };
+            }
+            statusText.value = `正在粘贴表 ${done}/${total}，已粘贴 ${copied} 张`;
+          });
+        }
+        let result;
+        try {
+          result = await invokeWorkbench("copy_tables", {
+            request: {
+              sourceConnectionId: source.connectionId,
+              sourceDatabase: source.database,
+              tableNames,
+              targetConnectionId,
+              targetDatabase,
+              operationId,
+            },
+          });
+        } catch (error) {
+          if (copiedSoFar > 0) {
+            await loadTables({ connectionId: targetConnectionId, database: targetDatabase }).catch(() => {});
+          }
+          throw error;
+        }
         const createdNames = copiedHomeTableNames(result);
+        if (typeof pasteTablesProgress !== "undefined") {
+          pasteTablesProgress.value = {
+            database: targetDatabase,
+            done: totalTables,
+            total: totalTables,
+            copied: createdNames.length || totalTables,
+            currentTable: "",
+            phase: "refreshing",
+          };
+        }
         await loadTables({ connectionId: targetConnectionId, database: targetDatabase });
         const home = openCurrentDatabaseHome({ activate: true });
         if (home) {
@@ -4252,12 +4326,19 @@ async function pasteHomeTables({ target, payload, onSuccess } = {}) {
           home.focusedTableName = createdNames[0] || "";
         }
         onSuccess?.(createdNames);
+        const previewNames = createdNames.length > 3
+          ? `${createdNames.slice(0, 3).join("、")} 等`
+          : createdNames.join("、");
         statusText.value = createdNames.length
-          ? `已粘贴 ${createdNames.length} 张表：${createdNames.join("、")}`
+          ? `已粘贴 ${createdNames.length} 张表：${previewNames}`
           : "已粘贴表";
         showWorkbenchReminder("success", `已粘贴 ${createdNames.length || 1} 张表`);
         return createdNames;
       } finally {
+        try {
+          unlistenProgress?.();
+        } catch {}
+        if (typeof pasteTablesProgress !== "undefined") pasteTablesProgress.value = null;
         busy.value = false;
       }
     });
@@ -4266,12 +4347,21 @@ async function pasteHomeTables({ target, payload, onSuccess } = {}) {
     if (paste.reason === "paste-pending") {
       statusText.value = "正在粘贴表，请勿重复操作";
     } else if (paste.reason === "navigation-failed") {
+      if (typeof pasteTablesProgress !== "undefined") pasteTablesProgress.value = null;
       statusText.value = "目标数据库切换失败，未执行粘贴";
     } else {
+      if (typeof pasteTablesProgress !== "undefined") pasteTablesProgress.value = null;
       statusText.value = "目标数据库尚未就绪，未执行粘贴";
     }
   } catch (error) {
+    if (ownedPendingWait && typeof pasteTablesProgress !== "undefined") {
+      pasteTablesProgress.value = null;
+    }
     statusText.value = `粘贴表失败：${String(error?.message || error)}`;
+  } finally {
+    if (ownedPendingWait && typeof pendingPasteTotal === "number") {
+      pendingPasteTotal = 0;
+    }
   }
 }
 
@@ -7064,6 +7154,53 @@ onBeforeUnmount(() => {
             }}
           </span>
           <span>{{ Math.round((deleteTablesProgress.done / Math.max(1, deleteTablesProgress.total)) * 100) }}%</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="pasteTablesProgress" class="wb-history-progress-overlay wb-paste-progress-overlay">
+      <div class="wb-history-progress wb-drop-progress wb-paste-progress" role="status" aria-live="polite">
+        <div class="wb-history-progress-label">
+          {{
+            pasteTablesProgress.phase === "switching"
+              ? t("home.pastingTablesSwitching", { database: pasteTablesProgress.database })
+              : pasteTablesProgress.phase === "refreshing"
+                ? t("home.pastingTablesRefreshing")
+                : pasteTablesProgress.total === 1
+                  ? t("home.pastingTable")
+                  : t("home.pastingTables", { count: pasteTablesProgress.total })
+          }}
+        </div>
+        <div
+          class="wb-history-progress-track"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="Math.round((pasteTablesProgress.done / Math.max(1, pasteTablesProgress.total)) * 100)"
+        >
+          <div
+            class="wb-history-progress-bar"
+            :style="{ width: `${Math.round((pasteTablesProgress.done / Math.max(1, pasteTablesProgress.total)) * 100)}%` }"
+          ></div>
+        </div>
+        <div class="wb-drop-progress-meta">
+          <span>
+            {{
+              t("home.pastingTablesDetail", {
+                done: pasteTablesProgress.done,
+                total: pasteTablesProgress.total,
+                copied: pasteTablesProgress.copied,
+              })
+            }}
+          </span>
+          <span>{{ Math.round((pasteTablesProgress.done / Math.max(1, pasteTablesProgress.total)) * 100) }}%</span>
+        </div>
+        <div
+          v-if="pasteTablesProgress.phase === 'pasting' && pasteTablesProgress.currentTable"
+          class="wb-paste-progress-current"
+          :title="pasteTablesProgress.currentTable"
+        >
+          {{ t("home.pastingCurrentTable", { table: pasteTablesProgress.currentTable }) }}
         </div>
       </div>
     </div>

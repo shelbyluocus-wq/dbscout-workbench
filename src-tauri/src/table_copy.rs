@@ -11,6 +11,7 @@ use crate::types::{is_overwrite_copy_mode, CopyTablesRequest, CopyTablesResponse
 const COPY_BATCH_ROWS: usize = 128;
 const COPY_BATCH_BYTES: usize = 4 * 1024 * 1024;
 const MYSQL_BIND_LIMIT: usize = 60_000;
+pub const TABLE_COPY_PROGRESS_EVENT: &str = "table-copy-progress";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransferKind {
@@ -47,27 +48,44 @@ pub async fn copy_tables_same_server(
     pool: &MySqlPool,
     request: &CopyTablesRequest,
 ) -> Result<CopyTablesResponse, String> {
+    copy_tables_same_server_with_progress(pool, request, |_, _, _| {}).await
+}
+
+pub async fn copy_tables_same_server_with_progress<F>(
+    pool: &MySqlPool,
+    request: &CopyTablesRequest,
+    on_progress: F,
+) -> Result<CopyTablesResponse, String>
+where
+    F: FnMut(usize, usize, Option<&str>),
+{
     let mut connection = pool
         .acquire()
         .await
         .map_err(|error| format!("获取 MySQL 连接失败: {error}"))?;
     let original_time_zone = read_session_time_zone(&mut connection).await?;
     set_session_time_zone(&mut connection, "+00:00").await?;
-    let result = copy_tables_same_server_with_connection(&mut connection, request).await;
+    let result =
+        copy_tables_same_server_with_connection(&mut connection, request, on_progress).await;
     let restore = set_session_time_zone(&mut connection, &original_time_zone).await;
     finish_with_session_restores(result, [("MySQL", restore)])
 }
 
-async fn copy_tables_same_server_with_connection(
+async fn copy_tables_same_server_with_connection<F>(
     connection: &mut MySqlConnection,
     request: &CopyTablesRequest,
-) -> Result<CopyTablesResponse, String> {
+    mut on_progress: F,
+) -> Result<CopyTablesResponse, String>
+where
+    F: FnMut(usize, usize, Option<&str>),
+{
     let mut existing = load_target_table_names(connection, &request.target_database).await?;
     let overwrite = is_overwrite_copy_mode(&request.mode);
     let mut copied = Vec::new();
     let mut warnings = Vec::new();
 
     for table_name in &request.table_names {
+        on_progress(copied.len(), copied.len(), Some(table_name.as_str()));
         let ddl = sync::show_create_table(connection, &request.source_database, table_name).await?;
         let target_name = if overwrite {
             table_name.clone()
@@ -144,6 +162,7 @@ async fn copy_tables_same_server_with_connection(
             row_count,
         });
         existing.insert(target_name.to_lowercase());
+        on_progress(copied.len(), copied.len(), Some(table_name.as_str()));
     }
 
     Ok(CopyTablesResponse {
@@ -158,6 +177,18 @@ pub async fn copy_tables_cross_server(
     target_pool: &MySqlPool,
     request: &CopyTablesRequest,
 ) -> Result<CopyTablesResponse, String> {
+    copy_tables_cross_server_with_progress(source_pool, target_pool, request, |_, _, _| {}).await
+}
+
+pub async fn copy_tables_cross_server_with_progress<F>(
+    source_pool: &MySqlPool,
+    target_pool: &MySqlPool,
+    request: &CopyTablesRequest,
+    on_progress: F,
+) -> Result<CopyTablesResponse, String>
+where
+    F: FnMut(usize, usize, Option<&str>),
+{
     let mut source = source_pool
         .acquire()
         .await
@@ -174,7 +205,13 @@ pub async fn copy_tables_cross_server(
         return finish_with_session_restores(Err(error), [("源 MySQL", restore)]);
     }
 
-    let result = copy_tables_cross_server_with_connections(&mut source, &mut target, request).await;
+    let result = copy_tables_cross_server_with_connections(
+        &mut source,
+        &mut target,
+        request,
+        on_progress,
+    )
+    .await;
     let source_restore = set_session_time_zone(&mut source, &source_time_zone).await;
     let target_restore = set_session_time_zone(&mut target, &target_time_zone).await;
     finish_with_session_restores(
@@ -183,17 +220,22 @@ pub async fn copy_tables_cross_server(
     )
 }
 
-async fn copy_tables_cross_server_with_connections(
+async fn copy_tables_cross_server_with_connections<F>(
     source: &mut MySqlConnection,
     target: &mut MySqlConnection,
     request: &CopyTablesRequest,
-) -> Result<CopyTablesResponse, String> {
+    mut on_progress: F,
+) -> Result<CopyTablesResponse, String>
+where
+    F: FnMut(usize, usize, Option<&str>),
+{
     let mut existing = load_target_table_names(target, &request.target_database).await?;
     let overwrite = is_overwrite_copy_mode(&request.mode);
     let mut copied = Vec::new();
     let mut warnings = Vec::new();
 
     for table_name in &request.table_names {
+        on_progress(copied.len(), copied.len(), Some(table_name.as_str()));
         let ddl = sync::show_create_table(source, &request.source_database, table_name).await?;
         let target_name = if overwrite {
             table_name.clone()
@@ -269,6 +311,7 @@ async fn copy_tables_cross_server_with_connections(
             row_count,
         });
         existing.insert(target_name.to_lowercase());
+        on_progress(copied.len(), copied.len(), Some(table_name.as_str()));
     }
 
     Ok(CopyTablesResponse {
@@ -1044,5 +1087,53 @@ mod tests {
         assert!(stripped.contains("`id` bigint NOT NULL AUTO_INCREMENT"));
         assert!(!stripped.contains("AUTO_INCREMENT=12345"));
         assert!(stripped.contains("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"));
+    }
+
+    #[test]
+    fn copy_request_deserializes_with_and_without_operation_id() {
+        let without_id: CopyTablesRequest = serde_json::from_value(serde_json::json!({
+            "sourceConnectionId": "src",
+            "sourceDatabase": "db_a",
+            "tableNames": ["orders"],
+            "targetConnectionId": "dst",
+            "targetDatabase": "db_b"
+        }))
+        .unwrap();
+        assert_eq!(without_id.operation_id, None);
+
+        let with_id: CopyTablesRequest = serde_json::from_value(serde_json::json!({
+            "sourceConnectionId": "src",
+            "sourceDatabase": "db_a",
+            "tableNames": ["orders"],
+            "targetConnectionId": "dst",
+            "targetDatabase": "db_b",
+            "operationId": "paste-123"
+        }))
+        .unwrap();
+        assert_eq!(with_id.operation_id.as_deref(), Some("paste-123"));
+    }
+
+    #[test]
+    fn copy_progress_event_serializes_with_camel_case_fields() {
+        let payload = serde_json::to_value(crate::types::CopyTablesProgressEvent {
+            operation_id: "paste-1".into(),
+            done: 2,
+            total: 5,
+            copied: 2,
+            current_table: Some("orders".into()),
+            stage: "copying".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "operationId": "paste-1",
+                "done": 2,
+                "total": 5,
+                "copied": 2,
+                "currentTable": "orders",
+                "stage": "copying",
+            })
+        );
     }
 }

@@ -2831,6 +2831,16 @@ label:has(input[type="checkbox"]:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+.wb-paste-progress-current {
+  margin-top: 6px;
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-muted);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── 查找替换弹窗（Ctrl+F / Ctrl+H）── */
 .wb-dialog-overlay.wb-find-replace-overlay {
   z-index: 190;
