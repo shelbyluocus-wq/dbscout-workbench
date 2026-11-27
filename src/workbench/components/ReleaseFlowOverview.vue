@@ -3,7 +3,8 @@
 // and what this release contains. The steps under the platform's card adapt
 // to these answers right away.
 import { computed } from "vue";
-import { ArrowRight, Check, Database, FolderOpen, MonitorSmartphone } from "lucide-vue-next";
+import { ArrowRight, Check, FolderOpen, MonitorSmartphone } from "lucide-vue-next";
+import { DefaultDatabaseIcon as Database } from "./DefaultDatabaseIcon.js";
 import { t } from "../i18n/index.js";
 import { RELEASE_SCOPES, localDateIso } from "../releaseFlowState.js";
 import { addDays } from "../utils/releasePlanNotes.js";

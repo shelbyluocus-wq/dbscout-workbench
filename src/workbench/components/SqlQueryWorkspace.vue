@@ -2,9 +2,10 @@
 import { t } from "../i18n/index.js";
 import { nextTick, computed, ref, watch } from "vue";
 import {
-  AlignLeft, BookOpen, CircleStop, Database, FileInput, FileOutput, FlaskConical,
+  AlignLeft, BookOpen, CircleStop, FileInput, FileOutput, FlaskConical,
   Play, PlayCircle, RotateCcw, Save, ShieldCheck, SplitSquareVertical,
 } from "lucide-vue-next";
+import { DefaultDatabaseIcon as Database } from "./DefaultDatabaseIcon.js";
 
 import { useConfirm } from "../composables/useConfirm.js";
 import { resolveSqlRun } from "../utils/sqlRunRequests.js";

@@ -14178,8 +14178,24 @@ label:has(input[type="checkbox"]:disabled) {
   transform: rotate(90deg);
 }
 
+/* Connected servers light up their icon in the online green tone and keep
+   crisp primary text, clearly separating live connections from closed ones. */
+.wb-connection-node.is-connected {
+  color: var(--wb-text);
+}
+
+.wb-connection-node.is-connected .wb-tree-kind-icon {
+  color: var(--wb-success-text);
+  opacity: 1;
+}
+
+.wb-connection-node.is-connected .wb-alias-realname {
+  color: var(--wb-secondary-text);
+}
+
 .wb-connection-node.active {
   background: var(--wb-chrome-surface);
+  color: var(--wb-accent-strong);
 }
 
 .wb-connection-node.active:hover,
@@ -14187,16 +14203,31 @@ label:has(input[type="checkbox"]:disabled) {
   background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
-/* A closed connection stays in the tree with a crossed-out server icon and
-   quieter text; one click opens it again. */
+/* A closed connection stays in the tree with a dimmed crossed-out server icon
+   and disabled-tone text; one click opens it again. */
 .wb-connection-node.is-closed {
-  color: var(--wb-quiet-text);
+  color: var(--wb-disabled);
   font-weight: 400;
 }
 
-.wb-connection-node.is-closed .wb-tree-kind-icon {
-  color: var(--wb-muted);
+.wb-connection-node.is-closed .wb-tree-kind-icon,
+.wb-connection-node.is-closed .wb-alias-realname {
+  color: var(--wb-disabled);
   opacity: 1;
+}
+
+.wb-connection-node.is-closed .wb-tree-chevron {
+  background: var(--wb-disabled);
+}
+
+.wb-connection-node.is-closed:hover,
+.wb-connection-node.is-closed:focus-visible {
+  color: var(--wb-secondary-text);
+}
+
+.wb-connection-node.is-closed:hover .wb-tree-kind-icon,
+.wb-connection-node.is-closed:focus-visible .wb-tree-kind-icon {
+  color: var(--wb-secondary-text);
 }
 
 /* ---- Connection groups: folder rows with their connections below ---- */

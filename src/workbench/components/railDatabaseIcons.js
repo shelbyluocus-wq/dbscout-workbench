@@ -8,7 +8,6 @@ import {
   Cloud,
   Coins,
   Crown,
-  Database,
   Dice5,
   Dog,
   Flag,
@@ -40,9 +39,10 @@ import {
   Wrench,
   Zap,
 } from "lucide-vue-next";
+import { DefaultDatabaseIcon } from "./DefaultDatabaseIcon.js";
 
 export const RAIL_DATABASE_ICON_COMPONENTS = Object.freeze({
-  database: Database,
+  database: DefaultDatabaseIcon,
   server: Server,
   cloud: Cloud,
   boxes: Boxes,

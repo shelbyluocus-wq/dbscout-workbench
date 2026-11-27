@@ -2,16 +2,16 @@ import {
   Archive,
   Boxes,
   Cloud,
-  Database,
   FlaskConical,
   Rocket,
   ShieldCheck,
   Star,
   Table2,
 } from "lucide-vue-next";
+import { DefaultDatabaseIcon } from "./DefaultDatabaseIcon.js";
 
 const ICON_COMPONENTS = Object.freeze({
-  database: Database,
+  database: DefaultDatabaseIcon,
   boxes: Boxes,
   shield: ShieldCheck,
   flask: FlaskConical,
@@ -22,7 +22,7 @@ const ICON_COMPONENTS = Object.freeze({
 });
 
 export function databaseDecorationIconComponent(icon) {
-  return ICON_COMPONENTS[String(icon || "")] || Database;
+  return ICON_COMPONENTS[String(icon || "")] || DefaultDatabaseIcon;
 }
 
 export function databaseTableIconComponent(decoration) {

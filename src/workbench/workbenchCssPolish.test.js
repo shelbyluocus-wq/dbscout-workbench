@@ -1448,12 +1448,22 @@ test("sidebar tree nodes use lucide icons for connection, database, and table", 
   const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
   assert.match(sidebarVue, /:is="connection\.closed \? ServerOff : Server" :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /'is-connected':\s*!connection\.closed && connection\.connected !== false/);
   assert.match(sidebarVue, /:is="databaseTreeIcon\(connection\.id, database\)"/);
   assert.match(sidebarVue, /:is="tableTreeIcon\(connection\.id, database\)"/);
   assert.match(sidebarVue, /:style="databaseMarkerStyle\(connection\.id, database\)"/);
   assert.doesNotMatch(sidebarVue, /data-kind="connection"/);
   assert.doesNotMatch(sidebarVue, /data-kind="database"/);
   assert.doesNotMatch(css, /data-kind="table"/);
+});
+
+test("sidebar connection rows visibly distinguish connected, active, and closed states", () => {
+  assert.match(ruleBody(".wb-connection-node.is-connected"), /color:\s*var\(--wb-text\)/);
+  assert.match(ruleBody(".wb-connection-node.is-connected .wb-tree-kind-icon"), /color:\s*var\(--wb-success-text\)/);
+  assert.match(ruleBody(".wb-connection-node.is-connected .wb-tree-kind-icon"), /opacity:\s*1/);
+  assert.match(ruleBody(".wb-connection-node.active"), /color:\s*var\(--wb-accent-strong\)/);
+  assert.match(ruleBody(".wb-connection-node.is-closed"), /color:\s*var\(--wb-disabled\)/);
+  assert.match(css, /\.wb-connection-node\.is-closed \.wb-tree-kind-icon,\s*\n\.wb-connection-node\.is-closed \.wb-alias-realname\s*\{[^}]*color:\s*var\(--wb-disabled\)/);
 });
 
 test("sidebar table rows lay out icon and label on a single line", () => {

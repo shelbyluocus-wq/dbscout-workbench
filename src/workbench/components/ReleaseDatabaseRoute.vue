@@ -2,7 +2,8 @@
 // Interactive database route for workflow steps: MySQL connection selector plus
 // sourceDatabase -> targetDatabase comboboxes backed by loaded schemas.
 import { computed, ref, watch } from "vue";
-import { ArrowRight, Database } from "lucide-vue-next";
+import { ArrowRight } from "lucide-vue-next";
+import { DefaultDatabaseIcon as Database } from "./DefaultDatabaseIcon.js";
 import { t } from "../i18n/index.js";
 import { formatPlatformConnectionLabel, usePlatformFieldMeta } from "../utils/releasePlatformFields.js";
 import ReleaseCombobox from "./ReleaseCombobox.vue";

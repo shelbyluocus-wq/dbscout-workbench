@@ -1,7 +1,8 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
-import { Check, Database, Keyboard, Pin, Plus, Search, Trash2, X } from "lucide-vue-next";
+import { Check, Keyboard, Pin, Plus, Search, Trash2, X } from "lucide-vue-next";
+import { DefaultDatabaseIcon as Database } from "./DefaultDatabaseIcon.js";
 
 import { useAliases } from "../composables/aliasStore.js";
 import { useEscClose } from "../composables/useEscClose.js";

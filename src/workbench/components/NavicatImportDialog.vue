@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
-import { Database, FileUp, LoaderCircle, RefreshCw } from "lucide-vue-next";
+import { FileUp, LoaderCircle, RefreshCw } from "lucide-vue-next";
+import { DefaultDatabaseIcon as Database } from "./DefaultDatabaseIcon.js";
 import { t } from "../i18n/index.js";
 import { useEscClose } from "../composables/useEscClose.js";
 import { invokeWorkbench } from "../utils/tauriBridge.js";

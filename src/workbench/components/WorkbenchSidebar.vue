@@ -1498,7 +1498,14 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
           <template v-else>
           <button
             class="wb-tree-row wb-connection-node"
-            :class="[{ active: connection.id === selectedConnectionId, 'is-closed': connection.closed }, dragRowClass('connection', connection.id)]"
+            :class="[
+              {
+                active: connection.id === selectedConnectionId,
+                'is-connected': !connection.closed && connection.connected !== false,
+                'is-closed': connection.closed,
+              },
+              dragRowClass('connection', connection.id),
+            ]"
             :title="connectionTooltip(connection)"
             :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId) && isConnectionBranchShown(connection)"
             draggable="true"
