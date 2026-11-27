@@ -1,0 +1,22 @@
+{
+  "clients": [
+    {
+      "id": "my-codex",
+      "token": "<MCP_TOKEN_64_HEX>",
+      "username": "<BLACKCAT_USERNAME>",
+      "svnUsername": "<SVN_USERNAME>",
+      "connections": ["mysql-243-8306-test"],
+      "canWrite": false
+    }
+  ],
+  "connections": [
+    {
+      "id": "mysql-243-8306-test",
+      "name": "243:8306 MCP 测试库",
+      "url": "mysql://blackcat_mcp_8306_test:<MYSQL_PASSWORD>@192.168.1.243:8306",
+      "database": "blackcat_mcp_test_8306",
+      "tables": ["release_check"],
+      "writable": false
+    }
+  ]
+}

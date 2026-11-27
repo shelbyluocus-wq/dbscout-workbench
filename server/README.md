@@ -109,36 +109,25 @@ npm run server:deploy -- --backup
 
 设置 `DBSCOUT_MCP_CONFIG` 指向只有服务账号可读的 JSON 文件后，MCP 默认监听 `127.0.0.1:8767`。243 内网部署将 `DBSCOUT_MCP_BIND` 设为 `192.168.1.243:8767`，入口为 `http://192.168.1.243:8767/mcp`。修改监听地址后重启服务，账号和连接配置在下一次请求生效。
 
+243 的 systemd 补充配置见 [blackcat-mcp-243.conf](deploy/blackcat-mcp-243.conf)，位于 `/etc/systemd/system/blackcat-server.service.d/`。将 [mcp-243.example.json](deploy/mcp-243.example.json) 中的占位值替换为实际账号和凭据后，以 `0600` 权限保存在 `/home/blackcat-server/mcp.json`。示例使用现有的 `192.168.1.243:8306`，范围为 `blackcat_mcp_test_8306.release_check`。
+
 能访问该内网地址的电脑可配置 Codex 直连。由管理员给每位操作者签发绑定黑猫账号与 SVN 用户名的令牌，在启动 Codex 的环境里设置 `BLACKCAT_MCP_TOKEN`，然后执行以下命令并打开新会话。
 
 ```sh
 codex mcp add blackcat --url http://192.168.1.243:8767/mcp --bearer-token-env-var BLACKCAT_MCP_TOKEN
 ```
 
-其他支持 Streamable HTTP 的客户端可使用相同 URL，并在 `Authorization` 请求头中传入 `Bearer <令牌>`。HTTP 地址仅用于可信内网。
+也可以在 Codex 的 `config.toml` 中添加以下配置。
 
-```json
-{
-  "clients": [{
-    "id": "my-codex",
-    "token": "<64 位随机十六进制 MCP 令牌>",
-    "username": "<已注册的黑猫用户名>",
-    "svnUsername": "<SVN 用户名>",
-    "connections": ["config-db"],
-    "canWrite": false
-  }],
-  "connections": [{
-    "id": "config-db",
-    "name": "配置库",
-    "url": "mysql://<账号>:<密码>@<主机>:3306",
-    "database": "config",
-    "tables": ["activity"],
-    "writable": false
-  }]
-}
+```toml
+[mcp_servers.blackcat]
+url = "http://192.168.1.243:8767/mcp"
+bearer_token_env_var = "BLACKCAT_MCP_TOKEN"
 ```
 
-令牌与中心服务账号绑定。数据库连接和目标表由管理员配置，写入要求客户端与连接同时获准，并由工具校验主键、旧值和确认参数。写入记录可在黑猫的共享变更记录和 MCP 的 `list_operation_records` 中查看。管理配置和凭据放在部署目录的私有文件里。
+其他支持 Streamable HTTP 的客户端可使用相同 URL，并在 `Authorization` 请求头中传入 `Bearer <令牌>`。HTTP 地址仅用于可信内网。
+
+令牌为 64 位十六进制随机字符串，与中心服务账号绑定。写入要求客户端的 `canWrite` 和连接的 `writable` 同时为 `true`，并由工具校验主键、旧值和确认参数。写入记录可在黑猫的共享变更记录和 MCP 的 `list_operation_records` 中查看。
 
 ## 安全说明
 
