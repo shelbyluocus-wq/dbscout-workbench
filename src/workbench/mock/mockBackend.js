@@ -17,7 +17,7 @@ import { columnName } from "../utils/normalize.js";
 import { contiguousSearchPreview, findCaseInsensitiveRange, matchSearchText, replaceSearchText } from "../utils/searchMatch.js";
 import { columnConstraint, validateCellValue, validateRowDraft } from "../utils/valueValidation.js";
 import { validateTableDesignConversion } from "../utils/tableDesignCompatibility.js";
-import { normalizeTableDesign } from "../utils/tableDesign.js";
+import { DEFAULT_CHARSET_OPTIONS, normalizeTableDesign } from "../utils/tableDesign.js";
 import { validateCreateTableDraft } from "../utils/createTable.js";
 import { DEFAULT_PAGE_SIZE } from "../constants.js";
 import { classifySqlStatement, splitSqlStatements } from "../utils/sqlStatements.js";
@@ -32,6 +32,7 @@ const mockSessions = new Map();
 // Materialize only requested fixture pages; keep writes isolated from demo rows.
 const perfRows = new Map();
 const mockTableSearchJobs = new Map();
+const mockDatabaseProps = new Map();
 let mockAgentContext = { connectionId: "demo", database: "game_db", activeTableName: "player" };
 globalThis.__DBSCOUT_SIMULATE_AI_ACTIVITY__ = (kind = "read", ms = 2000) => {
   const id = `sim-${Date.now()}`;
@@ -202,6 +203,7 @@ export function resetMockWorkbenchState() {
   schemaOverrides.clear();
   rowCache.clear();
   perfRows.clear();
+  mockDatabaseProps.clear();
   mockConfigRelations.reset();
   resetMockDatabaseSchemas();
 }
@@ -632,9 +634,12 @@ function columnTypeFromDraft(column = {}, fallback = {}) {
   const type = String(column.type || fallback.data_type || fallback.column_type || "").trim().toLowerCase();
   const length = column.length ?? "";
   const scale = column.scale ?? "";
-  if (type && length !== "" && length != null && scale !== "" && scale != null) return `${type}(${length},${scale})`;
-  if (type && length !== "" && length != null) return `${type}(${length})`;
-  return type || fallback.column_type || fallback.columnType || "";
+  const unsigned = Boolean(column.unsigned ?? /\bunsigned\b/i.test(String(fallback.column_type || fallback.columnType || "")));
+  let base = type || fallback.column_type || fallback.columnType || "";
+  if (type && length !== "" && length != null && scale !== "" && scale != null) base = `${type}(${length},${scale})`;
+  else if (type && length !== "" && length != null) base = `${type}(${length})`;
+  if (unsigned && base && !/\bunsigned\b/i.test(base)) base = `${base} unsigned`;
+  return base;
 }
 
 function enrichColumn(column = {}, index = 0) {
@@ -645,6 +650,7 @@ function enrichColumn(column = {}, index = 0) {
     ? column.column_default
     : column.columnDefault ?? null;
   const defaultMode = column.default_mode || column.defaultMode || (defaultValue == null ? "none" : "value");
+  const extra = String(column.extra || (column.is_auto_increment || column.autoIncrement ? "auto_increment" : ""));
   return {
     ...column,
     column_name: name,
@@ -669,6 +675,8 @@ function enrichColumn(column = {}, index = 0) {
     columnDefault: defaultValue,
     default_mode: defaultMode,
     defaultMode,
+    extra,
+    is_auto_increment: /\bauto_increment\b/i.test(extra),
     column_comment: column.column_comment || column.columnComment || "",
     columnComment: column.columnComment || column.column_comment || "",
     original_name: column.original_name || name,
@@ -687,6 +695,10 @@ function designFor(table) {
     tableName: clone.table_name,
     table_comment: clone.table_comment || "",
     tableComment: clone.table_comment || "",
+    engine: clone.engine || "InnoDB",
+    charset: clone.charset || "utf8mb4",
+    collation: clone.collation || "utf8mb4_general_ci",
+    indexes: Array.isArray(clone.indexes) ? clone.indexes.map((idx) => ({ ...idx, columns: [...(idx.columns || [])] })) : [],
     columns: clone.columns.map((column, index) => {
       const enriched = enrichColumn(column, index);
       if (enriched.is_primary_key && !enriched.primary_key_ordinal) {
@@ -709,6 +721,17 @@ function tableFromDraft(baseTable, draft = {}) {
     tableName: baseTable.table_name,
     table_comment: String(draft.tableComment ?? baseTable.table_comment ?? ""),
     tableComment: String(draft.tableComment ?? baseTable.table_comment ?? ""),
+    engine: String(draft.engine || baseTable.engine || "InnoDB"),
+    charset: String(draft.charset || baseTable.charset || "utf8mb4"),
+    collation: String(draft.collation || baseTable.collation || "utf8mb4_general_ci"),
+    indexes: Array.isArray(draft.indexes)
+      ? draft.indexes.map((idx) => ({
+          name: String(idx.name || "").trim(),
+          indexType: String(idx.indexType || idx.index_type || "INDEX").toUpperCase(),
+          columns: Array.isArray(idx.columns) ? [...idx.columns] : [],
+          comment: String(idx.comment || ""),
+        }))
+      : (Array.isArray(baseTable.indexes) ? baseTable.indexes.map((idx) => ({ ...idx, columns: [...(idx.columns || [])] })) : []),
     columns: (Array.isArray(draft.columns) ? draft.columns : []).map((column, index) => {
       const explicitOriginal = String(column.originalName ?? column.original_name ?? "").trim();
       const original = explicitOriginal ? (baseColumnByName.get(explicitOriginal) || {}) : {};
@@ -716,6 +739,7 @@ function tableFromDraft(baseTable, draft = {}) {
       const columnType = columnTypeFromDraft(column, original);
       const defaultMode = String(column.defaultMode || column.default_mode || "none");
       const defaultValue = defaultMode === "none" ? null : defaultMode === "null" ? null : column.defaultValue ?? column.column_default ?? null;
+      const autoInc = column.autoIncrement ?? /\bauto_increment\b/i.test(String(original.extra || ""));
       const enriched = enrichColumn({
         column_name: name,
         column_type: columnType,
@@ -726,6 +750,7 @@ function tableFromDraft(baseTable, draft = {}) {
           : null,
         column_default: defaultValue,
         default_mode: defaultMode,
+        extra: autoInc ? "auto_increment" : "",
         column_comment: String(column.comment ?? column.column_comment ?? ""),
         original_name: explicitOriginal || columnName(original),
         original_type: original.column_type || original.original_type || columnType,
@@ -765,14 +790,19 @@ function columnSql(column) {
     : column.default_mode === "expression"
       ? ` DEFAULT ${String(column.column_default).trim()}`
       : ` DEFAULT ${sqlString(column.column_default)}`;
+  const extraClause = /\bauto_increment\b/i.test(String(column.extra || "")) || column.is_auto_increment ? " AUTO_INCREMENT" : "";
   const commentClause = column.column_comment ? ` COMMENT ${sqlString(column.column_comment)}` : "";
-  return `${column.column_type} ${nullable}${defaultClause}${commentClause}`;
+  return `${column.column_type} ${nullable}${defaultClause}${extraClause}${commentClause}`;
 }
 
 function schemaSignatureFor(source, table) {
   return `mock-schema:${JSON.stringify({
     source,
     tableComment: table.table_comment || "",
+    engine: table.engine || "InnoDB",
+    charset: table.charset || "utf8mb4",
+    collation: table.collation || "utf8mb4_general_ci",
+    indexes: table.indexes || [],
     columns: (table.columns || []).map((column) => ({
       name: column.column_name,
       type: column.column_type,
@@ -781,6 +811,7 @@ function schemaSignatureFor(source, table) {
       primaryKeyOrdinal: column.primary_key_ordinal ?? column.primaryKeyOrdinal ?? null,
       defaultMode: column.default_mode || column.defaultMode || "none",
       defaultValue: column.column_default ?? null,
+      extra: column.extra || "",
       comment: column.column_comment || "",
     })),
   })}`;
@@ -811,6 +842,7 @@ function sameColumn(left = {}, right = {}) {
     Boolean(left.is_nullable) === Boolean(right.is_nullable) &&
     Boolean(left.is_primary_key) === Boolean(right.is_primary_key) &&
     samePrimaryKeyOrdinal(left, right) &&
+    /\bauto_increment\b/i.test(String(left.extra || "")) === /\bauto_increment\b/i.test(String(right.extra || "")) &&
     (left.column_default ?? null) === (right.column_default ?? null) &&
     String(left.column_comment || "") === String(right.column_comment || "");
 }
@@ -900,6 +932,40 @@ function previewDesignChange(baseTable, draft = {}, source = {}, rows = []) {
   });
   if (primaryKeyChanged && nextPk.length) {
     statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} ADD PRIMARY KEY (${nextPk.map(sqlIdent).join(", ")})`);
+  }
+  if (Array.isArray(draft.indexes)) {
+    const oldIdx = Array.isArray(baseTable.indexes) ? baseTable.indexes : [];
+    const oldMap = new Map(oldIdx.map((idx) => [String(idx.name || "").toLowerCase(), idx]));
+    const nextNames = new Set(draft.indexes.map((idx) => String(idx.originalName || "").toLowerCase()).filter(Boolean));
+    oldIdx.forEach((idx) => {
+      if (!nextNames.has(String(idx.name || "").toLowerCase())) {
+        statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP INDEX ${sqlIdent(idx.name)}`);
+        humanDescriptions.push(`🗑️ 删除索引「${idx.name}」`);
+      }
+    });
+    draft.indexes.forEach((idx) => {
+      const orig = oldMap.get(String(idx.originalName || "").toLowerCase());
+      const same = orig &&
+        orig.name === idx.name &&
+        String(orig.indexType || "INDEX").toUpperCase() === String(idx.indexType || "INDEX").toUpperCase() &&
+        JSON.stringify(orig.columns || []) === JSON.stringify(idx.columns || []) &&
+        String(orig.comment || "") === String(idx.comment || "");
+      if (!same) {
+        if (orig) statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DROP INDEX ${sqlIdent(orig.name)}`);
+        const prefix = idx.indexType === "UNIQUE" ? "ADD UNIQUE INDEX" : idx.indexType === "FULLTEXT" ? "ADD FULLTEXT INDEX" : "ADD INDEX";
+        const colsSql = (idx.columns || []).map(sqlIdent).join(", ");
+        const cmtSql = idx.comment ? ` COMMENT ${sqlString(idx.comment)}` : "";
+        statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} ${prefix} ${sqlIdent(idx.name)} (${colsSql})${cmtSql}`);
+        humanDescriptions.push(`📇 新增索引「${idx.name}」`);
+      }
+    });
+  }
+  if (draft.engine && String(draft.engine).toLowerCase() !== String(baseTable.engine || "InnoDB").toLowerCase()) {
+    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} ENGINE = ${draft.engine}`);
+  }
+  if (draft.charset && String(draft.charset).toLowerCase() !== String(baseTable.charset || "utf8mb4").toLowerCase()) {
+    const collateSql = draft.collation ? ` COLLATE = ${draft.collation}` : "";
+    statements.push(`ALTER TABLE ${sqlIdent(baseTable.table_name)} DEFAULT CHARACTER SET = ${draft.charset}${collateSql}`);
   }
   const schemaSignature = schemaSignatureFor(source, baseTable);
   const previewSignature = previewSignatureFor(source, schemaSignature, draft);
@@ -1752,6 +1818,117 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   if (command === "register_connection") {
     return upsertMockConnection(payload.url, payload.kind, { closed: true }).id;
   }
+  if (command === "update_connection_credentials") {
+    const connectionId = String(payload.connectionId || payload.connection_id || "");
+    const connection = mockConnections.find((item) => String(item.id) === connectionId);
+    if (!connection) throw new Error("连接不存在");
+    const parsed = parseMockUrl(payload.url || "");
+    connection.kind = String(payload.kind || connection.kind || "mysql");
+    connection.host = parsed.host || connection.host;
+    connection.port = parsed.port || connection.port;
+    connection.username = parsed.username || connection.username;
+    connection.url = payload.url;
+    connection.closed = false;
+    connection.connected = true;
+    return [...(mockConnectionDatabases[connectionId] || ["game_db"])];
+  }
+  if (command === "list_server_charsets") {
+    return DEFAULT_CHARSET_OPTIONS;
+  }
+  if (command === "get_database_properties") {
+    const { connectionId, database } = resolveContext(payload);
+    rejectMockMongo(connectionId, "编辑数据库");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能修改数据库");
+    const saved = mockDatabaseProps.get(`${connectionId}/${database}`) || { charset: "utf8mb4", collation: "utf8mb4_general_ci" };
+    return { database, ...saved, charsets: DEFAULT_CHARSET_OPTIONS };
+  }
+  if (command === "create_database") {
+    const req = payload.request || payload;
+    const connectionId = String(req.connectionId || req.connection_id || "demo");
+    const database = String(req.database || "").trim();
+    if (!database) throw new Error("数据库名称不能为空");
+    if (["information_schema", "mysql", "performance_schema", "sys"].includes(database.toLowerCase())) {
+      throw new Error("不能创建或修改系统数据库");
+    }
+    rejectMockMongo(connectionId, "创建数据库");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能创建数据库");
+    const list = [...(mockConnectionDatabases[connectionId] || ["game_db"])];
+    if (list.some((item) => item.toLowerCase() === database.toLowerCase())) throw new Error(`数据库 ${database} 已存在`);
+    list.push(database);
+    mockConnectionDatabases[connectionId] = list;
+    mockDatabaseSchemas[`${connectionId}/${database}`] = [];
+    mockDatabaseProps.set(`${connectionId}/${database}`, {
+      charset: String(req.charset || "utf8mb4"),
+      collation: String(req.collation || "utf8mb4_general_ci"),
+    });
+    const sql = `CREATE DATABASE ${sqlIdent(database)}${req.charset ? ` CHARACTER SET ${req.charset}` : ""}${req.collation ? ` COLLATE ${req.collation}` : ""}`;
+    return { database, databases: [...list], sql };
+  }
+  if (command === "alter_database") {
+    const req = payload.request || payload;
+    const connectionId = String(req.connectionId || req.connection_id || "demo");
+    const database = String(req.database || "").trim();
+    if (["information_schema", "mysql", "performance_schema", "sys"].includes(database.toLowerCase())) {
+      throw new Error("不能创建或修改系统数据库");
+    }
+    rejectMockMongo(connectionId, "编辑数据库");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能修改数据库");
+    const charset = String(req.charset || "utf8mb4");
+    const collation = String(req.collation || "");
+    mockDatabaseProps.set(`${connectionId}/${database}`, { charset, collation });
+    const list = [...(mockConnectionDatabases[connectionId] || ["game_db"])];
+    const sql = `ALTER DATABASE ${sqlIdent(database)} CHARACTER SET ${charset}${collation ? ` COLLATE ${collation}` : ""}`;
+    return { database, databases: list, sql };
+  }
+  if (command === "drop_database") {
+    const req = payload.request || payload;
+    const connectionId = String(req.connectionId || req.connection_id || "demo");
+    const database = String(req.database || "").trim();
+    if (["information_schema", "mysql", "performance_schema", "sys"].includes(database.toLowerCase())) {
+      throw new Error("禁止删除系统数据库");
+    }
+    if (String(req.confirmedName || "").trim() !== database) {
+      throw new Error("输入的数据库名称不匹配，已取消删除");
+    }
+    rejectMockMongo(connectionId, "删除数据库");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能删除数据库");
+    const list = (mockConnectionDatabases[connectionId] || ["game_db"]).filter((item) => item.toLowerCase() !== database.toLowerCase());
+    mockConnectionDatabases[connectionId] = list;
+    delete mockDatabaseSchemas[`${connectionId}/${database}`];
+    mockDatabaseProps.delete(`${connectionId}/${database}`);
+    return { database, databases: [...list], sql: `DROP DATABASE ${sqlIdent(database)}` };
+  }
+  if (command === "show_create_table") {
+    const { connectionId, database } = resolveContext(payload);
+    const tableName = String(payload.tableName || payload.table_name || "").trim();
+    rejectMockMongo(connectionId, "查看建表语句");
+    const table = resolvedTable(connectionId, database, tableName);
+    const definitions = (table.columns || []).map((column) => `  ${sqlIdent(column.column_name)} ${columnSql(column)}`);
+    const keys = (table.columns || []).filter((column) => column.is_primary_key).map((col) => sqlIdent(col.column_name));
+    if (keys.length) definitions.push(`  PRIMARY KEY (${keys.join(", ")})`);
+    (table.indexes || []).forEach((idx) => {
+      const prefix = idx.indexType === "UNIQUE" ? "UNIQUE KEY" : idx.indexType === "FULLTEXT" ? "FULLTEXT KEY" : "KEY";
+      definitions.push(`  ${prefix} ${sqlIdent(idx.name)} (${(idx.columns || []).map(sqlIdent).join(", ")})`);
+    });
+    const ddl = `CREATE TABLE ${sqlIdent(database)}.${sqlIdent(table.table_name)} (\n${definitions.join(",\n")}\n) ENGINE=${table.engine || "InnoDB"} DEFAULT CHARSET=${table.charset || "utf8mb4"} COMMENT=${sqlString(table.table_comment || "")}`;
+    return { database, tableName: table.table_name, ddl };
+  }
+  if (command === "truncate_tables") {
+    const req = payload.request || payload;
+    const connectionId = String(req.connectionId || req.connection_id || "demo");
+    const database = String(req.database || "game_db");
+    const tables = req.tables || req.tableNames || [];
+    rejectMockMongo(connectionId, "清空表");
+    if (isMockConnectionReadOnly(connectionId)) throw new Error("只读连接不能清空表");
+    const truncated = [];
+    const failed = [];
+    for (const tableName of tables) {
+      const key = sourceKey(connectionId, database, tableName);
+      rowCache.set(key, []);
+      truncated.push({ tableName, error: null });
+    }
+    return { truncated, failed };
+  }
   if (command === "remove_connection") {
     const connectionId = payload.connectionId || payload.connection_id || "";
     const index = mockConnections.findIndex((connection) => String(connection.id) === String(connectionId));
@@ -1827,9 +2004,18 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     const definitions = table.columns.map((column) => `${sqlIdent(column.column_name)} ${columnSql(column)}`);
     const keys = table.columns.filter((column) => column.is_primary_key).sort((left, right) => (primaryKeyOrdinal(left) || 0) - (primaryKeyOrdinal(right) || 0));
     if (keys.length) definitions.push(`PRIMARY KEY (${keys.map((column) => sqlIdent(column.column_name)).join(", ")})`);
+    (table.indexes || []).forEach((idx) => {
+      const prefix = idx.indexType === "UNIQUE" ? "UNIQUE KEY" : idx.indexType === "FULLTEXT" ? "FULLTEXT KEY" : "KEY";
+      const colsSql = (idx.columns || []).map(sqlIdent).join(", ");
+      const cmtSql = idx.comment ? ` COMMENT ${sqlString(idx.comment)}` : "";
+      definitions.push(`${prefix} ${sqlIdent(idx.name)} (${colsSql})${cmtSql}`);
+    });
+    const engineOpt = `ENGINE=${table.engine || "InnoDB"}`;
+    const charsetOpt = table.charset ? ` DEFAULT CHARSET=${table.charset}` : "";
+    const collateOpt = table.collation ? ` COLLATE=${table.collation}` : "";
     const preview = {
       signature, previewSignature: signature, sourceSignature: signature, schemaSignature: signature,
-      statements: [`CREATE TABLE ${sqlIdent(database)}.${sqlIdent(tableName)} (\n  ${definitions.join(",\n  ")}\n) ENGINE=InnoDB COMMENT=${sqlString(table.table_comment)}`],
+      statements: [`CREATE TABLE ${sqlIdent(database)}.${sqlIdent(tableName)} (\n  ${definitions.join(",\n  ")}\n) ${engineOpt}${charsetOpt}${collateOpt} COMMENT=${sqlString(table.table_comment)}`],
       warnings: ["仅创建空表，不覆盖已有表；DDL 不支持事务撤销"], conflicts: [], hasChanges: true,
       humanDescriptions: [`创建空表 ${database}.${tableName}，共 ${table.columns.length} 个字段`],
     };
@@ -2543,6 +2729,14 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     }
     const copied = [];
     const overwrite = String(req.mode || "copy").toLowerCase() === "overwrite";
+    const structureOnly = Boolean(req.structureOnly || req.structure_only);
+    if (
+      overwrite &&
+      sourceConnectionId === targetConnectionId &&
+      String(sourceDatabase).toLowerCase() === String(targetDatabase).toLowerCase()
+    ) {
+      throw new Error("覆盖模式下不能将表发送到同一个数据库");
+    }
     const schemaKey = `${targetConnectionId}/${targetDatabase}`;
     const targetSchema = [
       ...(mockDatabaseSchemas[schemaKey] || resolveMockSchema(targetConnectionId, targetDatabase).map((t) => t.table_name)),
@@ -2564,7 +2758,7 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       targetSchema.push(targetName);
       mockDatabaseSchemas[schemaKey] = [...targetSchema];
       const targetRows = getOrInitRows(targetConnectionId, targetDatabase, targetName);
-      const sourceRows = getOrInitRows(sourceConnectionId, sourceDatabase, tableName);
+      const sourceRows = structureOnly ? [] : getOrInitRows(sourceConnectionId, sourceDatabase, tableName);
       targetRows.length = 0;
       targetRows.push(...sourceRows.map((row) => ({ ...row })));
       copied.push({ originalName: tableName, targetName, rowCount: sourceRows.length });

@@ -82,6 +82,8 @@ const emit = defineEmits([
   "edit-home-table-comment",
   "edit-column-meaning",
   "delete-home-tables",
+  "truncate-home-tables",
+  "show-home-table-ddl",
   "send-home-tables",
   "refresh-home",
   "home-visible-tables",
@@ -267,6 +269,8 @@ onBeforeUnmount(finishResize);
         @edit-home-table-comment="emit('edit-home-table-comment', $event)"
         @edit-column-meaning="emit('edit-column-meaning', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
+        @truncate-home-tables="emit('truncate-home-tables', $event)"
+        @show-home-table-ddl="emit('show-home-table-ddl', $event)"
         @send-home-tables="emit('send-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
@@ -362,6 +366,8 @@ onBeforeUnmount(finishResize);
         @edit-home-table-comment="emit('edit-home-table-comment', $event)"
         @edit-column-meaning="emit('edit-column-meaning', $event)"
         @delete-home-tables="emit('delete-home-tables', $event)"
+        @truncate-home-tables="emit('truncate-home-tables', $event)"
+        @show-home-table-ddl="emit('show-home-table-ddl', $event)"
         @send-home-tables="emit('send-home-tables', $event)"
         @refresh-home="emit('refresh-home', $event)"
         @home-visible-tables="emit('home-visible-tables', $event)"
@@ -450,6 +456,8 @@ onBeforeUnmount(finishResize);
     @edit-home-table-comment="emit('edit-home-table-comment', $event)"
     @edit-column-meaning="emit('edit-column-meaning', $event)"
     @delete-home-tables="emit('delete-home-tables', $event)"
+    @truncate-home-tables="emit('truncate-home-tables', $event)"
+    @show-home-table-ddl="emit('show-home-table-ddl', $event)"
     @send-home-tables="emit('send-home-tables', $event)"
     @refresh-home="emit('refresh-home', $event)"
     @home-visible-tables="emit('home-visible-tables', $event)"

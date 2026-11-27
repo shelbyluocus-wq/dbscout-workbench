@@ -16,6 +16,7 @@ mod commands;
 mod connection_lifecycle;
 mod config_relations;
 mod control_server;
+mod database_manage;
 mod database_sync_jobs;
 mod db;
 mod external_changes;
@@ -260,6 +261,13 @@ pub fn run() {
             commands::rename_table,
             commands::drop_tables,
             commands::list_databases,
+            database_manage::list_server_charsets,
+            database_manage::get_database_properties,
+            database_manage::create_database,
+            database_manage::alter_database,
+            database_manage::drop_database,
+            database_manage::show_create_table,
+            database_manage::truncate_tables,
             commands::select_database,
             commands::list_tables,
             commands::get_table_schemas,

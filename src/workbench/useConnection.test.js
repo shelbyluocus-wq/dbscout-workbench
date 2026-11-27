@@ -1917,3 +1917,52 @@ test("cold start hydrates all saved connections and cached databases immediately
     conn.dispose();
   }
 });
+
+test("openEditConnectionDialog pre-fills saved credentials and updates entry without duplication when identity changes", async () => {
+  const store = installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      { kind: "mysql", host: "127.0.0.1", port: "13306", username: "root", password: "old_password", alias: "旧服", color: "blue", icon: "db" },
+    ]),
+  });
+  const calls = [];
+  const invoke = async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "update_connection_credentials") return ["new_db"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  };
+  const conn = useConnection(createWorkspaceState(), invoke);
+  conn.connections.value = [
+    { id: "mysql-1", kind: "mysql", label: "root@127.0.0.1:13306", host: "127.0.0.1", port: "13306", username: "root", connected: true, saved: true },
+  ];
+  conn.setConnectionAlias("mysql-1", "旧服");
+  try {
+    conn.openEditConnectionDialog("mysql-1");
+    assert.equal(conn.connDialog.open, true);
+    assert.equal(conn.connDialog.mode, "edit");
+    assert.equal(conn.connDialog.reconnectConnectionId, "mysql-1");
+    assert.equal(conn.connDialog.host, "127.0.0.1");
+    assert.equal(conn.connDialog.password, "old_password");
+    assert.equal(conn.connDialog.reconnectAlias, "旧服");
+
+    conn.connDialog.host = "127.0.0.2";
+    conn.connDialog.port = "13307";
+    conn.connDialog.username = "admin";
+    conn.connDialog.password = "new_password";
+    conn.connDialog.reconnectAlias = "新服";
+    await conn.submitConnDialog();
+
+    assert.equal(calls.some((c) => c.command === "add_connection"), false, "updates runtime connection in place without duplicating");
+    assert.equal(calls.some((c) => c.command === "update_connection_credentials" && c.payload.connectionId === "mysql-1"), true);
+    assert.deepEqual(conn.connections.value.map((item) => item.id), ["mysql-1"]);
+    const saved = JSON.parse(store.dbscout_connections);
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].host, "127.0.0.2");
+    assert.equal(saved[0].port, "13307");
+    assert.equal(saved[0].username, "admin");
+    assert.equal(saved[0].password, "new_password");
+    assert.equal(saved[0].alias, "新服");
+  } finally {
+    conn.dispose();
+  }
+});

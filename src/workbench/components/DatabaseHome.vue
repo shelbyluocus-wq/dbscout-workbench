@@ -3,7 +3,9 @@ import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   ClipboardPaste,
+  Code2,
   Copy,
+  Eraser,
   FolderOpen,
   History,
   Languages,
@@ -72,6 +74,8 @@ const emit = defineEmits([
   "rename-table",
   "edit-table-comment",
   "delete-tables",
+  "truncate-tables",
+  "show-ddl",
   "send-tables",
   "refresh",
   "batch-export",
@@ -210,6 +214,7 @@ const canTableDesign = computed(() => !readOnly.value && connectionHasCapability
 const canTableCopy = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "tableCopy"));
 const canImport = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "import"));
 const canRenameDrop = computed(() => !readOnly.value && connectionHasCapability(engineKind.value, "renameDrop"));
+const canShowDdl = computed(() => engineKind.value !== "mongodb");
 const canSqlConsole = computed(() => connectionHasCapability(engineKind.value, "sqlConsole"));
 const tableSourceContext = computed(() => ({
   connectionId: props.tab.connectionId,
@@ -767,6 +772,31 @@ function deleteSelection(name = "", selectedNames = null) {
   closeMenu();
 }
 
+function showDdl(name = "") {
+  const tableName = String(name || "").trim();
+  if (!tableName) return;
+  emit("show-ddl", {
+    connectionId: props.tab.connectionId,
+    database: props.tab.database,
+    tableName,
+  });
+  closeMenu();
+}
+
+function truncateSelection(name = "", selectedNames = null) {
+  if (!Array.isArray(selectedNames) && name && !controller.selectedSet.value.has(name)) controller.selectTable(name, {});
+  const tableNames = Array.isArray(selectedNames)
+    ? [...selectedNames]
+    : [...controller.selectedNames.value];
+  if (!tableNames.length) return;
+  emit("truncate-tables", {
+    connectionId: props.tab.connectionId,
+    database: props.tab.database,
+    tableNames,
+  });
+  closeMenu();
+}
+
 function batchSource() {
   const selectedTableNames = [...controller.selectedNames.value];
   return {
@@ -1139,6 +1169,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <button type="button" role="menuitem" :disabled="busy || !canTableDesign || !tab.database" @click="emit('create-table', tableSourceContext); closeMenu()"><Plus :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('createTable.title') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" @click="openSelection(menu.tableName); closeMenu()"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ openMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.open }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="openDesign(menu.tableName); closeMenu()"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="menuShortcuts.design" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.design }}</kbd></button>
+        <button v-if="!menu.blank && canShowDdl && menu.selectedNames.length <= 1" type="button" role="menuitem" @click="showDdl(menu.tableName)"><Code2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tableDdl.menuAction') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" @click="viewTableChangeHistory(menu.tableName); closeMenu()"><History :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.contextViewHistory') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canRenameDrop" @click="startRename(menu.tableName)"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.rename }}</kbd></button>
         <button v-if="!menu.blank" type="button" role="menuitem" :disabled="!canTableDesign" @click="editTableComment(menu.tableName)"><MessageSquareText :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('home.editTableComment') }}<kbd v-if="menuShortcuts.editTableComment" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.editTableComment }}</kbd></button>
@@ -1147,6 +1178,7 @@ defineExpose({ copySelection, pasteTables, focusSearch, refresh });
         <button type="button" role="menuitem" :disabled="!controller.canPaste.value" @click="pasteTables"><ClipboardPaste :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_335179267471') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.paste }}</kbd></button>
         <hr class="wb-context-separator" role="separator" />
         <button type="button" role="menuitem" @click="refreshHome"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="menuShortcuts.refresh" class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.refresh }}</kbd></button>
+        <button v-if="!menu.blank && canRenameDrop && menu.selectedNames.length" type="button" role="menuitem" class="danger" :disabled="busy" @click="truncateSelection(menu.tableName, menu.selectedNames)"><Eraser :size="14" class="wb-context-icon" aria-hidden="true" />{{ menu.selectedNames.length > 1 ? t('tableTruncate.menuPlural', { count: menu.selectedNames.length }) : t('tableTruncate.menuAction') }}</button>
         <button v-if="!menu.blank" type="button" role="menuitem" class="danger" :disabled="busy || !canRenameDrop || !menu.selectedNames.length" @click="deleteSelection(menu.tableName, menu.selectedNames)"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ deleteMenuLabel }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ menuShortcuts.delete }}</kbd></button>
       </menu>
     </Teleport>

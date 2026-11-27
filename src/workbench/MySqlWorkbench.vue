@@ -161,6 +161,8 @@ import BatchExportDialog from "./components/BatchExportDialog.vue";
 import BatchImportDialog from "./components/BatchImportDialog.vue";
 import DatabaseDisplayDialog from "./components/DatabaseDisplayDialog.vue";
 import ConnectionDialog from "./components/ConnectionDialog.vue";
+import DatabaseManageDialog from "./components/DatabaseManageDialog.vue";
+import TableDdlDialog from "./components/TableDdlDialog.vue";
 import NavicatImportDialog from "./components/NavicatImportDialog.vue";
 import UpdateDialog from "./components/UpdateDialog.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
@@ -356,6 +358,7 @@ const {
   isReadOnlyConnection,
   connectionCapability,
   openConnDialog,
+  openEditConnectionDialog,
   cancelConnDialog,
   applyConnConfigImport,
   rejectConnConfigImport,
@@ -4553,6 +4556,228 @@ const contextMenuCanDeleteTables = computed(() => {
     && connectionCapability(connectionId, "renameDrop");
 });
 
+const contextMenuCanManageDatabase = computed(() => {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  const connection = connections.value.find((item) => item.id === connectionId);
+  return contextMenu.kind === "database"
+    && Boolean(connection)
+    && !connection.readOnly
+    && connectionCapability(connectionId, "tableDesign");
+});
+
+const contextMenuCanShowDdl = computed(() => {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  const connection = connections.value.find((item) => item.id === connectionId);
+  return contextMenu.kind === "table" && Boolean(connection) && connection.kind !== "mongodb";
+});
+
+const contextMenuCanTruncateTables = computed(() => {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  return contextMenu.kind === "table"
+    && !isReadOnlyConnection(connectionId)
+    && connectionCapability(connectionId, "renameDrop");
+});
+
+const dbManageDialog = reactive({
+  open: false,
+  mode: "create",
+  connectionId: "",
+  connectionLabel: "",
+  database: "",
+});
+
+function openDatabaseManageDialog(mode, { connectionId = "", database = "" } = {}) {
+  const connId = String(connectionId || selectedConnectionId.value || "");
+  if (!connId) return;
+  const connection = connections.value.find((item) => item.id === connId);
+  dbManageDialog.mode = mode;
+  dbManageDialog.connectionId = connId;
+  dbManageDialog.connectionLabel = connectionLabel(connId, connection?.label || connId);
+  dbManageDialog.database = String(database || "");
+  dbManageDialog.open = true;
+}
+
+function openCreateDatabaseFromSidebar({ connectionId = "" } = {}) {
+  openDatabaseManageDialog("create", { connectionId });
+}
+
+function openEditDatabaseFromContext() {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  const database = String(contextMenu.database || "");
+  closeContextMenu();
+  if (connectionId && database) {
+    openDatabaseManageDialog("edit", { connectionId, database });
+  }
+}
+
+function openDropDatabaseFromContext() {
+  const connectionId = String(contextMenu.connectionId || selectedConnectionId.value || "");
+  const database = String(contextMenu.database || "");
+  closeContextMenu();
+  if (connectionId && database) {
+    openDatabaseManageDialog("drop", { connectionId, database });
+  }
+}
+
+async function handleDatabaseCreated({ connectionId, database, databases: nextList } = {}) {
+  if (!connectionId || !database) return;
+  const ordered = Array.isArray(nextList) ? nextList : [];
+  databasesByConnection[connectionId] = ordered;
+  if (selectedConnectionId.value === connectionId) {
+    databases.value = ordered;
+  }
+  setStatus(`已创建数据库 ${database}`, { tone: "success" });
+  await selectDatabaseWithHome({ connectionId, database });
+}
+
+function handleDatabaseUpdated({ database, charset, collation } = {}) {
+  if (!database) return;
+  const detail = [charset, collation].filter(Boolean).join(" / ");
+  setStatus(`已更新数据库 ${database}${detail ? `（${detail}）` : ""}`, { tone: "success" });
+}
+
+async function handleDatabaseDropped({ connectionId, database, databases: nextList } = {}) {
+  if (!connectionId || !database) return;
+  const closedTabs = closeDatabaseTabs(workspace, { connectionId, database });
+  closedTabs.forEach(clearTabCellErrors);
+  const ordered = Array.isArray(nextList)
+    ? nextList
+    : (databasesByConnection[connectionId] || []).filter((item) => item.toLowerCase() !== database.toLowerCase());
+  databasesByConnection[connectionId] = ordered;
+  if (selectedConnectionId.value === connectionId) {
+    databases.value = ordered;
+    if (String(selectedDatabase.value || "").toLowerCase() === database.toLowerCase()) {
+      const fallbackDb = ordered[0] || "";
+      if (fallbackDb) {
+        await selectDatabaseWithHome({ connectionId, database: fallbackDb });
+      } else {
+        selectedDatabase.value = "";
+        workspace.schema = [];
+        workspace.tables = [];
+      }
+    }
+  }
+  setStatus(`已删除数据库 ${database}`, { tone: "success" });
+}
+
+const tableDdlDialog = reactive({
+  open: false,
+  connectionId: "",
+  database: "",
+  tableName: "",
+  ddl: "",
+  loading: false,
+  error: "",
+  canOpenInSqlConsole: false,
+});
+let tableDdlLoadToken = 0;
+
+async function openTableDdlDialog(source = {}) {
+  const connectionId = String(source.connectionId || selectedConnectionId.value || "");
+  const database = String(source.database || selectedDatabase.value || "");
+  const tableName = String(source.tableName || "").trim();
+  if (!connectionId || !database || !tableName) return;
+  const token = ++tableDdlLoadToken;
+  tableDdlDialog.open = true;
+  tableDdlDialog.connectionId = connectionId;
+  tableDdlDialog.database = database;
+  tableDdlDialog.tableName = tableName;
+  tableDdlDialog.ddl = "";
+  tableDdlDialog.loading = true;
+  tableDdlDialog.error = "";
+  tableDdlDialog.canOpenInSqlConsole = connectionCapability(connectionId, "sqlConsole");
+  try {
+    const res = await invokeWorkbench("show_create_table", { connectionId, database, tableName });
+    if (token !== tableDdlLoadToken) return;
+    tableDdlDialog.ddl = String(res?.ddl || "");
+  } catch (error) {
+    if (token !== tableDdlLoadToken) return;
+    tableDdlDialog.error = String(error?.message || error || "读取建表语句失败");
+  } finally {
+    if (token === tableDdlLoadToken) tableDdlDialog.loading = false;
+  }
+}
+
+function showDdlFromContextMenu() {
+  const source = contextMenuTableSource();
+  const tableName = contextMenu.tableName || source.tableNames[0] || "";
+  closeContextMenu();
+  void openTableDdlDialog({ connectionId: source.connectionId, database: source.database, tableName });
+}
+
+function openDdlInSqlConsole({ connectionId, database, tableName, ddl } = {}) {
+  tableDdlDialog.open = false;
+  if (!ddl) return;
+  const sqlText = ddl.trim().endsWith(";") ? ddl.trim() : `${ddl.trim()};`;
+  newSqlQuery({
+    connectionId: connectionId || selectedConnectionId.value,
+    database: database || selectedDatabase.value,
+    title: tableName ? `${tableName} DDL` : "DDL",
+    sql: sqlText,
+  });
+}
+
+async function truncateHomeTables(source = {}) {
+  if (busy.value) return;
+  const tableNames = [...new Set(Array.isArray(source.tableNames) ? source.tableNames.filter(Boolean) : [])];
+  if (!tableNames.length) return;
+  if (isReadOnlyConnection(source.connectionId)) {
+    blockReadOnlyAction("清空表");
+    return;
+  }
+  if (!connectionCapability(source.connectionId, "renameDrop")) {
+    blockUnsupportedEngine("清空表");
+    return;
+  }
+  busy.value = true;
+  try {
+    const count = tableNames.length;
+    const confirmed = await confirmDialogConfirm({
+      title: count === 1 ? t("tableTruncate.confirmTitle") : t("tableTruncate.confirmTitlePlural", { count }),
+      message: t("tableTruncate.confirmMessage", { database: source.database }),
+      items: tableNames,
+      note: t("tableTruncate.confirmNote"),
+      confirmText: t("tableTruncate.confirmAction"),
+      cancelText: t("m_2cd0f3be8738"),
+      danger: true,
+    });
+    if (!confirmed) return;
+    statusText.value = `正在清空 ${tableNames.length} 张表…`;
+    const response = await invokeWorkbench("truncate_tables", {
+      request: { connectionId: source.connectionId, database: source.database, tables: tableNames },
+    });
+    const truncatedSet = new Set((response?.truncated || []).map((item) => item.tableName));
+    const failed = (response?.failed || []).filter((item) => item.error);
+    for (const tab of findTableDataTabs(workspace, {
+      connectionId: source.connectionId,
+      database: source.database,
+      tableNames: [...truncatedSet],
+    })) {
+      void refreshTabPage(tab);
+    }
+    try {
+      await loadTables({ connectionId: source.connectionId, database: source.database });
+    } catch {
+      // Table list refresh failure does not negate completed truncate.
+    }
+    if (failed.length) {
+      setStatus(`已清空 ${truncatedSet.size} 张表，${failed.length} 张失败：${failed[0].tableName}（${failed[0].error}）`, { tone: "warning" });
+    } else {
+      setStatus(`已清空 ${truncatedSet.size} 张表`, { tone: "success" });
+    }
+  } catch (error) {
+    setStatus(`清空表失败：${String(error?.message || error)}`, { error: true });
+  } finally {
+    busy.value = false;
+  }
+}
+
+function truncateTablesFromContextMenu() {
+  const source = contextMenuTableSource();
+  closeContextMenu();
+  void truncateHomeTables(source);
+}
+
 function openSidebarContextMenu(event, table) {
   closeTabContextMenu();
   openContextMenu(event, table, { surface: "sidebar", tableNames: table?.selectedTableNames });
@@ -6418,6 +6643,8 @@ onBeforeUnmount(() => {
         @rename-table="openTableRenameFromSource"
         @rename-database="openDatabaseAliasDialog"
         @rename-connection="openConnectionAliasDialog"
+        @edit-connection="openEditConnectionDialog($event.connectionId)"
+        @create-database="openCreateDatabaseFromSidebar"
         @contextmenu="openSidebarContextMenu"
         @set-theme="setThemePreference"
         @set-vibrancy="macosVibrancy.setPreference"
@@ -6498,6 +6725,8 @@ onBeforeUnmount(() => {
           @edit-home-table-comment="openHomeTableCommentEdit"
           @edit-column-meaning="openColumnMeaningEdit"
           @delete-home-tables="deleteHomeTables"
+          @truncate-home-tables="truncateHomeTables"
+          @show-home-table-ddl="openTableDdlDialog"
           @send-home-tables="sendHomeTables"
           @refresh-home="refreshHome"
           @home-visible-tables="loadVisibleHomeTableCounts"
@@ -6610,11 +6839,18 @@ onBeforeUnmount(() => {
       :freeze-cell-label="freezeCellLabel"
       :table-count="contextMenu.tableNames.length || 1"
       :can-delete-tables="contextMenuCanDeleteTables"
+      :can-manage-database="contextMenuCanManageDatabase"
+      :can-show-ddl="contextMenuCanShowDdl"
+      :can-truncate-tables="contextMenuCanTruncateTables"
       :database-on-rail="isRailDatabase(contextMenu.connectionId, contextMenu.database)"
       @close="closeContextMenu"
       @toggle-database-rail="toggleRailDatabaseFromContext"
       @open-tables="openTablesFromContextMenu"
       @delete-tables="deleteTablesFromContextMenu"
+      @truncate-tables="truncateTablesFromContextMenu"
+      @show-ddl="showDdlFromContextMenu"
+      @edit-database="openEditDatabaseFromContext"
+      @drop-database="openDropDatabaseFromContext"
       @refresh="refreshFromContextMenu"
       @copy="copyFromContextMenu"
       @paste="pasteFromContextMenu"
@@ -6858,6 +7094,32 @@ onBeforeUnmount(() => {
       :text-color="aliasDialog.textColor"
       @close="closeAliasDialog"
       @save="saveDatabaseDisplay"
+    />
+
+    <DatabaseManageDialog
+      :open="dbManageDialog.open"
+      :mode="dbManageDialog.mode"
+      :connection-id="dbManageDialog.connectionId"
+      :connection-label="dbManageDialog.connectionLabel"
+      :database="dbManageDialog.database"
+      :invoke-workbench="invokeWorkbench"
+      @close="dbManageDialog.open = false"
+      @created="handleDatabaseCreated"
+      @updated="handleDatabaseUpdated"
+      @dropped="handleDatabaseDropped"
+    />
+
+    <TableDdlDialog
+      :open="tableDdlDialog.open"
+      :connection-id="tableDdlDialog.connectionId"
+      :database="tableDdlDialog.database"
+      :table-name="tableDdlDialog.tableName"
+      :ddl="tableDdlDialog.ddl"
+      :loading="tableDdlDialog.loading"
+      :error="tableDdlDialog.error"
+      :can-open-in-sql-console="tableDdlDialog.canOpenInSqlConsole"
+      @close="tableDdlDialog.open = false"
+      @open-in-sql="openDdlInSqlConsole"
     />
 
     <UpdateDialog

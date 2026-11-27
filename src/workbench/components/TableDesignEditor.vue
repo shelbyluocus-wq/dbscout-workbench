@@ -1,11 +1,19 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { KeyRound, Plus, Trash2 } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { useEscClose } from "../composables/useEscClose.js";
-import { MYSQL_COMMON_TYPES, getTypeDefaultLength } from "../utils/tableDesign.js";
+import {
+  DEFAULT_CHARSET_OPTIONS,
+  INDEX_TYPES,
+  MYSQL_COMMON_TYPES,
+  MYSQL_ENGINES,
+  getTypeDefaultLength,
+  typeSupportsAutoIncrement,
+  typeSupportsUnsigned,
+} from "../utils/tableDesign.js";
 import {
   hasEditableTextSelection,
   resolveTableDesignClipboard,
@@ -52,10 +60,66 @@ const {
   pasteColumns,
   removeColumn,
   togglePrimaryKey,
+  toggleAutoIncrement,
+  addIndex,
+  removeIndex,
+  addIndexColumn,
+  removeIndexColumn,
+  moveIndexColumn,
   isNewColumn,
 } = useTableDesign(props.invokeWorkbench, computed(() => props.source), {
   onApplied: (event) => emit("applied", event),
 });
+
+const activeTab = ref("columns");
+const charsetOptions = ref(DEFAULT_CHARSET_OPTIONS);
+let charsetLoadToken = 0;
+
+async function loadServerCharsets() {
+  const connectionId = String(props.source?.connectionId || props.source?.connection_id || "");
+  if (!connectionId) return;
+  const token = ++charsetLoadToken;
+  try {
+    const result = await props.invokeWorkbench("list_server_charsets", { connectionId });
+    if (token !== charsetLoadToken) return;
+    if (Array.isArray(result) && result.length) {
+      charsetOptions.value = result;
+    }
+  } catch {
+    // Fallback list remains active if server charset list is unavailable.
+  }
+}
+
+const availableCollations = computed(() => {
+  const current = String(draft.charset || "").trim().toLowerCase();
+  const matched = charsetOptions.value.find((item) => item.charset.toLowerCase() === current);
+  if (matched?.collations?.length) return matched.collations;
+  if (draft.collation) return [draft.collation];
+  return [];
+});
+
+function onCharsetChange(nextCharset) {
+  draft.charset = nextCharset;
+  const matched = charsetOptions.value.find((item) => item.charset.toLowerCase() === String(nextCharset || "").toLowerCase());
+  if (matched) {
+    draft.collation = matched.defaultCollation || matched.collations?.[0] || "";
+  }
+}
+
+const availableColumnNames = computed(() =>
+  draft.columns.map((c) => String(c.name || "").trim()).filter(Boolean),
+);
+
+function unusedColumnsForIndex(indexItem) {
+  const used = new Set((indexItem.columns || []).map((c) => String(c || "").toLowerCase()));
+  return availableColumnNames.value.filter((name) => !used.has(name.toLowerCase()));
+}
+
+function onAppendIndexColumn(indexItem, event) {
+  const value = event?.target?.value || "";
+  if (value) addIndexColumn(indexItem, value);
+  if (event?.target) event.target.value = "";
+}
 
 const sourceTitle = computed(() => {
   if (creating.value) return [props.source?.database, draft.tableName].filter(Boolean).join(".");
@@ -239,7 +303,7 @@ function isEditableClipboardTarget(target) {
 }
 
 function shouldHandleClipboardShortcut(event) {
-  if (commentDialog.open || previewOpen.value) return false;
+  if (commentDialog.open || previewOpen.value || activeTab.value !== "columns") return false;
   if (editorRef.value?.contains?.(event?.target)) return true;
   if (!props.isFocused) return false;
   const pane = editorRef.value?.closest?.(".wb-workbench-pane");
@@ -316,8 +380,6 @@ function onKeydown(e) {
     return;
   }
   if ((e.ctrlKey || e.metaKey) && key === "v") {
-    // Leave native paste to inputs so ordinary text still goes into the field.
-    // Field payloads are intercepted by the capture-phase paste listener.
     if (isEditableClipboardTarget(e.target)) return;
     e.preventDefault();
     void pasteCopiedColumns();
@@ -362,27 +424,32 @@ function clearRowSelection() {
 
 onMounted(async () => {
   await refreshDesign({ notify: false });
+  void loadServerCharsets();
   await nextTick();
   if (creating.value && props.isFocused) tableNameInput.value?.focus();
 });
 watch(sourceKey, () => {
   clearRowSelection();
+  activeTab.value = "columns";
   refreshDesign({ notify: false });
+  void loadServerCharsets();
 });
 
 /* ---------- Column resizing ---------- */
 const defaultColWidths = {
   select: 34,
-  name: 144,
-  primaryKey: 72,
-  type: 118,
-  length: 66,
-  scale: 58,
-  nullable: 68,
-  defaultMode: 88,
-  defaultValue: 96,
-  comment: 180,
-  actions: 52,
+  name: 140,
+  primaryKey: 68,
+  type: 112,
+  length: 62,
+  scale: 54,
+  unsigned: 54,
+  autoIncrement: 54,
+  nullable: 62,
+  defaultMode: 84,
+  defaultValue: 92,
+  comment: 170,
+  actions: 48,
 };
 
 const SCALE_SUPPORTED_TYPES = new Set(["DECIMAL", "NUMERIC", "FLOAT", "DOUBLE"]);
@@ -407,7 +474,7 @@ function startResize(colKey, event) {
 function onResizeMove(event) {
   if (!resizingCol.value) return;
   const delta = event.clientX - resizeStartX.value;
-  const newWidth = Math.max(50, resizeStartWidth.value + delta);
+  const newWidth = Math.max(46, resizeStartWidth.value + delta);
   colWidths[resizingCol.value] = newWidth;
 }
 
@@ -420,6 +487,8 @@ function onResizeEnd() {
 /* ---------- Type dropdown + auto length ---------- */
 function onTypeChange(column, typeValue) {
   column.type = typeValue;
+  if (!typeSupportsUnsigned(typeValue)) column.unsigned = false;
+  if (!typeSupportsAutoIncrement(typeValue)) column.autoIncrement = false;
   const defaultLen = getTypeDefaultLength(typeValue);
   if (defaultLen) {
     if (defaultLen.includes(",")) {
@@ -526,7 +595,6 @@ function renderMarkdown(text) {
   if (!text) return "";
   let html = escapeHtml(text);
 
-  // Headers
   html = html.replace(/^###### (.*$)/gim, "<h6>$1</h6>");
   html = html.replace(/^##### (.*$)/gim, "<h5>$1</h5>");
   html = html.replace(/^#### (.*$)/gim, "<h4>$1</h4>");
@@ -534,7 +602,6 @@ function renderMarkdown(text) {
   html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
   html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
 
-  // Bold & Italic
   html = html.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>");
   html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
@@ -542,36 +609,17 @@ function renderMarkdown(text) {
   html = html.replace(/__(.*?)__/g, "<strong>$1</strong>");
   html = html.replace(/_(.*?)_/g, "<em>$1</em>");
 
-  // Inline code
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-  // Code blocks
   html = html.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
-
-  // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-  // Images
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:4px;" />');
-
-  // Horizontal rule
   html = html.replace(/^---$/gim, "<hr />");
   html = html.replace(/^\*\*\*$/gim, "<hr />");
-
-  // Blockquote
   html = html.replace(/^&gt; (.*$)/gim, "<blockquote>$1</blockquote>");
-
-  // Unordered list
   html = html.replace(/^\- (.*$)/gim, "<li>$1</li>");
   html = html.replace(/^(<li>.*<\/li>\n?)+/gm, (match) => `<ul>${match}</ul>`);
-
-  // Ordered list
   html = html.replace(/^\d+\.\s+(.*$)/gim, "<li>$1</li>");
-
-  // Paragraphs (wrap lines that are not already wrapped)
   html = html.replace(/^(?!<[hou]|<li|<block|<hr|<pre|<img)(.+)$/gim, "<p>$1</p>");
-
-  // Clean up empty paragraphs
   html = html.replace(/<p><\/p>/g, "");
 
   return html;
@@ -592,6 +640,8 @@ const colDefs = [
   { key: "type", labelKey: "design.column.type" },
   { key: "length", labelKey: "design.column.length" },
   { key: "scale", labelKey: "design.column.scale" },
+  { key: "unsigned", labelKey: "design.column.unsigned" },
+  { key: "autoIncrement", labelKey: "design.column.autoIncrement" },
   { key: "nullable", labelKey: "design.column.nullable" },
   { key: "defaultMode", labelKey: "design.column.defaultMode" },
   { key: "defaultValue", labelKey: "design.column.defaultValue" },
@@ -651,7 +701,34 @@ const colDefs = [
         <textarea v-model="draft.tableComment" name="tableComment" rows="2" :placeholder="t('m_687694cbea0f')"></textarea>
       </label>
 
-      <div class="wb-design-grid-wrap">
+      <div class="wb-design-subtabs" role="tablist" :aria-label="t('design.tabs.aria')">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'columns'"
+          :class="{ 'is-active': activeTab === 'columns' }"
+          @click="activeTab = 'columns'"
+        >{{ t('design.tabs.columns') }}</button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'indexes'"
+          :class="{ 'is-active': activeTab === 'indexes' }"
+          @click="activeTab = 'indexes'"
+        >
+          {{ t('design.tabs.indexes') }}
+          <span v-if="draft.indexes.length" class="wb-design-subtab-count">{{ draft.indexes.length }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'options'"
+          :class="{ 'is-active': activeTab === 'options' }"
+          @click="activeTab = 'options'"
+        >{{ t('design.tabs.options') }}</button>
+      </div>
+
+      <div v-show="activeTab === 'columns'" class="wb-design-grid-wrap">
         <table class="wb-design-grid">
           <thead>
             <tr>
@@ -755,15 +832,40 @@ const colDefs = [
                 <small v-if="validationErrors.columns?.[index]?.scale">{{ validationErrors.columns[index].scale }}</small>
               </td>
 
+              <!-- 无符号 -->
+              <td class="wb-design-check-cell" :style="{ width: colWidths.unsigned + 'px' }">
+                <input
+                  v-model="column.unsigned"
+                  type="checkbox"
+                  :disabled="!typeSupportsUnsigned(column.type)"
+                  :aria-label="t('design.column.unsigned')"
+                  :title="t('design.column.unsignedHint')"
+                />
+                <small v-if="validationErrors.columns?.[index]?.unsigned">{{ validationErrors.columns[index].unsigned }}</small>
+              </td>
+
+              <!-- 自增 -->
+              <td class="wb-design-check-cell" :style="{ width: colWidths.autoIncrement + 'px' }">
+                <input
+                  :checked="column.autoIncrement"
+                  type="checkbox"
+                  :disabled="!typeSupportsAutoIncrement(column.type)"
+                  :aria-label="t('design.column.autoIncrement')"
+                  :title="t('design.column.autoIncrementHint')"
+                  @change="toggleAutoIncrement(column)"
+                />
+                <small v-if="validationErrors.columns?.[index]?.autoIncrement">{{ validationErrors.columns[index].autoIncrement }}</small>
+              </td>
+
               <!-- 允许 NULL -->
               <td class="wb-design-check-cell" :style="{ width: colWidths.nullable + 'px' }">
-                <input v-model="column.nullable" type="checkbox" :disabled="column.primaryKey" :aria-label="t('m_0693812e331c')" />
+                <input v-model="column.nullable" type="checkbox" :disabled="column.primaryKey || column.autoIncrement" :aria-label="t('m_0693812e331c')" />
                 <small v-if="validationErrors.columns?.[index]?.nullable">{{ validationErrors.columns[index].nullable }}</small>
               </td>
 
               <!-- 默认值模式 -->
               <td :style="{ width: colWidths.defaultMode + 'px' }">
-                <select v-model="column.defaultMode" :aria-label="t('design.column.defaultMode')">
+                <select v-model="column.defaultMode" :disabled="column.autoIncrement" :aria-label="t('design.column.defaultMode')">
                   <option value="none">{{ t('m_484d55613910') }}</option>
                   <option value="null">NULL</option>
                   <option value="value">{{ t('m_a92a585d1fbf') }}</option>
@@ -774,7 +876,7 @@ const colDefs = [
 
               <!-- 默认值 -->
               <td :style="{ width: colWidths.defaultValue + 'px' }">
-                <input v-model="column.defaultValue" :disabled="column.defaultMode === 'none' || column.defaultMode === 'null'" :aria-label="t('m_306da767a461')" />
+                <input v-model="column.defaultValue" :disabled="column.autoIncrement || column.defaultMode === 'none' || column.defaultMode === 'null'" :aria-label="t('m_306da767a461')" />
                 <small v-if="validationErrors.columns?.[index]?.defaultValue">{{ validationErrors.columns[index].defaultValue }}</small>
               </td>
 
@@ -822,6 +924,123 @@ const colDefs = [
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- 索引页签 -->
+      <div v-show="activeTab === 'indexes'" class="wb-design-grid-wrap">
+        <table class="wb-design-grid wb-design-index-grid">
+          <thead>
+            <tr>
+              <th class="wb-design-select-col">#</th>
+              <th>{{ t('design.indexes.name') }}</th>
+              <th>{{ t('design.indexes.type') }}</th>
+              <th>{{ t('design.indexes.columns') }}</th>
+              <th>{{ t('design.indexes.comment') }}</th>
+              <th>{{ t('design.column.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(indexItem, idx) in draft.indexes" :key="indexItem.id || indexItem.originalName || idx">
+              <td class="wb-design-select-cell">{{ idx + 1 }}</td>
+              <td>
+                <input v-model="indexItem.name" :aria-label="t('design.indexes.name')" spellcheck="false" />
+                <small v-if="validationErrors.indexes?.[idx]?.name">{{ validationErrors.indexes[idx].name }}</small>
+              </td>
+              <td>
+                <select v-model="indexItem.indexType" :aria-label="t('design.indexes.type')">
+                  <option v-for="kind in INDEX_TYPES" :key="kind" :value="kind">{{ kind }}</option>
+                </select>
+              </td>
+              <td>
+                <div class="wb-design-index-columns">
+                  <span v-for="(colName, colIdx) in indexItem.columns" :key="colName" class="wb-design-index-chip">
+                    <span>{{ colName }}</span>
+                    <button
+                      v-if="colIdx > 0"
+                      type="button"
+                      class="wb-design-index-chip-btn"
+                      :title="t('design.indexes.moveUp')"
+                      @click="moveIndexColumn(indexItem, colIdx, -1)"
+                    ><ArrowUp :size="11" /></button>
+                    <button
+                      v-if="colIdx < indexItem.columns.length - 1"
+                      type="button"
+                      class="wb-design-index-chip-btn"
+                      :title="t('design.indexes.moveDown')"
+                      @click="moveIndexColumn(indexItem, colIdx, 1)"
+                    ><ArrowDown :size="11" /></button>
+                    <button
+                      type="button"
+                      class="wb-design-index-chip-btn"
+                      :title="t('design.indexes.removeColumn')"
+                      @click="removeIndexColumn(indexItem, colIdx)"
+                    >×</button>
+                  </span>
+                  <select
+                    v-if="unusedColumnsForIndex(indexItem).length"
+                    class="wb-design-index-add-col"
+                    :aria-label="t('design.indexes.addColumn')"
+                    @change="onAppendIndexColumn(indexItem, $event)"
+                  >
+                    <option value="">{{ t('design.indexes.addColumn') }}</option>
+                    <option v-for="colName in unusedColumnsForIndex(indexItem)" :key="colName" :value="colName">{{ colName }}</option>
+                  </select>
+                </div>
+                <small v-if="validationErrors.indexes?.[idx]?.columns">{{ validationErrors.indexes[idx].columns }}</small>
+              </td>
+              <td>
+                <input v-model="indexItem.comment" :aria-label="t('design.indexes.comment')" />
+              </td>
+              <td class="wb-design-actions-cell">
+                <button
+                  type="button"
+                  class="wb-design-row-remove"
+                  :title="t('design.indexes.remove')"
+                  :aria-label="t('design.indexes.remove')"
+                  @click="removeIndex(idx)"
+                ><Trash2 :size="14" /></button>
+              </td>
+            </tr>
+            <tr class="wb-design-add-row">
+              <td colspan="6">
+                <button
+                  type="button"
+                  class="wb-design-add-column"
+                  :disabled="loading || previewing || saving"
+                  @click="addIndex()"
+                >
+                  <Plus :size="16" />
+                  <span>{{ t('design.indexes.add') }}</span>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 表选项页签 -->
+      <div v-show="activeTab === 'options'" class="wb-design-options-panel">
+        <label class="wb-dialog-field">
+          <span>{{ t('design.options.engine') }}</span>
+          <select v-model="draft.engine">
+            <option value="">{{ t('design.options.serverDefault') }}</option>
+            <option v-for="eng in MYSQL_ENGINES" :key="eng" :value="eng">{{ eng }}</option>
+          </select>
+        </label>
+        <label class="wb-dialog-field">
+          <span>{{ t('design.options.charset') }}</span>
+          <select :value="draft.charset" @change="onCharsetChange($event.target.value)">
+            <option value="">{{ t('design.options.serverDefault') }}</option>
+            <option v-for="item in charsetOptions" :key="item.charset" :value="item.charset">{{ item.charset }}</option>
+          </select>
+        </label>
+        <label class="wb-dialog-field">
+          <span>{{ t('design.options.collation') }}</span>
+          <select v-model="draft.collation" :disabled="!draft.charset">
+            <option value="">{{ t('design.options.charsetDefault') }}</option>
+            <option v-for="col in availableCollations" :key="col" :value="col">{{ col }}</option>
+          </select>
+        </label>
       </div>
     </div>
 

@@ -188,7 +188,7 @@ pub(crate) fn invalidate_table_count(state: &AppState, connection_id: &str, data
         .invalidate_table(&PoolKey::new(connection_id, database), table);
 }
 
-fn invalidate_database_count(state: &AppState, connection_id: &str, database: &str) {
+pub(crate) fn invalidate_database_count(state: &AppState, connection_id: &str, database: &str) {
     state
         .table_counts
         .invalidate_database(&PoolKey::new(connection_id, database));
@@ -438,11 +438,11 @@ fn no_demo_error() -> String {
     "没有可用的内置演示数据，请先新建 MySQL 连接".into()
 }
 
-fn read_only_error(kind: DatabaseKind) -> String {
+pub(crate) fn read_only_error(kind: DatabaseKind) -> String {
     format!("{} 连接仅支持查看，不能执行写入操作", kind.label())
 }
 
-fn reject_mongo(kind: DatabaseKind, feature: &str) -> Result<(), String> {
+pub(crate) fn reject_mongo(kind: DatabaseKind, feature: &str) -> Result<(), String> {
     if kind == DatabaseKind::MongoDb {
         Err(kind.unsupported_feature(feature))
     } else {
@@ -499,7 +499,7 @@ where
 
 /// Best-effort: write a pending audit row. Returns its id, or None if the audit
 /// store is unavailable. Audit must never block a user's edit.
-async fn best_effort_audit(
+pub(crate) async fn best_effort_audit(
     app: &AppHandle,
     state: &State<'_, AppState>,
     perf_context: &PerfContext,
@@ -531,7 +531,7 @@ async fn best_effort_audit(
 }
 
 /// Flip a pending audit row to committed (applied) or aborted (not applied).
-async fn mark_audit(
+pub(crate) async fn mark_audit(
     app: &AppHandle,
     state: &State<'_, AppState>,
     perf_context: &PerfContext,
@@ -749,7 +749,7 @@ pub async fn list_connections(
     Ok(result)
 }
 
-async fn real_connection_pool(
+pub(crate) async fn real_connection_pool(
     connection_id: &str,
     state: &State<'_, AppState>,
     perf_context: &PerfContext,
@@ -1341,6 +1341,12 @@ pub async fn copy_tables(
     }
     reject_mongo(kind, "表复制")?;
     reject_mongo(target_kind, "表复制")?;
+    if crate::types::is_overwrite_copy_mode(&request.mode)
+        && request.source_connection_id == request.target_connection_id
+        && request.source_database.eq_ignore_ascii_case(&request.target_database)
+    {
+        return Err("覆盖模式下不能将表发送到同一个数据库".into());
+    }
     if source_is_real && target_is_real {
         let source_pool =
             real_connection_pool(&request.source_connection_id, &state, &perf_context).await?;
@@ -1435,8 +1441,11 @@ pub async fn copy_tables(
         } else {
             resolve_copy_table_name(target_schema, table_name)
         };
-        let source_rows =
-            materialized_demo_rows_for(&request.source_database, &rt.demo_rows, &source_table);
+        let source_rows = if request.structure_only {
+            Vec::new()
+        } else {
+            materialized_demo_rows_for(&request.source_database, &rt.demo_rows, &source_table)
+        };
         let row_count = source_rows.len() as u64;
         rt.demo_rows.insert(
             demo_row_key(&request.target_database, &target_name),
@@ -1815,25 +1824,54 @@ async fn drop_tables_mysql(
     Ok(DropTablesResponse { dropped, failed })
 }
 
+pub(crate) fn demo_databases_for_runtime(rt: &RuntimeState, connection_id: &str) -> Vec<String> {
+    let mut base = match rt.demo_profile {
+        Some(DemoProfile::Stress) => stress_databases(connection_id),
+        Some(DemoProfile::Performance(_)) => vec![fixture_database().into()],
+        None => Vec::new(),
+    };
+    base.retain(|db| !rt.demo_removed_databases.contains(&db.to_lowercase()));
+    let mut extras: Vec<String> = rt
+        .demo_schema_overrides
+        .keys()
+        .filter(|db| {
+            !rt.demo_removed_databases.contains(&db.to_lowercase())
+                && !base.iter().any(|existing| existing.eq_ignore_ascii_case(db))
+        })
+        .cloned()
+        .collect();
+    extras.sort();
+    base.extend(extras);
+    base
+}
+
 #[tauri::command]
 pub async fn list_databases(
     connection_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let (connection_id, kind, mysql_url, clickhouse_url, mongodb_url, demo_profile) = {
+    let (connection_id, kind, mysql_url, clickhouse_url, mongodb_url, demo_dbs) = {
         let rt = state.runtime.lock().await;
         let connection_id = connection_id.unwrap_or_else(|| rt.selected_connection_id.clone());
         let connection = rt
             .connections
             .get(&connection_id)
             .ok_or_else(|| "连接不存在".to_string())?;
+        let demo_dbs = if connection.mysql_url.is_none()
+            && connection.clickhouse_url.is_none()
+            && connection.mongodb_url.is_none()
+        {
+            demo_databases_for_runtime(&rt, &connection_id)
+        } else {
+            Vec::new()
+        };
         (
             connection_id,
             connection.kind,
             connection.mysql_url.clone(),
             connection.clickhouse_url.clone(),
             connection.mongodb_url.clone(),
-            rt.demo_profile,
+            demo_dbs,
         )
     };
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
@@ -1847,11 +1885,7 @@ pub async fn list_databases(
         return Ok(dbs);
     }
     let Some(_mysql_url) = mysql_url else {
-        return Ok(match demo_profile {
-            Some(DemoProfile::Stress) => stress_databases(&connection_id),
-            Some(DemoProfile::Performance(_)) => vec![fixture_database().into()],
-            None => Vec::new(),
-        });
+        return Ok(demo_dbs);
     };
     let pool = real_connection_pool(&connection_id, &state, &PerfContext::default()).await?;
     let rows = sqlx::query("SHOW DATABASES")
@@ -2894,6 +2928,9 @@ fn demo_table_design_from_schema(
         },
         table_name: table.table_name.clone(),
         table_comment: table.table_comment.clone(),
+        engine: "InnoDB".into(),
+        charset: "utf8mb4".into(),
+        collation: "utf8mb4_general_ci".into(),
         schema_signature: None,
         columns: {
             let mut next_primary_key_ordinal = 1;
@@ -2911,6 +2948,7 @@ fn demo_table_design_from_schema(
                 })
                 .collect()
         },
+        indexes: Vec::new(),
     };
     design.schema_signature = Some(crate::ddl::schema_signature(&design));
     Ok(design)
@@ -7828,7 +7866,7 @@ mod tests {
     fn committed_audit_rows_trigger_immediate_outbox_sync() {
         let source = include_str!("commands.rs").replace("\r\n", "\n");
         let mark_audit_body = source
-            .split("async fn mark_audit(")
+            .split("pub(crate) async fn mark_audit(")
             .nth(1)
             .and_then(|tail| tail.split("/// Read a row's full preimage").next())
             .expect("mark_audit helper should exist");
@@ -8495,6 +8533,9 @@ mod tests {
     fn design_draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
+            engine: None,
+            charset: None,
+            collation: None,
             columns: meta
                 .columns
                 .iter()
@@ -8503,6 +8544,7 @@ mod tests {
                     name: column.column_name.clone(),
                     data_type: column.data_type.clone(),
                     unsigned: None,
+                    auto_increment: None,
                     length: column.length,
                     scale: column.scale,
                     nullable: column.is_nullable,
@@ -8513,6 +8555,7 @@ mod tests {
                     comment: column.column_comment.clone(),
                 })
                 .collect(),
+            indexes: None,
         }
     }
 
@@ -8643,6 +8686,7 @@ mod tests {
                 name: "score".into(),
                 data_type: "int".into(),
                 unsigned: None,
+                auto_increment: None,
                 length: None,
                 scale: None,
                 nullable: true,

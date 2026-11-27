@@ -276,8 +276,8 @@ test("buildTableDesignPayload includes source identity and normalized column cha
     draft: {
       tableComment: "道具配置",
       columns: [
-        { originalName: "id", name: "id", type: "bigint", length: null, scale: null, nullable: false, primaryKey: true, primaryKeyOrdinal: 1, defaultMode: "none", defaultValue: null, comment: "主键" },
-        { originalName: "price", name: "price", type: "decimal", length: 10, scale: 2, nullable: false, primaryKey: false, primaryKeyOrdinal: null, defaultMode: "value", defaultValue: "0.00", comment: "售价" },
+        { originalName: "id", name: "id", type: "bigint", length: null, scale: null, unsigned: false, nullable: false, primaryKey: true, primaryKeyOrdinal: 1, autoIncrement: false, defaultMode: "none", defaultValue: null, comment: "主键" },
+        { originalName: "price", name: "price", type: "decimal", length: 10, scale: 2, unsigned: false, nullable: false, primaryKey: false, primaryKeyOrdinal: null, autoIncrement: false, defaultMode: "value", defaultValue: "0.00", comment: "售价" },
       ],
     },
   });
@@ -311,4 +311,46 @@ test("normalizeTableDesign assigns legacy primary keys a stable consecutive orde
 
   assert.deepEqual(draft.columns.map((column) => column.primaryKeyOrdinal), [1, 2]);
   assert.equal(validateTableDesignDraft(draft).valid, true);
+});
+
+test("validateTableDesignDraft enforces autoIncrement and unsigned rules", () => {
+  const result = validateTableDesignDraft({
+    columns: [
+      { name: "id", type: "varchar", length: "64", scale: "", unsigned: true, nullable: true, primaryKey: true, primaryKeyOrdinal: 1, autoIncrement: true, defaultMode: "value", defaultValue: "1", comment: "" },
+      { name: "seq", type: "int", length: "", scale: "", unsigned: false, nullable: false, primaryKey: false, autoIncrement: true, defaultMode: "none", defaultValue: "", comment: "" },
+    ],
+    indexes: [],
+  });
+  assert.ok(result.messages.some((err) => err.includes("自增") || err.includes("auto") || err.includes("整数")));
+  assert.ok(result.messages.some((err) => err.includes("1 个自增") || err.includes("one auto") || err.includes("自增")));
+});
+
+test("validateTableDesignDraft and buildTableDesignPayload support secondary indexes and table options", () => {
+  const draft = {
+    tableComment: "玩家",
+    engine: "InnoDB",
+    charset: "utf8mb4",
+    collation: "utf8mb4_unicode_ci",
+    columns: [
+      { name: "id", type: "bigint", length: "", scale: "", unsigned: true, nullable: false, primaryKey: true, primaryKeyOrdinal: 1, autoIncrement: true, defaultMode: "none", defaultValue: "", comment: "" },
+      { name: "email", type: "varchar", length: "120", scale: "", unsigned: false, nullable: false, primaryKey: false, defaultMode: "none", defaultValue: "", comment: "" },
+    ],
+    indexes: [
+      { originalName: "idx_email", name: "idx_email", indexType: "UNIQUE", columns: ["email"], comment: "邮箱唯一" },
+    ],
+  };
+  const validation = validateTableDesignDraft(draft);
+  assert.equal(validation.valid, true);
+  const payload = buildTableDesignPayload(
+    { connectionId: "mysql-1", database: "game", tableName: "players" },
+    draft,
+  );
+  assert.equal(payload.draft.engine, "InnoDB");
+  assert.equal(payload.draft.charset, "utf8mb4");
+  assert.equal(payload.draft.collation, "utf8mb4_unicode_ci");
+  assert.equal(payload.draft.columns[0].unsigned, true);
+  assert.equal(payload.draft.columns[0].autoIncrement, true);
+  assert.deepEqual(payload.draft.indexes, [
+    { originalName: "idx_email", name: "idx_email", indexType: "UNIQUE", columns: ["email"], comment: "邮箱唯一" },
+  ]);
 });

@@ -2,6 +2,7 @@ const LENGTH_TYPES = new Set(["char", "varchar", "binary", "varbinary", "bit"]);
 const DECIMAL_TYPES = new Set(["decimal", "numeric", "dec", "fixed"]);
 const INTEGER_TYPES = new Set(["tinyint", "smallint", "mediumint", "int", "integer", "bigint"]);
 const FLOAT_TYPES = new Set(["float", "double", "real"]);
+const UNSIGNED_TYPES = new Set([...INTEGER_TYPES, ...DECIMAL_TYPES, ...FLOAT_TYPES]);
 const TEXT_TYPES = new Set(["tinytext", "text", "mediumtext", "longtext", "json"]);
 const BLOB_TYPES = new Set(["tinyblob", "blob", "mediumblob", "longblob"]);
 const DATE_TYPES = new Set(["date", "datetime", "timestamp", "time", "year"]);
@@ -18,6 +19,49 @@ const SUPPORTED_TYPES = new Set([
   "bool",
   "boolean",
 ]);
+
+export const MYSQL_ENGINES = ["InnoDB", "MyISAM", "MEMORY", "ARCHIVE", "CSV"];
+export const INDEX_TYPES = ["INDEX", "UNIQUE", "FULLTEXT"];
+export const DEFAULT_CHARSET_OPTIONS = [
+  {
+    charset: "utf8mb4",
+    defaultCollation: "utf8mb4_general_ci",
+    collations: ["utf8mb4_general_ci", "utf8mb4_unicode_ci", "utf8mb4_0900_ai_ci", "utf8mb4_bin"],
+  },
+  {
+    charset: "utf8mb3",
+    defaultCollation: "utf8mb3_general_ci",
+    collations: ["utf8mb3_general_ci", "utf8mb3_unicode_ci", "utf8mb3_bin"],
+  },
+  {
+    charset: "utf8",
+    defaultCollation: "utf8_general_ci",
+    collations: ["utf8_general_ci", "utf8_unicode_ci", "utf8_bin"],
+  },
+  {
+    charset: "latin1",
+    defaultCollation: "latin1_swedish_ci",
+    collations: ["latin1_swedish_ci", "latin1_bin"],
+  },
+  {
+    charset: "gbk",
+    defaultCollation: "gbk_chinese_ci",
+    collations: ["gbk_chinese_ci", "gbk_bin"],
+  },
+  {
+    charset: "ascii",
+    defaultCollation: "ascii_general_ci",
+    collations: ["ascii_general_ci", "ascii_bin"],
+  },
+];
+
+export function typeSupportsUnsigned(typeValue) {
+  return UNSIGNED_TYPES.has(text(typeValue).toLowerCase());
+}
+
+export function typeSupportsAutoIncrement(typeValue) {
+  return INTEGER_TYPES.has(text(typeValue).toLowerCase());
+}
 
 export const MYSQL_COMMON_TYPES = [
   // 数值类型
@@ -95,8 +139,9 @@ function normalizeTypeName(value) {
 
 export function parseColumnType(value) {
   const originalType = text(value);
+  const unsigned = /\bunsigned\b/i.test(originalType);
   if (!originalType) {
-    return { type: "", length: "", scale: "", originalType: "" };
+    return { type: "", length: "", scale: "", unsigned: false, originalType: "" };
   }
 
   const sized = originalType.match(/^([a-z][\w\s]*?)\s*\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)\s*(?:[a-z][\w\s]*)?$/i);
@@ -105,6 +150,7 @@ export function parseColumnType(value) {
       type: normalizeTypeName(sized[1]),
       length: sized[2] || "",
       scale: sized[3] || "",
+      unsigned,
       originalType,
     };
   }
@@ -115,6 +161,7 @@ export function parseColumnType(value) {
       type: normalizeTypeName(modified[1]),
       length: "",
       scale: "",
+      unsigned,
       originalType,
     };
   }
@@ -123,6 +170,7 @@ export function parseColumnType(value) {
     type: normalizeTypeName(originalType),
     length: "",
     scale: "",
+    unsigned,
     originalType,
   };
 }
@@ -195,6 +243,18 @@ function normalizeColumn(column = {}, index = 0) {
     column.primaryKeyOrdinal,
     column.primaryKeyOrder,
   ));
+  const autoIncrement = normalizeBoolean(
+    firstDefined(
+      column.autoIncrement,
+      column.auto_increment,
+      /\bauto_increment\b/i.test(text(column.extra)),
+    ),
+    false,
+  );
+  const unsigned = normalizeBoolean(
+    firstDefined(column.unsigned, parsedType.unsigned),
+    false,
+  );
 
   return {
     id: text(firstDefined(column.id, column.column_id, column.columnId, name || `column-${index + 1}`)),
@@ -204,12 +264,32 @@ function normalizeColumn(column = {}, index = 0) {
     length: parsedType.length,
     scale: parsedType.scale,
     originalType: parsedType.originalType,
+    unsigned,
+    autoIncrement,
     nullable,
     primaryKey,
     primaryKeyOrdinal: primaryKey && explicitPrimaryKeyOrdinal > 0 ? explicitPrimaryKeyOrdinal : null,
     defaultMode,
     defaultValue: defaultValue == null || defaultMode === "none" || defaultMode === "null" ? "" : String(defaultValue),
     comment: columnComment(column),
+  };
+}
+
+function normalizeIndex(index = {}, idx = 0) {
+  const name = text(firstDefined(index.name, index.index_name, index.indexName, ""));
+  const originalName = text(firstDefined(index.originalName, index.original_name, name));
+  const rawType = text(firstDefined(index.indexType, index.index_type, "INDEX")).toUpperCase();
+  const indexType = INDEX_TYPES.includes(rawType) ? rawType : "INDEX";
+  const columns = Array.isArray(index.columns)
+    ? index.columns.map((c) => text(c)).filter(Boolean)
+    : [];
+  return {
+    id: text(firstDefined(index.id, originalName || name || `index-${idx + 1}`)),
+    originalName,
+    name,
+    indexType,
+    columns,
+    comment: text(firstDefined(index.comment, index.index_comment, index.indexComment, "")),
   };
 }
 
@@ -231,10 +311,15 @@ export function normalizeTableDesign(meta = {}) {
   primaryKeys.forEach((column, index) => {
     column.primaryKeyOrdinal = index + 1;
   });
+  const indexes = Array.isArray(meta.indexes) ? meta.indexes.map(normalizeIndex) : [];
   return {
     tableName: text(firstDefined(meta.table_name, meta.tableName, meta.name, "")),
     tableComment: text(firstDefined(meta.table_comment, meta.tableComment, meta.comment, "")),
+    engine: text(firstDefined(meta.engine, meta.table_engine, "")),
+    charset: text(firstDefined(meta.charset, meta.table_charset, "")),
+    collation: text(firstDefined(meta.collation, meta.table_collation, "")),
     columns,
+    indexes,
   };
 }
 
@@ -262,11 +347,20 @@ function emptyColumnErrors() {
     type: "",
     length: "",
     scale: "",
+    unsigned: "",
+    autoIncrement: "",
     nullable: "",
     primaryKey: "",
     defaultMode: "",
     defaultValue: "",
     comment: "",
+  };
+}
+
+function emptyIndexErrors() {
+  return {
+    name: "",
+    columns: "",
   };
 }
 
@@ -276,12 +370,20 @@ function setColumnError(result, index, field, message) {
   result.messages.push(message);
 }
 
+function setIndexError(result, index, field, message) {
+  result.valid = false;
+  result.indexes[index][field] = message;
+  result.messages.push(message);
+}
+
 export function validateTableDesignDraft(draft = {}) {
   const columns = Array.isArray(draft.columns) ? draft.columns : [];
+  const indexes = Array.isArray(draft.indexes) ? draft.indexes : [];
   const result = {
     valid: true,
     tableComment: "",
     columns: columns.map(emptyColumnErrors),
+    indexes: indexes.map(emptyIndexErrors),
     messages: [],
   };
 
@@ -302,15 +404,15 @@ export function validateTableDesignDraft(draft = {}) {
     nameBuckets.get(key).push(index);
   });
 
-  for (const indexes of nameBuckets.values()) {
-    if (indexes.length > 1) {
-      indexes.forEach((index) => setColumnError(result, index, "name", "字段名不能重复"));
+  for (const indexesBucket of nameBuckets.values()) {
+    if (indexesBucket.length > 1) {
+      indexesBucket.forEach((index) => setColumnError(result, index, "name", "字段名不能重复"));
     }
   }
 
   const primaryKeyOrdinals = new Set();
   const primaryKeyColumns = columns.filter((column) => column.primaryKey);
-  primaryKeyColumns.forEach((column, index) => {
+  primaryKeyColumns.forEach((column) => {
     const ordinal = finiteInteger(column.primaryKeyOrdinal);
     if (ordinal == null || ordinal <= 0 || primaryKeyOrdinals.has(ordinal)) {
       setColumnError(result, columns.indexOf(column), "primaryKey", "主键顺序必须连续且不能重复");
@@ -375,6 +477,73 @@ export function validateTableDesignDraft(draft = {}) {
     if (defaultMode === "expression" && !text(column.defaultValue)) {
       setColumnError(result, index, "defaultValue", "默认表达式不能为空");
     }
+
+    if (column.unsigned && type && !typeSupportsUnsigned(type)) {
+      setColumnError(result, index, "unsigned", "仅数值类型支持无符号 (UNSIGNED)");
+    }
+
+    if (column.autoIncrement) {
+      if (type && !typeSupportsAutoIncrement(type)) {
+        setColumnError(result, index, "autoIncrement", "自增字段必须为整数类型");
+      }
+      if (column.nullable) {
+        setColumnError(result, index, "autoIncrement", "自增字段必须为非空 (NOT NULL)");
+      }
+      if (defaultMode !== "none") {
+        setColumnError(result, index, "autoIncrement", "自增字段不能设置默认值");
+      }
+    }
+  });
+
+  const autoIncrementCols = columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) => Boolean(column.autoIncrement));
+  if (autoIncrementCols.length > 1) {
+    autoIncrementCols.forEach(({ index }) => {
+      setColumnError(result, index, "autoIncrement", "一张表最多只能有一个自增字段");
+    });
+  }
+
+  const columnNamesLower = new Set(columns.map((c) => text(c.name).toLowerCase()).filter(Boolean));
+  const leadingIndexColumns = new Set();
+  const indexNameBuckets = new Map();
+  indexes.forEach((idx, index) => {
+    const idxName = text(idx.name);
+    if (!idxName) {
+      setIndexError(result, index, "name", "索引名不能为空");
+    } else if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(idxName)) {
+      setIndexError(result, index, "name", "索引名只能包含字母、数字和下划线，且以字母或下划线开头");
+    } else if (idxName.toLowerCase() === "primary") {
+      setIndexError(result, index, "name", "索引名不能为 PRIMARY");
+    } else {
+      const key = idxName.toLowerCase();
+      if (!indexNameBuckets.has(key)) indexNameBuckets.set(key, []);
+      indexNameBuckets.get(key).push(index);
+    }
+
+    const idxCols = Array.isArray(idx.columns) ? idx.columns.map((c) => text(c)).filter(Boolean) : [];
+    if (!idxCols.length) {
+      setIndexError(result, index, "columns", "请至少选择一个索引字段");
+    } else {
+      const unknown = idxCols.find((col) => !columnNamesLower.has(col.toLowerCase()));
+      if (unknown) {
+        setIndexError(result, index, "columns", `索引引用了不存在的字段: ${unknown}`);
+      } else {
+        leadingIndexColumns.add(idxCols[0].toLowerCase());
+      }
+    }
+  });
+  for (const bucket of indexNameBuckets.values()) {
+    if (bucket.length > 1) {
+      bucket.forEach((index) => setIndexError(result, index, "name", "索引名不能重复"));
+    }
+  }
+
+  autoIncrementCols.forEach(({ column, index }) => {
+    const colLower = text(column.name).toLowerCase();
+    if (!column.primaryKey && (!colLower || !leadingIndexColumns.has(colLower))) {
+      setColumnError(result, index, "autoIncrement", "自增字段必须为主键或某个索引的首列");
+    }
   });
 
   result.messages = [...new Set(result.messages)];
@@ -399,16 +568,25 @@ function sourceIdentity(source = {}) {
 
 export function buildTableDesignPayload(source = {}, draft = {}) {
   const identity = sourceIdentity(source);
+  const engine = text(draft.engine);
+  const charset = text(draft.charset);
+  const collation = text(draft.collation);
   return {
     ...identity,
     draft: {
       tableComment: text(draft.tableComment),
+      ...(engine ? { engine } : {}),
+      ...(charset ? { charset } : {}),
+      ...(collation ? { collation } : {}),
       columns: (Array.isArray(draft.columns) ? draft.columns : []).map((column) => {
+        const type = text(column.type).toLowerCase();
         const defaultMode = text(column.defaultMode || "none") || "none";
         return {
           originalName: text(firstDefined(column.originalName, column.original_name, column.name)),
           name: text(column.name),
-          type: text(column.type).toLowerCase(),
+          type,
+          ...(typeSupportsUnsigned(type) ? { unsigned: Boolean(column.unsigned) } : {}),
+          autoIncrement: Boolean(column.autoIncrement),
           length: numberOrNull(column.length),
           scale: numberOrNull(column.scale),
           nullable: column.primaryKey ? false : Boolean(column.nullable),
@@ -419,6 +597,17 @@ export function buildTableDesignPayload(source = {}, draft = {}) {
           comment: text(column.comment),
         };
       }),
+      ...(Array.isArray(draft.indexes)
+        ? {
+            indexes: draft.indexes.map((idx) => ({
+              originalName: text(firstDefined(idx.originalName, idx.original_name)),
+              name: text(idx.name),
+              indexType: text(idx.indexType || idx.index_type || "INDEX").toUpperCase(),
+              columns: Array.isArray(idx.columns) ? idx.columns.map((c) => text(c)).filter(Boolean) : [],
+              comment: text(idx.comment),
+            })),
+          }
+        : {}),
     },
   };
 }

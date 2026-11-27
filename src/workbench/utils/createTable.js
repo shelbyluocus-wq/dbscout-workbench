@@ -5,6 +5,9 @@ export function initialCreateTableDraft() {
   return {
     tableName: "",
     tableComment: "",
+    engine: "InnoDB",
+    charset: "utf8mb4",
+    collation: "utf8mb4_general_ci",
     columns: [{
       id: "new-id",
       originalName: "",
@@ -13,6 +16,8 @@ export function initialCreateTableDraft() {
       length: "",
       scale: "",
       originalType: "",
+      unsigned: false,
+      autoIncrement: false,
       nullable: false,
       primaryKey: true,
       primaryKeyOrdinal: 1,
@@ -20,6 +25,7 @@ export function initialCreateTableDraft() {
       defaultValue: "",
       comment: "",
     }],
+    indexes: [],
   };
 }
 

@@ -121,6 +121,8 @@ const emit = defineEmits([
   "edit-home-table-comment",
   "edit-column-meaning",
   "delete-home-tables",
+  "truncate-home-tables",
+  "show-home-table-ddl",
   "send-home-tables",
   "refresh-home",
   "home-visible-tables",
@@ -2405,6 +2407,8 @@ onMounted(() => emitPaneState());
       @rename-table="emit('rename-home-table', $event)"
       @edit-table-comment="emit('edit-home-table-comment', $event)"
       @delete-tables="emit('delete-home-tables', $event)"
+      @truncate-tables="emit('truncate-home-tables', $event)"
+      @show-ddl="emit('show-home-table-ddl', $event)"
       @send-tables="emit('send-home-tables', $event)"
       @refresh="emit('refresh-home', $event)"
       @visible-tables="emit('home-visible-tables', $event)"

@@ -1157,8 +1157,14 @@ pub async fn read_table_design(
     connection_id: &str,
 ) -> Result<TableDesignMeta, String> {
     let table_row = sqlx::query(
-        "SELECT TABLE_NAME, COALESCE(TABLE_COMMENT, '') AS TABLE_COMMENT \
-         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1",
+        "SELECT t.TABLE_NAME, COALESCE(t.TABLE_COMMENT, '') AS TABLE_COMMENT, \
+         COALESCE(t.ENGINE, '') AS TABLE_ENGINE, \
+         COALESCE(t.TABLE_COLLATION, '') AS TABLE_COLLATION, \
+         COALESCE(c.CHARACTER_SET_NAME, '') AS TABLE_CHARSET \
+         FROM information_schema.TABLES t \
+         LEFT JOIN information_schema.COLLATION_CHARACTER_SET_APPLICABILITY c \
+           ON c.COLLATION_NAME = t.TABLE_COLLATION \
+         WHERE t.TABLE_SCHEMA = ? AND t.TABLE_NAME = ? LIMIT 1",
     )
     .bind(database)
     .bind(table_name)
@@ -1232,6 +1238,48 @@ pub async fn read_table_design(
     })
     .collect::<Result<Vec<_>, String>>()?;
 
+    let index_rows = sqlx::query(
+        "SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, COLUMN_NAME, COALESCE(INDEX_COMMENT, '') AS INDEX_COMMENT \
+         FROM information_schema.STATISTICS \
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME <> 'PRIMARY' \
+         ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+    )
+    .bind(database)
+    .bind(table_name)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("读取索引设计失败: {error}"))?;
+
+    let mut indexes: Vec<TableIndexMeta> = Vec::new();
+    for row in index_rows {
+        let name = mysql_text::string(&row, "INDEX_NAME").unwrap_or_default();
+        let col_name = mysql_text::string(&row, "COLUMN_NAME").unwrap_or_default();
+        if name.is_empty() || col_name.is_empty() {
+            continue;
+        }
+        let non_unique = row.try_get::<i64, _>("NON_UNIQUE").unwrap_or(1) != 0;
+        let raw_type = mysql_text::string(&row, "INDEX_TYPE").unwrap_or_default();
+        let index_type = if raw_type.eq_ignore_ascii_case("FULLTEXT") {
+            "FULLTEXT"
+        } else if !non_unique {
+            "UNIQUE"
+        } else {
+            "INDEX"
+        }
+        .to_string();
+        let comment = mysql_text::string(&row, "INDEX_COMMENT").unwrap_or_default();
+        if let Some(last) = indexes.last_mut().filter(|item| item.name == name) {
+            last.columns.push(col_name);
+        } else {
+            indexes.push(TableIndexMeta {
+                name,
+                index_type,
+                columns: vec![col_name],
+                comment,
+            });
+        }
+    }
+
     let mut design = TableDesignMeta {
         source: TableDesignSource {
             connection_id: connection_id.into(),
@@ -1241,8 +1289,12 @@ pub async fn read_table_design(
         table_name: mysql_text::string(&table_row, "TABLE_NAME")
             .unwrap_or_else(|_| table_name.to_string()),
         table_comment: mysql_text::string(&table_row, "TABLE_COMMENT").unwrap_or_default(),
+        engine: mysql_text::string(&table_row, "TABLE_ENGINE").unwrap_or_default(),
+        charset: mysql_text::string(&table_row, "TABLE_CHARSET").unwrap_or_default(),
+        collation: mysql_text::string(&table_row, "TABLE_COLLATION").unwrap_or_default(),
         schema_signature: None,
         columns,
+        indexes,
     };
     design.schema_signature = Some(crate::ddl::schema_signature(&design));
     Ok(design)

@@ -31130,3 +31130,235 @@ button.wb-table-mention:active {
   outline-offset: 1px;
 }
 
+/* ---------- Batch 1: Database manage, DDL viewer, Table design subtabs & Copy structure-only ---------- */
+.wb-table-copy-structure-only {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 16px 10px;
+  border-bottom: 1px solid var(--wb-line);
+  cursor: pointer;
+}
+
+.wb-table-copy-structure-only input[type="checkbox"] {
+  margin: 2px 0 0;
+  accent-color: var(--wb-accent);
+}
+
+.wb-table-copy-structure-only > span {
+  display: grid;
+  gap: 2px;
+}
+
+.wb-table-copy-structure-only strong {
+  font-size: var(--wb-fs-body);
+  font-weight: 600;
+  color: var(--wb-text);
+}
+
+.wb-table-copy-structure-only small {
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-secondary-text);
+}
+
+.wb-design-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 2px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.wb-design-subtabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wb-design-subtabs button:hover {
+  color: var(--wb-text);
+  background: var(--wb-control-hover);
+}
+
+.wb-design-subtabs button.is-active {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-weight: 600;
+}
+
+.wb-design-subtab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent-strong);
+  font-size: var(--wb-fs-micro);
+  font-weight: 600;
+}
+
+.wb-design-index-columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-design-index-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--wb-border);
+  border-radius: 5px;
+  background: var(--wb-control);
+  color: var(--wb-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-design-index-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+  cursor: pointer;
+}
+
+.wb-design-index-chip-btn:hover {
+  color: var(--wb-text);
+}
+
+.wb-design-index-add-col {
+  width: auto !important;
+  min-width: 108px;
+}
+
+.wb-design-options-panel {
+  display: grid;
+  gap: 12px;
+  max-width: 420px;
+  padding: 12px 2px;
+}
+
+.wb-db-manage-dialog {
+  width: min(460px, 92vw);
+}
+
+.wb-db-manage-scope {
+  margin: 0 0 12px;
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-secondary-text);
+}
+
+.wb-db-manage-danger-box {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-danger-border);
+  border-radius: 8px;
+  background: var(--wb-danger-surface);
+  color: var(--wb-danger-text);
+}
+
+.wb-db-manage-danger-box strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--wb-fs-body);
+}
+
+.wb-db-manage-danger-box p {
+  margin: 0;
+  font-size: var(--wb-fs-caption);
+  line-height: 1.5;
+}
+
+.wb-db-manage-preview {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--wb-border);
+  border-radius: 7px;
+  background: var(--wb-detail-surface);
+}
+
+.wb-db-manage-preview span {
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-secondary-text);
+}
+
+.wb-db-manage-preview code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-code-key);
+  word-break: break-all;
+}
+
+.wb-table-ddl-dialog {
+  width: min(720px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-table-ddl-dialog .wb-dialog-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.wb-table-ddl-dialog .wb-dialog-header small {
+  font-size: var(--wb-fs-caption);
+  color: var(--wb-secondary-text);
+}
+
+.wb-table-ddl-body {
+  flex: 1;
+  min-height: 180px;
+  max-height: 55vh;
+  overflow: auto;
+  margin: 8px 0 12px;
+}
+
+.wb-table-ddl-state {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-body);
+}
+
+.wb-table-ddl-code {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-detail-surface);
+  color: var(--wb-code-key);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: var(--wb-fs-body);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-table-ddl-dialog .wb-dialog-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+

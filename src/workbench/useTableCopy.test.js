@@ -47,7 +47,7 @@ test("table copy loads databases per target connection and sends explicit source
   });
 
   assert.equal(copy.dialog.targetConnectionId, "mysql-source");
-  assert.deepEqual(copy.targetDatabaseOptions.value, ["source_archive"]);
+  assert.deepEqual(copy.targetDatabaseOptions.value, ["game_db", "source_archive"]);
   assert.deepEqual(
     copy.targetConnectionOptions.value.map((connection) => connection.id),
     ["mysql-source", "mysql-target"],
@@ -69,6 +69,7 @@ test("table copy loads databases per target connection and sends explicit source
     targetConnectionId: "mysql-target",
     targetDatabase: "warehouse",
     mode: "copy",
+    structureOnly: false,
   });
 });
 
@@ -132,5 +133,36 @@ test("stale target database requests cannot replace the latest connection option
   await first;
 
   assert.equal(copy.dialog.targetConnectionId, "mysql-source");
-  assert.deepEqual(copy.targetDatabaseOptions.value, ["latest_archive"]);
+  assert.deepEqual(copy.targetDatabaseOptions.value, ["game_db", "latest_archive"]);
+});
+
+test("table copy supports structureOnly and clears same-database target when switching to overwrite", async () => {
+  const calls = [];
+  const invokeWorkbench = async (command, payload) => {
+    calls.push({ command, payload });
+    if (command === "list_tables") return [{ table_name: "orders", table_comment: "订单" }];
+    if (command === "list_databases") return ["game_db", "source_archive"];
+    if (command === "copy_tables") return { status: "succeeded", copied: [], warnings: [] };
+    throw new Error(`unexpected command: ${command}`);
+  };
+  const copy = useTableCopy({ connections: connections(), invokeWorkbench });
+
+  await copy.open({
+    connectionId: "mysql-source",
+    database: "game_db",
+    tableName: "orders",
+  });
+
+  copy.dialog.targetDatabase = "game_db";
+  copy.dialog.structureOnly = true;
+  await copy.execute();
+  const copyRequest = calls.find((call) => call.command === "copy_tables")?.payload?.request;
+  assert.equal(copyRequest.targetDatabase, "game_db");
+  assert.equal(copyRequest.structureOnly, true);
+  assert.equal(copyRequest.mode, "copy");
+
+  copy.dialog.mode = "overwrite";
+  await Promise.resolve();
+  assert.deepEqual(copy.targetDatabaseOptions.value, ["source_archive"]);
+  assert.equal(copy.dialog.targetDatabase, "");
 });

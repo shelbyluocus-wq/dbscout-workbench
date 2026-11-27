@@ -20,7 +20,7 @@ function sourceIdentity(source = {}) {
 function sourceKey(identity = {}) {
   return [identity.connectionId, identity.database, identity.tableName]
     .map((value) => String(value || ""))
-    .join("");
+    .join(" ");
 }
 
 function sourceObject(source = {}) {
@@ -28,12 +28,29 @@ function sourceObject(source = {}) {
   return raw && typeof raw === "object" ? raw : null;
 }
 
+function cloneIndex(index = {}) {
+  return {
+    id: String(index.id || ""),
+    originalName: String(index.originalName || ""),
+    name: String(index.name || ""),
+    indexType: String(index.indexType || "INDEX"),
+    columns: Array.isArray(index.columns) ? [...index.columns] : [],
+    comment: String(index.comment || ""),
+  };
+}
+
 function cloneDraft(draft = {}) {
   return {
     tableName: String(draft.tableName || ""),
     tableComment: String(draft.tableComment || ""),
+    engine: String(draft.engine || ""),
+    charset: String(draft.charset || ""),
+    collation: String(draft.collation || ""),
     columns: Array.isArray(draft.columns)
       ? draft.columns.map((column) => ({ ...column }))
+      : [],
+    indexes: Array.isArray(draft.indexes)
+      ? draft.indexes.map(cloneIndex)
       : [],
   };
 }
@@ -42,7 +59,11 @@ function replaceDraft(target, nextDraft) {
   const next = cloneDraft(nextDraft);
   target.tableName = next.tableName;
   target.tableComment = next.tableComment;
+  target.engine = next.engine;
+  target.charset = next.charset;
+  target.collation = next.collation;
   target.columns.splice(0, target.columns.length, ...next.columns);
+  target.indexes.splice(0, target.indexes.length, ...next.indexes);
 }
 
 function draftSignature(draft = {}) {
@@ -55,12 +76,22 @@ function draftSignature(draft = {}) {
     length: String(column.length || ""),
     scale: String(column.scale || ""),
     originalType: String(column.originalType || ""),
+    unsigned: Boolean(column.unsigned),
+    autoIncrement: Boolean(column.autoIncrement),
     nullable: Boolean(column.nullable),
     primaryKey: Boolean(column.primaryKey),
     primaryKeyOrdinal: column.primaryKey ? Number(column.primaryKeyOrdinal) || null : null,
     defaultMode: String(column.defaultMode || "none"),
     defaultValue: String(column.defaultValue ?? ""),
     comment: String(column.comment || ""),
+  }));
+  normalized.indexes = normalized.indexes.map((index) => ({
+    id: String(index.id || ""),
+    originalName: String(index.originalName || ""),
+    name: String(index.name || ""),
+    indexType: String(index.indexType || "INDEX").toUpperCase(),
+    columns: Array.isArray(index.columns) ? index.columns.map((c) => String(c || "")) : [],
+    comment: String(index.comment || ""),
   }));
   return JSON.stringify(normalized);
 }
@@ -158,7 +189,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   const error = ref("");
   const original = ref(null);
   const schema = ref(null);
-  const draft = reactive({ tableName: "", tableComment: "", columns: [] });
+  const draft = reactive({ tableName: "", tableComment: "", engine: "", charset: "", collation: "", columns: [], indexes: [] });
   const validationErrors = ref(validateTableDesignDraft(draft));
   const preview = ref(emptyPreview());
   const previewOpen = ref(false);
@@ -335,7 +366,7 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       original.value = cloneDraft(initial);
       replaceDraft(draft, initial);
       cleanSignature.value = draftSignature(initial);
-      validationErrors.value = { valid: true, columns: [], messages: [] };
+      validationErrors.value = { valid: true, columns: [], indexes: [], messages: [] };
       persistState(target);
       return cloneDraft(draft);
     }
@@ -588,6 +619,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
         type: String(column.type ?? ""),
         length: String(column.length ?? ""),
         scale: String(column.scale ?? ""),
+        unsigned: Boolean(column.unsigned),
+        autoIncrement: Boolean(column.autoIncrement),
         nullable: Boolean(column.nullable),
         defaultMode: String(column.defaultMode || "none"),
         defaultValue: String(column.defaultValue ?? ""),
@@ -614,6 +647,8 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
       length: "255",
       scale: "",
       originalType: "",
+      unsigned: false,
+      autoIncrement: false,
       nullable: true,
       primaryKey: false,
       primaryKeyOrdinal: null,
@@ -631,7 +666,13 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
   function removeColumn(index) {
     if (index < 0 || index >= draft.columns.length) return false;
     if (draft.columns.length <= 1) return false;
-    draft.columns.splice(index, 1);
+    const [removed] = draft.columns.splice(index, 1);
+    const removedLower = String(removed?.name || "").trim().toLowerCase();
+    if (removedLower) {
+      draft.indexes.forEach((idx) => {
+        idx.columns = idx.columns.filter((col) => String(col || "").trim().toLowerCase() !== removedLower);
+      });
+    }
     normalizePrimaryKeyOrdinals();
     return true;
   }
@@ -673,6 +714,68 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     return true;
   }
 
+  function toggleAutoIncrement(column) {
+    if (!column || !draft.columns.includes(column)) return false;
+    column.autoIncrement = !column.autoIncrement;
+    if (column.autoIncrement) {
+      column.nullable = false;
+      column.defaultMode = "none";
+      column.defaultValue = "";
+    }
+    return column.autoIncrement;
+  }
+
+  function addIndex() {
+    const existingNames = new Set(draft.indexes.map((item) => String(item.name || "").toLowerCase()));
+    let suffix = draft.indexes.length + 1;
+    let candidate = `idx_${suffix}`;
+    while (existingNames.has(candidate.toLowerCase())) {
+      suffix += 1;
+      candidate = `idx_${suffix}`;
+    }
+    draft.indexes.push({
+      id: `idx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      originalName: "",
+      name: candidate,
+      indexType: "INDEX",
+      columns: [],
+      comment: "",
+    });
+  }
+
+  function removeIndex(index) {
+    if (index < 0 || index >= draft.indexes.length) return false;
+    draft.indexes.splice(index, 1);
+    return true;
+  }
+
+  function addIndexColumn(indexItem, columnName) {
+    const name = String(columnName || "").trim();
+    if (!indexItem || !name) return false;
+    if (indexItem.columns.some((col) => String(col || "").toLowerCase() === name.toLowerCase())) {
+      return false;
+    }
+    indexItem.columns.push(name);
+    return true;
+  }
+
+  function removeIndexColumn(indexItem, colIdx) {
+    if (!indexItem || colIdx < 0 || colIdx >= indexItem.columns.length) return false;
+    indexItem.columns.splice(colIdx, 1);
+    return true;
+  }
+
+  function moveIndexColumn(indexItem, colIdx, delta) {
+    if (!indexItem) return false;
+    const nextIdx = colIdx + delta;
+    if (colIdx < 0 || nextIdx < 0 || colIdx >= indexItem.columns.length || nextIdx >= indexItem.columns.length) {
+      return false;
+    }
+    const [moved] = indexItem.columns.splice(colIdx, 1);
+    indexItem.columns.splice(nextIdx, 0, moved);
+    return true;
+  }
+
   function isNewColumn(column) {
     return String(column?.originalName || "").trim() === "";
   }
@@ -701,6 +804,12 @@ export function useTableDesign(invokeWorkbench, source, { onApplied } = {}) {
     pasteColumns,
     removeColumn,
     togglePrimaryKey,
+    toggleAutoIncrement,
+    addIndex,
+    removeIndex,
+    addIndexColumn,
+    removeIndexColumn,
+    moveIndexColumn,
     isNewColumn,
   };
 }

@@ -30,6 +30,7 @@ useEscClose(() => props.dialog.open, () => emit("cancel"), () => props.busy || p
 
 const formComplete = computed(() => isConnFormComplete(props.dialog));
 const testReady = computed(() => isConnTestReady(props.dialog));
+const isEditMode = computed(() => props.dialog.mode === "edit");
 const kindPlaceholders = computed(() => {
   const kind = normalizeConnectionKind(props.dialog.kind);
   if (kind === "clickhouse") return { host: "127.0.0.1", port: "8123", username: "default" };
@@ -108,14 +109,15 @@ async function onDialogDrop(event) {
       @drop.prevent.stop="onDialogDrop"
     >
       <header class="wb-dialog-header">
-        <strong>{{ t('m_441ba9e5a9b7') }}</strong>
+        <strong>{{ isEditMode ? t('connection.editTitle') : t('m_441ba9e5a9b7') }}</strong>
         <button type="button" class="wb-dialog-close" @click="emit('cancel')">×</button>
       </header>
-      <div class="wb-config-dropzone" :class="{ 'is-active': draggingConfig }">
+      <div v-if="!isEditMode" class="wb-config-dropzone" :class="{ 'is-active': draggingConfig }">
         <span class="wb-config-dropzone-mark">JSON</span>
         <span>{{ t('m_c34d1be9488f') }}</span>
       </div>
       <button
+        v-if="!isEditMode"
         type="button"
         class="wb-navicat-entry-btn"
         :disabled="busy || testBusy"
@@ -180,7 +182,7 @@ async function onDialogDrop(event) {
           class="wb-dialog-primary"
           :disabled="busy || testBusy || !formComplete"
         >
-          {{ busy ? t('m_ee9ebe523d42') : t('m_5a048351a77f') }}
+          {{ busy ? t('m_ee9ebe523d42') : isEditMode ? t('connection.saveChanges') : t('m_5a048351a77f') }}
         </button>
       </footer>
     </form>

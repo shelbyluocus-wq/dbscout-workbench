@@ -1,4 +1,4 @@
-import { computed, reactive, shallowRef } from "vue";
+import { computed, reactive, shallowRef, watch } from "vue";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
 
 function asArrayRef(value) {
@@ -25,6 +25,7 @@ export function useTableCopy({
     targetConnectionId: "",
     targetDatabase: "",
     mode: "copy",
+    structureOnly: false,
     status: "idle",
     errorMessage: "",
     sourceTableLoading: false,
@@ -54,9 +55,23 @@ export function useTableCopy({
   const targetDatabaseOptions = computed(() =>
     targetDatabaseList.value.filter(
       (database) =>
+        dialog.mode !== "overwrite" ||
         dialog.targetConnectionId !== dialog.sourceConnectionId ||
         database !== dialog.sourceDatabase,
     ),
+  );
+
+  watch(
+    () => [dialog.mode, dialog.targetConnectionId],
+    ([mode, targetConnectionId]) => {
+      if (
+        mode === "overwrite" &&
+        targetConnectionId === dialog.sourceConnectionId &&
+        dialog.targetDatabase === dialog.sourceDatabase
+      ) {
+        dialog.targetDatabase = "";
+      }
+    },
   );
 
   const selectAllTables = computed({
@@ -103,6 +118,7 @@ export function useTableCopy({
     dialog.targetConnectionId = "";
     dialog.targetDatabase = "";
     dialog.mode = "copy";
+    dialog.structureOnly = Boolean(source.structureOnly);
     dialog.status = "idle";
     dialog.errorMessage = "";
     dialog.sourceTableLoading = false;
@@ -212,6 +228,7 @@ export function useTableCopy({
           targetConnectionId: dialog.targetConnectionId,
           targetDatabase: dialog.targetDatabase,
           mode: dialog.mode,
+          structureOnly: Boolean(dialog.structureOnly),
         },
       });
       if (!isCurrent(token)) return null;

@@ -43,8 +43,12 @@ fn empty_design(request: &CreateTableRequest) -> TableDesignMeta {
         },
         table_name: request.table_name.clone(),
         table_comment: String::new(),
+        engine: String::new(),
+        charset: String::new(),
+        collation: String::new(),
         schema_signature: None,
         columns: vec![],
+        indexes: vec![],
     }
 }
 
@@ -90,11 +94,31 @@ pub fn preview(request: &CreateTableRequest) -> Result<TableDesignPreview, Strin
             .join(", ");
         definitions.push(format!("PRIMARY KEY ({key_names})"));
     }
+    if let Some(indexes) = &request.draft.indexes {
+        for index in indexes {
+            definitions.push(ddl::create_index_definition_sql(index, &request.draft)?);
+        }
+    }
+    let engine = match request.draft.engine.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(value) => ddl::validate_engine(value)?,
+        None => "InnoDB".to_string(),
+    };
+    let mut table_options = vec![format!("ENGINE={engine}")];
+    if let Some(charset) = request.draft.charset.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let cs = ddl::validate_charset_token(charset, "字符集")?;
+        table_options.push(format!("DEFAULT CHARSET={cs}"));
+    }
+    if let Some(collation) = request.draft.collation.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let col = ddl::validate_charset_token(collation, "排序规则")?;
+        table_options.push(format!("COLLATE={col}"));
+    }
     let comment = request.draft.table_comment.replace('\\', "\\\\").replace('\'', "''");
+    table_options.push(format!("COMMENT='{comment}'"));
     let sql = format!(
-        "CREATE TABLE {} (\n  {}\n) ENGINE=InnoDB COMMENT='{}'",
+        "CREATE TABLE {} (\n  {}\n) {}",
         crate::db::qualified_table(&request.database, &request.table_name),
-        definitions.join(",\n  "), comment
+        definitions.join(",\n  "),
+        table_options.join(" "),
     );
     let encoded = serde_json::to_vec(&("create-table-v1", request, &sql))
         .map_err(|error| error.to_string())?;
@@ -197,6 +221,20 @@ async fn execute_create(pool: &MySqlPool, statements: &[String]) -> Result<(), S
 fn designed_table(request: &CreateTableRequest) -> Result<(TableDesignMeta, TableMeta), String> {
     let mut design = empty_design(request);
     design.table_comment = request.draft.table_comment.clone();
+    design.engine = request.draft.engine.clone().unwrap_or_else(|| "InnoDB".into());
+    design.charset = request.draft.charset.clone().unwrap_or_default();
+    design.collation = request.draft.collation.clone().unwrap_or_default();
+    if let Some(indexes) = &request.draft.indexes {
+        design.indexes = indexes
+            .iter()
+            .map(|idx| TableIndexMeta {
+                name: idx.name.trim().to_string(),
+                index_type: ddl::normalize_index_type(&idx.index_type).unwrap_or("INDEX").to_string(),
+                columns: idx.columns.clone(),
+                comment: idx.comment.clone(),
+            })
+            .collect();
+    }
     let keys = ddl::primary_key_final_names_from_draft(&request.draft);
     let mut columns = Vec::new();
     for (index, column) in request.draft.columns.iter().enumerate() {
@@ -206,6 +244,7 @@ fn designed_table(request: &CreateTableRequest) -> Result<(TableDesignMeta, Tabl
         );
         meta.default_mode = Some(column.default_mode.clone());
         meta.default_value = column.default_value.clone();
+        meta.is_auto_increment = column.auto_increment.unwrap_or(false);
         columns.push(meta);
         design.columns.push(ColumnDesignMeta {
             ordinal: index as u32 + 1,
@@ -220,6 +259,7 @@ fn designed_table(request: &CreateTableRequest) -> Result<(TableDesignMeta, Tabl
             default_mode: column.default_mode.clone(),
             default_value: column.default_value.clone(),
             column_comment: column.comment.clone(),
+            extra: if column.auto_increment.unwrap_or(false) { "auto_increment".into() } else { String::new() },
             ..ddl::empty_column_meta()
         });
     }
@@ -426,5 +466,26 @@ mod tests {
         let result = preview(&definition).unwrap();
         assert!(!result.statements[0].contains("PRIMARY KEY"));
         assert_eq!(result.warnings.len(), 2);
+    }
+
+    #[test]
+    fn create_table_supports_auto_increment_indexes_and_table_options() {
+        let mut definition = request();
+        definition.draft.engine = Some("MyISAM".into());
+        definition.draft.charset = Some("utf8mb4".into());
+        definition.draft.collation = Some("utf8mb4_unicode_ci".into());
+        definition.draft.columns[0].auto_increment = Some(true);
+        definition.draft.indexes = Some(vec![TableIndexDraft {
+            original_name: String::new(),
+            name: "idx_name".into(),
+            index_type: "UNIQUE".into(),
+            columns: vec!["Name".into()],
+            comment: "unique name".into(),
+        }]);
+        let result = preview(&definition).unwrap();
+        let sql = &result.statements[0];
+        assert!(sql.contains("`ID` int unsigned NOT NULL AUTO_INCREMENT"));
+        assert!(sql.contains("UNIQUE KEY `idx_name` (`Name`) COMMENT 'unique name'"));
+        assert!(sql.contains("ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"));
     }
 }

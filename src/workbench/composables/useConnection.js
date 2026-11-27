@@ -405,6 +405,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   const selectedDatabase = ref("");
   const connDialog = reactive({
     open: false,
+    mode: "add",
     kind: CONNECTION_KINDS.mysql.kind,
     host: "127.0.0.1",
     port: CONNECTION_KINDS.mysql.defaultPort,
@@ -415,6 +416,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     reconnectConnectionId: "",
     reconnectAlias: "",
     reconnectUrl: "",
+    editOriginalIdentity: null,
     error: "",
     testPassed: false,
   });
@@ -1402,6 +1404,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     const kind = normalizeConnectionKind(connection.kind);
     const defaults = CONNECTION_KINDS[kind];
     const id = String(connection.id || "");
+    connDialog.mode = "reconnect";
     connDialog.kind = kind;
     connDialog.host = String(connection.host || "127.0.0.1");
     connDialog.port = String(connection.port || defaults.defaultPort);
@@ -1412,8 +1415,39 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     connDialog.reconnectConnectionId = id && !isPlaceholderConnectionId(id) ? id : "";
     connDialog.reconnectAlias = aliases.getConnectionAlias(connection.id) || "";
     connDialog.reconnectUrl = kind === CONNECTION_KINDS.mongodb.kind ? String(connection.url || "") : "";
+    connDialog.editOriginalIdentity = null;
     connDialog.error = message;
     connDialog.open = true;
+  }
+
+  function openEditConnectionDialog(connectionId) {
+    const id = String(connectionId || "");
+    const connection = connectionById(id);
+    if (!connection || connection.sampleData) return false;
+    resetConnTestState();
+    const kind = normalizeConnectionKind(connection.kind);
+    const defaults = CONNECTION_KINDS[kind];
+    const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
+    connDialog.mode = "edit";
+    connDialog.kind = kind;
+    connDialog.host = String(connection.host || saved?.host || "127.0.0.1");
+    connDialog.port = String(connection.port || saved?.port || defaults.defaultPort);
+    connDialog.username = connection.username ?? saved?.username ?? defaults.defaultUser;
+    connDialog.password = String(saved?.password ?? "");
+    connDialog.importedDatabase = "";
+    connDialog.reconnectPlaceholderId = isPlaceholderConnectionId(id) ? id : "";
+    connDialog.reconnectConnectionId = id && !isPlaceholderConnectionId(id) ? id : "";
+    connDialog.reconnectAlias = aliases.getConnectionAlias(connection.id) || saved?.alias || "";
+    connDialog.reconnectUrl = kind === CONNECTION_KINDS.mongodb.kind ? String(saved?.url || connection.url || "") : "";
+    connDialog.editOriginalIdentity = {
+      kind,
+      host: String(connection.host || saved?.host || ""),
+      port: String(connection.port || saved?.port || ""),
+      username: String(connection.username || saved?.username || ""),
+    };
+    connDialog.error = "";
+    connDialog.open = true;
+    return true;
   }
 
   function isCurrentTableLoad(token, connectionId, database) {
@@ -1684,10 +1718,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   function clearConnDialogReconnectMeta() {
+    connDialog.mode = "add";
     connDialog.reconnectPlaceholderId = "";
     connDialog.reconnectConnectionId = "";
     connDialog.reconnectAlias = "";
     connDialog.reconnectUrl = "";
+    connDialog.editOriginalIdentity = null;
   }
 
   function openConnDialog() {
@@ -1927,11 +1963,13 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return;
     }
     const normalizedKind = normalizeConnectionKind(kind);
+    const isEditMode = connDialog.mode === "edit";
+    const editOriginalIdentity = connDialog.editOriginalIdentity ? { ...connDialog.editOriginalIdentity } : null;
     const reconnectPlaceholderId = connDialog.reconnectPlaceholderId;
     const reconnectConnectionId = connDialog.reconnectConnectionId;
     const reconnectAlias = connDialog.reconnectAlias;
     const url =
-      normalizedKind === CONNECTION_KINDS.mongodb.kind && connDialog.reconnectUrl
+      normalizedKind === CONNECTION_KINDS.mongodb.kind && connDialog.reconnectUrl && !isEditMode
         ? injectPasswordIntoConnectionUrl(connDialog.reconnectUrl, { username, password })
         : buildConnectionUrl({ kind: normalizedKind, host, port, username, password });
     busy.value = true;
@@ -1986,6 +2024,13 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           connections.value = connections.value.filter((connection) => connection.id !== reconnectPlaceholderId);
         }
       }
+      if (isEditMode && editOriginalIdentity) {
+        const nextSavedIdentity = { kind: normalizedKind, host: connDialog.host.trim(), port: connDialog.port.trim(), username: connDialog.username };
+        if (savedConnectionKey(editOriginalIdentity) !== savedConnectionKey(nextSavedIdentity)) {
+          removeSavedConnection(editOriginalIdentity);
+          rememberConnectionClosed({ saved: true, ...editOriginalIdentity }, false);
+        }
+      }
       rememberConnectionClosed({ saved: true, kind: normalizedKind, host: connDialog.host.trim(), port: connDialog.port.trim(), username: connDialog.username }, false);
       writeSavedConnection({
         kind: normalizedKind,
@@ -2004,7 +2049,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         dbList[0] ||
         "";
       if (newConnection && database) await selectDatabase({ connectionId: newConnection.id, database });
-      statusText.value = `已连接 ${connectionKindLabel(normalizedKind)}，共 ${dbList.length} 个数据库`;
+      statusText.value = isEditMode
+        ? `已更新连接 ${connectionKindLabel(normalizedKind)}，共 ${dbList.length} 个数据库`
+        : `已连接 ${connectionKindLabel(normalizedKind)}，共 ${dbList.length} 个数据库`;
     } catch (error) {
       connDialog.error = String(error);
       statusText.value = `连接失败：${String(error)}`;
@@ -2155,6 +2202,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     isConnFormComplete,
     isConnTestReady,
     openConnDialog,
+    openEditConnectionDialog,
     cancelConnDialog,
     applyConnConfigImport,
     rejectConnConfigImport,

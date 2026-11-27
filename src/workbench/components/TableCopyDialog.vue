@@ -176,20 +176,27 @@ function confirmationTableNames() {
 }
 
 const isOverwriteMode = computed(() => props.copy.dialog.mode === "overwrite");
+const isStructureOnly = computed(() => Boolean(props.copy.dialog.structureOnly));
 
 async function confirmAndExecute() {
   confirming.value = true;
   try {
+    const scopeLabel = isStructureOnly.value ? t("tableCopy.scopeStructureOnly") : t("tableCopy.scopeStructureAndData");
     const confirmed = await confirm({
       title: isOverwriteMode.value ? "覆盖发送所选表" : "发送所选表到目标库",
       message:
         `从：${sourceConnectionLabel.value} / ${props.copy.dialog.sourceDatabase}\n` +
         `到：${targetConnectionLabel.value} / ${props.copy.dialog.targetDatabase}\n` +
+        `方式：${scopeLabel}\n` +
         `共 ${selectedCount.value} 张表`,
       items: confirmationTableNames(),
       note: isOverwriteMode.value
-        ? "目标库中的同名表将被源表的结构和数据完全替换，此操作不可撤销。"
-        : "目标库中的重名表不受影响，将自动添加 _copy 后缀创建副本。",
+        ? (isStructureOnly.value
+          ? t("tableCopy.confirmOverwriteStructureNote")
+          : "目标库中的同名表将被源表的结构和数据完全替换，此操作不可撤销。")
+        : (isStructureOnly.value
+          ? t("tableCopy.confirmCopyStructureNote")
+          : "目标库中的重名表不受影响，将自动添加 _copy 后缀创建副本。"),
       confirmText: isOverwriteMode.value ? "覆盖发送" : "发送",
       cancelText: "取消",
       danger: isOverwriteMode.value,
@@ -365,6 +372,18 @@ watch(searchQuery, () => {
           </label>
         </div>
 
+        <label class="wb-table-copy-structure-only">
+          <input
+            v-model="copy.dialog.structureOnly"
+            type="checkbox"
+            :disabled="isBusy"
+          />
+          <span>
+            <strong>{{ t('tableCopy.structureOnly') }}</strong>
+            <small>{{ t('tableCopy.structureOnlyHint') }}</small>
+          </span>
+        </label>
+
         <div class="wb-table-copy-content">
           <section class="wb-table-copy-catalog" aria-labelledby="wb-table-copy-catalog-title">
             <!-- Toolbar -->
@@ -469,7 +488,9 @@ watch(searchQuery, () => {
           v-if="copy.dialog.status === 'succeeded' || copy.dialog.status === 'failed' || resultWarnings.length"
           class="wb-table-copy-status"
         >
-          <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success"> {{ t('m_1243c70e0c7c') }} {{ copy.result.value?.copied?.length || 0 }} {{ t('m_08c0d40c3ef3') }}{{ copiedRowCount }} {{ t('m_a27a3956cf9c') }} </p>
+          <p v-if="copy.dialog.status === 'succeeded'" class="wb-database-sync-success">
+            {{ isStructureOnly ? t('tableCopy.structureCopied', { count: copy.result.value?.copied?.length || 0 }) : `${t('m_1243c70e0c7c')} ${copy.result.value?.copied?.length || 0} ${t('m_08c0d40c3ef3')}${copiedRowCount} ${t('m_a27a3956cf9c')}` }}
+          </p>
           <p
             v-for="warning in resultWarnings"
             :key="warning"

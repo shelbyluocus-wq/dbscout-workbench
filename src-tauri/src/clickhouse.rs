@@ -271,6 +271,24 @@ pub async fn list_databases(url: &str) -> Result<Vec<String>, String> {
         .collect())
 }
 
+pub async fn show_create_table(
+    url: &str,
+    database: &str,
+    table_name: &str,
+) -> Result<String, String> {
+    let sql = format!(
+        "SHOW CREATE TABLE {} FORMAT JSON",
+        table_ref(database, table_name)
+    );
+    let value = execute_json_query(url, &sql).await?;
+    let ddl = json_rows(&value)
+        .into_iter()
+        .find_map(|row| row.get("statement").map(|v| json_cell_to_string(Some(v))))
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| format!("未读取到表 {table_name} 的建表语句"))?;
+    Ok(ddl)
+}
+
 pub async fn list_tables(url: &str, database: &str) -> Result<Vec<TableOption>, String> {
     let sql = format!(
         "SELECT name, ifNull(comment, '') AS comment, total_bytes FROM system.tables WHERE database = {} AND is_temporary = 0 ORDER BY name FORMAT JSON",

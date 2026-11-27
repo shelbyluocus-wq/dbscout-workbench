@@ -774,12 +774,47 @@ pub struct ColumnDesignMeta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct TableIndexMeta {
+    pub name: String,
+    pub index_type: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub comment: String,
+}
+
+fn default_index_type() -> String {
+    "INDEX".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TableIndexDraft {
+    #[serde(default)]
+    pub original_name: String,
+    pub name: String,
+    #[serde(default = "default_index_type")]
+    pub index_type: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub comment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TableDesignMeta {
     pub source: TableDesignSource,
     pub table_name: String,
     pub table_comment: String,
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub charset: String,
+    #[serde(default)]
+    pub collation: String,
     pub schema_signature: Option<String>,
     pub columns: Vec<ColumnDesignMeta>,
+    #[serde(default)]
+    pub indexes: Vec<TableIndexMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -791,6 +826,8 @@ pub struct ColumnDesignDraft {
     pub data_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unsigned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_increment: Option<bool>,
     pub length: Option<u64>,
     pub scale: Option<u64>,
     pub nullable: bool,
@@ -806,7 +843,15 @@ pub struct ColumnDesignDraft {
 #[serde(rename_all = "camelCase")]
 pub struct TableDesignDraft {
     pub table_comment: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     pub columns: Vec<ColumnDesignDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexes: Option<Vec<TableIndexDraft>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -937,6 +982,8 @@ pub struct CopyTablesRequest {
     /// "overwrite"：覆盖目标库同名表，使其与源表完全一致。
     #[serde(default)]
     pub mode: String,
+    #[serde(default)]
+    pub structure_only: bool,
 }
 
 /// 判断 copy_tables 请求是否为覆盖模式。
@@ -1083,6 +1130,7 @@ pub struct RuntimeState {
     pub sessions: crate::table_sessions::TableSessionStore,
     pub demo_profile: Option<DemoProfile>,
     pub demo_schema_overrides: HashMap<String, Vec<TableMeta>>,
+    pub demo_removed_databases: HashSet<String>,
     pub demo_rows: HashMap<String, Vec<HashMap<String, String>>>,
 }
 
@@ -1917,6 +1965,7 @@ impl RuntimeState {
             sessions: crate::table_sessions::TableSessionStore::default(),
             demo_profile,
             demo_schema_overrides: HashMap::new(),
+            demo_removed_databases: HashSet::new(),
             demo_rows: HashMap::new(),
         }
     }
@@ -1934,6 +1983,7 @@ impl RuntimeState {
         self.schema = crate::perf_fixture::fixture_schema(&selection);
         self.sessions.clear();
         self.demo_schema_overrides.clear();
+        self.demo_removed_databases.clear();
         self.demo_rows.clear();
         self.connections.clear();
         self.closed_connections.clear();

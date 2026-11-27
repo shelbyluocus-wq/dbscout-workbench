@@ -104,6 +104,8 @@ const emit = defineEmits([
   "rename-table",
   "rename-database",
   "rename-connection",
+  "edit-connection",
+  "create-database",
   "remove-connection",
   "connection-open",
   "connection-close",
@@ -608,6 +610,8 @@ const menuConnection = computed(() => {
     label: connectionLabel(connection.id, connection.label),
     closed: Boolean(connection.closed),
     closable: !connection.closed && !connection.sampleData,
+    editable: !connection.sampleData,
+    canManageDatabase: normalizeConnectionKind(connection.kind) === CONNECTION_KINDS.mysql.kind && !connection.readOnly,
     groupId: connectionGroupId(connection),
   };
 });
@@ -622,10 +626,12 @@ const menuGroups = computed(() => groupStore.state.value.groups.map(({ id, name 
 function onConnectionMenuSelect({ action, groupId = "" }) {
   const connectionId = connectionMenu.connectionId;
   const group = connectionTree.value.groups.find((item) => item.id === connectionMenu.groupId);
-  const keepFocus = !["rename", "remove", "new-group", "group-rename", "group-delete", "close", "group-close-all"].includes(action);
+  const keepFocus = !["rename", "edit", "new-database", "remove", "new-group", "group-rename", "group-delete", "close", "group-close-all"].includes(action);
   closeConnectionMenu({ restoreFocus: keepFocus });
   if (action === "open") openConnectionRow(connectionId);
   else if (action === "close") emit("connection-close", { connectionIds: [connectionId] });
+  else if (action === "new-database") emit("create-database", { connectionId });
+  else if (action === "edit") emit("edit-connection", { connectionId });
   else if (action === "new-group") createGroup([connectionId]);
   else if (action === "move-to") moveConnectionToGroup(connectionId, groupId);
   else if (action === "ungroup") moveConnectionToGroup(connectionId, "");

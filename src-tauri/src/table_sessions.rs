@@ -186,6 +186,44 @@ impl TableSessionStore {
         before.saturating_sub(self.entries.len())
     }
 
+    pub fn invalidate_database(&mut self, connection_id: &str, database: &str) -> Vec<String> {
+        let removed: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.session.connection_id == connection_id
+                    && entry.session.database.eq_ignore_ascii_case(database)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &removed {
+            self.entries.remove(id);
+        }
+        removed
+    }
+
+    pub fn invalidate_table(
+        &mut self,
+        connection_id: &str,
+        database: &str,
+        table_name: &str,
+    ) -> Vec<String> {
+        let removed: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.session.connection_id == connection_id
+                    && entry.session.database.eq_ignore_ascii_case(database)
+                    && entry.session.table_name.eq_ignore_ascii_case(table_name)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &removed {
+            self.entries.remove(id);
+        }
+        removed
+    }
+
     pub fn prune_expired(&mut self) -> Vec<(String, String)> {
         self.prune_expired_at(Instant::now())
     }

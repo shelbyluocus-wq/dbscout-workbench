@@ -191,3 +191,44 @@ test("a failed pending create unlocks a remounted editor and preserves the error
   assert.equal(remounted.error.value, "connection lost");
   assert.equal(remounted.draft.tableName, "retry_table");
 });
+
+test("createTablePayload includes engine, charset, collation, autoIncrement, and indexes", async () => {
+  resetMockWorkbenchState();
+  const draft = initialCreateTableDraft();
+  draft.tableName = "guilds";
+  draft.engine = "InnoDB";
+  draft.charset = "utf8mb4";
+  draft.collation = "utf8mb4_unicode_ci";
+  draft.columns[0].unsigned = true;
+  draft.columns[0].autoIncrement = true;
+  draft.columns.push({
+    originalName: "",
+    name: "guild_name",
+    type: "varchar",
+    length: "64",
+    scale: "",
+    unsigned: false,
+    nullable: false,
+    primaryKey: false,
+    primaryKeyOrdinal: null,
+    autoIncrement: false,
+    defaultMode: "none",
+    defaultValue: "",
+    comment: "公会名",
+  });
+  draft.indexes = [
+    { originalName: "", name: "uniq_guild_name", indexType: "UNIQUE", columns: ["guild_name"], comment: "" },
+  ];
+  assert.equal(validateCreateTableDraft(draft).valid, true);
+  const req = createTablePayload(scope, draft);
+  assert.equal(req.draft.engine, "InnoDB");
+  assert.equal(req.draft.charset, "utf8mb4");
+  assert.equal(req.draft.collation, "utf8mb4_unicode_ci");
+  assert.equal(req.draft.columns[0].autoIncrement, true);
+  assert.deepEqual(req.draft.indexes, [
+    { originalName: "", name: "uniq_guild_name", indexType: "UNIQUE", columns: ["guild_name"], comment: "" },
+  ]);
+
+  const preview = await mockWorkbenchInvoke("preview_create_table", { request: req });
+  assert.ok(preview.statements.some((sql) => sql.includes("AUTO_INCREMENT") && sql.includes("UNIQUE KEY")));
+});

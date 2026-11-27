@@ -799,3 +799,26 @@ test("removeColumn ignores out-of-range indices", async () => {
   assert.equal(design.removeColumn(999), false);
   assert.equal(design.removeColumn(-1), false);
 });
+
+test("toggleAutoIncrement ensures single integer NOT NULL column and removeColumn cleans index columns", async () => {
+  const { design } = createHarness();
+  await design.loadDesign();
+  const [idCol, nameCol] = design.draft.columns;
+
+  assert.equal(design.toggleAutoIncrement(idCol), true);
+  assert.equal(idCol.autoIncrement, true);
+  assert.equal(idCol.nullable, false);
+  assert.equal(idCol.defaultMode, "none");
+
+  design.addIndex();
+  const idx = design.draft.indexes[0];
+  idx.name = "idx_name";
+  design.addIndexColumn(idx, "name");
+  assert.deepEqual(idx.columns, ["name"]);
+
+  assert.equal(design.removeColumn(1), true);
+  assert.deepEqual(idx.columns, []);
+
+  design.removeIndex(0);
+  assert.equal(design.draft.indexes.length, 0);
+});

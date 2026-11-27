@@ -793,6 +793,9 @@ mod tests {
             },
             table_name: "items".into(),
             table_comment: String::new(),
+            engine: String::new(),
+            charset: String::new(),
+            collation: String::new(),
             schema_signature: None,
             columns: vec![ColumnDesignMeta {
                 ordinal: 1,
@@ -813,17 +816,22 @@ mod tests {
                 is_supported: true,
                 unsupported_reason: None,
             }],
+            indexes: Vec::new(),
         }
     }
 
     fn draft_for(data_type: &str, length: Option<u64>) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: String::new(),
+            engine: None,
+            charset: None,
+            collation: None,
             columns: vec![ColumnDesignDraft {
                 original_name: "code".into(),
                 name: "code".into(),
                 data_type: data_type.into(),
                 unsigned: None,
+                auto_increment: None,
                 length,
                 scale: None,
                 nullable: true,
@@ -833,6 +841,7 @@ mod tests {
                 default_value: None,
                 comment: String::new(),
             }],
+            indexes: None,
         }
     }
 

@@ -14,6 +14,7 @@ const taskDialogs = [
   "./components/ConfirmDialog.vue",
   "./components/ConnectionDialog.vue",
   "./components/DatabaseDisplayDialog.vue",
+  "./components/DatabaseManageDialog.vue",
   "./components/DatabaseSyncDialog.vue",
   "./components/FontSettingsDialog.vue",
   "./components/ImportWizardDialog.vue",
@@ -21,6 +22,7 @@ const taskDialogs = [
   "./components/ShortcutSettingsDialog.vue",
   "./components/SqlHistoryDialog.vue",
   "./components/TableCopyDialog.vue",
+  "./components/TableDdlDialog.vue",
   "./components/UpdateDialog.vue",
 ];
 

@@ -3,6 +3,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowLeft,
   Check,
+  Database,
   Folder,
   FolderInput,
   FolderOutput,
@@ -10,6 +11,7 @@ import {
   Pencil,
   Plug,
   RefreshCw,
+  SlidersHorizontal,
   Trash2,
   Unplug,
 } from "lucide-vue-next";
@@ -174,7 +176,13 @@ onBeforeUnmount(() => {
         <button v-else-if="connection.closable" type="button" role="menuitem" @click="choose('close')">
           <Unplug :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("connectionGroup.closeConnection") }}
         </button>
-        <hr v-if="connection.closed || connection.closable" class="wb-context-separator" role="separator" />
+        <button v-if="!connection.closed && connection.canManageDatabase" type="button" role="menuitem" @click="choose('new-database')">
+          <Database :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("databaseManage.createAction") }}
+        </button>
+        <button v-if="connection.editable" type="button" role="menuitem" @click="choose('edit')">
+          <SlidersHorizontal :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("connection.editAction") }}
+        </button>
+        <hr v-if="connection.closed || connection.closable || connection.editable" class="wb-context-separator" role="separator" />
         <button v-if="groups.length" type="button" role="menuitem" aria-haspopup="menu" @click="showGroups">
           <FolderInput :size="14" class="wb-context-icon" aria-hidden="true" />{{ t("connectionGroup.moveToEllipsis") }}
         </button>

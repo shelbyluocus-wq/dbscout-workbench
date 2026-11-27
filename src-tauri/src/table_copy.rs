@@ -89,6 +89,11 @@ async fn copy_tables_same_server_with_connection(
             &request.target_database,
             &target_name,
         )?;
+        let rewritten = if request.structure_only {
+            strip_table_auto_increment(&rewritten)
+        } else {
+            rewritten
+        };
         if let Err(error) = sqlx::query(&rewritten).execute(&mut *connection).await {
             return Err(restore_overwrite_backup(
                 connection,
@@ -100,25 +105,29 @@ async fn copy_tables_same_server_with_connection(
             .await);
         }
 
-        let copy_result = copy_same_server_table_rows(
-            connection,
-            &request.source_database,
-            table_name,
-            &request.target_database,
-            &target_name,
-        )
-        .await;
-        let row_count = match copy_result {
-            Ok(row_count) => row_count,
-            Err(error) => {
-                return Err(restore_overwrite_backup(
-                    connection,
-                    &request.target_database,
-                    &target_name,
-                    backup_name,
-                    error,
-                )
-                .await);
+        let row_count = if request.structure_only {
+            0
+        } else {
+            let copy_result = copy_same_server_table_rows(
+                connection,
+                &request.source_database,
+                table_name,
+                &request.target_database,
+                &target_name,
+            )
+            .await;
+            match copy_result {
+                Ok(row_count) => row_count,
+                Err(error) => {
+                    return Err(restore_overwrite_backup(
+                        connection,
+                        &request.target_database,
+                        &target_name,
+                        backup_name,
+                        error,
+                    )
+                    .await);
+                }
             }
         };
         if let Some(backup) = backup_name {
@@ -205,6 +214,11 @@ async fn copy_tables_cross_server_with_connections(
             &request.target_database,
             &target_name,
         )?;
+        let rewritten = if request.structure_only {
+            strip_table_auto_increment(&rewritten)
+        } else {
+            rewritten
+        };
         if let Err(error) = sqlx::query(&rewritten).execute(&mut *target).await {
             return Err(restore_overwrite_backup(
                 target,
@@ -216,26 +230,30 @@ async fn copy_tables_cross_server_with_connections(
             .await);
         }
 
-        let copy_result = copy_cross_server_table_rows(
-            source,
-            target,
-            &request.source_database,
-            table_name,
-            &request.target_database,
-            &target_name,
-        )
-        .await;
-        let row_count = match copy_result {
-            Ok(row_count) => row_count,
-            Err(error) => {
-                return Err(restore_overwrite_backup(
-                    target,
-                    &request.target_database,
-                    &target_name,
-                    backup_name,
-                    error,
-                )
-                .await);
+        let row_count = if request.structure_only {
+            0
+        } else {
+            let copy_result = copy_cross_server_table_rows(
+                source,
+                target,
+                &request.source_database,
+                table_name,
+                &request.target_database,
+                &target_name,
+            )
+            .await;
+            match copy_result {
+                Ok(row_count) => row_count,
+                Err(error) => {
+                    return Err(restore_overwrite_backup(
+                        target,
+                        &request.target_database,
+                        &target_name,
+                        backup_name,
+                        error,
+                    )
+                    .await);
+                }
             }
         };
         if let Some(backup) = backup_name {
@@ -806,6 +824,41 @@ async fn clean_up_failed_table(
     }
 }
 
+pub(crate) fn strip_table_auto_increment(ddl: &str) -> String {
+    let Some(last_paren) = ddl.rfind(')') else {
+        return ddl.to_string();
+    };
+    let head = &ddl[..=last_paren];
+    let tail = &ddl[last_paren + 1..];
+    let lower_tail = tail.to_ascii_lowercase();
+    let needle = "auto_increment=";
+    let mut out = String::with_capacity(tail.len());
+    let mut cursor = 0;
+    while let Some(rel) = lower_tail[cursor..].find(needle) {
+        let start = cursor + rel;
+        let prefix_ok = start == 0 || tail[..start].ends_with(char::is_whitespace);
+        if !prefix_ok {
+            out.push_str(&tail[cursor..start + needle.len()]);
+            cursor = start + needle.len();
+            continue;
+        }
+        let mut end = start + needle.len();
+        while end < tail.len() && tail.as_bytes()[end].is_ascii_digit() {
+            end += 1;
+        }
+        let trimmed_before = tail[cursor..start].trim_end_matches(' ');
+        out.push_str(trimmed_before);
+        if end < tail.len() && tail.as_bytes()[end] == b' ' && trimmed_before.len() < tail[cursor..start].len() {
+            // Keep one space separator between adjacent table options.
+            out.push(' ');
+            end += 1;
+        }
+        cursor = end;
+    }
+    out.push_str(&tail[cursor..]);
+    format!("{head}{out}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -982,5 +1035,14 @@ mod tests {
         .unwrap_err();
         assert!(failure.contains("复制失败"));
         assert!(failure.contains("恢复目标 MySQL 会话失败"));
+    }
+
+    #[test]
+    fn strip_table_auto_increment_preserves_column_auto_increment() {
+        let ddl = "CREATE TABLE `db`.`orders` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `name` varchar(64)\n) ENGINE=InnoDB AUTO_INCREMENT=12345 DEFAULT CHARSET=utf8mb4";
+        let stripped = strip_table_auto_increment(ddl);
+        assert!(stripped.contains("`id` bigint NOT NULL AUTO_INCREMENT"));
+        assert!(!stripped.contains("AUTO_INCREMENT=12345"));
+        assert!(stripped.contains("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"));
     }
 }

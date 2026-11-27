@@ -6,6 +6,7 @@ import {
   ArrowUpToLine,
   CircleSlash,
   ClipboardPaste,
+  Code2,
   Columns2,
   Copy,
   DatabaseZap,
@@ -19,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   Send,
+  SlidersHorizontal,
   Snowflake,
   TableProperties,
   Trash2,
@@ -71,10 +73,13 @@ const props = defineProps({
   // part of it.
   tableCount: { type: Number, default: 1 },
   canDeleteTables: { type: Boolean, default: false },
+  canManageDatabase: { type: Boolean, default: false },
+  canShowDdl: { type: Boolean, default: false },
+  canTruncateTables: { type: Boolean, default: false },
   databaseOnRail: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'clear-cells', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'toggle-database-rail', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-cell-append-row', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
+const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'truncate-tables', 'show-ddl', 'edit-database', 'drop-database', 'copy', 'paste', 'clear-cells', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'toggle-database-rail', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-cell-append-row', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail", "grid"].includes(props.surface));
@@ -214,6 +219,7 @@ const contextMenuStyle = computed(() => ({
     <!-- 表操作组 -->
     <button v-if="showSidebarTableActions" type="button" role="menuitem" @click="emit('open-tables')"><FolderOpen :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.openTables', { count: tableCount }) : t('m_bf8ef131aa2d') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.open }}</kbd></button>
     <button v-if="showTableActions" type="button" role="menuitem" @click="emit('open-design')"><TableProperties :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d9a122ddc940') }}<kbd v-if="shortcutHints.design" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.design }}</kbd></button>
+    <button v-if="showTableActions && canShowDdl && tableCount === 1" type="button" role="menuitem" @click="emit('show-ddl')"><Code2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('tableDdl.menuAction') }}</button>
     <button v-if="showTableActions" type="button" role="menuitem" @click="emit('rename')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_0d0cbac2eee5') }}<kbd v-if="shortcutHints.rename" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.rename }}</kbd></button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_623281e9dfdb') }}</button>
@@ -222,8 +228,11 @@ const contextMenuStyle = computed(() => ({
     <!-- 通用操作组 -->
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('toggle-database-rail')"><component :is="databaseOnRail ? PinOff : Pin" :size="14" class="wb-context-icon" aria-hidden="true" />{{ t(databaseOnRail ? 'railDatabase.unpin' : 'railDatabase.pin') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
+    <button v-if="kind === 'database' && canManageDatabase" type="button" role="menuitem" @click="emit('edit-database')"><SlidersHorizontal :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('databaseManage.editAction') }}</button>
     <button v-if="surface !== 'input'" type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
     <!-- 危险操作放最后 -->
+    <button v-if="kind === 'database' && canManageDatabase" type="button" role="menuitem" class="danger" @click="emit('drop-database')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('databaseManage.dropAction') }}</button>
+    <button v-if="showSidebarTableActions && canTruncateTables" type="button" role="menuitem" class="danger" @click="emit('truncate-tables')"><Eraser :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('tableTruncate.menuPlural', { count: tableCount }) : t('tableTruncate.menuAction') }}</button>
     <button v-if="showSidebarTableActions" type="button" role="menuitem" class="danger" :disabled="!canDeleteTables" @click="emit('delete-tables')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.deleteTables', { count: tableCount }) : t('m_d545721cef25') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.deleteTables }}</kbd></button>
   </menu>
 </template>

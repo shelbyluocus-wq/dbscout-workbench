@@ -215,12 +215,114 @@ fn default_sql(draft: &ColumnDesignDraft) -> Result<String, String> {
     }
 }
 
-fn safe_column_extra_sql(current: &ColumnDesignMeta) -> String {
-    if has_auto_increment_extra(&current.extra) {
+fn effective_auto_increment(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> bool {
+    draft
+        .auto_increment
+        .unwrap_or_else(|| has_auto_increment_extra(&current.extra))
+}
+
+fn safe_column_extra_sql(draft: &ColumnDesignDraft, current: &ColumnDesignMeta) -> String {
+    if effective_auto_increment(current, draft) {
         " AUTO_INCREMENT".into()
     } else {
         String::new()
     }
+}
+
+pub fn validate_engine(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "innodb" => Ok("InnoDB".into()),
+        "myisam" => Ok("MyISAM".into()),
+        "memory" => Ok("MEMORY".into()),
+        "archive" => Ok("ARCHIVE".into()),
+        "csv" => Ok("CSV".into()),
+        _ => Err(format!("不支持的存储引擎: {trimmed}")),
+    }
+}
+
+pub fn validate_charset_token(raw: &str, label: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 64 {
+        return Err(format!("{label}格式无效: {trimmed}"));
+    }
+    if !trimmed.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        return Err(format!("{label}格式无效: {trimmed}"));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn normalize_index_type(raw: &str) -> Result<&'static str, String> {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "" | "INDEX" | "NORMAL" => Ok("INDEX"),
+        "UNIQUE" => Ok("UNIQUE"),
+        "FULLTEXT" => Ok("FULLTEXT"),
+        other => Err(format!("不支持的索引类型: {other}")),
+    }
+}
+
+fn resolve_index_columns(
+    index: &TableIndexDraft,
+    draft: &TableDesignDraft,
+) -> Result<Vec<String>, String> {
+    if index.columns.is_empty() {
+        return Err(format!("索引「{}」至少需要选择一个字段", index.name));
+    }
+    let mut seen = HashSet::new();
+    let mut out = Vec::with_capacity(index.columns.len());
+    for col in &index.columns {
+        let trimmed = col.trim();
+        let Some(matched) = draft
+            .columns
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(trimmed))
+        else {
+            return Err(format!(
+                "索引「{}」引用了不存在的字段: {}",
+                index.name, col
+            ));
+        };
+        let key = matched.name.to_ascii_lowercase();
+        if !seen.insert(key) {
+            return Err(format!(
+                "索引「{}」包含重复字段: {}",
+                index.name, matched.name
+            ));
+        }
+        out.push(matched.name.clone());
+    }
+    Ok(out)
+}
+
+pub fn create_index_definition_sql(
+    index: &TableIndexDraft,
+    draft: &TableDesignDraft,
+) -> Result<String, String> {
+    validate_identifier(&index.name)?;
+    if index.name.eq_ignore_ascii_case("PRIMARY") {
+        return Err("索引名不能为 PRIMARY".into());
+    }
+    let index_type = normalize_index_type(&index.index_type)?;
+    let columns = resolve_index_columns(index, draft)?;
+    let cols_sql = columns
+        .iter()
+        .map(|col| format!("`{}`", escape_ident(col)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let prefix = match index_type {
+        "UNIQUE" => "UNIQUE KEY",
+        "FULLTEXT" => "FULLTEXT KEY",
+        _ => "KEY",
+    };
+    let comment_sql = if index.comment.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" COMMENT {}", sql_string(index.comment.trim()))
+    };
+    Ok(format!(
+        "{prefix} `{}` ({cols_sql}){comment_sql}",
+        escape_ident(index.name.trim())
+    ))
 }
 
 pub fn column_definition_sql(
@@ -234,7 +336,7 @@ pub fn column_definition_sql(
         "NULL"
     };
     let default_sql = default_sql(draft)?;
-    let extra_sql = safe_column_extra_sql(current);
+    let extra_sql = safe_column_extra_sql(draft, current);
     let comment_sql = if draft.comment.is_empty() {
         String::new()
     } else {
@@ -277,10 +379,27 @@ fn canonical_meta(current: &TableDesignMeta) -> String {
         })
         .collect::<Vec<_>>()
         .join(";");
+    let indexes = current
+        .indexes
+        .iter()
+        .map(|idx| {
+            format!(
+                "{}:{}:{}:{}",
+                idx.name,
+                idx.index_type,
+                idx.columns.join(","),
+                idx.comment
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
     format!(
-        "source={}|comment={}|columns={columns}",
+        "source={}|comment={}|engine={}|charset={}|collation={}|columns={columns}|indexes={indexes}",
         canonical_source(design_source(current)),
-        current.table_comment
+        current.table_comment,
+        current.engine,
+        current.charset,
+        current.collation
     )
 }
 
@@ -290,7 +409,7 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
         .iter()
         .map(|column| {
             format!(
-                "{}>{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}:{:?}:{}:{}",
+                "{}>{}:{}:{:?}:{:?}:{}:{}:{:?}:{}:{:?}:{}:{:?}:{:?}:{}:{}",
                 column.original_name,
                 column.name,
                 normalize_data_type(&column.data_type),
@@ -303,13 +422,36 @@ fn canonical_draft(draft: &TableDesignDraft) -> String {
                 column.default_value,
                 column.comment,
                 column.unsigned,
+                column.auto_increment,
                 has_type_modifier(&column.data_type, "unsigned"),
                 has_type_modifier(&column.data_type, "signed"),
             )
         })
         .collect::<Vec<_>>()
         .join(";");
-    format!("comment={}|columns={columns}", draft.table_comment)
+    let indexes = draft
+        .indexes
+        .as_ref()
+        .map(|list| {
+            list.iter()
+                .map(|idx| {
+                    format!(
+                        "{}>{}:{}:{}:{}",
+                        idx.original_name,
+                        idx.name,
+                        idx.index_type,
+                        idx.columns.join(","),
+                        idx.comment
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(";")
+        })
+        .unwrap_or_default();
+    format!(
+        "comment={}|engine={:?}|charset={:?}|collation={:?}|columns={columns}|indexes={indexes}",
+        draft.table_comment, draft.engine, draft.charset, draft.collation
+    )
 }
 
 pub fn schema_signature(current: &TableDesignMeta) -> String {
@@ -478,6 +620,17 @@ fn build_human_descriptions(
             }
         }
 
+        // 自增
+        let old_auto_inc = has_auto_increment_extra(&current_column.extra);
+        let new_auto_inc = effective_auto_increment(current_column, draft_column);
+        if old_auto_inc != new_auto_inc {
+            col_changes.push(if new_auto_inc {
+                "开启自增 (AUTO_INCREMENT)".into()
+            } else {
+                "关闭自增 (AUTO_INCREMENT)".into()
+            });
+        }
+
         // 主键
         if current_column.is_primary_key != draft_column.primary_key {
             if draft_column.primary_key {
@@ -544,6 +697,9 @@ fn build_human_descriptions(
         if effective.primary_key {
             parts.push("主键".into());
         }
+        if effective.auto_increment.unwrap_or(false) {
+            parts.push("自增".into());
+        }
         descriptions.push(format!(
             "➕ 新增字段「{}」：{}",
             effective.name,
@@ -560,6 +716,46 @@ fn build_human_descriptions(
     }
     if !pk_changes.is_empty() {
         descriptions.push(format!("🔑 {}", pk_changes.join("；")));
+    }
+
+    // 4. 索引变更
+    if let Some(draft_indexes) = &draft.indexes {
+        let (dropped_indexes, added_indexes) = diff_indexes(current, draft, draft_indexes)?;
+        for name in dropped_indexes {
+            descriptions.push(format!("🗑️ 删除索引「{}」", name));
+        }
+        for idx in added_indexes {
+            let kind = normalize_index_type(&idx.index_type)?;
+            let cols = resolve_index_columns(idx, draft)?;
+            descriptions.push(format!(
+                "📇 新增索引「{}」：{} ({})",
+                idx.name.trim(),
+                kind,
+                cols.join(", ")
+            ));
+        }
+    }
+
+    // 5. 表选项变更
+    if let Some(engine) = draft.engine.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if !engine.eq_ignore_ascii_case(&current.engine) {
+            descriptions.push(format!(
+                "⚙️ 存储引擎：{} → {}",
+                if current.engine.is_empty() { "(默认)" } else { &current.engine },
+                validate_engine(engine)?
+            ));
+        }
+    }
+    let next_charset = draft.charset.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let next_collation = draft.collation.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if next_charset.is_some_and(|cs| !cs.eq_ignore_ascii_case(&current.charset))
+        || next_collation.is_some_and(|col| !col.eq_ignore_ascii_case(&current.collation))
+    {
+        descriptions.push(format!(
+            "⚙️ 字符集/排序规则：{} / {}",
+            next_charset.unwrap_or(&current.charset),
+            next_collation.unwrap_or(&current.collation)
+        ));
     }
 
     Ok(descriptions)
@@ -679,6 +875,36 @@ pub(crate) fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesig
         }
     }
 
+    if let Some(engine) = draft.engine.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_engine(engine)?;
+    }
+    if let Some(charset) = draft.charset.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_charset_token(charset, "字符集")?;
+    }
+    if let Some(collation) = draft.collation.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        validate_charset_token(collation, "排序规则")?;
+    }
+
+    let mut leading_index_cols: HashSet<String> = HashSet::new();
+    if let Some(indexes) = &draft.indexes {
+        let mut seen_index_names = HashSet::new();
+        for index in indexes {
+            validate_identifier(&index.name)?;
+            if index.name.eq_ignore_ascii_case("PRIMARY") {
+                return Err("索引名不能为 PRIMARY".into());
+            }
+            if !seen_index_names.insert(index.name.trim().to_ascii_lowercase()) {
+                return Err(format!("索引名重复: {}", index.name));
+            }
+            normalize_index_type(&index.index_type)?;
+            let cols = resolve_index_columns(index, draft)?;
+            if let Some(first) = cols.first() {
+                leading_index_cols.insert(first.to_ascii_lowercase());
+            }
+        }
+    }
+
+    let mut auto_increment_count = 0usize;
     for column in &draft.columns {
         let effective = if column.original_name.trim().is_empty() {
             // New column: no current metadata to inherit from.
@@ -714,20 +940,41 @@ pub(crate) fn validate_draft_shape(current: &TableDesignMeta, draft: &TableDesig
                 effective.name
             ));
         }
-        if let Some(current_column) = current_column {
-            if has_auto_increment_extra(&current_column.extra) {
-                if !effective.primary_key {
-                    return Err(format!(
-                        "auto_increment column must remain a primary key: {}",
-                        current_column.column_name
-                    ));
-                }
-                if !supports_auto_increment(&effective.data_type) {
-                    return Err(format!(
-                        "auto_increment column must remain an integer type: {}",
-                        current_column.column_name
-                    ));
-                }
+        let is_auto_inc = current_column
+            .map(|current| effective_auto_increment(current, &effective))
+            .unwrap_or_else(|| effective.auto_increment.unwrap_or(false));
+        if is_auto_inc {
+            auto_increment_count += 1;
+            if auto_increment_count > 1 {
+                return Err("一张表最多只能有一个自增(AUTO_INCREMENT)字段".into());
+            }
+            if !supports_auto_increment(&effective.data_type) {
+                return Err(format!(
+                    "auto_increment column must remain an integer type: {}",
+                    effective.name
+                ));
+            }
+            if effective.nullable {
+                return Err(format!(
+                    "auto_increment 字段必须为非空(NOT NULL): {}",
+                    effective.name
+                ));
+            }
+            let default_mode = effective.default_mode.trim().to_ascii_lowercase();
+            if !default_mode.is_empty() && default_mode != "none" {
+                return Err(format!(
+                    "auto_increment 字段不能同时设置默认值: {}",
+                    effective.name
+                ));
+            }
+            let has_key = effective.primary_key
+                || (draft.indexes.is_some()
+                    && leading_index_cols.contains(&effective.name.to_ascii_lowercase()));
+            if !has_key {
+                return Err(format!(
+                    "auto_increment column must remain a primary key: {}",
+                    effective.name
+                ));
             }
         }
         default_sql(&effective)?;
@@ -771,6 +1018,7 @@ fn current_as_draft(column: &ColumnDesignMeta) -> ColumnDesignDraft {
         },
         length: column.length.or(parsed_length),
         unsigned: Some(has_type_modifier(&column.column_type, "unsigned")),
+        auto_increment: Some(has_auto_increment_extra(&column.extra)),
         scale: column.scale.or(parsed_scale),
         nullable: column.is_nullable,
         primary_key: column.is_primary_key,
@@ -851,9 +1099,62 @@ fn column_changed(current: &ColumnDesignMeta, draft: &ColumnDesignDraft) -> Resu
         || column_type_sql(&current_draft)? != column_type_sql(&effective)?
         || current.is_nullable != effective.nullable
         || current.is_primary_key != effective.primary_key
+        || has_auto_increment_extra(&current.extra) != effective_auto_increment(current, &effective)
         || current.default_mode.to_ascii_lowercase() != effective.default_mode.to_ascii_lowercase()
         || current.default_value != effective.default_value
         || current.column_comment != effective.comment)
+}
+
+fn diff_indexes<'a>(
+    current: &TableDesignMeta,
+    draft: &TableDesignDraft,
+    draft_indexes: &'a [TableIndexDraft],
+) -> Result<(Vec<String>, Vec<&'a TableIndexDraft>), String> {
+    let current_lookup: HashMap<String, &TableIndexMeta> = current
+        .indexes
+        .iter()
+        .map(|idx| (idx.name.to_ascii_lowercase(), idx))
+        .collect();
+    let mut kept_originals: HashSet<String> = HashSet::new();
+    let mut added_or_modified: Vec<&'a TableIndexDraft> = Vec::new();
+
+    for draft_idx in draft_indexes {
+        let orig = draft_idx.original_name.trim();
+        let norm_type = normalize_index_type(&draft_idx.index_type)?;
+        let resolved_cols = resolve_index_columns(draft_idx, draft)?;
+        let unchanged = if orig.is_empty() {
+            false
+        } else if let Some(cur) = current_lookup.get(&orig.to_ascii_lowercase()) {
+            let cur_cols: Vec<String> = cur
+                .columns
+                .iter()
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+            let next_cols: Vec<String> = resolved_cols
+                .iter()
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+            cur.name == draft_idx.name.trim()
+                && cur.index_type.eq_ignore_ascii_case(norm_type)
+                && cur_cols == next_cols
+                && cur.comment == draft_idx.comment.trim()
+        } else {
+            false
+        };
+        if unchanged {
+            kept_originals.insert(orig.to_ascii_lowercase());
+        } else {
+            added_or_modified.push(draft_idx);
+        }
+    }
+
+    let dropped: Vec<String> = current
+        .indexes
+        .iter()
+        .filter(|cur| !kept_originals.contains(&cur.name.to_ascii_lowercase()))
+        .map(|cur| cur.name.clone())
+        .collect();
+    Ok((dropped, added_or_modified))
 }
 
 fn primary_key_original_names_from_meta(current: &TableDesignMeta) -> Vec<String> {
@@ -970,11 +1271,11 @@ pub fn build_table_design_statements(
     );
     let mut clauses = Vec::new();
 
-    let old_pk_identity = primary_key_original_names_from_meta(current);
-    let new_pk_identity = primary_key_original_names_from_draft(draft);
-    let primary_key_changed = old_pk_identity != new_pk_identity;
-    if primary_key_changed && !old_pk_identity.is_empty() {
-        clauses.push("DROP PRIMARY KEY".to_string());
+    if let Some(draft_indexes) = &draft.indexes {
+        let (dropped_indexes, _) = diff_indexes(current, draft, draft_indexes)?;
+        for index_name in dropped_indexes {
+            clauses.push(format!("DROP INDEX `{}`", escape_ident(&index_name)));
+        }
     }
 
     let current_lookup = current
@@ -990,15 +1291,6 @@ pub fn build_table_design_statements(
             (!original.is_empty()).then(|| original.to_ascii_lowercase())
         })
         .collect::<HashSet<_>>();
-    for current_column in &current.columns {
-        if !retained_originals.contains(&current_column.column_name.to_ascii_lowercase()) {
-            clauses.push(format!(
-                "DROP COLUMN `{}`",
-                escape_ident(&current_column.column_name)
-            ));
-        }
-    }
-
     let current_order = current_existing_order(current)
         .into_iter()
         .filter(|name| retained_originals.contains(name))
@@ -1007,6 +1299,66 @@ pub fn build_table_design_statements(
     let current_predecessors = predecessor_by_identity(&current_order);
     let draft_predecessors = predecessor_by_identity(&draft_order);
     let existing_order_changed = current_order != draft_order;
+
+    let old_pk_identity = primary_key_original_names_from_meta(current);
+    let new_pk_identity = primary_key_original_names_from_draft(draft);
+    let primary_key_changed = old_pk_identity != new_pk_identity;
+
+    let mut pre_drop_pk_columns: HashSet<String> = HashSet::new();
+    if primary_key_changed && !old_pk_identity.is_empty() {
+        let mut temp_prev: Option<String> = None;
+        for draft_column in &draft.columns {
+            if draft_column.original_name.trim().is_empty() {
+                temp_prev = Some(draft_column.name.clone());
+                continue;
+            }
+            let original_key = draft_column.original_name.to_ascii_lowercase();
+            if let Some(current_column) = current_lookup.get(&original_key) {
+                let effective = effective_draft(current_column, draft_column);
+                if has_auto_increment_extra(&current_column.extra)
+                    && !effective_auto_increment(current_column, &effective)
+                {
+                    let definition = column_definition_sql(&effective, current_column)?;
+                    let needs_position = existing_order_changed
+                        && current_predecessors.get(&original_key)
+                            != draft_predecessors.get(&original_key);
+                    let position_sql = if needs_position {
+                        position_clause(temp_prev.as_deref())
+                    } else {
+                        String::new()
+                    };
+                    if effective.name != current_column.column_name {
+                        clauses.push(format!(
+                            "CHANGE COLUMN `{}` `{}` {}{}",
+                            escape_ident(&current_column.column_name),
+                            escape_ident(&effective.name),
+                            definition,
+                            position_sql,
+                        ));
+                    } else {
+                        clauses.push(format!(
+                            "MODIFY COLUMN `{}` {}{}",
+                            escape_ident(&effective.name),
+                            definition,
+                            position_sql,
+                        ));
+                    }
+                    pre_drop_pk_columns.insert(original_key);
+                }
+                temp_prev = Some(effective.name);
+            }
+        }
+        clauses.push("DROP PRIMARY KEY".to_string());
+    }
+
+    for current_column in &current.columns {
+        if !retained_originals.contains(&current_column.column_name.to_ascii_lowercase()) {
+            clauses.push(format!(
+                "DROP COLUMN `{}`",
+                escape_ident(&current_column.column_name)
+            ));
+        }
+    }
 
     let mut previous_final_name: Option<String> = None;
     for draft_column in &draft.columns {
@@ -1028,6 +1380,10 @@ pub fn build_table_design_statements(
             .get(&original_key)
             .ok_or_else(|| format!("unknown original column: {}", draft_column.original_name))?;
         let effective = effective_draft(current_column, draft_column);
+        if pre_drop_pk_columns.contains(&original_key) {
+            previous_final_name = Some(effective.name);
+            continue;
+        }
         let definition = column_definition_sql(&effective, current_column)?;
         let needs_position = existing_order_changed
             && current_predecessors.get(&original_key) != draft_predecessors.get(&original_key);
@@ -1067,6 +1423,58 @@ pub fn build_table_design_statements(
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
+    }
+
+    if let Some(draft_indexes) = &draft.indexes {
+        let (_, added_indexes) = diff_indexes(current, draft, draft_indexes)?;
+        for idx in added_indexes {
+            let kind = normalize_index_type(&idx.index_type)?;
+            let cols = resolve_index_columns(idx, draft)?;
+            let cols_sql = cols
+                .iter()
+                .map(|col| format!("`{}`", escape_ident(col)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let prefix = match kind {
+                "UNIQUE" => "ADD UNIQUE INDEX",
+                "FULLTEXT" => "ADD FULLTEXT INDEX",
+                _ => "ADD INDEX",
+            };
+            let comment_sql = if idx.comment.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" COMMENT {}", sql_string(idx.comment.trim()))
+            };
+            clauses.push(format!(
+                "{prefix} `{}` ({cols_sql}){comment_sql}",
+                escape_ident(idx.name.trim())
+            ));
+        }
+    }
+
+    if let Some(engine) = draft.engine.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let normalized_engine = validate_engine(engine)?;
+        if !normalized_engine.eq_ignore_ascii_case(&current.engine) {
+            clauses.push(format!("ENGINE = {normalized_engine}"));
+        }
+    }
+
+    let next_charset = draft.charset.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let next_collation = draft.collation.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let charset_changed = next_charset.is_some_and(|cs| !cs.eq_ignore_ascii_case(&current.charset));
+    let collation_changed = next_collation.is_some_and(|col| !col.eq_ignore_ascii_case(&current.collation));
+    if charset_changed || collation_changed {
+        let effective_charset = next_charset
+            .or_else(|| (!current.charset.is_empty()).then_some(current.charset.as_str()));
+        if let Some(cs) = effective_charset {
+            let cs = validate_charset_token(cs, "字符集")?;
+            if let Some(col) = next_collation {
+                let col = validate_charset_token(col, "排序规则")?;
+                clauses.push(format!("DEFAULT CHARACTER SET = {cs} COLLATE = {col}"));
+            } else {
+                clauses.push(format!("DEFAULT CHARACTER SET = {cs}"));
+            }
+        }
     }
 
     if current.table_comment != draft.table_comment {
@@ -1188,12 +1596,16 @@ mod tests {
             source: source(),
             table_name: "player".into(),
             table_comment: "玩家账号表".into(),
+            engine: "InnoDB".into(),
+            charset: "utf8mb4".into(),
+            collation: "utf8mb4_general_ci".into(),
             schema_signature: None,
             columns: vec![
                 col("id", "int", false, true, "玩家ID"),
                 col("username", "varchar(32)", false, false, "用户名"),
                 col("nickname", "varchar(64)", true, false, "昵称"),
             ],
+            indexes: Vec::new(),
         }
     }
 
@@ -1209,6 +1621,9 @@ mod tests {
     fn draft_from(meta: &TableDesignMeta) -> TableDesignDraft {
         TableDesignDraft {
             table_comment: meta.table_comment.clone(),
+            engine: None,
+            charset: None,
+            collation: None,
             columns: meta
                 .columns
                 .iter()
@@ -1217,6 +1632,7 @@ mod tests {
                     name: column.column_name.clone(),
                     data_type: column.data_type.clone(),
                     unsigned: None,
+                    auto_increment: None,
                     length: column.length,
                     scale: column.scale,
                     nullable: column.is_nullable,
@@ -1227,6 +1643,7 @@ mod tests {
                     comment: column.column_comment.clone(),
                 })
                 .collect(),
+            indexes: None,
         }
     }
 
@@ -1380,6 +1797,7 @@ mod tests {
                 name: "score".into(),
                 data_type: "int".into(),
                 unsigned: None,
+                auto_increment: None,
                 length: None,
                 scale: None,
                 nullable: false,
@@ -1532,6 +1950,7 @@ mod tests {
             name: "status".into(),
             data_type: "enum".into(),
             unsigned: None,
+            auto_increment: None,
             length: None,
             scale: None,
             nullable: true,
@@ -1883,6 +2302,7 @@ mod tests {
             name: "new_column".into(),
             data_type: "int".into(),
             unsigned: None,
+            auto_increment: None,
             length: None,
             scale: None,
             nullable: true,
@@ -1905,6 +2325,7 @@ mod tests {
             name: "score".into(),
             data_type: "int".into(),
             unsigned: None,
+            auto_increment: None,
             length: None,
             scale: None,
             nullable: false,
@@ -2048,5 +2469,79 @@ mod tests {
             assert!(column_definition_sql(&draft, &current).unwrap().contains("DEFAULT NULL"));
             draft.nullable = false;
         }
+    }
+
+    #[test]
+    fn toggling_auto_increment_and_dropping_pk_orders_modify_before_drop_primary_key() {
+        let mut current = meta();
+        current.columns[0].extra = "auto_increment".into();
+
+        // Turn auto_increment on for a non-AI table first
+        let plain = meta();
+        let mut add_ai = draft_from(&plain);
+        add_ai.columns[0].auto_increment = Some(true);
+        add_ai.columns[0].unsigned = Some(true);
+        let add_res = preview(&plain, &add_ai);
+        assert!(add_res.statements[0].contains("MODIFY COLUMN `id` int unsigned NOT NULL AUTO_INCREMENT"));
+
+        // Turn auto_increment off while dropping PK: MODIFY must appear before DROP PRIMARY KEY
+        let mut drop_pk = draft_from(&current);
+        drop_pk.columns[0].auto_increment = Some(false);
+        drop_pk.columns[0].primary_key = false;
+        drop_pk.columns[1].primary_key = true;
+        drop_pk.columns[1].primary_key_ordinal = Some(1);
+        let drop_res = preview(&current, &drop_pk);
+        let sql = &drop_res.statements[0];
+        let modify_pos = sql.find("MODIFY COLUMN `id`").unwrap();
+        let drop_pk_pos = sql.find("DROP PRIMARY KEY").unwrap();
+        assert!(modify_pos < drop_pk_pos, "sql was: {sql}");
+        assert!(!sql[modify_pos..drop_pk_pos].contains("AUTO_INCREMENT"));
+    }
+
+    #[test]
+    fn secondary_indexes_and_table_options_diff_cleanly() {
+        let mut current = meta();
+        current.indexes = vec![
+            TableIndexMeta {
+                name: "idx_username".into(),
+                index_type: "UNIQUE".into(),
+                columns: vec!["username".into()],
+                comment: String::new(),
+            },
+            TableIndexMeta {
+                name: "idx_nick".into(),
+                index_type: "INDEX".into(),
+                columns: vec!["nickname".into()],
+                comment: String::new(),
+            },
+        ];
+        let mut draft = draft_from(&current);
+        draft.engine = Some("MyISAM".into());
+        draft.charset = Some("utf8mb4".into());
+        draft.collation = Some("utf8mb4_unicode_ci".into());
+        draft.indexes = Some(vec![
+            TableIndexDraft {
+                original_name: "idx_username".into(),
+                name: "idx_username".into(),
+                index_type: "UNIQUE".into(),
+                columns: vec!["username".into()],
+                comment: String::new(),
+            },
+            TableIndexDraft {
+                original_name: String::new(),
+                name: "idx_user_nick".into(),
+                index_type: "INDEX".into(),
+                columns: vec!["username".into(), "nickname".into()],
+                comment: "composite".into(),
+            },
+        ]);
+
+        let result = preview(&current, &draft);
+        let sql = &result.statements[0];
+        assert!(sql.contains("DROP INDEX `idx_nick`"), "sql: {sql}");
+        assert!(!sql.contains("DROP INDEX `idx_username`"), "sql: {sql}");
+        assert!(sql.contains("ADD INDEX `idx_user_nick` (`username`, `nickname`) COMMENT 'composite'"), "sql: {sql}");
+        assert!(sql.contains("ENGINE = MyISAM"), "sql: {sql}");
+        assert!(sql.contains("DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci"), "sql: {sql}");
     }
 }

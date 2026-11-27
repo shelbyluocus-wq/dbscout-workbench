@@ -171,6 +171,18 @@ impl RuntimeResources {
             .any(|(key, cell)| key.connection_id() == connection_id && cell.get().is_some())
     }
 
+    pub async fn close_database(&self, key: &PoolKey) -> usize {
+        let pools = self
+            .database_pools
+            .remove_matching(|candidate| candidate == key)
+            .await;
+        let count = pools.len();
+        for pool in pools {
+            pool.close().await;
+        }
+        count
+    }
+
     pub async fn close_connection(&self, connection_id: &str) -> usize {
         let mut pools = self
             .server_pools
