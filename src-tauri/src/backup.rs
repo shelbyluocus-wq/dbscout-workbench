@@ -5,17 +5,17 @@
 //! exhaust disk. Also implements snapshot restore (with an automatic
 //! pre-restore snapshot so a restore can itself be undone).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use sqlx::{MySqlPool, Row};
+use sqlx::{MySqlConnection, MySqlPool, Row};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::task::JoinSet;
 
-use crate::db::{connect_database, connect_database_with_max_connections, escape_ident};
+use crate::db::{connect_database, connect_database_with_pool_options, escape_ident};
 use crate::mysql_text;
 use crate::sync::{count_rows, list_base_tables, set_session_lock_wait_limits, show_create_table};
 use crate::types::{AppState, BackupConfig, SnapshotInfo};
@@ -24,6 +24,8 @@ pub const SNAPSHOT_PROGRESS_EVENT: &str = "snapshot-progress";
 
 const INSERT_BATCH_SIZE: usize = 500;
 const SNAPSHOT_WORKER_CONCURRENCY: usize = 6;
+const SNAPSHOT_POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
+const SNAPSHOT_RETRY_ATTEMPTS: usize = 3;
 const SNAPSHOT_PROGRESS_INTERVAL: Duration = Duration::from_millis(120);
 const RESTORE_DROP_BATCH_SIZE: usize = 50;
 
@@ -156,8 +158,38 @@ pub fn is_system_database(database: &str) -> bool {
 /// Build a dedicated snapshot pool so concurrent table reads do not steal
 /// connections from the runtime pool used by foreground UI operations.
 async fn snapshot_pool(mysql_url: &str) -> Result<MySqlPool, String> {
-    connect_database_with_max_connections(mysql_url, None, SNAPSHOT_WORKER_CONCURRENCY as u32)
-        .await
+    connect_database_with_pool_options(
+        mysql_url,
+        None,
+        SNAPSHOT_WORKER_CONCURRENCY as u32,
+        SNAPSHOT_POOL_ACQUIRE_TIMEOUT,
+    )
+    .await
+}
+
+fn should_count_rows_for_snapshot(large_table_threshold: u64) -> bool {
+    large_table_threshold < u64::MAX
+}
+
+fn is_transient_connection_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("server has gone away")
+        || lower.contains("lost connection")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
+        || lower.contains("unexpected eof")
+        || lower.contains("connection closed")
+        || lower.contains("pool timed out")
+        || lower.contains("timed out")
+}
+
+fn is_retryable_snapshot_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("lock wait timeout")
+        || lower.contains("metadata lock")
+        || lower.contains("error 1205")
+        || lower.contains("error 3572")
+        || is_transient_connection_error(error)
 }
 
 enum PreparedSnapshotTable {
@@ -172,71 +204,118 @@ enum PreparedSnapshotTable {
     },
 }
 
-async fn prepare_table_snapshot(
-    pool: MySqlPool,
-    database: String,
-    table: String,
-    row_count: u64,
-    large_table_threshold: u64,
-    preloaded_columns: Option<Vec<(String, String)>>,
-) -> Result<PreparedSnapshotTable, String> {
-    if row_count > large_table_threshold {
-        return Ok(PreparedSnapshotTable::Skipped { table, row_count });
-    }
-
+async fn prepare_table_snapshot_once(
+    pool: &MySqlPool,
+    database: &str,
+    table: &str,
+    row_count: Option<u64>,
+    preloaded_columns: Option<&[(String, String)]>,
+) -> Result<(PreparedSnapshotTable, bool), String> {
     let mut conn = pool
         .acquire()
         .await
         .map_err(|error| format!("获取连接失败: {error}"))?;
-    set_session_lock_wait_limits(&mut conn).await?;
+    let work: Result<PreparedSnapshotTable, String> = async {
+        set_session_lock_wait_limits(&mut conn).await?;
 
-    let ddl = show_create_table(&mut conn, &database, &table).await?;
-    let mut sql_chunk = String::with_capacity(ddl.len() + 256);
-    sql_chunk.push_str(&format!("DROP TABLE IF EXISTS `{}`;\n", escape_ident(&table)));
-    sql_chunk.push_str(&format_dump_statement(&ddl));
+        let ddl = show_create_table(&mut conn, database, table).await?;
+        let mut sql_chunk = String::with_capacity(ddl.len() + 256);
+        sql_chunk.push_str(&format!("DROP TABLE IF EXISTS `{}`;\n", escape_ident(table)));
+        sql_chunk.push_str(&format_dump_statement(&ddl));
 
-    let columns_with_types = match preloaded_columns {
-        Some(cols) if !cols.is_empty() => cols,
-        _ => list_columns_with_type(&pool, &database, &table).await?,
-    };
-    let columns: Vec<String> = columns_with_types
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect();
-    if columns.is_empty() || row_count == 0 {
-        return Ok(PreparedSnapshotTable::Dumped {
-            table,
-            rows: 0,
-            sql_chunk,
-        });
-    }
-
-    let col_list = columns
-        .iter()
-        .map(|column| format!("`{}`", escape_ident(column)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let select_sql = build_select_sql(&database, &table, &columns_with_types);
-    let rows = sqlx::query(&select_sql)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|error| format!("读取表 {table} 数据失败: {error}"))?;
-    let mut value_rows = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let mut values = Vec::with_capacity(columns.len());
-        for (i, _) in columns.iter().enumerate() {
-            values.push(format_row_value(row, i));
+        let owned_columns;
+        let columns_with_types: &[(String, String)] = match preloaded_columns {
+            Some(cols) if !cols.is_empty() => cols,
+            _ => {
+                owned_columns = list_columns_with_type(&mut conn, database, table).await?;
+                &owned_columns
+            }
+        };
+        if columns_with_types.is_empty() || row_count == Some(0) {
+            return Ok(PreparedSnapshotTable::Dumped {
+                table: table.to_string(),
+                rows: 0,
+                sql_chunk,
+            });
         }
-        value_rows.push(format!("({})", values.join(", ")));
+
+        let col_list = columns_with_types
+            .iter()
+            .map(|(name, _)| format!("`{}`", escape_ident(name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let select_sql = build_select_sql(database, table, columns_with_types);
+        let rows = sqlx::query(&select_sql)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|error| format!("读取表 {table} 数据失败: {error}"))?;
+        let mut value_rows = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let mut values = Vec::with_capacity(columns_with_types.len());
+            for (i, (_, data_type)) in columns_with_types.iter().enumerate() {
+                values.push(format_row_value_for_type(row, i, data_type));
+            }
+            value_rows.push(format!("({})", values.join(", ")));
+        }
+        if !value_rows.is_empty() {
+            sql_chunk.push_str(&format_insert_batches(table, &col_list, &value_rows));
+        }
+        Ok(PreparedSnapshotTable::Dumped {
+            table: table.to_string(),
+            rows: value_rows.len() as u64,
+            sql_chunk,
+        })
     }
-    if !value_rows.is_empty() {
-        sql_chunk.push_str(&format_insert_batches(&table, &col_list, &value_rows));
+    .await;
+    match work {
+        Ok(prepared) => Ok((prepared, false)),
+        Err(error) => {
+            let fatal = is_transient_connection_error(&error);
+            if fatal {
+                conn.close_on_drop();
+            }
+            Err(error)
+        }
     }
-    Ok(PreparedSnapshotTable::Dumped {
-        table,
-        rows: value_rows.len() as u64,
-        sql_chunk,
-    })
+}
+
+async fn prepare_table_snapshot(
+    pool: MySqlPool,
+    database: String,
+    table: String,
+    row_count: Option<u64>,
+    large_table_threshold: u64,
+    preloaded_columns: Option<Vec<(String, String)>>,
+) -> Result<PreparedSnapshotTable, String> {
+    if let Some(count) = row_count {
+        if count > large_table_threshold {
+            return Ok(PreparedSnapshotTable::Skipped {
+                table,
+                row_count: count,
+            });
+        }
+    }
+
+    for attempt in 1..=SNAPSHOT_RETRY_ATTEMPTS {
+        match prepare_table_snapshot_once(
+            &pool,
+            &database,
+            &table,
+            row_count,
+            preloaded_columns.as_deref(),
+        )
+        .await
+        {
+            Ok((prepared, _)) => return Ok(prepared),
+            Err(error)
+                if is_retryable_snapshot_error(&error) && attempt < SNAPSHOT_RETRY_ATTEMPTS =>
+            {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("snapshot retry loop always returns")
 }
 
 /// Generate one `.sql` snapshot for a single database under a connection.
@@ -318,104 +397,113 @@ where
         tables.retain(|table| wanted.contains(&table.to_ascii_lowercase()));
     }
     let total_tables = tables.len();
-    on_progress(SyncSnapshotProgress {
-        done: 0,
-        total: total_tables as u64,
-        current_table: None,
-        message: format!("正在统计 {total_tables} 张表的数据量"),
-    });
-    let (counts, mut columns_by_table) = if tables.is_empty() {
-        (HashMap::new(), HashMap::new())
+    let (counts, columns_by_table) = if tables.is_empty() {
+        (HashMap::new(), AllColumnsLookup::default())
     } else {
-        tokio::try_join!(
-            count_rows(pool, database, &tables),
-            list_all_columns_with_type(pool, database)
-        )?
+        on_progress(SyncSnapshotProgress {
+            done: 0,
+            total: total_tables as u64,
+            current_table: None,
+            message: format!("正在读取 {total_tables} 张表的字段结构"),
+        });
+        let columns_by_table = list_all_columns_with_type(pool, database).await?;
+        let counts = if should_count_rows_for_snapshot(config.large_table_threshold) {
+            on_progress(SyncSnapshotProgress {
+                done: 0,
+                total: total_tables as u64,
+                current_table: None,
+                message: format!("正在统计 {total_tables} 张表的数据量"),
+            });
+            count_rows(pool, database, &tables).await?
+        } else {
+            HashMap::new()
+        };
+        (counts, columns_by_table)
     };
 
     let raw_file = tokio::fs::File::create(&sql_path)
         .await
         .map_err(|error| format!("创建快照文件失败: {error}"))?;
-    let mut file = tokio::io::BufWriter::with_capacity(512 * 1024, raw_file);
-    use tokio::io::AsyncWriteExt;
-    file.write_all(
-        format!("-- snapshot connection={connection_id} database={database} ts={ts}\n").as_bytes(),
-    )
-    .await
-    .map_err(|error| format!("写入快照失败: {error}"))?;
-    file.write_all(b"SET FOREIGN_KEY_CHECKS=0;\n")
+    let write_result: Result<SnapshotManifest, String> = async {
+        let mut file = tokio::io::BufWriter::with_capacity(512 * 1024, raw_file);
+        use tokio::io::AsyncWriteExt;
+        file.write_all(
+            format!("-- snapshot connection={connection_id} database={database} ts={ts}\n")
+                .as_bytes(),
+        )
         .await
         .map_err(|error| format!("写入快照失败: {error}"))?;
+        file.write_all(b"SET FOREIGN_KEY_CHECKS=0;\n")
+            .await
+            .map_err(|error| format!("写入快照失败: {error}"))?;
 
-    let mut manifest = SnapshotManifest {
-        connection_id: connection_id.to_string(),
-        database: database.to_string(),
-        ts: ts.clone(),
-        tables: Vec::with_capacity(total_tables),
-        skipped_tables: Vec::new(),
-    };
-
-    if let Some(first_table) = tables.first() {
-        on_progress(SyncSnapshotProgress {
-            done: 0,
-            total: total_tables as u64,
-            current_table: Some(first_table.clone()),
-            message: format!("正在并行写入本地快照（共 {total_tables} 张表）"),
-        });
-    }
-
-    let threshold = config.large_table_threshold;
-    let mut work_iter = tables.iter().enumerate().map(|(index, table)| {
-        let row_count = counts
-            .get(table)
-            .copied()
-            .unwrap_or_else(|| counts.get(&table.to_lowercase()).copied().unwrap_or(0));
-        let cols = columns_by_table.remove(&table.to_lowercase());
-        (index, table.clone(), row_count, cols)
-    });
-
-    let mut join_set: JoinSet<Result<(usize, PreparedSnapshotTable), String>> = JoinSet::new();
-    for _ in 0..SNAPSHOT_WORKER_CONCURRENCY {
-        let Some((index, table, row_count, cols)) = work_iter.next() else {
-            break;
+        let mut manifest = SnapshotManifest {
+            connection_id: connection_id.to_string(),
+            database: database.to_string(),
+            ts: ts.clone(),
+            tables: Vec::with_capacity(total_tables),
+            skipped_tables: Vec::new(),
         };
-        let worker_pool = pool.clone();
-        let worker_db = database.to_string();
-        join_set.spawn(async move {
-            let prepared =
-                prepare_table_snapshot(worker_pool, worker_db, table, row_count, threshold, cols)
-                    .await?;
-            Ok((index, prepared))
-        });
-    }
 
-    let mut pending_in_order: BTreeMap<usize, PreparedSnapshotTable> = BTreeMap::new();
-    let mut next_write_index = 0usize;
-    let mut completed = 0usize;
-    let mut last_emit = Instant::now() - SNAPSHOT_PROGRESS_INTERVAL;
-    while let Some(join_result) = join_set.join_next().await {
-        let (index, prepared) =
-            join_result.map_err(|error| format!("快照任务执行异常: {error}"))??;
-        pending_in_order.insert(index, prepared);
-        if let Some((next_idx, table, row_count, cols)) = work_iter.next() {
-            let worker_pool = pool.clone();
-            let worker_db = database.to_string();
-            join_set.spawn(async move {
-                let next_prepared = prepare_table_snapshot(
-                    worker_pool,
-                    worker_db,
-                    table,
-                    row_count,
-                    threshold,
-                    cols,
-                )
-                .await?;
-                Ok((next_idx, next_prepared))
+        if let Some(first_table) = tables.first() {
+            on_progress(SyncSnapshotProgress {
+                done: 0,
+                total: total_tables as u64,
+                current_table: Some(first_table.clone()),
+                message: format!("正在并行写入本地快照（共 {total_tables} 张表）"),
             });
         }
 
-        while let Some(ready) = pending_in_order.remove(&next_write_index) {
-            next_write_index += 1;
+        let threshold = config.large_table_threshold;
+        let check_row_counts = should_count_rows_for_snapshot(threshold);
+        let mut work_iter = tables.iter().map(|table| {
+            let row_count = if check_row_counts {
+                Some(
+                    counts
+                        .get(table)
+                        .copied()
+                        .unwrap_or_else(|| counts.get(&table.to_lowercase()).copied().unwrap_or(0)),
+                )
+            } else {
+                None
+            };
+            let cols = columns_by_table.get(table).cloned();
+            (table.clone(), row_count, cols)
+        });
+
+        let mut join_set: JoinSet<Result<PreparedSnapshotTable, String>> = JoinSet::new();
+        for _ in 0..SNAPSHOT_WORKER_CONCURRENCY {
+            let Some((table, row_count, cols)) = work_iter.next() else {
+                break;
+            };
+            let worker_pool = pool.clone();
+            let worker_db = database.to_string();
+            join_set.spawn(async move {
+                prepare_table_snapshot(worker_pool, worker_db, table, row_count, threshold, cols)
+                    .await
+            });
+        }
+
+        let mut completed = 0usize;
+        let mut last_emit = Instant::now() - SNAPSHOT_PROGRESS_INTERVAL;
+        while let Some(join_result) = join_set.join_next().await {
+            let ready = join_result.map_err(|error| format!("快照任务执行异常: {error}"))??;
+            if let Some((table, row_count, cols)) = work_iter.next() {
+                let worker_pool = pool.clone();
+                let worker_db = database.to_string();
+                join_set.spawn(async move {
+                    prepare_table_snapshot(
+                        worker_pool,
+                        worker_db,
+                        table,
+                        row_count,
+                        threshold,
+                        cols,
+                    )
+                    .await
+                });
+            }
+
             completed += 1;
             let should_emit = completed == 1
                 || completed == total_tables
@@ -474,19 +562,31 @@ where
                 }
             }
         }
+
+        file.write_all(b"SET FOREIGN_KEY_CHECKS=1;\n")
+            .await
+            .map_err(|error| format!("写入快照失败: {error}"))?;
+        file.flush()
+            .await
+            .map_err(|error| format!("刷新快照文件失败: {error}"))?;
+        manifest.tables.sort_by(|a, b| a.name.cmp(&b.name));
+        manifest.skipped_tables.sort();
+
+        let manifest_json = serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("序列化清单失败: {error}"))?;
+        std::fs::write(&manifest_path, manifest_json)
+            .map_err(|error| format!("写入清单失败: {error}"))?;
+        Ok(manifest)
     }
+    .await;
 
-    file.write_all(b"SET FOREIGN_KEY_CHECKS=1;\n")
-        .await
-        .map_err(|error| format!("写入快照失败: {error}"))?;
-    file.flush()
-        .await
-        .map_err(|error| format!("刷新快照文件失败: {error}"))?;
-
-    let manifest_json = serde_json::to_string_pretty(&manifest)
-        .map_err(|error| format!("序列化清单失败: {error}"))?;
-    std::fs::write(&manifest_path, manifest_json)
-        .map_err(|error| format!("写入清单失败: {error}"))?;
+    let manifest = match write_result {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&sql_path).await;
+            return Err(error);
+        }
+    };
 
     emit_progress(
         app,
@@ -543,11 +643,12 @@ pub async fn create_sync_protection_snapshot<F>(
     config: &BackupConfig,
     job_id: &str,
     on_progress: F,
-) -> Result<SnapshotInfo, String>
+) -> Result<(SnapshotInfo, Option<String>), String>
 where
     F: FnMut(SyncSnapshotProgress),
 {
-    let protection_config = sync_protection_config(config);
+    let (protection_config, fallback_warning) =
+        resolve_sync_protection_config(app, config, connection_id, database)?;
     let pool = snapshot_pool(mysql_url).await?;
     let result = stream_snapshot_with_progress(
         app,
@@ -561,13 +662,74 @@ where
     .await;
     pool.close().await;
     let (sql_path, manifest) = result?;
-    snapshot_to_info(
+    let info = snapshot_to_info(
         connection_id,
         database,
         &sql_path,
         Some(manifest),
         "current",
-    )
+    )?;
+    Ok((info, fallback_warning))
+}
+
+fn ensure_writable_snapshot_dir(
+    app: &AppHandle,
+    config: &BackupConfig,
+    connection_id: &str,
+    database: &str,
+) -> Result<PathBuf, String> {
+    let dir = snapshots_root(app, config)?
+        .join(safe_segment(connection_id))
+        .join(safe_segment(database));
+    std::fs::create_dir_all(&dir).map_err(|error| format!("创建快照目录失败: {error}"))?;
+    let probe = dir.join(format!(".write-probe-{}", std::process::id()));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&probe)
+        .map_err(|error| format!("快照目录不可写: {error}"))?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(dir)
+}
+
+fn resolve_sync_snapshot_target(
+    custom_dir: Option<&str>,
+    primary: Result<PathBuf, String>,
+    fallback: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<(PathBuf, Option<String>, bool), String> {
+    let has_custom = custom_dir.is_some_and(|dir| !dir.trim().is_empty());
+    match primary {
+        Ok(dir) => Ok((dir, None, false)),
+        Err(reason) if has_custom => {
+            let dir = fallback()?;
+            let warning = format!(
+                "自定义备份目录不可用（{reason}），本次同步安全快照已回退保存到默认目录"
+            );
+            Ok((dir, Some(warning), true))
+        }
+        Err(reason) => Err(reason),
+    }
+}
+
+fn resolve_sync_protection_config(
+    app: &AppHandle,
+    config: &BackupConfig,
+    connection_id: &str,
+    database: &str,
+) -> Result<(BackupConfig, Option<String>), String> {
+    let mut protection_config = sync_protection_config(config);
+    let primary = ensure_writable_snapshot_dir(app, &protection_config, connection_id, database);
+    let (_, warning, used_fallback) =
+        resolve_sync_snapshot_target(config.storage_dir.as_deref(), primary, || {
+            let mut default_config = protection_config.clone();
+            default_config.storage_dir = None;
+            ensure_writable_snapshot_dir(app, &default_config, connection_id, database)
+        })?;
+    if used_fallback {
+        protection_config.storage_dir = None;
+    }
+    Ok((protection_config, warning))
 }
 
 fn sync_protection_config(config: &BackupConfig) -> BackupConfig {
@@ -576,10 +738,24 @@ fn sync_protection_config(config: &BackupConfig) -> BackupConfig {
     protection_config
 }
 
+#[derive(Default)]
+struct AllColumnsLookup {
+    exact: HashMap<String, Vec<(String, String)>>,
+    lower: HashMap<String, Vec<(String, String)>>,
+}
+
+impl AllColumnsLookup {
+    fn get(&self, table: &str) -> Option<&Vec<(String, String)>> {
+        self.exact
+            .get(table)
+            .or_else(|| self.lower.get(&table.to_lowercase()))
+    }
+}
+
 async fn list_all_columns_with_type(
     pool: &MySqlPool,
     database: &str,
-) -> Result<HashMap<String, Vec<(String, String)>>, String> {
+) -> Result<AllColumnsLookup, String> {
     let rows = sqlx::query(
         "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION",
@@ -588,7 +764,9 @@ async fn list_all_columns_with_type(
     .fetch_all(pool)
     .await
     .map_err(|error| format!("读取数据库字段列表失败: {error}"))?;
-    let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    let mut lookup = AllColumnsLookup::default();
+    let mut lower_seen_names: HashMap<String, String> = HashMap::new();
+    let mut lower_collisions: std::collections::HashSet<String> = std::collections::HashSet::new();
     for row in rows {
         let Ok(table_name) = mysql_text::string(&row, "TABLE_NAME") else {
             continue;
@@ -597,15 +775,34 @@ async fn list_all_columns_with_type(
             continue;
         };
         let data_type = mysql_text::string(&row, "DATA_TYPE").unwrap_or_default();
-        map.entry(table_name.to_lowercase())
+        let entry = (column_name, data_type.to_ascii_lowercase());
+        lookup
+            .exact
+            .entry(table_name.clone())
             .or_default()
-            .push((column_name, data_type.to_ascii_lowercase()));
+            .push(entry.clone());
+        let lower_key = table_name.to_lowercase();
+        match lower_seen_names.get(&lower_key) {
+            Some(existing) if existing != &table_name => {
+                lower_collisions.insert(lower_key.clone());
+                lookup.lower.remove(&lower_key);
+            }
+            Some(_) => {
+                if !lower_collisions.contains(&lower_key) {
+                    lookup.lower.entry(lower_key).or_default().push(entry);
+                }
+            }
+            None => {
+                lower_seen_names.insert(lower_key.clone(), table_name);
+                lookup.lower.entry(lower_key).or_default().push(entry);
+            }
+        }
     }
-    Ok(map)
+    Ok(lookup)
 }
 
 async fn list_columns_with_type(
-    pool: &MySqlPool,
+    conn: &mut MySqlConnection,
     database: &str,
     table: &str,
 ) -> Result<Vec<(String, String)>, String> {
@@ -615,7 +812,7 @@ async fn list_columns_with_type(
     )
     .bind(database)
     .bind(table)
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(|error| format!("读取字段列表失败: {error}"))?;
     Ok(rows
@@ -629,9 +826,10 @@ async fn list_columns_with_type(
 }
 
 /// Build a SELECT that returns every column as a stable textual form, so the
-/// decoder only needs to handle String (for normal columns) and Vec<u8> (for
-/// raw binary columns). Non-binary columns are CAST to CHAR — this reliably
-/// stringifies integers, decimals, dates, datetimes, enums, json, etc.
+/// decoder only needs to handle String (for normal columns), u64 (for BIT), and
+/// Vec<u8> (for raw binary or WKB spatial columns). Non-binary/non-spatial
+/// columns are CAST to CHAR — this reliably stringifies integers, decimals,
+/// dates, datetimes, enums, json, etc.
 fn build_select_sql(
     database: &str,
     table: &str,
@@ -640,14 +838,15 @@ fn build_select_sql(
     let list = columns_with_types
         .iter()
         .map(|(name, data_type)| {
+            let escaped = escape_ident(name);
             if is_binary_type(data_type) {
-                format!("`{}`", escape_ident(name))
+                format!("`{escaped}`")
+            } else if is_spatial_type(data_type) {
+                format!("ST_AsWKB(`{escaped}`) AS `{escaped}`")
+            } else if data_type == "bit" {
+                format!("CAST(`{escaped}` AS UNSIGNED) AS `{escaped}`")
             } else {
-                format!(
-                    "CAST(`{}` AS CHAR) AS `{}`",
-                    escape_ident(name),
-                    escape_ident(name)
-                )
+                format!("CAST(`{escaped}` AS CHAR) AS `{escaped}`")
             }
         })
         .collect::<Vec<_>>()
@@ -667,10 +866,37 @@ fn is_binary_type(data_type: &str) -> bool {
     )
 }
 
-/// Format one MySQL cell as a SQL literal for snapshot output. After the
-/// CAST-to-CHAR SELECT, normal cells decode as String; binary columns decode
-/// as Vec<u8>.
-fn format_row_value(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
+fn is_spatial_type(data_type: &str) -> bool {
+    matches!(
+        data_type,
+        "geometry"
+            | "point"
+            | "linestring"
+            | "polygon"
+            | "multipoint"
+            | "multilinestring"
+            | "multipolygon"
+            | "geometrycollection"
+    )
+}
+
+/// Format one MySQL cell as a SQL literal for snapshot output.
+fn format_row_value_for_type(
+    row: &sqlx::mysql::MySqlRow,
+    index: usize,
+    data_type: &str,
+) -> String {
+    if is_spatial_type(data_type) {
+        if let Ok(value) = row.try_get::<Option<Vec<u8>>, _>(index) {
+            return match value {
+                Some(bytes) => {
+                    let hex: String = bytes.iter().map(|byte| format!("{byte:02X}")).collect();
+                    format!("ST_GeomFromWKB(_binary X'{hex}')")
+                }
+                None => "NULL".into(),
+            };
+        }
+    }
     if let Ok(value) = row.try_get::<Option<String>, _>(index) {
         return match value {
             Some(value) => format_string_literal(&value),
@@ -685,6 +911,11 @@ fn format_row_value(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
             }
             None => "NULL".into(),
         };
+    }
+    if let Ok(value) = row.try_get::<Option<u64>, _>(index) {
+        return value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "NULL".into());
     }
     if let Ok(value) = row.try_get::<Option<i64>, _>(index) {
         return value
@@ -1915,6 +2146,64 @@ SET FOREIGN_KEY_CHECKS=1;"#;
 
         assert_eq!(protection.large_table_threshold, u64::MAX);
         assert_eq!(config.large_table_threshold, 10);
+        assert!(!should_count_rows_for_snapshot(
+            protection.large_table_threshold
+        ));
+        assert!(should_count_rows_for_snapshot(config.large_table_threshold));
+    }
+
+    #[test]
+    fn build_select_sql_handles_binary_bit_and_spatial_columns() {
+        let sql = build_select_sql(
+            "game_db",
+            "entities",
+            &[
+                ("id".into(), "int".into()),
+                ("flags".into(), "bit".into()),
+                ("payload".into(), "blob".into()),
+                ("pos".into(), "point".into()),
+                ("area".into(), "geometry".into()),
+            ],
+        );
+
+        assert!(sql.contains("CAST(`id` AS CHAR) AS `id`"));
+        assert!(sql.contains("CAST(`flags` AS UNSIGNED) AS `flags`"));
+        assert!(sql.contains("`payload`, ST_AsWKB(`pos`) AS `pos`, ST_AsWKB(`area`) AS `area`"));
+    }
+
+    #[test]
+    fn retryable_snapshot_error_matches_locks_and_transient_connections() {
+        assert!(is_retryable_snapshot_error(
+            "error returned from database: 1205 (HY000): Lock wait timeout exceeded"
+        ));
+        assert!(is_retryable_snapshot_error("MySQL server has gone away"));
+        assert!(is_retryable_snapshot_error("pool timed out while waiting for an open connection"));
+        assert!(!is_retryable_snapshot_error("Access denied for user"));
+    }
+
+    #[test]
+    fn sync_snapshot_target_falls_back_when_custom_storage_dir_fails() {
+        let fallback_dir = PathBuf::from("/tmp/default-snapshots");
+        let (dir, warning, used_fallback) = resolve_sync_snapshot_target(
+            Some("Z:\\unavailable\\backup"),
+            Err("快照目录不可写: permission denied".into()),
+            || Ok(fallback_dir.clone()),
+        )
+        .expect("custom storage dir failure should fall back to default");
+
+        assert_eq!(dir, fallback_dir);
+        assert!(used_fallback);
+        assert!(warning
+            .as_deref()
+            .is_some_and(|msg| msg.contains("自定义备份目录不可用") && msg.contains("默认目录")));
+
+        let err = resolve_sync_snapshot_target(
+            None,
+            Err("创建快照目录失败: disk full".into()),
+            || Ok(PathBuf::from("/tmp/unreachable")),
+        )
+        .expect_err("default storage failure should still fail");
+        assert!(err.contains("disk full"));
     }
 
     #[test]

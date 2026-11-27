@@ -437,7 +437,7 @@ pub async fn create_database(
             },
         )
         .await;
-        match sqlx::query(&sql).execute(&pool).await {
+        match sqlx::raw_sql(&sql).execute(&pool).await {
             Ok(_) => {
                 mark_audit(&app, &state, &PerfContext::default(), audit_id, true).await;
             }
@@ -516,7 +516,7 @@ pub async fn alter_database(
             },
         )
         .await;
-        match sqlx::query(&sql).execute(&pool).await {
+        match sqlx::raw_sql(&sql).execute(&pool).await {
             Ok(_) => {
                 mark_audit(&app, &state, &PerfContext::default(), audit_id, true).await;
             }
@@ -591,7 +591,7 @@ pub async fn drop_database(
             },
         )
         .await;
-        match sqlx::query(&sql).execute(&pool).await {
+        match sqlx::raw_sql(&sql).execute(&pool).await {
             Ok(_) => {
                 mark_audit(&app, &state, &PerfContext::default(), audit_id, true).await;
             }
@@ -833,7 +833,7 @@ pub async fn truncate_tables(
                 },
             )
             .await;
-            match sqlx::query(&sql).execute(&pool).await {
+            match sqlx::raw_sql(&sql).execute(&pool).await {
                 Ok(_) => {
                     mark_audit(&app, &state, &perf_context, audit_id, true).await;
                     invalidate_table_count(

@@ -373,6 +373,8 @@ const {
   dispose: disposeConnection,
 } = conn;
 
+const deleteTablesProgress = ref(null);
+
 const tableModifiedTimeAutoRefresh = createTableModifiedTimeAutoRefresh({
   refresh: refreshTableModifiedTimes,
   getSource: () => ({
@@ -4346,6 +4348,16 @@ async function deleteHomeTables(source = {}) {
       danger: true,
     });
     if (!confirmed) return;
+    if (typeof deleteTablesProgress !== "undefined") {
+      deleteTablesProgress.value = {
+        database: source.database,
+        done: 0,
+        total: tableNames.length,
+        dropped: 0,
+        failed: 0,
+        phase: "deleting",
+      };
+    }
     statusText.value = `正在删除 ${tableNames.length} 张表，请稍候…`;
     const result = { dropped: [], failed: [] };
     for (let offset = 0; offset < tableNames.length; offset += 32) {
@@ -4357,6 +4369,16 @@ async function deleteHomeTables(source = {}) {
         });
         result.dropped.push(...(response?.dropped || []));
         result.failed.push(...(response?.failed || []));
+        if (typeof deleteTablesProgress !== "undefined") {
+          deleteTablesProgress.value = {
+            database: source.database,
+            done: Math.min(offset + batch.length, tableNames.length),
+            total: tableNames.length,
+            dropped: result.dropped.length,
+            failed: result.failed.length,
+            phase: "deleting",
+          };
+        }
       } catch (error) {
         // A lost response may follow applied DDL. Never retry it automatically.
         result.failed.push(...batch.map((tableName) => ({
@@ -4365,6 +4387,16 @@ async function deleteHomeTables(source = {}) {
         result.failed.push(...tableNames.slice(offset + batch.length).map((tableName) => ({
           tableName, reason: "前一批中断，尚未执行",
         })));
+        if (typeof deleteTablesProgress !== "undefined") {
+          deleteTablesProgress.value = {
+            database: source.database,
+            done: tableNames.length,
+            total: tableNames.length,
+            dropped: result.dropped.length,
+            failed: result.failed.length,
+            phase: "deleting",
+          };
+        }
         break;
       }
     }
@@ -4387,6 +4419,16 @@ async function deleteHomeTables(source = {}) {
       + (failed.length ? `，${failed.length} 张未删除或未确认：${failureSummary}` : "")
       + (failed.length > 3 ? "；其余失败表保留选中" : "");
     let refreshError = "";
+    if (typeof deleteTablesProgress !== "undefined") {
+      deleteTablesProgress.value = {
+        database: source.database,
+        done: tableNames.length,
+        total: tableNames.length,
+        dropped: droppedNames.length,
+        failed: failed.length,
+        phase: "refreshing",
+      };
+    }
     try {
       await loadTables({ connectionId: source.connectionId, database: source.database });
     } catch (error) {
@@ -4400,6 +4442,7 @@ async function deleteHomeTables(source = {}) {
   } catch (error) {
     statusText.value = `删除表失败：${String(error?.message || error)}`;
   } finally {
+    if (typeof deleteTablesProgress !== "undefined") deleteTablesProgress.value = null;
     busy.value = false;
   }
 }
@@ -6976,6 +7019,51 @@ onBeforeUnmount(() => {
         </div>
         <div class="wb-history-progress-count">
           {{ editState.historyProgress.done }} / {{ editState.historyProgress.total }}
+        </div>
+      </div>
+    </div>
+
+    <div v-if="deleteTablesProgress" class="wb-history-progress-overlay wb-drop-progress-overlay">
+      <div class="wb-history-progress wb-drop-progress" role="status" aria-live="polite">
+        <div class="wb-history-progress-label">
+          {{
+            deleteTablesProgress.phase === "refreshing"
+              ? t("home.deletingTablesRefreshing")
+              : deleteTablesProgress.total === 1
+                ? t("home.deletingTable")
+                : t("home.deletingTables", { count: deleteTablesProgress.total })
+          }}
+        </div>
+        <div
+          class="wb-history-progress-track"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="Math.round((deleteTablesProgress.done / Math.max(1, deleteTablesProgress.total)) * 100)"
+        >
+          <div
+            class="wb-history-progress-bar"
+            :style="{ width: `${Math.round((deleteTablesProgress.done / Math.max(1, deleteTablesProgress.total)) * 100)}%` }"
+          ></div>
+        </div>
+        <div class="wb-drop-progress-meta">
+          <span>
+            {{
+              deleteTablesProgress.failed > 0
+                ? t("home.deletingTablesDetailWithFailed", {
+                    done: deleteTablesProgress.done,
+                    total: deleteTablesProgress.total,
+                    dropped: deleteTablesProgress.dropped,
+                    failed: deleteTablesProgress.failed,
+                  })
+                : t("home.deletingTablesDetail", {
+                    done: deleteTablesProgress.done,
+                    total: deleteTablesProgress.total,
+                    dropped: deleteTablesProgress.dropped,
+                  })
+            }}
+          </span>
+          <span>{{ Math.round((deleteTablesProgress.done / Math.max(1, deleteTablesProgress.total)) * 100) }}%</span>
         </div>
       </div>
     </div>

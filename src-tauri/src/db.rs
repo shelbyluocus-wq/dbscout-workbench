@@ -878,13 +878,28 @@ pub(crate) async fn connect_database_with_max_connections(
     database: Option<&str>,
     max_connections: u32,
 ) -> Result<MySqlPool, String> {
+    connect_database_with_pool_options(
+        mysql_url,
+        database,
+        max_connections,
+        MYSQL_POOL_ACQUIRE_TIMEOUT,
+    )
+    .await
+}
+
+pub(crate) async fn connect_database_with_pool_options(
+    mysql_url: &str,
+    database: Option<&str>,
+    max_connections: u32,
+    acquire_timeout: Duration,
+) -> Result<MySqlPool, String> {
     let options = mysql_connect_options(mysql_url, database)?;
     let max_conns = max_connections.max(1);
     MySqlPoolOptions::new()
         .max_connections(max_conns)
         .min_connections(1.min(max_conns))
         .idle_timeout(Some(Duration::from_secs(300)))
-        .acquire_timeout(MYSQL_POOL_ACQUIRE_TIMEOUT)
+        .acquire_timeout(acquire_timeout)
         .connect_with(options)
         .await
         .map_err(|error| format!("连接 MySQL 失败: {error}"))

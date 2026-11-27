@@ -3,6 +3,7 @@ import { t } from "../i18n/index.js";
 import { computed, nextTick, ref, watch } from "vue";
 import { useEscClose } from "../composables/useEscClose.js";
 import { DEFAULT_CHARSET_OPTIONS } from "../utils/tableDesign.js";
+import WorkbenchSelect from "./WorkbenchSelect.vue";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -228,19 +229,29 @@ async function submit() {
           />
           <input v-else :value="database" disabled />
         </label>
-        <label class="wb-dialog-field">
+        <div class="wb-dialog-field">
           <span>{{ t('databaseManage.charsetLabel') }}</span>
-          <select :value="charset" :disabled="busy || loading" @change="onCharsetChange($event.target.value)">
-            <option v-for="item in charsets" :key="item.charset" :value="item.charset">{{ item.charset }}</option>
-          </select>
-        </label>
-        <label class="wb-dialog-field">
+          <WorkbenchSelect
+            :model-value="charset"
+            :options="charsets.map((item) => item.charset)"
+            :aria-label="t('databaseManage.charsetLabel')"
+            :disabled="busy || loading"
+            :searchable="true"
+            :monospace="true"
+            @change="onCharsetChange"
+          />
+        </div>
+        <div class="wb-dialog-field">
           <span>{{ t('databaseManage.collationLabel') }}</span>
-          <select v-model="collation" :disabled="busy || loading || !availableCollations.length">
-            <option value="">{{ t('databaseManage.collationAuto') }}</option>
-            <option v-for="col in availableCollations" :key="col" :value="col">{{ col }}</option>
-          </select>
-        </label>
+          <WorkbenchSelect
+            v-model="collation"
+            :options="[{ value: '', label: t('databaseManage.collationAuto') }, ...availableCollations]"
+            :aria-label="t('databaseManage.collationLabel')"
+            :disabled="busy || loading || !availableCollations.length"
+            :searchable="true"
+            :monospace="true"
+          />
+        </div>
       </template>
 
       <div class="wb-db-manage-preview">

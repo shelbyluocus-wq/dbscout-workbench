@@ -12,6 +12,7 @@ import {
 import { useEscClose } from "../composables/useEscClose.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import TableCopySelectionPanel from "./TableCopySelectionPanel.vue";
+import WorkbenchSelect from "./WorkbenchSelect.vue";
 
 const props = defineProps({
   copy: { type: Object, required: true },
@@ -149,8 +150,8 @@ const allSelected = computed({
 });
 
 /* ── Event handlers ── */
-function handleTargetConnectionChange(event) {
-  emit("target-connection-change", event.target.value);
+function handleTargetConnectionChange(value) {
+  emit("target-connection-change", value);
 }
 
 function toggleTable(name) {
@@ -306,32 +307,22 @@ watch(searchQuery, () => {
           <div class="wb-table-copy-route-node is-target">
             <span class="wb-table-copy-route-label">{{ t('m_57060c88a36b') }}</span>
             <div class="wb-table-copy-target-selects">
-              <select
-                :value="copy.dialog.targetConnectionId"
-                :disabled="isBusy"
+              <WorkbenchSelect
+                :model-value="copy.dialog.targetConnectionId"
+                :options="copy.targetConnectionOptions.value.map((conn) => ({ value: String(conn.id), label: conn.label || conn.host || String(conn.id) }))"
                 :aria-label="t('m_37b9835a7d78')"
+                :placeholder="t('m_4c90fc42fd94')"
+                :disabled="isBusy"
                 @change="handleTargetConnectionChange"
-              >
-                <option value="" disabled>{{ t('m_4c90fc42fd94') }}</option>
-                <option
-                  v-for="conn in copy.targetConnectionOptions.value"
-                  :key="conn.id"
-                  :value="conn.id"
-                >
-                  {{ conn.label || conn.host || conn.id }}
-                </option>
-              </select>
-              <select
-                :value="copy.dialog.targetDatabase"
-                :disabled="isBusy || !copy.dialog.targetConnectionId || copy.dialog.targetDatabaseLoading"
+              />
+              <WorkbenchSelect
+                v-model="copy.dialog.targetDatabase"
+                :options="targetDatabases"
                 :aria-label="t('m_6c7424a6b8a4')"
-                @change="copy.dialog.targetDatabase = $event.target.value"
-              >
-                <option value="" disabled>
-                  {{ copy.dialog.targetDatabaseLoading ? t('m_ad78b6232786') : t('m_287e8652c4ad') }}
-                </option>
-                <option v-for="db in targetDatabases" :key="db" :value="db">{{ db }}</option>
-              </select>
+                :placeholder="copy.dialog.targetDatabaseLoading ? t('m_ad78b6232786') : t('m_287e8652c4ad')"
+                :disabled="isBusy || !copy.dialog.targetConnectionId || copy.dialog.targetDatabaseLoading"
+                :monospace="true"
+              />
             </div>
             <p v-if="copy.dialog.targetDatabaseError" class="wb-table-copy-route-warning"> {{ t('m_84a1faa717d8') }}{{ copy.dialog.targetDatabaseError }}
             </p>

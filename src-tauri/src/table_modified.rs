@@ -1474,20 +1474,23 @@ pub async fn record_tables_dropped(
         return;
     };
     let database_key = database.to_lowercase();
-    for name in table_names {
-        let key = name.trim().to_lowercase();
-        if key.is_empty() {
-            continue;
+    if let Ok(mut tx) = pool.begin().await {
+        for name in table_names {
+            let key = name.trim().to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            let _ = sqlx::query(
+                "DELETE FROM table_modified_state \
+                 WHERE server_key = ? AND database_key = ? AND table_key = ?",
+            )
+            .bind(&server_key)
+            .bind(&database_key)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await;
         }
-        let _ = sqlx::query(
-            "DELETE FROM table_modified_state \
-             WHERE server_key = ? AND database_key = ? AND table_key = ?",
-        )
-        .bind(&server_key)
-        .bind(&database_key)
-        .bind(&key)
-        .execute(&pool)
-        .await;
+        let _ = tx.commit().await;
     }
 }
 

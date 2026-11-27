@@ -395,7 +395,98 @@ pub async fn record_pending_batch_in_operation(
     Ok(ids)
 }
 
+/// Multi-table batch variant of `record_pending`: writes all pending rows for
+/// an operation (such as `drop_tables`) inside ONE SQLite transaction.
+pub async fn record_pending_multi_table_batch(
+    pool: &SqlitePool,
+    entries: &[(AuditContext, PendingAudit)],
+) -> Result<Vec<i64>, String> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ts, operation_id) = new_operation_meta();
+    let operation_size = entries.len() as i64;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("开启审计写入事务失败: {error}"))?;
+    let mut ids = Vec::with_capacity(entries.len());
+    for (ctx, pending) in entries {
+        let client_id = uuid::Uuid::new_v4().to_string();
+        let identity_json = pending
+            .row_identity
+            .as_ref()
+            .map(|value| serde_json::to_string(value).unwrap_or_default());
+        let result = sqlx::query(
+            "INSERT INTO audit_log \
+                (ts, connection_id, database, table_name, operation, row_identity, column_name, \
+                 old_value, new_value, forward_sql, forward_binds, inverse_sql, inverse_binds, \
+                 rollback_strategy, session_id, source, status, is_rollback, notes, actor, client_id, synced, operation_id, operation_size) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?, ?)",
+        )
+        .bind(&ts)
+        .bind(&ctx.connection_id)
+        .bind(&ctx.database)
+        .bind(&ctx.table_name)
+        .bind(pending.operation)
+        .bind(&identity_json)
+        .bind(&pending.column_name)
+        .bind(&pending.old_value)
+        .bind(&pending.new_value)
+        .bind(&pending.forward_sql)
+        .bind(encode_binds(&pending.forward_binds))
+        .bind(&pending.inverse_sql)
+        .bind(encode_binds(&pending.inverse_binds))
+        .bind(pending.rollback_strategy)
+        .bind(&ctx.session_id)
+        .bind(ctx.source)
+        .bind(STATUS_PENDING)
+        .bind(&pending.notes)
+        .bind(&ctx.actor)
+        .bind(&client_id)
+        .bind(&operation_id)
+        .bind(operation_size)
+        .execute(&mut *tx)
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                tx.rollback().await.ok();
+                return Err(format!("写入审计记录失败: {error}"));
+            }
+        };
+        ids.push(result.last_insert_rowid());
+    }
+    tx.commit()
+        .await
+        .map_err(|error| format!("提交审计记录失败: {error}"))?;
+    Ok(ids)
+}
+
 async fn mark_status(pool: &SqlitePool, ids: &[i64], status: &str) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    if ids.len() > 1 {
+        if let Ok(mut tx) = pool.begin().await {
+            let mut tx_ok = true;
+            for id in ids {
+                if sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
+                    .bind(status)
+                    .bind(*id)
+                    .execute(&mut *tx)
+                    .await
+                    .is_err()
+                {
+                    tx_ok = false;
+                    break;
+                }
+            }
+            if tx_ok && tx.commit().await.is_ok() {
+                return Ok(());
+            }
+        }
+    }
     let mut first_error = None;
     for id in ids {
         if let Err(error) = sqlx::query("UPDATE audit_log SET status = ? WHERE id = ?")
@@ -1880,6 +1971,71 @@ mod tests {
                         .await
                         .unwrap();
                 assert_eq!(remaining, vec![ids[1], ids[2]]);
+            });
+    }
+
+    #[test]
+    fn record_pending_multi_table_batch_and_mark_status_commit_together() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let base_ctx = test_audit_context();
+                let entries = ["t1", "t2", "t3"]
+                    .iter()
+                    .map(|name| {
+                        let mut ctx = base_ctx.clone();
+                        ctx.table_name = (*name).to_string();
+                        (
+                            ctx,
+                            PendingAudit {
+                                operation: "DDL",
+                                column_name: None,
+                                old_value: Some((*name).to_string()),
+                                new_value: None,
+                                row_identity: None,
+                                forward_sql: format!("DROP TABLE IF EXISTS `game_db`.`{name}`"),
+                                forward_binds: Vec::new(),
+                                inverse_sql: None,
+                                inverse_binds: Vec::new(),
+                                rollback_strategy: STRATEGY_DDL,
+                                notes: Some("test".into()),
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let ids = record_pending_multi_table_batch(&pool, &entries)
+                    .await
+                    .expect("multi-table pending batch succeeds");
+                assert_eq!(ids.len(), 3);
+
+                mark_committed(&pool, &ids[0..2])
+                    .await
+                    .expect("batch mark_committed succeeds");
+                mark_aborted(&pool, &ids[2..3])
+                    .await
+                    .expect("single mark_aborted succeeds");
+
+                let rows: Vec<(String, String, Option<String>, Option<i64>)> = sqlx::query_as(
+                    "SELECT table_name, status, operation_id, operation_size FROM audit_log ORDER BY id ASC",
+                )
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+                assert_eq!(rows.len(), 3);
+                assert_eq!(rows[0].0, "t1");
+                assert_eq!(rows[0].1, STATUS_COMMITTED);
+                assert_eq!(rows[1].0, "t2");
+                assert_eq!(rows[1].1, STATUS_COMMITTED);
+                assert_eq!(rows[2].0, "t3");
+                assert_eq!(rows[2].1, STATUS_ABORTED);
+                assert!(rows[0].2.is_some());
+                assert_eq!(rows[0].2, rows[1].2);
+                assert_eq!(rows[1].2, rows[2].2);
+                assert_eq!(rows[0].3, Some(3));
             });
     }
 }

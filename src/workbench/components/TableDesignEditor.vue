@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, KeyRound, Plus, Trash2 } from "lucide-vue-next";
 
 import { useTableDesign } from "../composables/useTableDesign.js";
 import { useEscClose } from "../composables/useEscClose.js";
+import WorkbenchSelect from "./WorkbenchSelect.vue";
 import {
   DEFAULT_CHARSET_OPTIONS,
   INDEX_TYPES,
@@ -115,10 +116,10 @@ function unusedColumnsForIndex(indexItem) {
   return availableColumnNames.value.filter((name) => !used.has(name.toLowerCase()));
 }
 
-function onAppendIndexColumn(indexItem, event) {
-  const value = event?.target?.value || "";
+function onAppendIndexColumn(indexItem, valueOrEvent) {
+  const value = typeof valueOrEvent === "string" ? valueOrEvent : (valueOrEvent?.target?.value || "");
   if (value) addIndexColumn(indexItem, value);
-  if (event?.target) event.target.value = "";
+  if (valueOrEvent?.target) valueOrEvent.target.value = "";
 }
 
 const sourceTitle = computed(() => {
@@ -947,9 +948,13 @@ const colDefs = [
                 <small v-if="validationErrors.indexes?.[idx]?.name">{{ validationErrors.indexes[idx].name }}</small>
               </td>
               <td>
-                <select v-model="indexItem.indexType" :aria-label="t('design.indexes.type')">
-                  <option v-for="kind in INDEX_TYPES" :key="kind" :value="kind">{{ kind }}</option>
-                </select>
+                <WorkbenchSelect
+                  v-model="indexItem.indexType"
+                  :options="INDEX_TYPES"
+                  :aria-label="t('design.indexes.type')"
+                  :searchable="false"
+                  :monospace="true"
+                />
               </td>
               <td>
                 <div class="wb-design-index-columns">
@@ -976,15 +981,17 @@ const colDefs = [
                       @click="removeIndexColumn(indexItem, colIdx)"
                     >×</button>
                   </span>
-                  <select
+                  <WorkbenchSelect
                     v-if="unusedColumnsForIndex(indexItem).length"
                     class="wb-design-index-add-col"
+                    :model-value="''"
+                    :options="unusedColumnsForIndex(indexItem)"
+                    :placeholder="t('design.indexes.addColumn')"
                     :aria-label="t('design.indexes.addColumn')"
-                    @change="onAppendIndexColumn(indexItem, $event)"
-                  >
-                    <option value="">{{ t('design.indexes.addColumn') }}</option>
-                    <option v-for="colName in unusedColumnsForIndex(indexItem)" :key="colName" :value="colName">{{ colName }}</option>
-                  </select>
+                    :searchable="false"
+                    :monospace="true"
+                    @change="(val) => onAppendIndexColumn(indexItem, val)"
+                  />
                 </div>
                 <small v-if="validationErrors.indexes?.[idx]?.columns">{{ validationErrors.indexes[idx].columns }}</small>
               </td>
@@ -1020,27 +1027,38 @@ const colDefs = [
 
       <!-- 表选项页签 -->
       <div v-show="activeTab === 'options'" class="wb-design-options-panel">
-        <label class="wb-dialog-field">
+        <div class="wb-dialog-field">
           <span>{{ t('design.options.engine') }}</span>
-          <select v-model="draft.engine">
-            <option value="">{{ t('design.options.serverDefault') }}</option>
-            <option v-for="eng in MYSQL_ENGINES" :key="eng" :value="eng">{{ eng }}</option>
-          </select>
-        </label>
-        <label class="wb-dialog-field">
+          <WorkbenchSelect
+            v-model="draft.engine"
+            :options="[{ value: '', label: t('design.options.serverDefault') }, ...MYSQL_ENGINES]"
+            :aria-label="t('design.options.engine')"
+            :searchable="false"
+            :monospace="true"
+          />
+        </div>
+        <div class="wb-dialog-field">
           <span>{{ t('design.options.charset') }}</span>
-          <select :value="draft.charset" @change="onCharsetChange($event.target.value)">
-            <option value="">{{ t('design.options.serverDefault') }}</option>
-            <option v-for="item in charsetOptions" :key="item.charset" :value="item.charset">{{ item.charset }}</option>
-          </select>
-        </label>
-        <label class="wb-dialog-field">
+          <WorkbenchSelect
+            :model-value="draft.charset"
+            :options="[{ value: '', label: t('design.options.serverDefault') }, ...charsetOptions.map((item) => item.charset)]"
+            :aria-label="t('design.options.charset')"
+            :searchable="true"
+            :monospace="true"
+            @change="onCharsetChange"
+          />
+        </div>
+        <div class="wb-dialog-field">
           <span>{{ t('design.options.collation') }}</span>
-          <select v-model="draft.collation" :disabled="!draft.charset">
-            <option value="">{{ t('design.options.charsetDefault') }}</option>
-            <option v-for="col in availableCollations" :key="col" :value="col">{{ col }}</option>
-          </select>
-        </label>
+          <WorkbenchSelect
+            v-model="draft.collation"
+            :options="[{ value: '', label: t('design.options.charsetDefault') }, ...availableCollations]"
+            :aria-label="t('design.options.collation')"
+            :disabled="!draft.charset"
+            :searchable="true"
+            :monospace="true"
+          />
+        </div>
       </div>
     </div>
 

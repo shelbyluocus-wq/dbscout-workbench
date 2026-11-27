@@ -14,6 +14,7 @@ function harness({ result, refreshError = false, busy = false, invoke, tableName
   const home = { selectedTableNames: ["a", "b"] };
   const state = {
     busy: { value: busy }, statusText: { value: "" }, workspace: {},
+    deleteTablesProgress: { value: null },
     recentHomeTableNames: { value: ["a", "b", "c"] },
     isReadOnlyConnection: () => false, connectionCapability: () => true,
     confirmDialogConfirm: async (options) => { confirmations.push(options); return true; },
@@ -122,4 +123,42 @@ test("missing table results are not treated as success", async () => {
   await h.run();
   assert.deepEqual(h.closed, ["a"]);
   assert.match(h.state.statusText.value, /未确认/);
+});
+
+test("bulk deletion publishes batch and refresh progress and clears progress afterward", async () => {
+  const tableNames = Array.from({ length: 70 }, (_, index) => `table_${index}`);
+  const snapshots = [];
+  let h;
+  h = harness({
+    tableNames,
+    invoke: async (_, { request }) => {
+      snapshots.push({ ...h.state.deleteTablesProgress.value });
+      return { dropped: request.tables.map((tableName) => ({ tableName })), failed: [] };
+    },
+  });
+  h.state.loadTables = async () => {
+    snapshots.push({ ...h.state.deleteTablesProgress.value });
+  };
+  await h.run();
+  assert.deepEqual(
+    snapshots.map((item) => [item.done, item.total, item.dropped, item.phase]),
+    [
+      [0, 70, 0, "deleting"],
+      [32, 70, 32, "deleting"],
+      [64, 70, 64, "deleting"],
+      [70, 70, 70, "refreshing"],
+    ],
+  );
+  assert.equal(h.state.deleteTablesProgress.value, null);
+  assert.equal(h.state.busy.value, false);
+
+  const failing = harness({
+    tableNames: ["a", "b"],
+    invoke: async () => {
+      throw new Error("network lost");
+    },
+  });
+  await failing.run();
+  assert.equal(failing.state.deleteTablesProgress.value, null);
+  assert.equal(failing.state.busy.value, false);
 });

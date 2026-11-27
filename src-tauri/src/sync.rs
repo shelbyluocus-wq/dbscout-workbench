@@ -38,7 +38,7 @@ const SYNC_LOCK_RETRY_ATTEMPTS: usize = 3;
 const SYNC_WORKER_CONCURRENCY: usize = 8;
 const SYNC_DROP_BATCH_SIZE: usize = 50;
 const COUNT_ROWS_UNION_BATCH_SIZE: usize = 40;
-const COUNT_ROWS_CONCURRENCY: usize = 6;
+const COUNT_ROWS_CONCURRENCY: usize = 4;
 const SYNC_PROGRESS_THROTTLE: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,7 +169,7 @@ async fn create_sync_snapshot_with_watchdog<Emit>(
     total_tables: u64,
     cancellation: &WorkCancellation,
     emit: &mut Emit,
-) -> Result<SnapshotInfo, String>
+) -> Result<(SnapshotInfo, Option<String>), String>
 where
     Emit: FnMut(DatabaseSyncProgress),
 {
@@ -202,7 +202,15 @@ where
         tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err("覆盖同步已停止".into()),
-            result = &mut operation => return result,
+            result = &mut operation => {
+                return result.map_err(|error| {
+                    if error.starts_with("创建目标库本地安全快照") {
+                        error
+                    } else {
+                        format!("创建目标库本地安全快照失败：{error}")
+                    }
+                });
+            }
             snapshot_progress = progress_rx.recv(), if progress_open => {
                 match snapshot_progress {
                     Some(snapshot_progress) => {
@@ -1024,7 +1032,7 @@ where
         "running",
     ));
 
-    let snapshot = create_sync_snapshot_with_watchdog(
+    let (snapshot, snapshot_warning) = create_sync_snapshot_with_watchdog(
         app,
         mysql_url,
         backup_config,
@@ -1035,6 +1043,9 @@ where
     )
     .await
     .map_err(SyncError::without_restore)?;
+    if let Some(warning) = snapshot_warning {
+        warnings.push(warning);
+    }
     *backup_snapshot_path = Some(snapshot.path.clone());
     emit(progress(
         &request.job_id,

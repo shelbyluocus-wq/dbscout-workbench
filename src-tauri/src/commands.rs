@@ -1763,62 +1763,197 @@ pub async fn drop_tables(
     Ok(DropTablesResponse { dropped, failed })
 }
 
+const DROP_TABLES_SQL_BATCH_SIZE: usize = 50;
+
+fn build_drop_tables_sql(database: &str, tables: &[String]) -> String {
+    let qualified = tables
+        .iter()
+        .map(|table_name| {
+            format!(
+                "`{}`.`{}`",
+                escape_ident(database),
+                escape_ident(table_name),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("DROP TABLE IF EXISTS {qualified}")
+}
+
+fn is_foreign_key_drop_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("3730")
+        || lower.contains("1217")
+        || lower.contains("foreign key constraint")
+}
+
 async fn drop_tables_mysql(
     pool: &sqlx::MySqlPool,
     request: &DropTablesRequest,
     table_names: &[String],
     app: &AppHandle,
     state: &State<'_, AppState>,
-    perf_context: &PerfContext,
+    _perf_context: &PerfContext,
 ) -> Result<DropTablesResponse, String> {
     let mut dropped = Vec::new();
     let mut failed = Vec::new();
+    if table_names.is_empty() {
+        return Ok(DropTablesResponse { dropped, failed });
+    }
 
-    for table_name in table_names {
-        let sql = format!(
-            "DROP TABLE IF EXISTS `{}`.`{}`",
-            escape_ident(&request.database),
-            escape_ident(table_name),
-        );
-        let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
-        let audit_id = best_effort_audit(
-            app,
-            state,
-            perf_context,
-            audit::AuditContext {
-                connection_id: request.connection_id.clone(),
-                database: request.database.clone(),
-                table_name: table_name.clone(),
-                session_id: None,
-                source: audit::SOURCE_DDL,
-                actor,
-                client_id,
-            },
-            audit::PendingAudit {
-                operation: "DDL",
-                column_name: None,
-                old_value: Some(table_name.clone()),
-                new_value: None,
-                row_identity: None,
-                forward_sql: sql.clone(),
-                forward_binds: Vec::new(),
-                inverse_sql: None,
-                inverse_binds: Vec::new(),
-                rollback_strategy: audit::STRATEGY_DDL,
-                notes: Some("删除表无法行级回滚，请通过快照恢复".into()),
-            },
-        )
-        .await;
-        match sqlx::query(&sql).execute(pool).await {
+    let (actor, client_id) = crate::account::audit_actor_and_id(app, state).await;
+    let audit_entries: Vec<(audit::AuditContext, audit::PendingAudit)> = table_names
+        .iter()
+        .map(|table_name| {
+            let sql = format!(
+                "DROP TABLE IF EXISTS `{}`.`{}`",
+                escape_ident(&request.database),
+                escape_ident(table_name),
+            );
+            (
+                audit::AuditContext {
+                    connection_id: request.connection_id.clone(),
+                    database: request.database.clone(),
+                    table_name: table_name.clone(),
+                    session_id: None,
+                    source: audit::SOURCE_DDL,
+                    actor: actor.clone(),
+                    client_id: client_id.clone(),
+                },
+                audit::PendingAudit {
+                    operation: "DDL",
+                    column_name: None,
+                    old_value: Some(table_name.clone()),
+                    new_value: None,
+                    row_identity: None,
+                    forward_sql: sql,
+                    forward_binds: Vec::new(),
+                    inverse_sql: None,
+                    inverse_binds: Vec::new(),
+                    rollback_strategy: audit::STRATEGY_DDL,
+                    notes: Some("删除表无法行级回滚，请通过快照恢复".into()),
+                },
+            )
+        })
+        .collect();
+
+    let audit_pool = audit::ensure_audit_pool(app, state).await.ok();
+    let audit_ids: Vec<Option<i64>> = match audit_pool.as_ref() {
+        Some(pool) => match audit::record_pending_multi_table_batch(pool, &audit_entries).await {
+            Ok(ids) if ids.len() == table_names.len() => ids.into_iter().map(Some).collect(),
+            _ => vec![None; table_names.len()],
+        },
+        None => vec![None; table_names.len()],
+    };
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|error| format!("获取数据库连接失败: {error}"))?;
+    let mut committed_audit_ids = Vec::new();
+    let mut aborted_audit_ids = Vec::new();
+
+    for (chunk_idx, chunk) in table_names.chunks(DROP_TABLES_SQL_BATCH_SIZE).enumerate() {
+        let base_idx = chunk_idx * DROP_TABLES_SQL_BATCH_SIZE;
+        let batch_sql = build_drop_tables_sql(&request.database, chunk);
+        match sqlx::query(&batch_sql).execute(&mut *conn).await {
             Ok(_) => {
-                mark_audit(app, state, perf_context, audit_id, true).await;
-                dropped.push(drop_result(table_name.clone(), None));
+                for (offset, table_name) in chunk.iter().enumerate() {
+                    if let Some(id) = audit_ids[base_idx + offset] {
+                        committed_audit_ids.push(id);
+                    }
+                    dropped.push(drop_result(table_name.clone(), None));
+                }
             }
-            Err(error) => {
-                mark_audit(app, state, perf_context, audit_id, false).await;
-                failed.push(drop_result(table_name.clone(), Some(error.to_string())));
+            Err(_) => {
+                let mut fk_deferred: Vec<(usize, String)> = Vec::new();
+                for (offset, table_name) in chunk.iter().enumerate() {
+                    let idx = base_idx + offset;
+                    let single_sql = format!(
+                        "DROP TABLE IF EXISTS `{}`.`{}`",
+                        escape_ident(&request.database),
+                        escape_ident(table_name),
+                    );
+                    match sqlx::query(&single_sql).execute(&mut *conn).await {
+                        Ok(_) => {
+                            if let Some(id) = audit_ids[idx] {
+                                committed_audit_ids.push(id);
+                            }
+                            dropped.push(drop_result(table_name.clone(), None));
+                        }
+                        Err(error) => {
+                            let err_msg = error.to_string();
+                            if is_foreign_key_drop_error(&err_msg) {
+                                fk_deferred.push((idx, table_name.clone()));
+                            } else {
+                                if let Some(id) = audit_ids[idx] {
+                                    aborted_audit_ids.push(id);
+                                }
+                                failed.push(drop_result(table_name.clone(), Some(err_msg)));
+                            }
+                        }
+                    }
+                }
+
+                // Multi-pass retry for foreign-key ordered tables: dropping child
+                // tables in an earlier pass unblocks parent tables in the next pass.
+                while !fk_deferred.is_empty() {
+                    let mut next_deferred = Vec::new();
+                    let mut last_errors: Vec<(usize, String, String)> = Vec::new();
+                    let mut made_progress = false;
+                    for (idx, table_name) in fk_deferred {
+                        let single_sql = format!(
+                            "DROP TABLE IF EXISTS `{}`.`{}`",
+                            escape_ident(&request.database),
+                            escape_ident(&table_name),
+                        );
+                        match sqlx::query(&single_sql).execute(&mut *conn).await {
+                            Ok(_) => {
+                                made_progress = true;
+                                if let Some(id) = audit_ids[idx] {
+                                    committed_audit_ids.push(id);
+                                }
+                                dropped.push(drop_result(table_name, None));
+                            }
+                            Err(error) => {
+                                let err_msg = error.to_string();
+                                if is_foreign_key_drop_error(&err_msg) {
+                                    last_errors.push((idx, table_name.clone(), err_msg));
+                                    next_deferred.push((idx, table_name));
+                                } else {
+                                    if let Some(id) = audit_ids[idx] {
+                                        aborted_audit_ids.push(id);
+                                    }
+                                    failed.push(drop_result(table_name, Some(err_msg)));
+                                }
+                            }
+                        }
+                    }
+                    if !made_progress {
+                        for (idx, table_name, err_msg) in last_errors {
+                            if let Some(id) = audit_ids[idx] {
+                                aborted_audit_ids.push(id);
+                            }
+                            failed.push(drop_result(table_name, Some(err_msg)));
+                        }
+                        break;
+                    }
+                    fk_deferred = next_deferred;
+                }
             }
         }
+    }
+
+    if let Some(audit_pool) = audit_pool {
+        if !committed_audit_ids.is_empty() {
+            let _ = audit::mark_committed(&audit_pool, &committed_audit_ids).await;
+        }
+        if !aborted_audit_ids.is_empty() {
+            let _ = audit::mark_aborted(&audit_pool, &aborted_audit_ids).await;
+        }
+    }
+    if !dropped.is_empty() {
+        crate::audit_sync::trigger_immediate_sync(app);
     }
 
     Ok(DropTablesResponse { dropped, failed })
@@ -7599,6 +7734,31 @@ pub async fn quick_search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_drop_tables_sql_escapes_identifiers_in_single_statement() {
+        let sql = build_drop_tables_sql(
+            "game`db",
+            &["player".into(), "hero`bag".into()],
+        );
+        assert_eq!(
+            sql,
+            "DROP TABLE IF EXISTS `game``db`.`player`, `game``db`.`hero``bag`"
+        );
+    }
+
+    #[test]
+    fn foreign_key_drop_error_detection_matches_mysql_fk_errors() {
+        assert!(is_foreign_key_drop_error(
+            "error returned from database: 3730 (HY000): Cannot drop table 'parent' referenced by a foreign key constraint 'fk_child'"
+        ));
+        assert!(is_foreign_key_drop_error(
+            "1217 (23000): Cannot delete or update a parent row: a foreign key constraint fails"
+        ));
+        assert!(!is_foreign_key_drop_error(
+            "1142 (42000): DROP command denied to user"
+        ));
+    }
 
     #[test]
     fn table_list_priority_defaults_to_foreground() {
