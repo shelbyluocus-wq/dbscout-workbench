@@ -9,6 +9,9 @@ description: 黑猫（DB Scout Workbench）打包与安装。只有用户明确�
 
 - 用户明确要求执行“打包流程”：进入下方“完整 SVN 发版流程”，本次 SVN 路径是该流程的前置条件。单纯引用或要求修改这条规则不算执行授权。
 - 用户只说“打包”“打个最新包”“打包并装上”等，且当前机器是 macOS：执行“Mac 本机打包安装”。“最新”指当前工作区代码，包括已有未提交改动，不代表自动拉取远端或切换分支。
+- 用户说“同步”“同步到 blackcat”：默认执行**完整仓库源码镜像同步**（`npm run sync:svn -- --svn-dir "<路径>" --svn-update --head`，同步整个 `HEAD` 源码树，不止本次修改），除非用户特意说明“仅同步本次修改”；绝不自动执行 `svn commit`。
+  - 本机 macOS 常用 SVN 源码目录（**仅本机保留，不提交到 Git**）：`/Users/shelby/Documents/juesheng2/策划/开发工具/blackcat`
+  - macOS 上操作 SVN（如 Update / Revert / 检查状态等）优先使用 **Cairn**（`/Applications/Cairn.app`，可通过 `cua-driver` 驱动界面操作），避免终端 `svn` 连不上内网服务器。
 - 未说“打包流程”的其他平台或独立发布请求：只确认实际要构建、安装或发布的范围，不自动套用完整流程。不要因为出现“发版”、SVN 路径或 AI 运行时字样就绕过触发条件。
 
 ## Mac 本机打包安装
