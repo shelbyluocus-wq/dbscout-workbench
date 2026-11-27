@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { useBackupCenter } from "./composables/useBackupCenter.js";
+import { formatGmBackupLocalTimestamp } from "./utils/backupDisplay.js";
 
 // Minimal in-memory command/event backend stubbing the 8 backup commands.
 function createBackend() {
@@ -1085,4 +1086,15 @@ test("243 per-table 60-change backup jump, version drill-down, restore, and manu
   assert.equal(scanCalls, 1);
   assert.equal(scanRes.tablesChanged, 2);
   backup.dispose();
+});
+
+test("formatGmBackupLocalTimestamp converts Rust RFC3339 nanosecond timestamps to local YYYY-MM-DD HH:mm:ss", () => {
+  const iso = "2026-11-27T05:39:13.942725238+00:00";
+  const d = new Date("2026-11-27T05:39:13.942+00:00");
+  const pad = (n) => String(n).padStart(2, "0");
+  const expected = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  assert.equal(formatGmBackupLocalTimestamp(iso), expected);
+  assert.equal(formatGmBackupLocalTimestamp("2026-11-27 12:50:07"), "2026-11-27 12:50:07");
+  assert.equal(formatGmBackupLocalTimestamp(""), "");
 });

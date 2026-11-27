@@ -17,7 +17,7 @@ import {
 import { t } from "../i18n/index.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { useConfirm } from "../composables/useConfirm.js";
-import { formatBackupSize } from "../utils/backupDisplay.js";
+import { formatBackupSize, formatGmBackupLocalTimestamp } from "../utils/backupDisplay.js";
 import { connectionHasCapability } from "../utils/connectionKinds.js";
 
 const props = defineProps({
@@ -725,7 +725,7 @@ const progressStyle = computed(() => ({
 
       <div v-if="!gmTableBackups.activeTable.presentInLatest" class="wb-backup-gm-notice" role="status">
         <AlertTriangle :size="15" aria-hidden="true" />
-        <span>{{ t('backup.gm.tableHistory.deletedNotice', { time: gmTableBackups.activeTable.lastSeenTs || '-' }) }}</span>
+        <span>{{ t('backup.gm.tableHistory.deletedNotice', { time: formatGmBackupLocalTimestamp(gmTableBackups.activeTable.lastSeenTs) || '-' }) }}</span>
       </div>
 
       <div v-if="gmTableBackups.versionsLoading" class="wb-backup-empty" role="status">
@@ -782,7 +782,7 @@ const progressStyle = computed(() => ({
         <strong>{{ t('backup.gm.tableHistory.listLabel') }}</strong>
         <span class="wb-backup-count" :data-empty="gmTableBackups.items.length === 0">{{ gmTableBackups.items.length }}</span>
         <span v-if="gmTableBackups.lastRunTs" class="wb-backup-meta wb-backup-gm-last-run">
-          {{ t('backup.gm.tableHistory.lastScan', { time: gmTableBackups.lastRunTs }) }}
+          {{ t('backup.gm.tableHistory.lastScan', { time: formatGmBackupLocalTimestamp(gmTableBackups.lastRunTs) }) }}
         </span>
       </div>
 
