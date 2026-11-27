@@ -16,3 +16,5 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip = { version = "7.2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+flate2 = "1"

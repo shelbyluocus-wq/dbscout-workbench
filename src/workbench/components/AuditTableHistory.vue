@@ -15,6 +15,15 @@ const props = defineProps({
 const { connectionLabel: resolveConnectionAlias } = useAliases();
 const readOnly = computed(() => Boolean(props.history.readOnly));
 const actorLabel = (entry) => {
+  const summaryActors = entry?.summaryMeta?.actors;
+  if (Array.isArray(summaryActors) && summaryActors.length) {
+    const names = summaryActors.map((a) => a.displayName || a.username).filter(Boolean);
+    if (names.length <= 3) return names.join("、");
+    return t("tableHistory.summary.actorsOverflow", {
+      names: names.slice(0, 2).join("、"),
+      count: names.length,
+    });
+  }
   const name = entry.displayName || entry.username;
   return entry.displayName && entry.username ? `${entry.displayName} (@${entry.username})` : name || t("backup.unknownUser");
 };
@@ -68,7 +77,18 @@ watch(
   },
   { immediate: true },
 );
-const title = (operation) => t(`backup.history.source.${operation.legacy ? "legacy" : SOURCES.has(operation.source) ? operation.source : "other"}`);
+const title = (operation) => {
+  if (operation.summaryKind === "daily") {
+    return t("tableHistory.summary.dailyLabel", { period: operation.summaryPeriod || "" });
+  }
+  if (operation.summaryKind === "monthly") {
+    return t("tableHistory.summary.monthlyLabel", { period: operation.summaryPeriod || "" });
+  }
+  if (operation.isSession) {
+    return t("tableHistory.session.badge", { count: operation.stepCount || operation.entryCount });
+  }
+  return t(`backup.history.source.${operation.legacy ? "legacy" : SOURCES.has(operation.source) ? operation.source : "other"}`);
+};
 const opLabel = (operation) => { const key = `backup.op.${operation}`; const label = t(key); return label === key ? operation : label; };
 const isSelected = (table) => Boolean(s.value.selected && auditTableKey(table) === auditTableKey(s.value.selected));
 const counts = (row) => [["insert", "INSERT", row.inserted], ["update", "UPDATE", row.updated], ["delete", "DELETE", row.deleted]];
@@ -143,10 +163,16 @@ const details = (id) => s.value.details[id]?.items || [];
           <article v-for="operation in s.operations" :key="operation.id" class="wb-audit-operation" :class="{ targeted: s.target?.id === operation.id, expanded: s.expanded === operation.id }" :data-source="operation.legacy ? 'legacy' : operation.source">
             <header><strong>{{ title(operation) }}</strong><time :datetime="operation.ts">{{ stamp(operation.ts) }}</time></header>
             <div class="wb-audit-counts">
+              <span v-if="operation.isNoNetChange" class="wb-audit-count" data-kind="noop">{{ t('tableHistory.summary.noNetChangePill') }}</span>
               <span v-for="[kind, op, value] in nonZeroCounts(operation)" :key="kind" class="wb-audit-count" :data-kind="kind">{{ opLabel(op) }} <b>{{ value }}</b></span>
               <span v-if="readOnly" class="wb-backup-chip wb-backup-audit-actor" :title="actorLabel(operation)">{{ actorLabel(operation) }}</span>
               <span v-if="!readOnly && operation.blocked" class="wb-audit-blocked"><TriangleAlert :size="12" aria-hidden="true" />{{ t('backup.history.blocked') }}</span>
             </div>
+            <p v-if="operation.summaryKind && operation.summaryMeta?.operationCount" class="wb-audit-hint">
+              {{ operation.summaryKind === 'monthly'
+                ? t('tableHistory.summary.monthlyBanner', { period: operation.summaryPeriod, actors: actorLabel(operation), ops: operation.summaryMeta.operationCount })
+                : t('tableHistory.summary.dailyBanner', { period: operation.summaryPeriod, actors: actorLabel(operation), ops: operation.summaryMeta.operationCount }) }}
+            </p>
             <p v-if="operation.legacy" class="wb-audit-hint">{{ t('m_2964bd3c0438') }}</p>
             <div class="wb-audit-actions">
               <button type="button" class="wb-audit-details-toggle" :aria-expanded="s.expanded === operation.id" :disabled="s.restoring" @click="history.loadDetails(operation)"><ChevronDown :size="14" aria-hidden="true" />{{ s.expanded === operation.id ? t('m_0ae7312510f4') : t('backup.history.viewDetails', { count: operation.entryCount }) }}</button>
@@ -157,7 +183,9 @@ const details = (id) => s.value.details[id]?.items || [];
               <article v-for="entry in details(operation.id)" :key="entry.id" class="wb-audit-detail">
                 <header><span class="wb-backup-op" :data-op="entry.operation">{{ opLabel(entry.operation) }}</span><time :datetime="entry.ts">{{ stamp(entry.ts) }}</time><span>{{ entry.status === 'aborted' ? t('m_a37778f17c5f') : entry.status === 'pending' ? t('m_33df16b4afab') : entry.status === 'rolled_back' ? t('m_9d1ac300aa31') : t('m_f28461bb49c8') }}</span></header>
                 <p v-if="entry.rowIdentity" class="wb-audit-identity">{{ t('m_a9e8c256cb93') }}{{ Object.entries(entry.rowIdentity).map(([key, value]) => `${key}=${value ?? 'NULL'}`).join(', ') }}</p>
-                <ul v-if="auditChangeItems(entry).length"><li v-for="(item, index) in auditChangeItems(entry)" :key="index">{{ item }}</li></ul><p v-else class="wb-audit-hint">{{ t('m_c226c1702dc7') }}</p>
+                <ul v-if="auditChangeItems(entry).length"><li v-for="(item, index) in auditChangeItems(entry)" :key="index">{{ item }}</li></ul>
+                <p v-else-if="String(entry.operation || '').toUpperCase() === 'NOOP'" class="wb-audit-hint">{{ t('tableHistory.summary.noNetChangeDesc') }}</p>
+                <p v-else class="wb-audit-hint">{{ t('m_c226c1702dc7') }}</p>
                 <p v-if="readOnly && entry.isRollback" class="wb-audit-hint">{{ t('m_dd194f08e2f4') }}</p>
                 <p v-if="readOnly && entry.notes" class="wb-backup-change-note"><b>{{ t('m_3e633a204a63') }}</b>{{ entry.notes }}</p>
                 <details v-if="readOnly && auditChangeSql(entry)" class="wb-backup-change-sql">

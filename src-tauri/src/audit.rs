@@ -826,6 +826,50 @@ pub(crate) fn audit_log_entry(row: &sqlx::sqlite::SqliteRow) -> AuditLogEntry {
     }
 }
 
+/// Aligned with central server tiered retention: synced local detailed rows
+/// older than 14 calendar days (UTC+8) are superseded by server daily/monthly summaries.
+pub const LOCAL_SYNCED_AUDIT_RETENTION_DAYS: i64 = 14;
+const DEFAULT_TZ_OFFSET_SECS: i32 = 8 * 3600;
+
+/// Compute the UTC cutoff instant corresponding to `00:00:00 +08:00` on the
+/// oldest calendar day kept in the detailed window (`today - (detailed_days - 1)`).
+/// Rows strictly before this instant belong to completed days `<= today - detailed_days`.
+pub fn local_synced_detailed_cutoff_utc(detailed_days: i64) -> chrono::DateTime<chrono::Utc> {
+    use chrono::{Duration, FixedOffset, NaiveTime, TimeZone, Utc};
+    let offset = FixedOffset::east_opt(DEFAULT_TZ_OFFSET_SECS).unwrap();
+    let today_local = Utc::now().with_timezone(&offset).date_naive();
+    let keep_from_date = today_local - Duration::days((detailed_days - 1).max(0));
+    let keep_from_naive = keep_from_date.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+    offset
+        .from_local_datetime(&keep_from_naive)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc::now() - Duration::days(detailed_days.max(1)))
+}
+
+/// Prune local audit rows that have ALREADY been synced to the central server
+/// (`synced = 1`) and are older than the 14-day detailed window so local history
+/// stays aligned with central-server daily/monthly summaries without duplicating rows.
+/// Unsynced rows and pending/in-flight restore jobs are never touched.
+pub async fn prune_synced_audit_logs_older_than_days(
+    pool: &SqlitePool,
+    detailed_days: i64,
+) -> Result<u64, String> {
+    let cutoff_ts = local_synced_detailed_cutoff_utc(detailed_days).to_rfc3339();
+    let result = sqlx::query(
+        "DELETE FROM audit_log \
+         WHERE synced = 1 \
+           AND ts < ? \
+           AND status != 'pending' \
+           AND NOT EXISTS (SELECT 1 FROM audit_restore_jobs WHERE status = 'prepared')",
+    )
+    .bind(&cutoff_ts)
+    .execute(pool)
+    .await
+    .map_err(|error| format!("清理已同步旧审计记录失败: {error}"))?;
+    Ok(result.rows_affected())
+}
+
 pub async fn prune_audit_logs(pool: &SqlitePool, retention_days: u32) -> Result<u64, String> {
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
     let cutoff_ts = cutoff.to_rfc3339();
@@ -1781,6 +1825,61 @@ mod tests {
                 assert_eq!(ops.items[0].entry_count, 344);
                 assert_eq!(ops.items[0].deleted, 344);
                 assert!(!ops.items[0].blocked);
+            });
+    }
+
+    #[test]
+    fn prune_synced_audit_logs_older_than_days_preserves_unsynced_and_recent_rows() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let pool = full_schema_test_pool().await;
+                let ctx = test_audit_context();
+                let ids = record_pending_batch(
+                    &pool,
+                    &ctx,
+                    &[
+                        test_pending_audit("UPDATE", "UPDATE `hero` SET `hp` = 1"),
+                        test_pending_audit("UPDATE", "UPDATE `hero` SET `hp` = 2"),
+                        test_pending_audit("UPDATE", "UPDATE `hero` SET `hp` = 3"),
+                    ],
+                )
+                .await
+                .unwrap();
+                mark_committed_required_batch(&pool, &ids).await.unwrap();
+
+                // Row 0: old + synced -> should be pruned
+                sqlx::query("UPDATE audit_log SET ts = '2020-01-01T00:00:00Z', synced = 1 WHERE id = ?")
+                    .bind(ids[0])
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                // Row 1: old + unsynced -> MUST be kept until synced
+                sqlx::query("UPDATE audit_log SET ts = '2020-01-01T00:00:00Z', synced = 0 WHERE id = ?")
+                    .bind(ids[1])
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                // Row 2: recent (now) + synced -> MUST be kept within 14 days
+                sqlx::query("UPDATE audit_log SET synced = 1 WHERE id = ?")
+                    .bind(ids[2])
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+
+                let deleted = prune_synced_audit_logs_older_than_days(&pool, 14)
+                    .await
+                    .unwrap();
+                assert_eq!(deleted, 1);
+
+                let remaining: Vec<i64> =
+                    sqlx::query_scalar("SELECT id FROM audit_log ORDER BY id ASC")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                assert_eq!(remaining, vec![ids[1], ids[2]]);
             });
     }
 }

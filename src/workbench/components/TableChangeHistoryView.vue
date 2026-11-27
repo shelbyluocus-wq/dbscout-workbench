@@ -6,6 +6,7 @@ import {
   ArrowUp,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   ExternalLink,
   History,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Server,
   Table2,
   TriangleAlert,
   X,
@@ -122,8 +124,24 @@ const isFieldDiffMode = computed(() => snapshot.value.mode === "field-diff");
 const isExternalMode = computed(() => (
   snapshot.value.mode === "external" && Boolean(selectedRevision.value?.isExternal)
 ));
+const isNoopMode = computed(() => (
+  snapshot.value.mode === "noop" && Boolean(selectedRevision.value?.isNoNetChange)
+));
+const selectedSummaryActors = computed(() => {
+  const rev = selectedRevision.value;
+  if (!rev?.summaryKind) return [];
+  const list = rev.summaryMeta?.actors;
+  if (Array.isArray(list) && list.length) {
+    return list.map((a) => ({
+      name: a.displayName || a.username || "",
+      operationCount: a.operationCount || 0,
+      entryCount: a.entryCount || 0,
+    })).filter((a) => a.name);
+  }
+  return (rev.actorsList || []).map((name) => ({ name, operationCount: 0, entryCount: 0 }));
+});
 const nearestAuditRevision = computed(() => (
-  state.revisions.find((rev) => !rev.isExternal) || null
+  history.displayRevisions.value.find((rev) => !rev.isExternal) || null
 ));
 const restoreExternalCautionTime = computed(() => (
   restoreModal.value?.crossedExternalTime || externalNotice.value?.modifiedAt || ""
@@ -301,6 +319,7 @@ const canRestoreEngine = computed(() => (
   !props.readOnly && String(props.engineKind || "mysql").toLowerCase() === "mysql"
 ));
 
+const selectedRevisionRange = history.selectedRevisionRange;
 const selectedRevisionFullIndex = history.selectedRevisionFullIndex;
 
 const beforeRestorePlan = computed(() => {
@@ -312,7 +331,8 @@ const beforeRestorePlan = computed(() => {
     primaryKeys: snapshot.value.primaryKeys,
     liveRows: state.liveRows,
     revisions: state.revisions,
-    targetIndex: selectedRevisionFullIndex.value,
+    targetIndex: selectedRevisionRange.value.startIndex,
+    targetRange: selectedRevisionRange.value,
     target: "before",
   });
 });
@@ -326,7 +346,8 @@ const afterRestorePlan = computed(() => {
     primaryKeys: snapshot.value.primaryKeys,
     liveRows: state.liveRows,
     revisions: state.revisions,
-    targetIndex: selectedRevisionFullIndex.value,
+    targetIndex: selectedRevisionRange.value.startIndex,
+    targetRange: selectedRevisionRange.value,
     target: "after",
   });
 });
@@ -360,7 +381,13 @@ async function requestRestore(target) {
   const plan = target === "after" ? afterRestorePlan.value : beforeRestorePlan.value;
   if (!rev || !plan?.canRestore || restorePreviewingTarget.value || restoreApplying.value) return;
 
-  const timeText = fullTime(rev.ts);
+  const timeText = rev.summaryKind === "daily"
+    ? t("tableHistory.summary.dailyLabel", { period: rev.summaryPeriod || shortTime(rev.ts) })
+    : rev.summaryKind === "monthly"
+      ? t("tableHistory.summary.monthlyLabel", { period: rev.summaryPeriod || shortTime(rev.ts) })
+      : rev.isSession
+        ? `${shortTime(rev.startTs)}–${clockTime(rev.ts)}`
+        : fullTime(rev.ts);
   const targetLabel = target === "after"
     ? t("tableHistory.restore.targetAfterLabel", { time: timeText })
     : t("tableHistory.restore.targetBeforeLabel", { time: timeText });
@@ -801,11 +828,45 @@ function actorChipLabel(item) {
 }
 
 function revisionClockText(rev) {
+  if (rev?.summaryKind === "daily") {
+    return t("tableHistory.summary.dailyTag");
+  }
+  if (rev?.summaryKind === "monthly") {
+    return t("tableHistory.summary.monthlyTag");
+  }
+  if (rev?.isSession && rev.startTs) {
+    const start = clockTime(rev.startTs).slice(0, 5);
+    const end = clockTime(rev.ts).slice(0, 5);
+    return start && end && start !== end ? `${start}–${end}` : clockTime(rev.ts);
+  }
   const clock = clockTime(rev?.ts);
   if (rev?.isExternal && rev?.timeKind === "detected" && clock) {
     return t("tableHistory.external.approxClock", { time: clock });
   }
   return clock;
+}
+
+function revisionActorsDisplay(rev) {
+  if (rev?.isExternal) return t("tableHistory.external.actorLabel");
+  const list = Array.isArray(rev?.actorsList) && rev.actorsList.length
+    ? rev.actorsList
+    : (rev?.actor ? [rev.actor] : []);
+  if (list.length <= 2) return list.join("、");
+  return t("tableHistory.summary.actorsOverflow", {
+    names: list.slice(0, 2).join("、"),
+    count: list.length,
+  });
+}
+
+function isStepSelectedInSession(session) {
+  if (!session?.isSession || !Array.isArray(session.steps)) return false;
+  return session.steps.some((step) => step.id === selectedRevision.value?.id);
+}
+
+function formatSummaryActorSummary() {
+  return selectedSummaryActors.value
+    .map((a) => (a.operationCount > 0 ? `${a.name} (${a.operationCount})` : a.name))
+    .join("、");
 }
 
 function externalSignalLabel(signal) {
@@ -836,6 +897,7 @@ const revisionGroups = computed(() => groupRevisionsByDay(filteredRevisions.valu
 function dayGroupLabel(group) {
   if (group.kind === "today") return t("tableHistory.dayToday");
   if (group.kind === "yesterday") return t("tableHistory.dayYesterday");
+  if (group.kind === "month") return t("tableHistory.summary.monthGroupLabel", { period: group.label });
   if (group.kind === "unknown") return t("tableHistory.dayUnknown");
   return group.label;
 }
@@ -895,6 +957,16 @@ function openInBackupCenter() {
       && !selectedRevision.value.isExternal
       && selectedRevision.value.origin === "shared",
     ),
+  });
+}
+
+function openTableBackupsOn243() {
+  emit("open-backup-center", {
+    tab: "snapshot",
+    snapshotView: "table-history",
+    connectionId: props.connectionId,
+    database: props.database,
+    tableName: props.tableName,
   });
 }
 
@@ -1250,6 +1322,22 @@ onBeforeUnmount(() => {
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
       <span>{{ t('tableHistory.liveTruncatedNotice', { limit: state.liveRows.length }) }}</span>
     </div>
+    <div v-if="selectedRevision && selectedRevision.summaryKind && !isNoopMode" class="wb-thv-banner is-info" role="status">
+      <Info :size="14" :stroke-width="2" aria-hidden="true" />
+      <span>{{
+        selectedRevision.summaryKind === 'monthly'
+          ? t('tableHistory.summary.monthlyBanner', {
+              period: selectedRevision.summaryPeriod,
+              actors: formatSummaryActorSummary(),
+              ops: selectedRevision.summaryMeta?.operationCount || selectedRevision.entryCount,
+            })
+          : t('tableHistory.summary.dailyBanner', {
+              period: selectedRevision.summaryPeriod,
+              actors: formatSummaryActorSummary(),
+              ops: selectedRevision.summaryMeta?.operationCount || selectedRevision.entryCount,
+            })
+      }}</span>
+    </div>
     <div v-if="fallbackBannerText" class="wb-thv-banner is-info" role="status">
       <Info :size="14" :stroke-width="2" aria-hidden="true" />
       <span>{{ fallbackBannerText }}</span>
@@ -1285,8 +1373,8 @@ onBeforeUnmount(() => {
       <aside class="wb-thv-rail" :aria-label="t('tableHistory.timelineAria')">
         <div class="wb-thv-rail-head">
           <span class="wb-thv-rail-title">{{ t('tableHistory.recentTitle') }}</span>
-          <span v-if="state.revisions.length" class="wb-thv-rail-count">
-            {{ t('tableHistory.revisionCount', { count: state.revisions.length }) }}
+          <span v-if="history.displayRevisions.value.length" class="wb-thv-rail-count">
+            {{ t('tableHistory.revisionCount', { count: history.displayRevisions.value.length }) }}
           </span>
         </div>
 
@@ -1326,61 +1414,132 @@ onBeforeUnmount(() => {
           <template v-else-if="filteredRevisions.length">
             <template v-for="group in revisionGroups" :key="group.key">
               <div class="wb-thv-day-head" role="presentation">{{ dayGroupLabel(group) }}</div>
-              <button
-                v-for="rev in group.items"
-                :key="rev.id"
-                type="button"
-                role="option"
-                class="wb-thv-rev-item"
-                :class="{ 'is-active': selectedRevision?.id === rev.id, 'is-external': rev.isExternal }"
-                :data-revision-kind="rev.isExternal ? 'external' : 'audit'"
-                :aria-selected="selectedRevision?.id === rev.id"
-                @click="history.selectRevision(rev.id)"
-              >
-                <div class="wb-thv-rev-top">
-                  <span class="wb-thv-rev-actor">
-                    <span
-                      v-if="rev.isExternal"
-                      class="wb-thv-avatar is-external"
-                      aria-hidden="true"
-                    ><ExternalLink :size="12" :stroke-width="2.1" /></span>
-                    <span v-else class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
-                    <span class="wb-thv-actor-name">{{ rev.isExternal ? t('tableHistory.external.actorLabel') : rev.actor }}</span>
-                  </span>
-                  <span class="wb-thv-rev-time" :title="fullTime(rev.ts)">{{ revisionClockText(rev) }}</span>
+              <template v-for="rev in group.items" :key="rev.id">
+                <div class="wb-thv-rev-wrap" :class="{ 'is-session': rev.isSession, 'is-summary': Boolean(rev.summaryKind) }">
+                  <button
+                    type="button"
+                    role="option"
+                    class="wb-thv-rev-item"
+                    :class="{
+                      'is-active': selectedRevision?.id === rev.id,
+                      'is-step-selected': isStepSelectedInSession(rev),
+                      'is-external': rev.isExternal,
+                      'is-summary': Boolean(rev.summaryKind),
+                      'is-noop': rev.isNoNetChange,
+                    }"
+                    :data-revision-kind="rev.isExternal ? 'external' : (rev.summaryKind || (rev.isSession ? 'session' : 'audit'))"
+                    :aria-selected="selectedRevision?.id === rev.id"
+                    @click="history.selectRevision(rev.id)"
+                  >
+                    <div class="wb-thv-rev-top">
+                      <span class="wb-thv-rev-actor">
+                        <span
+                          v-if="rev.isExternal"
+                          class="wb-thv-avatar is-external"
+                          aria-hidden="true"
+                        ><ExternalLink :size="12" :stroke-width="2.1" /></span>
+                        <span v-else class="wb-thv-avatar" aria-hidden="true">{{ actorInitial(rev.actor) }}</span>
+                        <span class="wb-thv-actor-name" :title="revisionActorsDisplay(rev)">{{ revisionActorsDisplay(rev) }}</span>
+                      </span>
+                      <span class="wb-thv-rev-time" :title="rev.isSession ? `${fullTime(rev.startTs)} ~ ${fullTime(rev.ts)}` : fullTime(rev.ts)">{{ revisionClockText(rev) }}</span>
+                    </div>
+                    <div class="wb-thv-rev-bottom">
+                      <template v-if="rev.isExternal">
+                        <span class="wb-thv-rev-source" data-source="external">
+                          {{ rev.signal === 'create_time' ? t('tableHistory.external.sourceRebuild') : t('tableHistory.external.sourceBadge') }}
+                        </span>
+                        <span class="wb-thv-rev-badges">
+                          <span v-if="rev.occurrenceCount > 1" class="wb-thv-count-pill" data-kind="external">
+                            {{ t('tableHistory.summary.externalCount', { count: rev.occurrenceCount }) }}
+                          </span>
+                          <span class="wb-thv-count-pill" data-kind="external">
+                            {{ t('tableHistory.external.noDiffPill') }}
+                          </span>
+                        </span>
+                      </template>
+                      <template v-else-if="rev.summaryKind">
+                        <span class="wb-thv-rev-source" :data-source="rev.summaryKind === 'monthly' ? 'summary-monthly' : 'summary-daily'">
+                          {{ rev.summaryKind === 'monthly' ? t('tableHistory.summary.monthlyTag') : t('tableHistory.summary.dailyTag') }}
+                        </span>
+                        <span class="wb-thv-rev-badges">
+                          <span v-if="rev.isNoNetChange" class="wb-thv-count-pill" data-kind="noop">
+                            {{ t('tableHistory.summary.noNetChangePill') }}
+                          </span>
+                          <template v-else>
+                            <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
+                              {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+                            </span>
+                            <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
+                              {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                            </span>
+                            <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
+                              {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                            </span>
+                            <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
+                              {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
+                            </span>
+                          </template>
+                        </span>
+                      </template>
+                      <template v-else>
+                        <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
+                          {{ rev.isSession ? t('tableHistory.session.badge', { count: rev.stepCount }) : sourceLabel(rev.source, rev.isRollback) }}
+                        </span>
+                        <span class="wb-thv-rev-badges">
+                          <span v-if="rev.isNoNetChange" class="wb-thv-count-pill" data-kind="noop">
+                            {{ t('tableHistory.summary.noNetChangePill') }}
+                          </span>
+                          <template v-else>
+                            <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
+                              {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
+                            </span>
+                            <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
+                              {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
+                            </span>
+                            <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
+                              {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
+                            </span>
+                            <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
+                              {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
+                            </span>
+                          </template>
+                        </span>
+                      </template>
+                    </div>
+                  </button>
+                  <button
+                    v-if="rev.isSession"
+                    type="button"
+                    class="wb-thv-session-toggle"
+                    :aria-expanded="history.isSessionExpanded(rev.id)"
+                    @click.stop="history.toggleSessionExpanded(rev.id)"
+                  >
+                    <ChevronDown v-if="history.isSessionExpanded(rev.id)" :size="12" aria-hidden="true" />
+                    <ChevronRight v-else :size="12" aria-hidden="true" />
+                    <span>{{ history.isSessionExpanded(rev.id) ? t('tableHistory.session.collapse') : t('tableHistory.session.expand', { count: rev.stepCount }) }}</span>
+                  </button>
+                  <div v-if="rev.isSession && history.isSessionExpanded(rev.id)" class="wb-thv-session-steps" role="group">
+                    <button
+                      v-for="(step, sIdx) in rev.steps"
+                      :key="step.id"
+                      type="button"
+                      role="option"
+                      class="wb-thv-session-step"
+                      :class="{ 'is-active': selectedRevision?.id === step.id }"
+                      :aria-selected="selectedRevision?.id === step.id"
+                      @click="history.selectRevision(step.id)"
+                    >
+                      <span class="wb-thv-session-step-time" :title="fullTime(step.ts)">{{ clockTime(step.ts) }}</span>
+                      <span class="wb-thv-session-step-meta">
+                        <span v-if="step.counts.update" class="wb-thv-count-pill" data-kind="update">{{ t('tableHistory.count.update', { count: step.counts.update }) }}</span>
+                        <span v-if="step.counts.insert" class="wb-thv-count-pill" data-kind="insert">{{ t('tableHistory.count.insert', { count: step.counts.insert }) }}</span>
+                        <span v-if="step.counts.delete" class="wb-thv-count-pill" data-kind="delete">{{ t('tableHistory.count.delete', { count: step.counts.delete }) }}</span>
+                        <span class="wb-thv-session-step-index">#{{ rev.steps.length - sIdx }}</span>
+                      </span>
+                    </button>
+                  </div>
                 </div>
-                <div class="wb-thv-rev-bottom">
-                  <template v-if="rev.isExternal">
-                    <span class="wb-thv-rev-source" data-source="external">
-                      {{ rev.signal === 'create_time' ? t('tableHistory.external.sourceRebuild') : t('tableHistory.external.sourceBadge') }}
-                    </span>
-                    <span class="wb-thv-rev-badges">
-                      <span class="wb-thv-count-pill" data-kind="external">
-                        {{ t('tableHistory.external.noDiffPill') }}
-                      </span>
-                    </span>
-                  </template>
-                  <template v-else>
-                    <span class="wb-thv-rev-source" :data-source="(rev.isRollback || rev.source === 'rollback') ? 'rollback' : (rev.source || 'other')">
-                      {{ sourceLabel(rev.source, rev.isRollback) }}
-                    </span>
-                    <span class="wb-thv-rev-badges">
-                      <span v-if="rev.counts.update" class="wb-thv-count-pill" data-kind="update">
-                        {{ t('tableHistory.count.update', { count: rev.counts.update }) }}
-                      </span>
-                      <span v-if="rev.counts.insert" class="wb-thv-count-pill" data-kind="insert">
-                        {{ t('tableHistory.count.insert', { count: rev.counts.insert }) }}
-                      </span>
-                      <span v-if="rev.counts.delete" class="wb-thv-count-pill" data-kind="delete">
-                        {{ t('tableHistory.count.delete', { count: rev.counts.delete }) }}
-                      </span>
-                      <span v-if="rev.counts.ddl" class="wb-thv-count-pill" data-kind="ddl">
-                        {{ t('tableHistory.count.ddl', { count: rev.counts.ddl }) }}
-                      </span>
-                    </span>
-                  </template>
-                </div>
-              </button>
+              </template>
             </template>
 
             <button
@@ -1409,6 +1568,10 @@ onBeforeUnmount(() => {
         </div>
 
         <footer v-if="canOpenBackupCenter" class="wb-thv-rail-footer">
+          <button type="button" class="wb-thv-link-btn" @click="openTableBackupsOn243">
+            <Server :size="13" :stroke-width="1.9" aria-hidden="true" />
+            <span>{{ t('tableHistory.open243TableBackups') }}</span>
+          </button>
           <button type="button" class="wb-thv-link-btn" @click="openInBackupCenter">
             <ExternalLink :size="13" :stroke-width="1.9" aria-hidden="true" />
             <span>{{ t('tableHistory.openBackupCenter') }}</span>
@@ -1475,6 +1638,15 @@ onBeforeUnmount(() => {
 
             <footer class="wb-thv-external-actions">
               <button
+                v-if="canOpenBackupCenter"
+                type="button"
+                class="wb-thv-empty-back-btn"
+                @click="openTableBackupsOn243"
+              >
+                <Server :size="14" :stroke-width="1.9" aria-hidden="true" />
+                <span>{{ t('tableHistory.open243TableBackups') }}</span>
+              </button>
+              <button
                 v-if="nearestAuditRevision"
                 type="button"
                 class="wb-thv-empty-back-btn"
@@ -1486,6 +1658,60 @@ onBeforeUnmount(() => {
               <button type="button" class="wb-thv-empty-back-btn" @click="emit('switch-view', 'data')">
                 <Table2 :size="14" :stroke-width="1.9" aria-hidden="true" />
                 <span>{{ t('tableHistory.backToData') }}</span>
+              </button>
+            </footer>
+          </section>
+        </div>
+
+        <!-- Lightweight Zero-Net-Change Summary / Session Notice -->
+        <div v-else-if="isNoopMode" class="wb-thv-external-stage">
+          <section class="wb-thv-external-card" :aria-label="t('tableHistory.summary.noNetChangeTitle')">
+            <header class="wb-thv-external-head">
+              <span class="wb-thv-external-icon is-noop" aria-hidden="true">
+                <CheckCircle2 :size="18" :stroke-width="2" />
+              </span>
+              <div class="wb-thv-external-heading">
+                <strong>{{ t('tableHistory.summary.noNetChangeTitle') }}</strong>
+                <p>{{ t('tableHistory.summary.noNetChangeDesc') }}</p>
+              </div>
+            </header>
+
+            <dl class="wb-thv-external-facts">
+              <dt>{{ t('tableHistory.summary.factPeriod') }}</dt>
+              <dd>
+                <strong>
+                  {{ selectedRevision.summaryKind === 'monthly'
+                    ? t('tableHistory.summary.monthlyLabel', { period: selectedRevision.summaryPeriod })
+                    : selectedRevision.summaryKind === 'daily'
+                      ? t('tableHistory.summary.dailyLabel', { period: selectedRevision.summaryPeriod })
+                      : fullTime(selectedRevision.ts) }}
+                </strong>
+              </dd>
+              <dt>{{ t('tableHistory.summary.factActors') }}</dt>
+              <dd>{{ formatSummaryActorSummary() || revisionActorsDisplay(selectedRevision) }}</dd>
+              <dt>{{ t('tableHistory.summary.factOpCount') }}</dt>
+              <dd>{{ t('tableHistory.summary.factOpCountValue', { count: selectedRevision.summaryMeta?.operationCount || selectedRevision.stepCount || selectedRevision.entryCount || 1 }) }}</dd>
+            </dl>
+
+            <footer class="wb-thv-external-actions">
+              <button
+                v-if="canRestoreEngine && afterRestorePlan.canRestore"
+                type="button"
+                class="wb-thv-empty-back-btn"
+                :disabled="Boolean(restorePreviewingTarget) || restoreApplying"
+                @click="requestRestore('after')"
+              >
+                <RotateCcw :size="14" :stroke-width="1.9" aria-hidden="true" />
+                <span>{{ t('tableHistory.summary.restoreToPeriod') }}</span>
+              </button>
+              <button
+                v-if="canOpenBackupCenter"
+                type="button"
+                class="wb-thv-empty-back-btn"
+                @click="openTableBackupsOn243"
+              >
+                <Server :size="14" :stroke-width="1.9" aria-hidden="true" />
+                <span>{{ t('tableHistory.open243TableBackups') }}</span>
               </button>
             </footer>
           </section>

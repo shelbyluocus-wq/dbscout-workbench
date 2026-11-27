@@ -10,6 +10,7 @@ import {
   filterRevisionItems,
   findNewerExternalRevision,
   groupAuditRevisions,
+  groupContinuousEditSessions,
   mergeTableAuditEntries,
   mergeTableExternalChanges,
   mergeTimelineRevisions,
@@ -1136,4 +1137,155 @@ test("groupAuditRevisions keeps >500-row imports whole and separates distinct op
   assert.equal(revisions[1].operationId, "op-batch-a");
   assert.equal(revisions[1].counts.update, 650);
   assert.equal(revisions[1].isIncomplete, false);
+});
+
+test("groupContinuousEditSessions merges <=5m same-user grid saves, computes net counts, and breaks on gap/span/actor/import", () => {
+  const mk = (id, ts, overrides = {}) => ({
+    id,
+    clientId: id,
+    ts,
+    operation: "UPDATE",
+    columnName: "hp",
+    oldValue: "10",
+    newValue: "20",
+    rowIdentity: { id: "1" },
+    source: "grid",
+    status: "committed",
+    actor: "Alice",
+    operationId: `op-${id}`,
+    ...overrides,
+  });
+  const entries = [
+    // Session 1: Alice edits id=1 from 10->20->30, plus edits id=2 5->9->5 (cancels out) within 5m
+    mk("e4", "2026-11-26T02:04:00Z", { rowIdentity: { id: "2" }, oldValue: "9", newValue: "5" }),
+    mk("e3", "2026-11-26T02:03:00Z", { rowIdentity: { id: "2" }, oldValue: "5", newValue: "9" }),
+    mk("e2", "2026-11-26T02:01:30Z", { rowIdentity: { id: "1" }, oldValue: "20", newValue: "30" }),
+    mk("e1", "2026-11-26T02:00:00Z", { rowIdentity: { id: "1" }, oldValue: "10", newValue: "20" }),
+    // Different actor breaks session
+    mk("e0", "2026-11-26T01:59:00Z", { actor: "Bob", oldValue: "1", newValue: "2" }),
+    // Import breaks session
+    mk("imp", "2026-11-26T01:58:00Z", { actor: "Bob", source: "import" }),
+    // Gap > 5 min breaks session
+    mk("old", "2026-11-26T01:40:00Z", { actor: "Alice" }),
+  ];
+
+  const atomic = groupAuditRevisions(mergeTableAuditEntries({ localEntries: entries }));
+  const grouped = groupContinuousEditSessions(atomic);
+  assert.equal(grouped.length, 4);
+  assert.equal(grouped[0].isSession, true);
+  assert.equal(grouped[0].stepCount, 4);
+  assert.equal(grouped[0].rangeStartIndex, 0);
+  assert.equal(grouped[0].rangeEndIndex, 3);
+  // Only row id=1 has net change (10->30); id=2 returned to 5!
+  assert.equal(grouped[0].counts.update, 1);
+  assert.equal(grouped[1].isSession, false);
+  assert.equal(grouped[1].actor, "Bob");
+  assert.equal(grouped[2].source, "import");
+  assert.equal(grouped[3].isSession, false);
+});
+
+test("targetRange snapshot and restore handle multi-step sessions, same-PK INSERT+DELETE, and transparent NOOP summaries", () => {
+  const columns = [
+    { name: "id", primaryKey: true },
+    { name: "hp", primaryKey: false },
+  ];
+  const primaryKeys = ["id"];
+  // Live table after all edits: row 1 has hp=30; row 2 was inserted then deleted in the same session.
+  const liveRows = [{ id: "1", hp: "30" }];
+
+  const rawEntries = [
+    // Session (indices 0..3 in atomic revisions): row1 hp 10->20->30, row2 inserted then deleted
+    {
+      id: 4, clientId: "c4", ts: "2026-11-26T02:03:00Z", operation: "DELETE",
+      oldValue: JSON.stringify({ id: "2", hp: "99" }), newValue: null,
+      rowIdentity: { id: "2" }, source: "grid", status: "committed", actor: "Alice", operationId: "op-4",
+    },
+    {
+      id: 3, clientId: "c3", ts: "2026-11-26T02:02:00Z", operation: "INSERT",
+      oldValue: null, newValue: JSON.stringify({ id: "2", hp: "99" }),
+      rowIdentity: { id: "2" }, source: "grid", status: "committed", actor: "Alice", operationId: "op-3",
+    },
+    {
+      id: 2, clientId: "c2", ts: "2026-11-26T02:01:00Z", operation: "UPDATE",
+      columnName: "hp", oldValue: "20", newValue: "30",
+      rowIdentity: { id: "1" }, source: "grid", status: "committed", actor: "Alice", operationId: "op-2",
+    },
+    {
+      id: 1, clientId: "c1", ts: "2026-11-26T02:00:00Z", operation: "UPDATE",
+      columnName: "hp", oldValue: "10", newValue: "20",
+      rowIdentity: { id: "1" }, source: "grid", status: "committed", actor: "Alice", operationId: "op-1",
+    },
+    // Older NOOP daily summary (index 4)
+    {
+      id: 0, clientId: "sum-noop", ts: "2026-11-01T15:59:59Z", operation: "NOOP",
+      source: "summary", status: "committed", actor: "Alice", operationId: "summary:daily:2026-11-01:seg0",
+      summaryKind: "daily", summaryPeriod: "2026-11-01",
+      summaryMeta: { actors: [{ username: "alice", displayName: "Alice", operationCount: 2, entryCount: 2 }], operationCount: 2, entryCount: 2, noNetChange: true },
+    },
+    // Older daily summary before the NOOP (index 5): row1 hp 5->10
+    {
+      id: -1, clientId: "sum-old", ts: "2026-10-20T15:59:59Z", operation: "UPDATE",
+      oldValue: JSON.stringify({ hp: "5" }), newValue: JSON.stringify({ hp: "10" }),
+      rowIdentity: { id: "1" }, source: "summary", status: "committed", actor: "Bob",
+      operationId: "summary:daily:2026-10-20:seg0", summaryKind: "daily", summaryPeriod: "2026-10-20",
+    },
+  ];
+
+  const atomic = groupAuditRevisions(mergeTableAuditEntries({ sharedEntries: rawEntries }));
+  assert.equal(atomic.length, 6);
+
+  // Full-table diff for the entire 4-step session: row 1 changed 10 -> 30, row 2 (insert+delete) is net unchanged!
+  const sessionSnap = reconstructRevisionFullTable({
+    columns, primaryKeys, liveRows, revisions: atomic,
+    targetIndex: 0, targetRange: { startIndex: 0, endIndex: 3 },
+  });
+  assert.equal(sessionSnap.mode, "full-table");
+  assert.equal(sessionSnap.rows.length, 1);
+  assert.equal(sessionSnap.rows[0].status, "updated");
+  assert.equal(sessionSnap.rows[0].before.hp, "10");
+  assert.equal(sessionSnap.rows[0].after.hp, "30");
+
+  // Restoring to "before" the session brings row 1 back to hp=10
+  const planBeforeSession = buildHistoryRestorePlan({
+    columns, primaryKeys, liveRows, revisions: atomic,
+    targetIndex: 0, targetRange: { startIndex: 0, endIndex: 3 }, target: "before",
+  });
+  assert.equal(planBeforeSession.canRestore, true);
+  assert.equal(planBeforeSession.operations.length, 1);
+  assert.equal(planBeforeSession.operations[0].kind, "update");
+  assert.equal(planBeforeSession.operations[0].targetValues.hp, "10");
+  assert.equal(planBeforeSession.operations[0].expectedCurrent.hp, "30");
+
+  // Selecting the NOOP summary shows mode === "noop"
+  const noopSnap = reconstructRevisionFullTable({
+    columns, primaryKeys, liveRows, revisions: atomic, targetIndex: 4,
+  });
+  assert.equal(noopSnap.mode, "noop");
+
+  // Selecting the older daily summary past the NOOP rewinds cleanly to 5 -> 10!
+  const olderSnap = reconstructRevisionFullTable({
+    columns, primaryKeys, liveRows, revisions: atomic, targetIndex: 5,
+  });
+  assert.equal(olderSnap.mode, "full-table");
+  assert.equal(olderSnap.rows[0].before.hp, "5");
+  assert.equal(olderSnap.rows[0].after.hp, "10");
+});
+
+test("mergeTableAuditEntries suppresses local raw rows inside compacted daily/monthly summary periods", () => {
+  const merged = mergeTableAuditEntries({
+    localEntries: [
+      // Inside 2026-11-01 (UTC+8) which is compacted on central server -> must be suppressed
+      { id: 1, clientId: "local-old-1", ts: "2026-11-01T02:00:00Z", operation: "UPDATE", status: "committed", source: "grid" },
+      // Inside 2026-04 (UTC+8) which is monthly-compacted -> must be suppressed
+      { id: 2, clientId: "local-old-2", ts: "2026-04-10T02:00:00Z", operation: "UPDATE", status: "committed", source: "grid" },
+      // Recent day not compacted -> must be kept
+      { id: 3, clientId: "local-new", ts: "2026-11-26T02:00:00Z", operation: "UPDATE", status: "committed", source: "grid" },
+    ],
+    sharedEntries: [
+      { clientId: "sum-d", ts: "2026-11-01T15:59:59Z", operation: "UPDATE", status: "committed", source: "summary", summaryKind: "daily", summaryPeriod: "2026-11-01" },
+      { clientId: "sum-m", ts: "2026-04-30T15:59:59Z", operation: "UPDATE", status: "committed", source: "summary", summaryKind: "monthly", summaryPeriod: "2026-04" },
+    ],
+  });
+  const ids = merged.map((e) => e.clientId);
+  assert.deepEqual(ids, ["local-new", "sum-d", "sum-m"]);
 });

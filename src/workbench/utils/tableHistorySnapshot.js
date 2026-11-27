@@ -110,12 +110,15 @@ export function normalizeItemRowIdentity(item, primaryKeys = [], colNameMap = ne
 }
 
 /**
- * Decide whether the selected revision can be rendered as an accurate
- * full-table before/after comparison without fabricating row placement.
+ * Decide whether the selected revision (or revision slice) can be rendered as
+ * an accurate full-table before/after comparison without fabricating row placement.
  */
 export function canReconstructRevision(revision, primaryKeys = [], columns = []) {
   if (revision?.isExternal) {
     return { ok: false, reason: "external-change" };
+  }
+  if (revision?.isNoNetChange) {
+    return { ok: false, reason: "no-net-change" };
   }
   if (!Array.isArray(primaryKeys) || primaryKeys.length === 0) {
     return { ok: false, reason: "no-primary-key" };
@@ -126,8 +129,13 @@ export function canReconstructRevision(revision, primaryKeys = [], columns = [])
   }
   const colNameMap = buildColumnNameMap(columns, primaryKeys);
   let rowMutationCount = 0;
+  let noopCount = 0;
   for (const item of items) {
     const op = String(item?.operation || "").toUpperCase();
+    if (op === "NOOP") {
+      noopCount += 1;
+      continue;
+    }
     if (op === "DDL") continue;
     rowMutationCount += 1;
     const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
@@ -136,7 +144,7 @@ export function canReconstructRevision(revision, primaryKeys = [], columns = [])
     }
   }
   if (rowMutationCount === 0) {
-    return { ok: false, reason: "ddl-only" };
+    return { ok: false, reason: noopCount > 0 ? "no-net-change" : "ddl-only" };
   }
   return { ok: true, reason: "" };
 }
@@ -165,9 +173,10 @@ function cellValuesDiffer(beforeVal, afterVal) {
 }
 
 /**
- * Reconstruct exact Before and After full-table states for `revisions[targetIndex]`
- * by inverse-replaying newer revisions (0 .. targetIndex - 1) onto `liveRows`,
- * then inverse-applying `revisions[targetIndex]` to compute the aligned diff.
+ * Reconstruct exact Before and After full-table states for `revisions[startIndex .. endIndex]`
+ * (defaulting to the single revision at `targetIndex`) by inverse-replaying newer
+ * revisions (`0 .. startIndex - 1`) onto `liveRows`, then inverse-applying the
+ * target range (`startIndex .. endIndex`) to compute the aligned net diff.
  */
 export function reconstructRevisionFullTable({
   columns: rawColumns = [],
@@ -175,11 +184,20 @@ export function reconstructRevisionFullTable({
   liveRows = [],
   revisions = [],
   targetIndex = 0,
+  targetRange = null,
 } = {}) {
+  const startIndex = targetRange && Number.isInteger(targetRange.startIndex)
+    ? targetRange.startIndex
+    : targetIndex;
+  const endIndex = targetRange && Number.isInteger(targetRange.endIndex)
+    ? Math.max(startIndex, targetRange.endIndex)
+    : startIndex;
+
   const primaryKeys = Array.isArray(rawPrimaryKeys) ? rawPrimaryKeys.filter(Boolean) : [];
   const columns = normalizeSnapshotColumns(rawColumns, primaryKeys);
-  const targetRevision = revisions[targetIndex] || null;
-  if (targetRevision?.isExternal) {
+  const targetSlice = revisions.slice(startIndex, endIndex + 1).filter(Boolean);
+  const headRevision = targetSlice[0] || null;
+  if (headRevision?.isExternal && targetSlice.length === 1) {
     return {
       mode: "external",
       reason: "external-change",
@@ -193,10 +211,17 @@ export function reconstructRevisionFullTable({
       hasSynthesizedRows: false,
     };
   }
-  const check = canReconstructRevision(targetRevision, primaryKeys, columns);
+  const combinedTarget = targetSlice.length === 1
+    ? headRevision
+    : {
+        isExternal: false,
+        isNoNetChange: targetSlice.every((rev) => Boolean(rev?.isNoNetChange)),
+        items: targetSlice.flatMap((rev) => rev?.items || []),
+      };
+  const check = canReconstructRevision(combinedTarget, primaryKeys, columns);
   if (!check.ok) {
     return {
-      mode: "field-diff",
+      mode: check.reason === "no-net-change" ? "noop" : "field-diff",
       reason: check.reason,
       columns,
       primaryKeys,
@@ -259,16 +284,20 @@ export function reconstructRevisionFullTable({
 
   let partialReplayWarning = false;
 
-  // Phase A: rewind revisions newer than targetIndex (0 .. targetIndex - 1).
+  // Phase A: rewind revisions newer than startIndex (0 .. startIndex - 1).
   // Revisions are sorted newest-first; items inside a revision are also newest-first.
-  for (let revIdx = 0; revIdx < targetIndex; revIdx += 1) {
+  for (let revIdx = 0; revIdx < startIndex; revIdx += 1) {
     const rev = revisions[revIdx];
     if (rev?.isExternal) {
       partialReplayWarning = true;
       continue;
     }
+    if (rev?.isNoNetChange) {
+      continue;
+    }
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
+      if (op === "NOOP") continue;
       if (op === "DDL") {
         partialReplayWarning = true;
         continue;
@@ -298,7 +327,7 @@ export function reconstructRevisionFullTable({
     }
   }
 
-  // Phase B: snapshot `afterMap` and rewind `targetRevision` into `beforeMap`.
+  // Phase B: snapshot `afterMap` and rewind `combinedTarget` into `beforeMap`.
   const afterMap = new Map();
   const beforeMap = new Map();
   for (const [idKey, row] of currentMap.entries()) {
@@ -309,8 +338,7 @@ export function reconstructRevisionFullTable({
   const touchedKeys = new Set();
   const touchedColsByKey = new Map();
   const synthesizedKeys = new Set();
-  const deletedKeys = new Set();
-  const insertedKeys = new Set();
+  const handledInTarget = new Set();
   const identityMapByKey = new Map();
 
   const recordTouchedCol = (idKey, colName) => {
@@ -318,40 +346,49 @@ export function reconstructRevisionFullTable({
     if (colName) touchedColsByKey.get(idKey).add(colName);
   };
 
-  for (const item of targetRevision.items || []) {
+  for (const item of combinedTarget.items || []) {
     const op = String(item?.operation || "").toUpperCase();
-    if (op === "DDL") continue;
+    if (op === "DDL" || op === "NOOP") continue;
     const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
     if (!identity.complete) continue;
 
     const idKey = identity.key;
+    const alreadyHandled = handledInTarget.has(idKey);
+    handledInTarget.add(idKey);
     touchedKeys.add(idKey);
     identityMapByKey.set(idKey, identity.map);
 
     if (op === "INSERT") {
-      insertedKeys.add(idKey);
       // Before this INSERT, the row did not exist
       beforeMap.delete(idKey);
-      // If externally deleted later (or beyond live row cap), synthesize into afterMap
-      if (!afterMap.has(idKey)) {
+      // Only synthesize into afterMap if no newer item inside this same target
+      // range already acted on this key (e.g. INSERT followed by DELETE in one session).
+      if (!alreadyHandled && !afterMap.has(idKey)) {
         const synthesized = { ...identity.map, ...rowFieldsToObject(item.rowFields, colNameMap) };
         afterMap.set(idKey, synthesized);
         synthesizedKeys.add(idKey);
         ensureInOrder(idKey, synthesized, { sortedInsert: true });
       }
     } else if (op === "DELETE") {
-      deletedKeys.add(idKey);
-      // After this DELETE, the row does not exist
-      afterMap.delete(idKey);
+      // Only delete from afterMap when DELETE is the newest action on this key in the range.
+      if (!alreadyHandled) {
+        afterMap.delete(idKey);
+      }
       // Before this DELETE, the row existed with its full old values
       const restoredBefore = { ...identity.map, ...rowFieldsToObject(item.rowFields, colNameMap) };
       beforeMap.set(idKey, restoredBefore);
       ensureInOrder(idKey, restoredBefore, { sortedInsert: true });
+      // If a newer INSERT re-created the same PK in this range, mark all fields for diffing.
+      if (afterMap.has(idKey)) {
+        const afterRow = afterMap.get(idKey);
+        for (const k of Object.keys(restoredBefore)) recordTouchedCol(idKey, k);
+        for (const k of Object.keys(afterRow || {})) recordTouchedCol(idKey, k);
+      }
     } else {
       // UPDATE
-      let afterRow = afterMap.get(idKey);
       let beforeRow = beforeMap.get(idKey);
-      if (!afterRow) {
+      let afterRow = afterMap.get(idKey);
+      if (!beforeRow && !alreadyHandled) {
         // Row was deleted externally or outside live row cap — synthesize partial row
         afterRow = { ...identity.map };
         beforeRow = { ...identity.map };
@@ -360,14 +397,12 @@ export function reconstructRevisionFullTable({
         synthesizedKeys.add(idKey);
         ensureInOrder(idKey, afterRow, { sortedInsert: true });
       }
+      if (!beforeRow) continue;
       for (const change of item.changes || []) {
         if (!change?.field) continue;
         const canonical = resolveColumnName(change.field, colNameMap);
         recordTouchedCol(idKey, canonical);
-        // Since items inside a revision are newest -> oldest, preserve the newest
-        // `after` value if not already set on a synthesized row, and always rewind
-        // `before` to the older value.
-        if (synthesizedKeys.has(idKey) && !Object.hasOwn(afterRow, canonical)) {
+        if (afterRow && synthesizedKeys.has(idKey) && !Object.hasOwn(afterRow, canonical)) {
           afterRow[canonical] = rawValueFromDiffPart(change.after);
         }
         beforeRow[canonical] = rawValueFromDiffPart(change.before);

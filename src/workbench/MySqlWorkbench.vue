@@ -1267,12 +1267,20 @@ const account = useAccount({
     if (account.isLoggedIn.value) {
       backupCenter.resetGmBackups();
       if (backupCenter.dialog.open && backupCenter.dialog.tab === "snapshot") {
-        void backupCenter.loadGmBackups();
+        if (backupCenter.gmBackupViewMode?.mode === "table-history") {
+          void backupCenter.loadGmTableBackups();
+        } else {
+          void backupCenter.loadGmBackups();
+        }
       }
     } else if (backupCenter.gmBackups.status !== "unauthorized" && !backupCenter.gmBackups.loading) {
       backupCenter.resetGmBackups();
       if (backupCenter.dialog.open && backupCenter.dialog.tab === "snapshot") {
-        void backupCenter.loadGmBackups();
+        if (backupCenter.gmBackupViewMode?.mode === "table-history") {
+          void backupCenter.loadGmTableBackups();
+        } else {
+          void backupCenter.loadGmBackups();
+        }
       }
     }
     if (account.isLoggedIn.value && selectedConnectionId.value && selectedDatabase.value) {
@@ -1345,7 +1353,11 @@ function openBackupCenterForTable(target = {}) {
     tableName: "",
   });
   backupCenter.open({
-    tab: "audit",
+    tab: target.tab || "audit",
+    snapshotView: target.snapshotView || "",
+    connectionId: target.connectionId || "",
+    database: target.database || "",
+    tableName: target.tableName || "",
     auditMode: target.preferShared ? "shared" : undefined,
   });
   void account.loadAccount();

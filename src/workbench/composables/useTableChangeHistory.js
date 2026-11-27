@@ -5,6 +5,7 @@ import {
   detectExternalNewerModification,
   findNewerExternalRevision,
   groupAuditRevisions,
+  groupContinuousEditSessions,
   inspectStreamRevisionHorizon,
   mergeTableAuditEntries,
   mergeTableExternalChanges,
@@ -61,6 +62,7 @@ export function useTableChangeHistory({
     observedExternal: null,
     revisions: [],
     selectedRevisionId: "",
+    expandedSessionIds: [],
     actorFilter: "",
     displayScope: "full", // "full" (default) | "changed"
     searchQuery: "",
@@ -76,17 +78,24 @@ export function useTableChangeHistory({
 
   const effectiveTableMeta = computed(() => state.observedTableMeta || state.tableMeta);
 
+  const displayRevisions = computed(() => groupContinuousEditSessions(state.revisions));
+
   const actors = computed(() => {
     const counts = new Map();
     let externalCount = 0;
-    for (const rev of state.revisions) {
+    for (const rev of displayRevisions.value) {
       if (rev.isExternal) {
         externalCount += 1;
         continue;
       }
-      const name = String(rev.actor || "").trim();
-      if (!name) continue;
-      counts.set(name, (counts.get(name) || 0) + 1);
+      const names = Array.isArray(rev.actorsList) && rev.actorsList.length
+        ? rev.actorsList
+        : (rev.actor ? [rev.actor] : []);
+      for (const rawName of names) {
+        const name = String(rawName || "").trim();
+        if (!name) continue;
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
     }
     const list = [...counts.entries()].map(([name, count]) => ({
       name,
@@ -104,28 +113,50 @@ export function useTableChangeHistory({
   });
 
   const filteredRevisions = computed(() => {
-    if (!state.actorFilter) return state.revisions;
+    if (!state.actorFilter) return displayRevisions.value;
     if (state.actorFilter === EXTERNAL_ACTOR_FILTER) {
-      return state.revisions.filter((rev) => rev.isExternal);
+      return displayRevisions.value.filter((rev) => rev.isExternal);
     }
-    return state.revisions.filter((rev) => !rev.isExternal && rev.actor === state.actorFilter);
+    return displayRevisions.value.filter((rev) => {
+      if (rev.isExternal) return false;
+      if (rev.actor === state.actorFilter) return true;
+      return Array.isArray(rev.actorsList) && rev.actorsList.includes(state.actorFilter);
+    });
   });
 
+  function findSelectionInList(list, targetId) {
+    if (!targetId) return null;
+    for (const item of list) {
+      if (item.id === targetId) return item;
+      if (item.isSession && Array.isArray(item.steps)) {
+        const step = item.steps.find((s) => s.id === targetId);
+        if (step) return step;
+      }
+    }
+    return null;
+  }
+
   const selectedRevision = computed(() => (
-    filteredRevisions.value.find((rev) => rev.id === state.selectedRevisionId)
+    findSelectionInList(filteredRevisions.value, state.selectedRevisionId)
     || filteredRevisions.value[0]
     || null
   ));
 
-  const selectedRevisionFullIndex = computed(() => {
+  const selectedRevisionRange = computed(() => {
     const rev = selectedRevision.value;
-    if (!rev) return -1;
-    return state.revisions.findIndex((item) => item.id === rev.id);
+    if (!rev) return { startIndex: -1, endIndex: -1 };
+    if (Number.isInteger(rev.rangeStartIndex) && Number.isInteger(rev.rangeEndIndex)) {
+      return { startIndex: rev.rangeStartIndex, endIndex: rev.rangeEndIndex };
+    }
+    const idx = state.revisions.findIndex((item) => item.id === rev.id);
+    return { startIndex: idx, endIndex: idx };
   });
 
+  const selectedRevisionFullIndex = computed(() => selectedRevisionRange.value.startIndex);
+
   const snapshot = computed(() => {
-    const targetIndex = selectedRevisionFullIndex.value;
-    if (targetIndex < 0) {
+    const range = selectedRevisionRange.value;
+    if (range.startIndex < 0) {
       return {
         mode: "empty",
         reason: "empty",
@@ -143,6 +174,20 @@ export function useTableChangeHistory({
       return {
         mode: "external",
         reason: "external-change",
+        columns: state.liveColumns,
+        primaryKeys: state.livePrimaryKeys,
+        rows: [],
+        changedRowIndices: [],
+        totalRows: 0,
+        changedCount: 0,
+        partialReplayWarning: false,
+        hasSynthesizedRows: false,
+      };
+    }
+    if (selectedRevision.value?.isNoNetChange) {
+      return {
+        mode: "noop",
+        reason: "no-net-change",
         columns: state.liveColumns,
         primaryKeys: state.livePrimaryKeys,
         rows: [],
@@ -172,7 +217,8 @@ export function useTableChangeHistory({
       primaryKeys: state.livePrimaryKeys,
       liveRows: state.liveRows,
       revisions: state.revisions,
-      targetIndex,
+      targetIndex: range.startIndex,
+      targetRange: range,
     });
   });
 
@@ -302,13 +348,14 @@ export function useTableChangeHistory({
       ? externalRevisions.filter((ext) => ext.tsMs >= (auditRevisions[auditRevisions.length - 1]?.tsMs || 0))
       : externalRevisions;
     state.revisions = mergeTimelineRevisions(auditRevisions, visibleExternal);
+    const displayed = displayRevisions.value;
     if (
       state.selectedRevisionId
-      && state.revisions.some((rev) => rev.id === state.selectedRevisionId)
+      && findSelectionInList(displayed, state.selectedRevisionId)
     ) {
       return;
     }
-    state.selectedRevisionId = state.revisions[0]?.id || "";
+    state.selectedRevisionId = displayed[0]?.id || "";
     state.activeChangeIndex = 0;
     state.activeMatchIndex = 0;
   }
@@ -430,6 +477,7 @@ export function useTableChangeHistory({
       state.observedExternal = null;
       state.revisions = [];
       state.selectedRevisionId = "";
+      state.expandedSessionIds = [];
       state.actorFilter = "";
       state.activeChangeIndex = 0;
       state.activeMatchIndex = 0;
@@ -651,10 +699,24 @@ export function useTableChangeHistory({
     state.activeMatchIndex = 0;
   }
 
+  function isSessionExpanded(sessionId) {
+    return state.expandedSessionIds.includes(String(sessionId || ""));
+  }
+
+  function toggleSessionExpanded(sessionId) {
+    const id = String(sessionId || "");
+    if (!id) return;
+    if (state.expandedSessionIds.includes(id)) {
+      state.expandedSessionIds = state.expandedSessionIds.filter((item) => item !== id);
+    } else {
+      state.expandedSessionIds = [...state.expandedSessionIds, id];
+    }
+  }
+
   function setActorFilter(actor) {
     state.actorFilter = state.actorFilter === actor ? "" : String(actor || "");
     const visible = filteredRevisions.value;
-    if (visible.length && !visible.some((rev) => rev.id === state.selectedRevisionId)) {
+    if (visible.length && !findSelectionInList(visible, state.selectedRevisionId)) {
       state.selectedRevisionId = visible[0].id;
       state.activeChangeIndex = 0;
       state.activeMatchIndex = 0;
@@ -707,9 +769,11 @@ export function useTableChangeHistory({
 
   return {
     state,
+    displayRevisions,
     actors,
     filteredRevisions,
     selectedRevision,
+    selectedRevisionRange,
     selectedRevisionFullIndex,
     snapshot,
     displayRows,
@@ -723,6 +787,8 @@ export function useTableChangeHistory({
     setTableMeta,
     dispose,
     selectRevision,
+    isSessionExpanded,
+    toggleSessionExpanded,
     setActorFilter,
     setDisplayScope,
     setSearchQuery,

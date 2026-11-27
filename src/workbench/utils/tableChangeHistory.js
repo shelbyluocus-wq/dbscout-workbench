@@ -2,6 +2,9 @@ import { auditChangeItems, auditChangeSql } from "./auditDisplay.js";
 
 const LEGACY_PLACEHOLDER_SERVER_KEY = "mysql://configured:3306";
 const DEFAULT_GROUP_WINDOW_MS = 2500;
+export const DEFAULT_SESSION_GAP_MS = 5 * 60 * 1000;
+export const DEFAULT_SESSION_MAX_SPAN_MS = 30 * 60 * 1000;
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 const EXTERNAL_NEWER_GRACE_MS = 120_000;
 const EXACT_AUDIT_MATCH_BEFORE_MS = 5_000;
 const EXACT_AUDIT_MATCH_AFTER_MS = 12_000;
@@ -156,6 +159,17 @@ export function extractEntryChanges(entry) {
       }))
     : [];
 
+  if (operation === "NOOP") {
+    return {
+      operation: "NOOP",
+      rowIdentity: [],
+      changes: [],
+      rowFields: [],
+      ddlItems: [],
+      forwardSql: "",
+    };
+  }
+
   if (operation === "DDL") {
     return {
       operation,
@@ -248,10 +262,48 @@ function normalizeActor(entry, selfLabel) {
   };
 }
 
+function calendarKeyUtc8(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return { day: "", month: "" };
+  const shifted = new Date(ms + BEIJING_OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getUTCDate()).padStart(2, "0");
+  return { day: `${y}-${m}-${d}`, month: `${y}-${m}` };
+}
+
+function normalizeSummaryMeta(raw) {
+  if (!raw) return null;
+  let obj = raw;
+  if (typeof raw === "string") {
+    obj = tryParseJson(raw);
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const rawActors = Array.isArray(obj.actors) ? obj.actors : [];
+  const actors = rawActors
+    .filter((a) => a && typeof a === "object")
+    .map((a) => ({
+      userId: String(a.userId ?? a.user_id ?? "").trim(),
+      username: String(a.username || "").trim(),
+      displayName: String(a.displayName ?? a.display_name ?? a.username ?? "").trim(),
+      operationCount: Math.max(0, Number(a.operationCount ?? a.operation_count) || 0),
+      entryCount: Math.max(0, Number(a.entryCount ?? a.entry_count) || 0),
+      sources: Array.isArray(a.sources) ? a.sources.map((s) => String(s || "").trim()).filter(Boolean) : [],
+    }))
+    .filter((a) => a.displayName || a.username);
+  return {
+    actors,
+    operationCount: Math.max(0, Number(obj.operationCount ?? obj.operation_count) || 0),
+    entryCount: Math.max(0, Number(obj.entryCount ?? obj.entry_count) || 0),
+    noNetChange: Boolean(obj.noNetChange ?? obj.no_net_change),
+  };
+}
+
 /**
  * Merge local SQLite audit entries and central-server shared entries into one
  * deduplicated list (deduping by clientId while keeping local rowIdentity /
  * sessionId / SQL metadata and preferring the shared display name).
+ * Also suppresses local-only raw rows that fall inside a calendar day/month
+ * already compacted into a central-server daily or monthly summary.
  */
 export function mergeTableAuditEntries({
   localEntries = [],
@@ -262,9 +314,25 @@ export function mergeTableAuditEntries({
   const wantedServerKey = canonicalRealServerKey(serverKey);
   const byClientId = new Map();
   const withoutClientId = [];
+  const compactedDays = new Set();
+  const compactedMonths = new Set();
+
+  const safeShared = Array.isArray(sharedEntries) ? sharedEntries : [];
+  for (const raw of safeShared) {
+    if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
+    const kind = String(raw.summaryKind ?? raw.summary_kind ?? "").trim().toLowerCase();
+    const period = String(raw.summaryPeriod ?? raw.summary_period ?? "").trim();
+    if (kind === "daily" && period) compactedDays.add(period);
+    else if (kind === "monthly" && period) compactedMonths.add(period);
+  }
 
   for (const raw of Array.isArray(localEntries) ? localEntries : []) {
     if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
+    const tsMs = parseAuditTimestampMs(raw.ts);
+    const cal = calendarKeyUtc8(tsMs);
+    if ((cal.day && compactedDays.has(cal.day)) || (cal.month && compactedMonths.has(cal.month))) {
+      continue;
+    }
     const clientId = String(raw.clientId || "").trim();
     const operationId = String(raw.operationId ?? raw.operation_id ?? "").trim();
     const operationSize = Math.max(0, Number(raw.operationSize ?? raw.operation_size) || 0);
@@ -274,7 +342,10 @@ export function mergeTableAuditEntries({
       clientId,
       operationId,
       operationSize,
-      tsMs: parseAuditTimestampMs(raw.ts),
+      summaryKind: String(raw.summaryKind ?? raw.summary_kind ?? "").trim().toLowerCase(),
+      summaryPeriod: String(raw.summaryPeriod ?? raw.summary_period ?? "").trim(),
+      summaryMeta: normalizeSummaryMeta(raw.summaryMeta ?? raw.summary_meta),
+      tsMs,
       actor: actorInfo.actor,
       username: actorInfo.username,
       isSelfFallback: actorInfo.isSelfFallback,
@@ -287,7 +358,6 @@ export function mergeTableAuditEntries({
     }
   }
 
-  const safeShared = Array.isArray(sharedEntries) ? sharedEntries : [];
   for (let sharedIndex = 0; sharedIndex < safeShared.length; sharedIndex += 1) {
     const raw = safeShared[sharedIndex];
     if (!raw || !VALID_STATUSES.has(String(raw.status || ""))) continue;
@@ -298,6 +368,9 @@ export function mergeTableAuditEntries({
     const clientId = String(raw.clientId || "").trim();
     const operationId = String(raw.operationId ?? raw.operation_id ?? "").trim();
     const operationSize = Math.max(0, Number(raw.operationSize ?? raw.operation_size) || 0);
+    const summaryKind = String(raw.summaryKind ?? raw.summary_kind ?? "").trim().toLowerCase();
+    const summaryPeriod = String(raw.summaryPeriod ?? raw.summary_period ?? "").trim();
+    const summaryMeta = normalizeSummaryMeta(raw.summaryMeta ?? raw.summary_meta);
     const actorInfo = normalizeActor(raw, selfLabel);
     const existing = clientId ? byClientId.get(clientId) : null;
     if (existing) {
@@ -305,6 +378,9 @@ export function mergeTableAuditEntries({
         ...existing,
         operationId: existing.operationId || operationId,
         operationSize: Math.max(existing.operationSize || 0, operationSize),
+        summaryKind: summaryKind || existing.summaryKind,
+        summaryPeriod: summaryPeriod || existing.summaryPeriod,
+        summaryMeta: summaryMeta || existing.summaryMeta,
         // Prefer central-server display name/username while preserving local
         // rowIdentity, forwardSql, and notes.
         displayName: raw.displayName || existing.displayName,
@@ -319,6 +395,9 @@ export function mergeTableAuditEntries({
         clientId,
         operationId,
         operationSize,
+        summaryKind,
+        summaryPeriod,
+        summaryMeta,
         tsMs: parseAuditTimestampMs(raw.ts),
         actor: actorInfo.actor,
         username: actorInfo.username,
@@ -461,20 +540,36 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
       continue;
     }
 
+    const summaryKind = String(entry.summaryKind || "").trim().toLowerCase();
+    const summaryPeriod = String(entry.summaryPeriod || "").trim();
+    const summaryMeta = entry.summaryMeta || null;
+    const summaryActorNames = summaryMeta?.actors?.length
+      ? summaryMeta.actors.map((a) => a.displayName || a.username).filter(Boolean)
+      : [];
+    const actorsList = summaryActorNames.length
+      ? [...new Set(summaryActorNames)]
+      : (entry.actor ? [entry.actor] : []);
+
     const rev = {
       id: `rev-${detailItem.id}-${revisions.length}`,
-      kind: "audit",
+      kind: summaryKind ? "summary" : "audit",
       isExternal: false,
+      summaryKind,
+      summaryPeriod,
+      summaryMeta,
+      isNoNetChange: Boolean(summaryMeta?.noNetChange || detailItem.operation === "NOOP"),
       operationId: entryOpId,
       ts: entry.ts,
       tsMs: entry.tsMs,
-      actor: entry.actor,
+      actor: actorsList[0] || entry.actor,
+      actorsList,
       username: entry.username || "",
       isSelfFallback: Boolean(entry.isSelfFallback),
       source: entry.source || "",
       isRollback: Boolean(entry.isRollback),
       origin: entry.origin || "local",
       counts: { update: 0, insert: 0, delete: 0, ddl: 0 },
+      _noopCount: 0,
       fieldChangeCount: 0,
       entryCount: 0,
       expectedEntryCount: entryOpSize,
@@ -486,8 +581,12 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
     revisions.push(rev);
   }
 
-  return revisions.map(({ _lastEntry, _forceIncomplete, ...rev }) => ({
+  return revisions.map(({ _lastEntry, _forceIncomplete, _noopCount, ...rev }) => ({
     ...rev,
+    isNoNetChange: Boolean(
+      rev.isNoNetChange
+      || (_noopCount > 0 && rev.counts.update === 0 && rev.counts.insert === 0 && rev.counts.delete === 0 && rev.counts.ddl === 0),
+    ),
     isIncomplete: Boolean(
       _forceIncomplete
       || (rev.expectedEntryCount > 0 && rev.entryCount < rev.expectedEntryCount),
@@ -497,7 +596,9 @@ export function groupAuditRevisions(entries = [], { windowMs = DEFAULT_GROUP_WIN
 
 function accumulateRevisionCounts(rev, item) {
   rev.entryCount += 1;
-  if (item.operation === "INSERT") {
+  if (item.operation === "NOOP") {
+    rev._noopCount = (rev._noopCount || 0) + 1;
+  } else if (item.operation === "INSERT") {
     rev.counts.insert += 1;
     rev.fieldChangeCount += Math.max(1, item.rowFields.length);
   } else if (item.operation === "DELETE") {
@@ -615,6 +716,9 @@ export function mergeTableExternalChanges({
           timeKind,
           signal,
           origin,
+          summaryKind: String(raw.summaryKind ?? raw.summary_kind ?? "").trim().toLowerCase(),
+          summaryPeriod: String(raw.summaryPeriod ?? raw.summary_period ?? "").trim(),
+          occurrenceCount: Math.max(1, Number(raw.occurrenceCount ?? raw.occurrence_count) || 1),
         });
       }
     }
@@ -712,6 +816,9 @@ export function mergeTableExternalChanges({
       source: "external",
       timeKind: item.timeKind,
       signal: item.signal,
+      summaryKind: item.summaryKind || "",
+      summaryPeriod: item.summaryPeriod || "",
+      occurrenceCount: Math.max(1, Number(item.occurrenceCount) || 1),
       isRollback: false,
       origin: item.origin,
       counts: { update: 0, insert: 0, delete: 0, ddl: 0 },
@@ -719,6 +826,198 @@ export function mergeTableExternalChanges({
       entryCount: 0,
       items: [],
     }));
+}
+
+function isSessionEligibleGridRevision(rev) {
+  if (!rev || rev.isExternal || rev.summaryKind || rev.isNoNetChange || rev.isIncomplete || rev.isRollback) {
+    return false;
+  }
+  if (String(rev.source || "") !== "grid") return false;
+  if (Number(rev.counts?.ddl || 0) > 0) return false;
+  return Boolean(rev.tsMs > 0);
+}
+
+function localDayKey(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function itemRowIdentityKey(item) {
+  if (!Array.isArray(item?.rowIdentity) || item.rowIdentity.length === 0) return "";
+  return JSON.stringify(
+    item.rowIdentity
+      .map((p) => [String(p?.key || "").toLowerCase(), String(p?.value ?? "")])
+      .sort((a, b) => a[0].localeCompare(b[0])),
+  );
+}
+
+/**
+ * Compute net row-change counts (`insert` / `update` / `delete`) across a
+ * contiguous sequence of atomic grid revisions (ordered newest -> oldest),
+ * deduplicating repeated edits to the same row/cell within the session.
+ */
+function computeSessionNetCounts(stepsNewestFirst) {
+  const orderedOldestFirst = [];
+  for (let s = stepsNewestFirst.length - 1; s >= 0; s -= 1) {
+    const items = Array.isArray(stepsNewestFirst[s]?.items) ? stepsNewestFirst[s].items : [];
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      orderedOldestFirst.push(items[i]);
+    }
+  }
+  const byRow = new Map();
+  let unkeyedUpdates = 0;
+  let unkeyedInserts = 0;
+  let unkeyedDeletes = 0;
+
+  for (const item of orderedOldestFirst) {
+    const op = String(item?.operation || "UPDATE").toUpperCase();
+    const key = itemRowIdentityKey(item);
+    if (!key) {
+      if (op === "INSERT") unkeyedInserts += 1;
+      else if (op === "DELETE") unkeyedDeletes += 1;
+      else if (op !== "NOOP") unkeyedUpdates += 1;
+      continue;
+    }
+    let state = byRow.get(key);
+    if (!state) {
+      state = { initial: op === "INSERT" ? "absent" : "present", current: op === "DELETE" ? "absent" : "present", fields: new Map() };
+      byRow.set(key, state);
+    }
+    if (op === "INSERT") {
+      state.current = "present";
+    } else if (op === "DELETE") {
+      state.current = "absent";
+    } else if (op === "UPDATE") {
+      state.current = "present";
+      for (const ch of Array.isArray(item.changes) ? item.changes : []) {
+        const field = String(ch?.field || "").toLowerCase();
+        if (!field) continue;
+        const beforeText = ch.before?.isNull ? null : String(ch.before?.text ?? "");
+        const afterText = ch.after?.isNull ? null : String(ch.after?.text ?? "");
+        if (!state.fields.has(field)) {
+          state.fields.set(field, { initial: beforeText, current: afterText });
+        } else {
+          state.fields.get(field).current = afterText;
+        }
+      }
+    }
+  }
+
+  let insert = unkeyedInserts;
+  let del = unkeyedDeletes;
+  let update = unkeyedUpdates;
+  for (const st of byRow.values()) {
+    if (st.initial === "absent" && st.current === "present") {
+      insert += 1;
+    } else if (st.initial === "present" && st.current === "absent") {
+      del += 1;
+    } else if (st.initial === "present" && st.current === "present") {
+      const hasFieldDiff = [...st.fields.values()].some((f) => f.initial !== f.current);
+      if (hasFieldDiff || st.fields.size === 0) update += 1;
+    }
+  }
+  return { update, insert, delete: del, ddl: 0 };
+}
+
+/**
+ * Collapse consecutive same-actor, same-day manual grid edits within `gapMs`
+ * (default 5 min, max span 30 min) into clean expandable "edit sessions" while
+ * keeping every underlying atomic step accessible for inspection and restore.
+ *
+ * Breaks immediately on actor change, day boundary, import, rollback, DDL,
+ * summary nodes, or external changes.
+ */
+export function groupContinuousEditSessions(
+  timelineRevisions = [],
+  { gapMs = DEFAULT_SESSION_GAP_MS, maxSpanMs = DEFAULT_SESSION_MAX_SPAN_MS } = {},
+) {
+  const list = Array.isArray(timelineRevisions) ? timelineRevisions : [];
+  const result = [];
+  let i = 0;
+
+  while (i < list.length) {
+    const head = list[i];
+    if (!isSessionEligibleGridRevision(head)) {
+      result.push({
+        ...head,
+        isSession: false,
+        rangeStartIndex: i,
+        rangeEndIndex: i,
+        fullIndex: i,
+      });
+      i += 1;
+      continue;
+    }
+
+    const headActor = String(head.actor || "").trim().toLowerCase();
+    const headDay = localDayKey(head.tsMs);
+    const steps = [{ ...head, fullIndex: i, rangeStartIndex: i, rangeEndIndex: i }];
+    let j = i + 1;
+    let oldestMs = head.tsMs;
+
+    while (j < list.length) {
+      const next = list[j];
+      if (!isSessionEligibleGridRevision(next)) break;
+      const nextActor = String(next.actor || "").trim().toLowerCase();
+      if (nextActor !== headActor) break;
+      if (localDayKey(next.tsMs) !== headDay) break;
+      if (Math.abs(oldestMs - next.tsMs) > gapMs) break;
+      if (Math.abs(head.tsMs - next.tsMs) > maxSpanMs) break;
+      steps.push({ ...next, fullIndex: j, rangeStartIndex: j, rangeEndIndex: j });
+      oldestMs = next.tsMs;
+      j += 1;
+    }
+
+    if (steps.length === 1) {
+      result.push({
+        ...head,
+        isSession: false,
+        rangeStartIndex: i,
+        rangeEndIndex: i,
+        fullIndex: i,
+      });
+    } else {
+      const oldest = steps[steps.length - 1];
+      const netCounts = computeSessionNetCounts(steps);
+      const isNoNetChange =
+        netCounts.update === 0 && netCounts.insert === 0 && netCounts.delete === 0;
+      result.push({
+        id: `session:${head.id}:${oldest.id}`,
+        kind: "session",
+        isSession: true,
+        isExternal: false,
+        summaryKind: "",
+        summaryPeriod: "",
+        summaryMeta: null,
+        isNoNetChange,
+        ts: head.ts,
+        tsMs: head.tsMs,
+        startTs: oldest.ts,
+        startTsMs: oldest.tsMs,
+        actor: head.actor,
+        actorsList: [head.actor],
+        username: head.username || "",
+        isSelfFallback: Boolean(head.isSelfFallback),
+        source: "grid",
+        isRollback: false,
+        origin: steps.some((s) => s.origin !== head.origin) ? "merged" : head.origin,
+        stepCount: steps.length,
+        steps,
+        rangeStartIndex: i,
+        rangeEndIndex: j - 1,
+        fullIndex: i,
+        counts: netCounts,
+        entryCount: steps.reduce((acc, s) => acc + (s.entryCount || 0), 0),
+        expectedEntryCount: 0,
+        isIncomplete: false,
+        items: steps.flatMap((s) => s.items || []),
+      });
+    }
+    i = j;
+  }
+
+  return result;
 }
 
 /**

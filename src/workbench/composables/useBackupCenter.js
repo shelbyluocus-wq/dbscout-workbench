@@ -57,6 +57,9 @@ export function useBackupCenter(options = {}) {
   // "local" = this workstation's local snapshots.
   const snapshotSource = reactive({ mode: "server" });
 
+  // "hourly" = 243 hourly full-DB zips; "table-history" = per-table up to 60 changed versions.
+  const gmBackupViewMode = reactive({ mode: "hourly" });
+
   const gmBackups = reactive({
     status: "idle",
     enabled: false,
@@ -75,6 +78,26 @@ export function useBackupCenter(options = {}) {
     tablesError: "",
     selectedTables: [],
     tableSearch: "",
+  });
+
+  const gmTableBackups = reactive({
+    status: "idle",
+    enabled: false,
+    maxVersions: 60,
+    lastRunTs: "",
+    databases: [],
+    items: [],
+    databaseFilter: "",
+    search: "",
+    includeDeleted: true,
+    error: "",
+    loading: false,
+    loadedOnce: false,
+    activeTable: null,
+    versions: [],
+    versionsLoading: false,
+    versionsError: "",
+    runningScan: false,
   });
 
   const auditLogs = shallowRef([]);
@@ -128,6 +151,8 @@ export function useBackupCenter(options = {}) {
   let listingRequestCount = 0;
   let gmListToken = 0;
   let gmTablesToken = 0;
+  let gmTableListToken = 0;
+  let gmTableVersionsToken = 0;
 
   function beginListing() {
     listingRequestCount += 1;
@@ -308,6 +333,47 @@ export function useBackupCenter(options = {}) {
     gmBackups.tableSearch = "";
   }
 
+  function setGmBackupViewMode(mode) {
+    gmBackupViewMode.mode = mode === "table-history" ? "table-history" : "hourly";
+    if (gmBackupViewMode.mode === "table-history") {
+      if (!gmTableBackups.loadedOnce && !gmTableBackups.loading) {
+        void loadGmTableBackups();
+      }
+    } else if (!gmBackups.loadedOnce && !gmBackups.loading) {
+      void loadGmBackups();
+    }
+  }
+
+  function setGmTableBackupFilters(partial) {
+    Object.assign(gmTableBackups, partial);
+  }
+
+  function closeGmTableBackupVersions() {
+    gmTableVersionsToken += 1;
+    gmTableBackups.activeTable = null;
+    gmTableBackups.versions = [];
+    gmTableBackups.versionsLoading = false;
+    gmTableBackups.versionsError = "";
+  }
+
+  function resetGmTableBackups() {
+    gmTableListToken += 1;
+    gmTableVersionsToken += 1;
+    gmTableBackups.loading = false;
+    gmTableBackups.loadedOnce = false;
+    gmTableBackups.status = "idle";
+    gmTableBackups.enabled = false;
+    gmTableBackups.lastRunTs = "";
+    gmTableBackups.databases = [];
+    gmTableBackups.items = [];
+    gmTableBackups.error = "";
+    gmTableBackups.activeTable = null;
+    gmTableBackups.versions = [];
+    gmTableBackups.versionsLoading = false;
+    gmTableBackups.versionsError = "";
+    gmTableBackups.runningScan = false;
+  }
+
   function resetGmBackups() {
     gmListToken += 1;
     gmTablesToken += 1;
@@ -326,6 +392,7 @@ export function useBackupCenter(options = {}) {
     gmBackups.tablesError = "";
     gmBackups.selectedTables = [];
     gmBackups.tableSearch = "";
+    resetGmTableBackups();
   }
 
   async function loadGmBackups(overrides = {}) {
@@ -436,6 +503,170 @@ export function useBackupCenter(options = {}) {
     } finally {
       busy.restoring = false;
     }
+  }
+
+  async function loadGmTableBackups(overrides = {}) {
+    const token = ++gmTableListToken;
+    gmTableBackups.loading = true;
+    gmTableBackups.error = "";
+    const database = "database" in overrides ? overrides.database : gmTableBackups.databaseFilter;
+    const search = "search" in overrides ? overrides.search : gmTableBackups.search;
+    const includeDeleted = "includeDeleted" in overrides
+      ? Boolean(overrides.includeDeleted)
+      : Boolean(gmTableBackups.includeDeleted);
+    try {
+      const request = { includeDeleted };
+      if (database) request.database = database;
+      if (search && String(search).trim()) request.search = String(search).trim();
+      const result = await invokeWorkbench("list_gm_table_backups", { request });
+      if (token !== gmTableListToken) return false;
+      const payload = result || {};
+      gmTableBackups.status = payload.status || (payload.enabled ? "ok" : "disabled");
+      gmTableBackups.enabled = Boolean(payload.enabled);
+      gmTableBackups.maxVersions = Number(payload.maxVersions) || 60;
+      gmTableBackups.lastRunTs = payload.lastRunTs || "";
+      gmTableBackups.databases = Array.isArray(payload.databases) ? payload.databases : [];
+      gmTableBackups.items = Array.isArray(payload.items) ? payload.items : [];
+      gmTableBackups.error = payload.error || "";
+      gmTableBackups.loadedOnce = true;
+      return gmTableBackups.status === "ok";
+    } catch (error) {
+      if (token !== gmTableListToken) return false;
+      gmTableBackups.status = "unreachable";
+      gmTableBackups.enabled = false;
+      gmTableBackups.items = [];
+      gmTableBackups.error = errorMessage(error);
+      gmTableBackups.loadedOnce = true;
+      return false;
+    } finally {
+      if (token === gmTableListToken) {
+        gmTableBackups.loading = false;
+      }
+    }
+  }
+
+  async function openGmTableBackupVersions(item) {
+    if (!item?.database || !item?.tableName) return false;
+    const token = ++gmTableVersionsToken;
+    gmTableBackups.activeTable = {
+      database: item.database,
+      tableName: item.tableName,
+      presentInLatest: item.presentInLatest !== false,
+      lastSeenTs: item.lastSeenTs || item.latestVersionTs || "",
+      versionCount: item.versionCount || 0,
+    };
+    gmTableBackups.versions = [];
+    gmTableBackups.versionsLoading = true;
+    gmTableBackups.versionsError = "";
+    try {
+      const result = await invokeWorkbench("list_gm_table_backup_versions", {
+        request: {
+          database: item.database,
+          tableName: item.tableName,
+        },
+      });
+      if (token !== gmTableVersionsToken) return false;
+      if (result) {
+        gmTableBackups.activeTable = {
+          database: result.database || item.database,
+          tableName: result.tableName || item.tableName,
+          presentInLatest: result.presentInLatest !== false,
+          lastSeenTs: result.lastSeenTs || item.lastSeenTs || "",
+          versionCount: Array.isArray(result.versions) ? result.versions.length : (item.versionCount || 0),
+        };
+        if (result.maxVersions) gmTableBackups.maxVersions = Number(result.maxVersions) || 60;
+        gmTableBackups.versions = Array.isArray(result.versions) ? result.versions : [];
+      }
+      return true;
+    } catch (error) {
+      if (token !== gmTableVersionsToken) return false;
+      gmTableBackups.versionsError = errorMessage(error);
+      return false;
+    } finally {
+      if (token === gmTableVersionsToken) {
+        gmTableBackups.versionsLoading = false;
+      }
+    }
+  }
+
+  async function restoreGmTableBackup({ connectionId, database, sourceDatabase, tableName, versionId }) {
+    if (!connectionId || !database || !sourceDatabase || !tableName || !versionId) {
+      throw new Error("请先选择还原的目标连接和数据库");
+    }
+    busy.restoring = true;
+    try {
+      const result = await invokeWorkbench("restore_gm_table_backup", {
+        request: {
+          connectionId,
+          database,
+          sourceDatabase,
+          tableName,
+          versionId,
+        },
+      });
+      lastError.value = "";
+      return result;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      throw error;
+    } finally {
+      busy.restoring = false;
+    }
+  }
+
+  async function runGmTableBackupsNow() {
+    if (gmTableBackups.runningScan) return null;
+    gmTableBackups.runningScan = true;
+    try {
+      const result = await invokeWorkbench("run_gm_table_backups_now", {});
+      await loadGmTableBackups();
+      if (gmTableBackups.activeTable) {
+        await openGmTableBackupVersions(gmTableBackups.activeTable);
+      }
+      lastError.value = "";
+      return result;
+    } catch (error) {
+      lastError.value = errorMessage(error);
+      throw error;
+    } finally {
+      gmTableBackups.runningScan = false;
+    }
+  }
+
+  async function openTableBackupTarget({ database = "", tableName = "" } = {}) {
+    gmBackupViewMode.mode = "table-history";
+    closeGmTableBackupVersions();
+    const targetDb = String(database || "").trim();
+    const targetTable = String(tableName || "").trim();
+    gmTableBackups.databaseFilter = targetDb;
+    gmTableBackups.search = targetTable;
+    let ok = await loadGmTableBackups({
+      database: targetDb,
+      search: targetTable,
+      includeDeleted: true,
+    });
+    if (ok && targetDb && gmTableBackups.items.length === 0 && gmTableBackups.databases.length > 0) {
+      // If the exact local database name is not present on 243, relax database filter so user still sees available DBs
+      const matchedDb = gmTableBackups.databases.find((db) => db.toLowerCase() === targetDb.toLowerCase());
+      if (!matchedDb) {
+        gmTableBackups.databaseFilter = "";
+        ok = await loadGmTableBackups({
+          database: "",
+          search: targetTable,
+          includeDeleted: true,
+        });
+      }
+    }
+    if (ok && targetTable) {
+      const matched = gmTableBackups.items.find((item) => (
+        String(item.tableName || "").toLowerCase() === targetTable.toLowerCase()
+        && (!targetDb || String(item.database || "").toLowerCase() === targetDb.toLowerCase())
+      )) || (gmTableBackups.items.length === 1 ? gmTableBackups.items[0] : null);
+      if (matched) {
+        await openGmTableBackupVersions(matched);
+      }
+    }
+    return ok;
   }
 
   async function loadConfig() {
@@ -744,10 +975,21 @@ export function useBackupCenter(options = {}) {
 
   let stopListeners = null;
 
-  async function open({ tab = "audit", connectionId, database, auditMode: nextAuditMode } = {}) {
+  async function open({
+    tab = "audit",
+    snapshotView = "",
+    connectionId,
+    database,
+    tableName,
+    auditMode: nextAuditMode,
+  } = {}) {
     // Default to the audit log tab when opening from the sidebar entry; callers
-    // such as the release database page can land directly on snapshots.
-    dialog.tab = ["audit", "snapshots", "settings"].includes(tab) ? tab : "audit";
+    // such as the release database page or table history can land directly on 243 backups.
+    const normalizedTab = tab === "snapshots" ? "snapshot" : tab === "settings" ? "config" : tab;
+    dialog.tab = ["audit", "snapshot", "config"].includes(normalizedTab) ? normalizedTab : "audit";
+    if (snapshotView === "table-history" || snapshotView === "hourly") {
+      gmBackupViewMode.mode = snapshotView;
+    }
     if (nextAuditMode === "shared" || nextAuditMode === "local") {
       history.dispose();
       sharedHistory.dispose();
@@ -761,7 +1003,14 @@ export function useBackupCenter(options = {}) {
       });
     }
     dialog.open = true;
-    await Promise.all([loadConfig(), loadFilterOptions(), loadAuditLogs(), loadSnapshots()]);
+    const tasks = [loadConfig(), loadFilterOptions(), loadAuditLogs(), loadSnapshots()];
+    if (dialog.tab === "snapshot" && snapshotView === "table-history") {
+      tasks.push(openTableBackupTarget({
+        database: database ?? filters.database,
+        tableName: tableName || "",
+      }));
+    }
+    await Promise.all(tasks);
     if (!stopListeners) {
       stopListeners = await startEventListeners();
     }
@@ -773,7 +1022,9 @@ export function useBackupCenter(options = {}) {
     sharedHistory.dispose();
     filterLoadToken += 1;
     gmListToken += 1;
+    gmTableListToken += 1;
     closeGmBackupTables();
+    closeGmTableBackupVersions();
     filterDatabases.value = [];
     filterTables.value = [];
     cancelImport();
@@ -823,7 +1074,9 @@ export function useBackupCenter(options = {}) {
     filters,
     auditMode,
     snapshotSource,
+    gmBackupViewMode,
     gmBackups,
+    gmTableBackups,
     history,
     sharedHistory,
     auditLogs,
@@ -845,14 +1098,23 @@ export function useBackupCenter(options = {}) {
     setAuditMode,
     loadSnapshots,
     setSnapshotSource,
+    setGmBackupViewMode,
     setGmBackupFilters,
+    setGmTableBackupFilters,
     resetGmBackups,
+    resetGmTableBackups,
     loadGmBackups,
     openGmBackupTables,
     closeGmBackupTables,
     toggleGmBackupTable,
     setGmSelectedTables,
     restoreGmBackup,
+    loadGmTableBackups,
+    openGmTableBackupVersions,
+    closeGmTableBackupVersions,
+    restoreGmTableBackup,
+    runGmTableBackupsNow,
+    openTableBackupTarget,
     loadConfig,
     saveConfig,
     rollback,

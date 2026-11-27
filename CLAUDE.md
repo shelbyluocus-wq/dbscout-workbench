@@ -154,16 +154,23 @@ capabilities:
   SQLite).
 - **Accounts + central server** — optional login to a central server
   (default `http://192.168.1.243:8766`, standalone under `/home/blackcat-server`
-  on Linux via `npm run server:deploy`, retaining the latest 20 revisions per
-  table by default; clients automatically migrate saved legacy
+  on Linux via `npm run server:deploy`; clients automatically migrate saved legacy
   `http://192.168.1.193:8765` / `http://192.168.1.243:8765` addresses once) that
-  aggregates a **shared audit log** across workstations and provides strictly
-  read-only access to the host's hourly MySQL backup archives
+  aggregates a **shared audit log** across workstations using tiered retention
+  (every edit verbatim for 14 days, daily net-delta summaries with actor lists
+  from 14 to 180 days, and permanent monthly net-delta summaries beyond 180 days,
+  all diffable and restorable, with lightweight zero-net-change markers; consecutive
+  same-user single-cell edits within 5 minutes collapse into expandable edit
+  sessions in the UI, and local SQLite prunes synced rows older than 14 days) and
+  provides strictly read-only access to the host's hourly MySQL backup archives
   (`DBSCOUT_SERVER_GM_BACKUP_DIR`, default `/home/servbin/dbback` via
-  `/backups/gm`, `/backups/gm/tables`, `/backups/gm/extract`), surfaced under
-  Backup Center → 243 Backups for single-table or full-DB restore (recorded in
-  the audit trail; local scheduled snapshots UI and background scheduler are
-  removed).
+  `/backups/gm`, `/backups/gm/tables`, `/backups/gm/extract`) plus a daily 01:15
+  per-table change-based backup store under `/home/blackcat-server/table-backups`
+  (`/backups/gm/table-history*`, skipping unchanged tables and retaining up to 60
+  changed versions per table including dropped tables), surfaced under Backup
+  Center → 243 Backups (hourly and per-table views) and linked from single-table
+  change history for single-table or full-DB restore (recorded in the audit trail;
+  local scheduled snapshots UI and background scheduler are removed).
 - **Built-in AI assistant** — Claude Agent SDK running in a Node sidecar whose
   large Node + native CLI runtime is downloaded from the SVN release directory
   on first use, with

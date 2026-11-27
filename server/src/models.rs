@@ -72,6 +72,34 @@ pub struct AuditPushResponse {
     pub skipped: u64,
 }
 
+/// Per-actor participation metadata attached to compacted daily/monthly summaries.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditSummaryActor {
+    #[serde(default)]
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub operation_count: u64,
+    pub entry_count: u64,
+    #[serde(default)]
+    pub sources: Vec<String>,
+}
+
+/// Summary metadata attached to daily (`14d..180d`) and monthly (`>180d`)
+/// compacted audit entries so the UI can show who edited during the period
+/// and distinguish lightweight zero-net-change records.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditSummaryMeta {
+    #[serde(default)]
+    pub actors: Vec<AuditSummaryActor>,
+    pub operation_count: u64,
+    pub entry_count: u64,
+    #[serde(default)]
+    pub no_net_change: bool,
+}
+
 /// A shared audit-log row returned to clients. Includes the actor's display
 /// name so the grid can show "who changed what".
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +132,12 @@ pub struct SharedAuditLogEntry {
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_size: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_period: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_meta: Option<AuditSummaryMeta>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -177,6 +211,12 @@ pub struct SharedExternalChangeEntry {
     pub ts_ms: i64,
     pub time_kind: String,
     pub signal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_period: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -263,4 +303,100 @@ pub struct GmBackupExtractResponse {
     pub ts: String,
     pub tables: Vec<String>,
     pub sql: String,
+}
+
+// ---- Per-table count-based backups (up to 60 changes per table) ------------
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupListQuery {
+    pub database: Option<String>,
+    pub search: Option<String>,
+    #[serde(default)]
+    pub include_deleted: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupSummary {
+    pub database: String,
+    pub table_name: String,
+    pub version_count: u32,
+    pub latest_version_id: String,
+    pub latest_version_ts: String,
+    pub latest_size_bytes: u64,
+    pub latest_schema_changed: bool,
+    pub present_in_latest: bool,
+    pub last_seen_ts: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupListResponse {
+    pub enabled: bool,
+    pub max_versions: usize,
+    pub last_run_ts: Option<String>,
+    pub databases: Vec<String>,
+    pub items: Vec<GmTableBackupSummary>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersionsQuery {
+    pub database: String,
+    pub table_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersion {
+    pub version_id: String,
+    pub backup_ts: String,
+    pub backup_date: String,
+    pub source_file_name: String,
+    pub content_hash: String,
+    pub schema_changed: bool,
+    pub has_data: bool,
+    pub compressed_bytes: u64,
+    pub raw_bytes: u64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersionsResponse {
+    pub database: String,
+    pub table_name: String,
+    pub present_in_latest: bool,
+    pub last_seen_ts: String,
+    pub max_versions: usize,
+    pub versions: Vec<GmTableBackupVersion>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupExtractRequest {
+    pub database: String,
+    pub table_name: String,
+    pub version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupExtractResponse {
+    pub database: String,
+    pub table_name: String,
+    pub version_id: String,
+    pub ts: String,
+    pub sql: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupRunResponse {
+    pub databases_scanned: usize,
+    pub tables_scanned: usize,
+    pub tables_changed: usize,
+    pub tables_missing: usize,
+    pub skipped_archives: usize,
 }

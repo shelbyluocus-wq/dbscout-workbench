@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::{
     extract::{Extension, Query, State},
@@ -10,8 +11,10 @@ use axum::{
 };
 use chrono::Utc;
 use sqlx::{Row, SqlitePool};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::audit_compaction::AuditRetentionPolicy;
 use crate::auth::account_info;
 use crate::db::{
     canonical_server_scope, clear_external_changes_matching_audit, find_user_by_username,
@@ -20,13 +23,18 @@ use crate::db::{
 };
 use crate::gm_backups::{self, GmBackupTableCache};
 use crate::models::*;
+use crate::table_backups::{self, TableBackupConfig};
 
 #[derive(Clone)]
 pub struct ServerState {
     pub pool: SqlitePool,
     pub max_revisions_per_table: usize,
+    #[allow(dead_code)]
+    pub retention_policy: AuditRetentionPolicy,
     pub gm_backup_dir: Option<PathBuf>,
     pub gm_backup_table_cache: GmBackupTableCache,
+    pub table_backup_config: TableBackupConfig,
+    pub table_backup_lock: Arc<Mutex<()>>,
 }
 
 fn trim_username(value: &str) -> Option<String> {
@@ -225,7 +233,8 @@ pub async fn list_audit(
          a.connection_id, a.database, a.table_name, a.operation, a.row_identity, a.column_name, \
          a.old_value, a.new_value, a.source, a.status, a.is_rollback, \
          a.rollback_of_client_id, a.host, a.server_key, a.svn_username, \
-         a.operation_id, a.operation_size \
+         a.operation_id, a.operation_size, \
+         a.summary_kind, a.summary_period, a.summary_meta \
          FROM audit_log a LEFT JOIN users u ON u.id = a.user_id",
     );
     let mut clauses: Vec<&'static str> = Vec::new();
@@ -326,6 +335,21 @@ pub async fn list_audit(
                 .flatten()
                 .filter(|s| !s.is_empty()),
             operation_size: r.try_get("operation_size").ok().flatten(),
+            summary_kind: r
+                .try_get::<Option<String>, _>("summary_kind")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            summary_period: r
+                .try_get::<Option<String>, _>("summary_period")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            summary_meta: r
+                .try_get::<Option<String>, _>("summary_meta")
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str(&raw).ok()),
         })
         .collect();
     Ok(Json(entries))
@@ -485,7 +509,8 @@ pub async fn list_external_changes(
         .filter(|s| !s.is_empty());
 
     let mut sql = String::from(
-        "SELECT event_id, server_key, database, table_name, ts, ts_ms, time_kind, signal \
+        "SELECT event_id, server_key, database, table_name, ts, ts_ms, time_kind, signal, \
+                summary_kind, summary_period, occurrence_count \
          FROM table_external_changes",
     );
     let mut clauses: Vec<&'static str> = Vec::new();
@@ -538,6 +563,21 @@ pub async fn list_external_changes(
             ts_ms: r.try_get("ts_ms").unwrap_or(0),
             time_kind: r.try_get("time_kind").unwrap_or_default(),
             signal: r.try_get("signal").unwrap_or_default(),
+            summary_kind: r
+                .try_get::<Option<String>, _>("summary_kind")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            summary_period: r
+                .try_get::<Option<String>, _>("summary_period")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            occurrence_count: r
+                .try_get::<Option<i64>, _>("occurrence_count")
+                .ok()
+                .flatten()
+                .filter(|&n| n > 1),
         })
         .collect();
     Ok(Json(entries))
@@ -594,18 +634,92 @@ pub async fn extract_gm_backup(
     Ok(Json(result))
 }
 
+pub async fn list_gm_table_backups(
+    State(state): State<ServerState>,
+    Query(q): Query<GmTableBackupListQuery>,
+) -> Result<Json<GmTableBackupListResponse>, (StatusCode, String)> {
+    let include_deleted = q.include_deleted.unwrap_or(true);
+    let result = table_backups::list_table_backups(
+        &state.pool,
+        &state.table_backup_config,
+        q.database.as_deref(),
+        q.search.as_deref(),
+        include_deleted,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+pub async fn list_gm_table_backup_versions(
+    State(state): State<ServerState>,
+    Query(q): Query<GmTableBackupVersionsQuery>,
+) -> Result<Json<GmTableBackupVersionsResponse>, (StatusCode, String)> {
+    let result = table_backups::list_table_backup_versions(
+        &state.pool,
+        &state.table_backup_config,
+        &q.database,
+        &q.table_name,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+pub async fn extract_gm_table_backup(
+    State(state): State<ServerState>,
+    Json(req): Json<GmTableBackupExtractRequest>,
+) -> Result<Json<GmTableBackupExtractResponse>, (StatusCode, String)> {
+    let result = table_backups::extract_table_backup_sql(
+        &state.pool,
+        &state.table_backup_config,
+        &req.database,
+        &req.table_name,
+        &req.version_id,
+    )
+    .await?;
+    Ok(Json(result))
+}
+
+pub async fn run_gm_table_backups_now(
+    State(state): State<ServerState>,
+) -> Result<Json<GmTableBackupRunResponse>, (StatusCode, String)> {
+    let _guard = state.table_backup_lock.lock().await;
+    let result = table_backups::run_per_table_backup_pass(
+        &state.pool,
+        state.gm_backup_dir.as_deref(),
+        &state.table_backup_config,
+        Utc::now(),
+    )
+    .await
+    .map_err(server_err)?;
+    Ok(Json(result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{connect, insert_user, prune_all_tables, DEFAULT_MAX_REVISIONS_PER_TABLE};
+    use crate::db::{connect, insert_user, prune_all_tables};
 
-    fn test_state(pool: SqlitePool) -> ServerState {
+    fn test_state_with_cap(pool: SqlitePool, cap: usize) -> ServerState {
         ServerState {
             pool,
-            max_revisions_per_table: DEFAULT_MAX_REVISIONS_PER_TABLE,
+            max_revisions_per_table: cap,
+            retention_policy: AuditRetentionPolicy::default(),
             gm_backup_dir: None,
             gm_backup_table_cache: GmBackupTableCache::new(),
+            table_backup_config: TableBackupConfig {
+                backup_dir: None,
+                max_versions: table_backups::DEFAULT_MAX_VERSIONS_PER_TABLE,
+                max_table_bytes: table_backups::DEFAULT_MAX_TABLE_BYTES,
+                min_archive_age_secs: 0,
+                tz_offset_hours: 8,
+                database_whitelist: None,
+            },
+            table_backup_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    fn test_state(pool: SqlitePool) -> ServerState {
+        test_state_with_cap(pool, 20)
     }
 
     fn push_item(
@@ -879,12 +993,7 @@ mod tests {
             .unwrap();
 
         // Seed 24 edits without pruning (simulating a pre-existing DB migrated from 193).
-        let unpruned_state = ServerState {
-            pool: pool.clone(),
-            max_revisions_per_table: 0,
-            gm_backup_dir: None,
-            gm_backup_table_cache: GmBackupTableCache::new(),
-        };
+        let unpruned_state = test_state_with_cap(pool.clone(), 0);
         let items: Vec<_> = (1..=24)
             .map(|i| {
                 push_item(
@@ -901,9 +1010,7 @@ mod tests {
             .await
             .unwrap();
 
-        let pruned = prune_all_tables(&pool, DEFAULT_MAX_REVISIONS_PER_TABLE)
-            .await
-            .unwrap();
+        let pruned = prune_all_tables(&pool, 20).await.unwrap();
         assert_eq!(pruned, 4);
 
         let Json(entries) = list_audit(

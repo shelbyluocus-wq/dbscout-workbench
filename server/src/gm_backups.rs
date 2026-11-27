@@ -141,14 +141,14 @@ pub fn parse_mysql_backup_filename(file_name: &str) -> Option<ParsedMysqlBackupN
     })
 }
 
-fn is_valid_date_segment(date: &str) -> bool {
+pub(crate) fn is_valid_date_segment(date: &str) -> bool {
     date.len() == 10
         && !date.contains('/')
         && !date.contains('\\')
         && NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
 }
 
-fn is_valid_hour_segment(hour: &str) -> bool {
+pub(crate) fn is_valid_hour_segment(hour: &str) -> bool {
     if hour.is_empty() || hour.len() > 2 || !hour.bytes().all(|b| b.is_ascii_digit()) {
         return false;
     }
@@ -338,7 +338,7 @@ fn is_sql_zip_entry(name: &str) -> bool {
         && trimmed.to_ascii_lowercase().ends_with(".sql")
 }
 
-fn sql_entry_indices(archive: &mut ZipArchive<File>) -> Result<Vec<usize>, (StatusCode, String)> {
+pub(crate) fn sql_entry_indices(archive: &mut ZipArchive<File>) -> Result<Vec<usize>, (StatusCode, String)> {
     let mut entries: Vec<(String, usize)> = Vec::new();
     for idx in 0..archive.len() {
         let entry = archive.by_index(idx).map_err(|e| {
@@ -380,7 +380,7 @@ fn extract_backtick_ident(line: &str, prefix: &str) -> Option<String> {
 /// - `CREATE TABLE \`foo\` (`
 /// - `CREATE TABLE IF NOT EXISTS \`foo\` (`
 /// - `INSERT INTO \`foo\` ...`
-fn extract_statement_table_name(trimmed: &str) -> Option<(&'static str, String)> {
+pub(crate) fn extract_statement_table_name(trimmed: &str) -> Option<(&'static str, String)> {
     let upper = trimmed.to_ascii_uppercase();
     for (kind, prefix) in [
         ("drop", "DROP TABLE IF EXISTS "),
@@ -413,13 +413,13 @@ fn extract_statement_table_name(trimmed: &str) -> Option<(&'static str, String)>
     None
 }
 
-enum DumpLineMarker {
+pub(crate) enum DumpLineMarker {
     TableStructure(String),
     TableData(String),
     NonTableSection,
 }
 
-fn parse_mysqldump_section_marker(trimmed: &str) -> Option<DumpLineMarker> {
+pub(crate) fn parse_mysqldump_section_marker(trimmed: &str) -> Option<DumpLineMarker> {
     if let Some(name) = extract_backtick_ident(trimmed, "-- Table structure for table ") {
         return Some(DumpLineMarker::TableStructure(name));
     }
@@ -440,7 +440,7 @@ fn parse_mysqldump_section_marker(trimmed: &str) -> Option<DumpLineMarker> {
 
 /// Advance single-quoted SQL string literal state across one line.
 /// Handles MySQL backslash escapes (`\'`, `\\`) AND doubled single quotes (`''`).
-fn advance_sql_quote_state(line: &str, in_single_quote: &mut bool) {
+pub(crate) fn advance_sql_quote_state(line: &str, in_single_quote: &mut bool) {
     let bytes = line.as_bytes();
     let mut i = 0;
     let mut escaped = false;
@@ -641,7 +641,7 @@ pub fn list_backup_tables(
     })
 }
 
-fn is_lock_statement(trimmed: &str) -> bool {
+pub(crate) fn is_lock_statement(trimmed: &str) -> bool {
     let upper = trimmed.to_ascii_uppercase();
     upper.starts_with("LOCK TABLES ") || upper.starts_with("UNLOCK TABLES")
 }

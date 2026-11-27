@@ -3,8 +3,15 @@
 DB Scout Workbench（黑猫）的中心服务（局域网内部署）。提供**共享用户账号**与**共享变更日志**，让所有客户端都能看到“是谁改了什么”。
 
 - 单一 SQLite 文件存储（WAL 模式），零外部依赖。
-- **每张表默认只保留最近 20 次改动**（启动时与每次写入后自动清理更早记录；同一次批量导入/多行保存按 2.5 秒窗口算作 1 次改动完整保留，避免打断历史对比；可通过环境变量 `DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE` 调整，设为 `0` 不清理）。
-- **只读读取 243 定时备份目录**（默认检测 `/home/servbin/dbback`，可通过 `DBSCOUT_SERVER_GM_BACKUP_DIR` 覆盖或设为 `off` 关闭）：扫描 MySQL 备份 `.zip` 列表、列出包内表清单、按表或整库提取 SQL，供黑猫客户端「备份中心 → 快照 → 243 服务器备份」一键还原；全程只读，绝不修改或删除原备份文件。
+- **修改记录分层保留（默认启用，`DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE=0`）**：
+  - **14 天内**（按东八区自然日）：逐条完整保留。
+  - **14 天～180 天（约半年）**：每日凌晨 `02:00` 自动合并为「每日总结」，保留当日初始→最终净变化与全部参与人/次数，仍支持对比与还原。
+  - **超过 180 天**：按自然月自动合并为「每月总结」并**永久保留**，仍支持对比与还原；净变化为空的周期保留轻量级记录留痕。
+  - 环境变量：`DBSCOUT_SERVER_AUDIT_DETAILED_DAYS=14`、`DBSCOUT_SERVER_AUDIT_DAILY_DAYS=180`、`DBSCOUT_SERVER_COMPACT_TIME=02:00`。
+- **只读读取 243 定时备份 + 按表 60 次变化备份**：
+  - 自动以只读方式读取 `/home/servbin/dbback`（可通过 `DBSCOUT_SERVER_GM_BACKUP_DIR` 覆盖或设为 `off` 关闭），供黑猫客户端在「备份中心 → 243 服务器备份」按时间点浏览每小时 MySQL 备份并按表/整库一键还原；全程只读，绝不修改或删除原备份文件。
+  - 每天凌晨 `01:15`（以及首次启动基线扫描）自动对比配置库最新备份，仅在数据表内容或表结构实际变化时压缩归档到独立目录 `/home/blackcat-server/table-backups/`，每张表最多留存 **60 次变化**（已删表仍保留历史版本可找回）。
+  - 环境变量：`DBSCOUT_SERVER_TABLE_BACKUP_DIR=/home/blackcat-server/table-backups`、`DBSCOUT_SERVER_TABLE_BACKUP_MAX_VERSIONS=60`、`DBSCOUT_SERVER_TABLE_BACKUP_TIME=01:15`、`DBSCOUT_SERVER_TABLE_BACKUP_DATABASES`（可选逗号分隔白名单，默认自动匹配含 `cfg`/`config` 且不含 `log` 的配置库）。
 - 仅用户名 + 不透明令牌登录，**不存密码**。安全假设：仅限公司局域网内使用，不对外网开放。
 - HTTP/JSON 接口，Bearer token 鉴权。
 - 独立部署在 `192.168.1.243:8766`（`/home/blackcat-server`），与 GM 服务端（`/home/gmserv`）完全隔离，互不干扰。
@@ -30,6 +37,7 @@ cargo run -p dbscout-server
 ├── bin/dbscout-server        # Linux 可执行程序（升级自动保留 .prev 失败回滚）
 ├── data/dbscout-server.sqlite # 中心库（更新程序时绝不覆盖）
 ├── backups/                  # 每日 04:00 自动在线热备份（保留 30 天，至少留 7 份）
+├── table-backups/            # 每日 01:15 按表变化备份（仅存有变化的表，每表最多 60 次 .sql.gz）
 ├── scripts/                  # 启停与备份脚本
 └── logs/                     # 兼容非 systemd 环境的运行日志
 ```
@@ -92,6 +100,10 @@ npm run server:deploy -- --backup
 | GET  | `/backups/gm` | Bearer | 只读扫描 243 定时备份目录（`/home/servbin/dbback`）下的 MySQL `.zip` 备份清单，支持 `database`/`date`/`limit` |
 | GET  | `/backups/gm/tables` | Bearer | 解析指定备份 `.zip` 内的全部数据表列表（带元数据缓存） |
 | POST | `/backups/gm/extract` | Bearer | 从指定备份 `.zip` 按表（`tables` 非空）或整库（`tables` 为空）提取 SQL 供客户端安全还原 |
+| GET  | `/backups/gm/table-history` | Bearer | 查询 243 按表变化备份清单，支持 `database`/`search`/`includeDeleted` |
+| GET  | `/backups/gm/table-history/versions` | Bearer | 查询单张表的最多 60 次变化备份版本列表（含已删表标记） |
+| POST | `/backups/gm/table-history/extract` | Bearer | 解压并返回指定单表历史版本的完整还原 SQL |
+| POST | `/backups/gm/table-history/run` | Bearer | 手动触发一次 243 按表变化备份扫描 |
 
 ## 服务端 MCP
 

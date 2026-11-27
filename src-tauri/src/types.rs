@@ -1389,6 +1389,30 @@ pub struct AuditLogEntry {
     pub operation_size: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditSummaryActor {
+    #[serde(default)]
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    pub operation_count: u64,
+    pub entry_count: u64,
+    #[serde(default)]
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditSummaryMeta {
+    #[serde(default)]
+    pub actors: Vec<AuditSummaryActor>,
+    pub operation_count: u64,
+    pub entry_count: u64,
+    #[serde(default)]
+    pub no_net_change: bool,
+}
+
 /// A shared change-log entry fetched from the central server. Mirrors the
 /// server's `SharedAuditLogEntry` and includes the actor's display name so the
 /// UI can show "who changed what" across all users.
@@ -1420,6 +1444,12 @@ pub struct SharedAuditLogEntry {
     pub operation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_size: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_period: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_meta: Option<AuditSummaryMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1455,6 +1485,12 @@ pub struct TableExternalChangeEntry {
     pub time_kind: String,
     pub signal: String,
     pub origin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_period: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1699,6 +1735,94 @@ pub struct RestoreGmBackupResponse {
     pub restored_tables: Vec<String>,
     pub statement_count: usize,
     pub pre_restore_snapshot_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupListRequest {
+    pub database: Option<String>,
+    pub search: Option<String>,
+    #[serde(default)]
+    pub include_deleted: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupSummary {
+    pub database: String,
+    pub table_name: String,
+    pub version_count: u32,
+    pub latest_version_id: String,
+    pub latest_version_ts: String,
+    pub latest_size_bytes: u64,
+    pub latest_schema_changed: bool,
+    pub present_in_latest: bool,
+    pub last_seen_ts: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupListResponse {
+    pub status: String,
+    pub enabled: bool,
+    pub max_versions: usize,
+    pub last_run_ts: Option<String>,
+    pub databases: Vec<String>,
+    pub items: Vec<GmTableBackupSummary>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersionsRequest {
+    pub database: String,
+    pub table_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersion {
+    pub version_id: String,
+    pub backup_ts: String,
+    pub backup_date: String,
+    pub source_file_name: String,
+    pub content_hash: String,
+    pub schema_changed: bool,
+    pub has_data: bool,
+    pub compressed_bytes: u64,
+    pub raw_bytes: u64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupVersionsResponse {
+    pub database: String,
+    pub table_name: String,
+    pub present_in_latest: bool,
+    pub last_seen_ts: String,
+    pub max_versions: usize,
+    pub versions: Vec<GmTableBackupVersion>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreGmTableBackupRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub source_database: String,
+    pub table_name: String,
+    pub version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GmTableBackupRunResponse {
+    pub databases_scanned: usize,
+    pub tables_scanned: usize,
+    pub tables_changed: usize,
+    pub tables_missing: usize,
+    pub skipped_archives: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

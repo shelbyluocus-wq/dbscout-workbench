@@ -79,7 +79,7 @@ wait_healthy() {
 }
 
 start_service() {
-  mkdir -p "$ROOT/bin" "$ROOT/data" "$ROOT/backups" "$ROOT/logs" "$ROOT/run"
+  mkdir -p "$ROOT/bin" "$ROOT/data" "$ROOT/backups" "$ROOT/table-backups" "$ROOT/logs" "$ROOT/run"
   if [[ ! -x "$BIN" ]]; then
     echo "错误: 找不到可执行文件 $BIN" >&2
     return 1
@@ -94,8 +94,14 @@ start_service() {
     cd "$ROOT"
     DBSCOUT_SERVER_BIND="$BIND_ADDR" \
     DBSCOUT_SERVER_DB="$DB_PATH" \
-    DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE="${DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE:-20}" \
+    DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE="${DBSCOUT_SERVER_MAX_REVISIONS_PER_TABLE:-0}" \
+    DBSCOUT_SERVER_AUDIT_DETAILED_DAYS="${DBSCOUT_SERVER_AUDIT_DETAILED_DAYS:-14}" \
+    DBSCOUT_SERVER_AUDIT_DAILY_DAYS="${DBSCOUT_SERVER_AUDIT_DAILY_DAYS:-180}" \
+    DBSCOUT_SERVER_COMPACT_TIME="${DBSCOUT_SERVER_COMPACT_TIME:-02:00}" \
     DBSCOUT_SERVER_GM_BACKUP_DIR="${DBSCOUT_SERVER_GM_BACKUP_DIR:-/home/servbin/dbback}" \
+    DBSCOUT_SERVER_TABLE_BACKUP_DIR="${DBSCOUT_SERVER_TABLE_BACKUP_DIR:-$ROOT/table-backups}" \
+    DBSCOUT_SERVER_TABLE_BACKUP_MAX_VERSIONS="${DBSCOUT_SERVER_TABLE_BACKUP_MAX_VERSIONS:-60}" \
+    DBSCOUT_SERVER_TABLE_BACKUP_TIME="${DBSCOUT_SERVER_TABLE_BACKUP_TIME:-01:15}" \
     RUST_LOG="${RUST_LOG:-dbscout_server=info,tower_http=info}" \
       nohup "$BIN" </dev/null >>"$LOG_FILE" 2>&1 &
     echo "$!" > "$PID_FILE"

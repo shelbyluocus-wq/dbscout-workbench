@@ -1,6 +1,10 @@
 import { computed, reactive, shallowRef } from "vue";
 import { auditTableKey } from "./useAuditHistory.js";
-import { parseAuditTimestampMs } from "../utils/tableChangeHistory.js";
+import {
+  DEFAULT_SESSION_GAP_MS,
+  DEFAULT_SESSION_MAX_SPAN_MS,
+  parseAuditTimestampMs,
+} from "../utils/tableChangeHistory.js";
 
 const PAGE_SIZE = 200;
 const SCOPED_OPERATION_PAGE_SIZE = 2000;
@@ -100,6 +104,45 @@ const entryDedupKey = (entry) => JSON.stringify([
 
 const uniqueEntries = (entries) => [...new Map(entries.map((entry) => [entryDedupKey(entry), entry])).values()];
 
+function normalizeSummaryMeta(raw) {
+  if (!raw) return null;
+  let obj = raw;
+  if (typeof raw === "string") {
+    try { obj = JSON.parse(raw); } catch { return null; }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const rawActors = Array.isArray(obj.actors) ? obj.actors : [];
+  const actors = rawActors
+    .filter((a) => a && typeof a === "object")
+    .map((a) => ({
+      username: String(a.username || "").trim(),
+      displayName: String(a.displayName ?? a.display_name ?? a.username ?? "").trim(),
+      operationCount: Math.max(0, Number(a.operationCount ?? a.operation_count) || 0),
+      entryCount: Math.max(0, Number(a.entryCount ?? a.entry_count) || 0),
+    }))
+    .filter((a) => a.displayName || a.username);
+  return {
+    actors,
+    operationCount: Math.max(0, Number(obj.operationCount ?? obj.operation_count) || 0),
+    entryCount: Math.max(0, Number(obj.entryCount ?? obj.entry_count) || 0),
+    noNetChange: Boolean(obj.noNetChange ?? obj.no_net_change),
+  };
+}
+
+function localDayKey(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function entrySummaryKind(entry) {
+  return String(entry?.summaryKind ?? entry?.summary_kind ?? "").trim().toLowerCase();
+}
+
+function entrySummaryPeriod(entry) {
+  return String(entry?.summaryPeriod ?? entry?.summary_period ?? "").trim();
+}
+
 function isBatchJoinable(prevEntry, nextEntry) {
   const prevOp = String(prevEntry.operationId || "").trim();
   const nextOp = String(nextEntry.operationId || "").trim();
@@ -123,6 +166,31 @@ function isBatchJoinable(prevEntry, nextEntry) {
   return prevEntry.ts === nextEntry.ts;
 }
 
+function isContinuousGridSessionJoinable(headEntry, prevEntry, nextEntry) {
+  const prevOp = String(prevEntry.operationId || "").trim();
+  const nextOp = String(nextEntry.operationId || "").trim();
+  // Only collapse modern single-cell grid edits that carry distinct operationIds;
+  // legacy rows without operationId remain ungrouped.
+  if (!prevOp || !nextOp || prevOp === nextOp) return false;
+  if (entrySummaryKind(prevEntry) || entrySummaryKind(nextEntry)) return false;
+  if (String(prevEntry.source || "") !== "grid" || String(nextEntry.source || "") !== "grid") return false;
+  if (prevEntry.isRollback || nextEntry.isRollback) return false;
+  const prevKind = String(prevEntry.operation || "").toUpperCase();
+  const nextKind = String(nextEntry.operation || "").toUpperCase();
+  if (prevKind === "DDL" || nextKind === "DDL" || prevKind === "NOOP" || nextKind === "NOOP") return false;
+  const prevUser = String(prevEntry.username || prevEntry.displayName || "").trim().toLowerCase();
+  const nextUser = String(nextEntry.username || nextEntry.displayName || "").trim().toLowerCase();
+  if (!prevUser || prevUser !== nextUser) return false;
+  const headMs = parseAuditTimestampMs(headEntry.ts);
+  const prevMs = parseAuditTimestampMs(prevEntry.ts);
+  const nextMs = parseAuditTimestampMs(nextEntry.ts);
+  if (!headMs || !prevMs || !nextMs) return false;
+  if (localDayKey(headMs) !== localDayKey(nextMs)) return false;
+  if (Math.abs(prevMs - nextMs) > DEFAULT_SESSION_GAP_MS) return false;
+  if (Math.abs(headMs - nextMs) > DEFAULT_SESSION_MAX_SPAN_MS) return false;
+  return true;
+}
+
 function groupSharedOperations(entries = []) {
   const groups = [];
   for (const entry of entries) {
@@ -130,30 +198,60 @@ function groupSharedOperations(entries = []) {
       continue;
     }
     const last = groups[groups.length - 1];
-    if (last && isBatchJoinable(last._lastEntry, entry)) {
+    const joinedBatch = last && isBatchJoinable(last._lastEntry, entry);
+    const joinedSession = !joinedBatch && last && isContinuousGridSessionJoinable(last._headEntry, last._lastEntry, entry);
+    if (joinedBatch || joinedSession) {
       last.entries.push(entry);
       last.entryCount += 1;
       if (entry.operation === "INSERT") last.inserted += 1;
       else if (entry.operation === "UPDATE") last.updated += 1;
       else if (entry.operation === "DELETE") last.deleted += 1;
+      const opId = String(entry.operationId || "").trim();
+      if (opId) last._opIds.add(opId);
+      last.startTs = entry.ts;
       last._lastEntry = entry;
       continue;
     }
     const headId = entryDedupKey(entry);
     const opId = String(entry.operationId || "").trim();
+    const summaryKind = entrySummaryKind(entry);
+    const summaryPeriod = entrySummaryPeriod(entry);
+    const summaryMeta = normalizeSummaryMeta(entry.summaryMeta ?? entry.summary_meta);
+    const opIds = new Set();
+    if (opId) opIds.add(opId);
     groups.push({
       ...entry,
       id: opId ? `op:${opId}` : headId,
+      summaryKind,
+      summaryPeriod,
+      summaryMeta,
+      startTs: entry.ts,
       entryCount: 1,
       inserted: Number(entry.operation === "INSERT"),
       updated: Number(entry.operation === "UPDATE"),
       deleted: Number(entry.operation === "DELETE"),
       entry,
       entries: [entry],
+      _headEntry: entry,
       _lastEntry: entry,
+      _opIds: opIds,
     });
   }
-  return groups.map(({ _lastEntry, ...op }) => op);
+  return groups.map(({ _headEntry, _lastEntry, _opIds, ...op }) => {
+    const stepCount = _opIds.size;
+    const isSession = Boolean(!op.summaryKind && stepCount > 1 && op.source === "grid");
+    const isNoNetChange = Boolean(
+      op.summaryMeta?.noNetChange
+      || (op.inserted === 0 && op.updated === 0 && op.deleted === 0
+        && op.entries.some((e) => String(e.operation || "").toUpperCase() === "NOOP")),
+    );
+    return {
+      ...op,
+      stepCount: isSession ? stepCount : 1,
+      isSession,
+      isNoNetChange,
+    };
+  });
 }
 
 /** Shared team audit history with cross-workstation server scoping and batch import grouping. */

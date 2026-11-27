@@ -355,7 +355,7 @@ ROOT=${root}
 PORT=${port}
 STAGE="$ROOT/.stage-deploy"
 
-mkdir -p "$ROOT/bin" "$ROOT/data" "$ROOT/backups" "$ROOT/logs" "$ROOT/run" "$ROOT/scripts"
+mkdir -p "$ROOT/bin" "$ROOT/data" "$ROOT/backups" "$ROOT/table-backups" "$ROOT/logs" "$ROOT/run" "$ROOT/scripts"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 tar -xzf "$ROOT/.blackcat-server-bundle.tar.gz" -C "$STAGE"

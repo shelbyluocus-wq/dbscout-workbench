@@ -92,6 +92,12 @@ struct SharedExternalChangeWire {
     ts_ms: i64,
     time_kind: String,
     signal: String,
+    #[serde(default)]
+    summary_kind: Option<String>,
+    #[serde(default)]
+    summary_period: Option<String>,
+    #[serde(default)]
+    occurrence_count: Option<i64>,
 }
 
 pub fn format_utc_rfc3339_ms(ms: i64) -> String {
@@ -221,6 +227,9 @@ async fn insert_or_coalesce_in_tx(
                 time_kind: TIME_KIND_EXACT.to_string(),
                 signal: signal.to_string(),
                 origin: "local".to_string(),
+                summary_kind: None,
+                summary_period: None,
+                occurrence_count: None,
             }));
         }
     } else {
@@ -270,6 +279,9 @@ async fn insert_or_coalesce_in_tx(
         time_kind: time_kind.to_string(),
         signal: signal.to_string(),
         origin: "local".to_string(),
+        summary_kind: None,
+        summary_period: None,
+        occurrence_count: None,
     }))
 }
 
@@ -398,6 +410,9 @@ pub async fn apply_action_in_tx(
                     time_kind: TIME_KIND_EXACT.to_string(),
                     signal: (*signal).to_string(),
                     origin: "local".to_string(),
+                    summary_kind: None,
+                    summary_period: None,
+                    occurrence_count: None,
                 }));
             }
             insert_or_coalesce_in_tx(
@@ -501,8 +516,26 @@ pub async fn list_local(
             time_kind: row.try_get("time_kind").unwrap_or_default(),
             signal: row.try_get("signal").unwrap_or_default(),
             origin: "local".to_string(),
+            summary_kind: None,
+            summary_period: None,
+            occurrence_count: None,
         })
         .collect())
+}
+
+/// Remove synced local external change rows older than `detailed_days` so they
+/// do not duplicate central-server daily/monthly summaries.
+pub async fn prune_synced_older_than_days(
+    pool: &SqlitePool,
+    detailed_days: i64,
+) -> Result<u64, String> {
+    let cutoff_ms = crate::audit::local_synced_detailed_cutoff_utc(detailed_days).timestamp_millis();
+    let res = sqlx::query("DELETE FROM table_external_changes WHERE synced = 1 AND ts_ms < ?")
+        .bind(cutoff_ms)
+        .execute(pool)
+        .await
+        .map_err(|error| format!("清理已同步旧外部变动记录失败: {error}"))?;
+    Ok(res.rows_affected())
 }
 
 /// Push unsynced local external change events to the central server.
@@ -673,6 +706,9 @@ pub async fn fetch_shared_outcome(
                 time_kind: row.time_kind,
                 signal: row.signal,
                 origin: "shared".to_string(),
+                summary_kind: row.summary_kind,
+                summary_period: row.summary_period,
+                occurrence_count: row.occurrence_count,
             })
             .collect(),
     ))

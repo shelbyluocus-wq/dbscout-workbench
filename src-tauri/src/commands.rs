@@ -9896,6 +9896,69 @@ pub async fn restore_gm_backup(
 }
 
 #[tauri::command]
+pub async fn list_gm_table_backups(
+    request: Option<GmTableBackupListRequest>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GmTableBackupListResponse, String> {
+    gm_backup::list_gm_table_backups(&app, &state, &request.unwrap_or_default()).await
+}
+
+#[tauri::command]
+pub async fn list_gm_table_backup_versions(
+    request: GmTableBackupVersionsRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GmTableBackupVersionsResponse, String> {
+    gm_backup::list_gm_table_backup_versions(&app, &state, &request).await
+}
+
+#[tauri::command]
+pub async fn run_gm_table_backups_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<GmTableBackupRunResponse, String> {
+    gm_backup::run_gm_table_backups_now(&app, &state).await
+}
+
+#[tauri::command]
+pub async fn restore_gm_table_backup(
+    request: RestoreGmTableBackupRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RestoreGmBackupResponse, String> {
+    let mysql_url = {
+        let rt = state.runtime.lock().await;
+        let connection = rt
+            .connections
+            .get(&request.connection_id)
+            .ok_or_else(|| "连接不存在".to_string())?;
+        if connection.kind.is_read_only() {
+            return Err(read_only_error(connection.kind));
+        }
+        reject_mongo(connection.kind, "还原单表按次备份")?;
+        connection
+            .mysql_url
+            .clone()
+            .ok_or_else(|| "演示连接不支持还原服务器备份".to_string())?
+    };
+    let result = gm_backup::restore_gm_table_backup(&app, &state, &mysql_url, &request).await?;
+    state
+        .schema_cache
+        .invalidate_database(&request.connection_id, &result.database);
+    invalidate_database_count(&state, &request.connection_id, &result.database);
+    let _ = app.emit(
+        audit::BACKUP_JOB_EVENT,
+        serde_json::json!({
+            "kind": "restore",
+            "database": result.database,
+            "tables": result.restored_tables,
+        }),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
 pub async fn inspect_snapshot_file(
     request: InspectSnapshotFileRequest,
 ) -> Result<Option<SnapshotFileInspection>, String> {

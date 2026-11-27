@@ -10,7 +10,15 @@
 //! and the background task retries on the next tick. Local edits and rollbacks
 //! are never blocked by sync state.
 
-use std::{collections::HashMap, future::Future, sync::atomic::Ordering, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::atomic::{AtomicI64, Ordering},
+    time::Duration,
+};
+
+static LAST_SYNCED_PRUNE_EPOCH_SECS: AtomicI64 = AtomicI64::new(0);
+const SYNCED_PRUNE_INTERVAL_SECS: i64 = 3600;
 
 use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -311,6 +319,27 @@ pub async fn push_outbox(app: &AppHandle, state: &AppState) -> Result<AuditPushR
         host,
     )
     .await;
+
+    // Align synced local detailed rows with central-server 14-day detailed window
+    // (throttled to at most once per hour so foreground sync stays fast).
+    let now_secs = chrono::Utc::now().timestamp();
+    let last_secs = LAST_SYNCED_PRUNE_EPOCH_SECS.load(Ordering::Relaxed);
+    if now_secs.saturating_sub(last_secs) >= SYNCED_PRUNE_INTERVAL_SECS
+        && LAST_SYNCED_PRUNE_EPOCH_SECS
+            .compare_exchange(last_secs, now_secs, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+    {
+        let _ = crate::audit::prune_synced_audit_logs_older_than_days(
+            &pool,
+            crate::audit::LOCAL_SYNCED_AUDIT_RETENTION_DAYS,
+        )
+        .await;
+        let _ = crate::external_changes::prune_synced_older_than_days(
+            &pool,
+            crate::audit::LOCAL_SYNCED_AUDIT_RETENTION_DAYS,
+        )
+        .await;
+    }
 
     Ok(result)
 }

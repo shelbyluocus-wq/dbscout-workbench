@@ -3318,6 +3318,123 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
       preRestoreSnapshotPath: "mock://backup/pre-gm-restore.sql",
     };
   }
+  if (command === "list_gm_table_backups") {
+    const req = payload.request || {};
+    const allItems = [
+      {
+        database: "newsg_4cfg",
+        tableName: "heroprop",
+        versionCount: 14,
+        latestVersionId: "v-hero-14",
+        latestVersionTs: "2026-11-26 01:15:00",
+        latestSizeBytes: 96_100,
+        latestSchemaChanged: false,
+        presentInLatest: true,
+        lastSeenTs: "2026-11-26 01:15:00",
+      },
+      {
+        database: "newsg_4cfg",
+        tableName: "skillprop",
+        versionCount: 28,
+        latestVersionId: "v-skill-28",
+        latestVersionTs: "2026-11-25 01:15:00",
+        latestSizeBytes: 520_100,
+        latestSchemaChanged: true,
+        presentInLatest: true,
+        lastSeenTs: "2026-11-26 01:15:00",
+      },
+      {
+        database: "newsg_4cfg",
+        tableName: "legacy_eventprop",
+        versionCount: 3,
+        latestVersionId: "v-legacy-3",
+        latestVersionTs: "2026-10-12 01:15:00",
+        latestSizeBytes: 12_400,
+        latestSchemaChanged: false,
+        presentInLatest: false,
+        lastSeenTs: "2026-10-18 01:15:00",
+      },
+    ];
+    const includeDeleted = req.includeDeleted !== false;
+    const kw = String(req.search || "").trim().toLowerCase();
+    const items = allItems.filter((item) => {
+      if (!includeDeleted && !item.presentInLatest) return false;
+      if (req.database && item.database.toLowerCase() !== String(req.database).toLowerCase()) return false;
+      if (kw && !item.tableName.toLowerCase().includes(kw)) return false;
+      return true;
+    });
+    return {
+      status: "ok",
+      enabled: true,
+      maxVersions: 60,
+      lastRunTs: "2026-11-26 01:15:03",
+      databases: ["newsg_4cfg", "newsgcfg"],
+      items,
+      error: null,
+    };
+  }
+  if (command === "list_gm_table_backup_versions") {
+    const req = payload.request || {};
+    const tableName = req.tableName || "heroprop";
+    const database = req.database || "newsg_4cfg";
+    return {
+      database,
+      tableName,
+      presentInLatest: tableName !== "legacy_eventprop",
+      lastSeenTs: tableName !== "legacy_eventprop" ? "2026-11-26 01:15:00" : "2026-10-18 01:15:00",
+      maxVersions: 60,
+      versions: [
+        {
+          versionId: `v-${tableName}-2`,
+          backupTs: "2026-11-26 01:15:00",
+          backupDate: "2026-11-26",
+          sourceFileName: `192.168.1.243_mysql_${database}_2026-11-26-00_50_02.zip`,
+          contentHash: "a1b2c3d4",
+          schemaChanged: tableName === "skillprop",
+          hasData: true,
+          compressedBytes: 18_420,
+          rawBytes: 96_100,
+          createdAt: "2026-11-26T01:15:03+08:00",
+        },
+        {
+          versionId: `v-${tableName}-1`,
+          backupTs: "2026-11-18 01:15:00",
+          backupDate: "2026-11-18",
+          sourceFileName: `192.168.1.243_mysql_${database}_2026-11-18-00_50_02.zip`,
+          contentHash: "9f8e7d6c",
+          schemaChanged: false,
+          hasData: true,
+          compressedBytes: 18_100,
+          rawBytes: 94_800,
+          createdAt: "2026-11-18T01:15:03+08:00",
+        },
+      ],
+    };
+  }
+  if (command === "restore_gm_table_backup") {
+    const req = payload.request || {};
+    const tableName = req.tableName || "heroprop";
+    setTimeout(() => {
+      emitMockEvent("backup-job", { kind: "restore", database: req.database || "game_db", tables: [tableName] });
+    }, 80);
+    return {
+      database: req.database || "game_db",
+      sourceDatabase: req.sourceDatabase || "newsg_4cfg",
+      ts: "2026-11-26 01:15:00",
+      restoredTables: [tableName],
+      statementCount: 4,
+      preRestoreSnapshotPath: "mock://backup/pre-gm-table-restore.sql",
+    };
+  }
+  if (command === "run_gm_table_backups_now") {
+    return {
+      databasesScanned: 2,
+      tablesScanned: 185,
+      tablesChanged: 4,
+      tablesMissing: 1,
+      skippedArchives: 0,
+    };
+  }
   if (command === "inspect_snapshot_file") {
     // Browser dev can't open a native file picker; simulate picking a
     // DB Scout snapshot so the import confirmation panel is exercisable.

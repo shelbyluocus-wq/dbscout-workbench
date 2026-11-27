@@ -171,8 +171,20 @@ export function groupRevisionsByDay(revisions = [], { nowMs = Date.now(), parseM
   const nowYear = new Date(nowMs).getFullYear();
   const groups = [];
   for (const rev of revisions) {
+    if (rev?.summaryKind === "monthly" && rev?.summaryPeriod) {
+      const key = `month:${rev.summaryPeriod}`;
+      let group = groups[groups.length - 1];
+      if (!group || group.key !== key) {
+        group = { key, kind: "month", label: rev.summaryPeriod, items: [] };
+        groups.push(group);
+      }
+      group.items.push(rev);
+      continue;
+    }
     const ms = Number(parseMs(rev)) || 0;
-    const key = ms ? dayKeyOf(ms) : "unknown";
+    const key = rev?.summaryKind === "daily" && rev?.summaryPeriod
+      ? rev.summaryPeriod
+      : (ms ? dayKeyOf(ms) : "unknown");
     let group = groups[groups.length - 1];
     if (!group || group.key !== key) {
       let kind = "date";
@@ -180,7 +192,10 @@ export function groupRevisionsByDay(revisions = [], { nowMs = Date.now(), parseM
       if (key === todayKey) kind = "today";
       else if (key === yesterdayKey) kind = "yesterday";
       else if (key === "unknown") kind = "unknown";
-      else label = new Date(ms).getFullYear() === nowYear ? key.slice(5) : key;
+      else {
+        const yearNum = Number(key.slice(0, 4)) || (ms ? new Date(ms).getFullYear() : nowYear);
+        label = yearNum === nowYear ? key.slice(5) : key;
+      }
       group = { key, kind, label, items: [] };
       groups.push(group);
     }

@@ -24,7 +24,11 @@ const emit = defineEmits(["close"]);
 const dialog = computed(() => props.backup.dialog);
 const auditMode = computed(() => props.backup.auditMode?.mode || "local");
 const isSharedMode = computed(() => auditMode.value === "shared");
-const gmBackupCount = computed(() => (props.backup.gmBackups?.items || []).length);
+const gmBackupCount = computed(() => (
+  props.backup.gmBackupViewMode?.mode === "table-history"
+    ? (props.backup.gmTableBackups?.items || []).length
+    : (props.backup.gmBackups?.items || []).length
+));
 const account = computed(() => props.account || null);
 const isLoggedIn = computed(() => Boolean(account.value?.isLoggedIn?.value));
 const displayName = computed(() => account.value?.displayName?.value || "");

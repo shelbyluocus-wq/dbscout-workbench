@@ -8,8 +8,17 @@ use sqlx::{
     Row, SqlitePool,
 };
 
-/// Default number of recent revisions retained per table on the central server.
-pub const DEFAULT_MAX_REVISIONS_PER_TABLE: usize = 20;
+/// Legacy count-based revision cap (0 = disabled, default uses tiered retention).
+pub const DEFAULT_MAX_REVISIONS_PER_TABLE: usize = 0;
+
+/// Default retention windows for tiered audit history:
+/// - Detailed: keep every change verbatim for 14 calendar days
+/// - Daily summary: keep net daily state + actors from day 15 to day 180 (~6 months)
+/// - Monthly summary: keep net monthly state + actors beyond 180 days permanently
+pub const DEFAULT_AUDIT_DETAILED_DAYS: i64 = 14;
+pub const DEFAULT_AUDIT_DAILY_DAYS: i64 = 180;
+/// Default local timezone offset in hours (Asia/Shanghai UTC+8).
+pub const DEFAULT_TZ_OFFSET_HOURS: i32 = 8;
 
 /// Revision grouping window matching the desktop client (`tableChangeHistory.js`).
 const REVISION_GROUP_WINDOW_MS: i64 = 2500;
@@ -76,6 +85,58 @@ CREATE TABLE IF NOT EXISTS table_external_changes (\
 );\
 CREATE INDEX IF NOT EXISTS ix_ext_server_db_table_ts \
     ON table_external_changes(server_key, database, table_name, ts_ms DESC);\
+CREATE TABLE IF NOT EXISTS table_backup_tables (\
+    db_lower TEXT NOT NULL,\
+    table_lower TEXT NOT NULL,\
+    database TEXT NOT NULL,\
+    table_name TEXT NOT NULL,\
+    present_in_latest INTEGER NOT NULL DEFAULT 1,\
+    last_seen_ts TEXT NOT NULL,\
+    latest_version_id TEXT NOT NULL,\
+    latest_version_ts TEXT NOT NULL,\
+    latest_content_hash TEXT NOT NULL,\
+    latest_schema_hash TEXT NOT NULL,\
+    latest_size_bytes INTEGER NOT NULL DEFAULT 0,\
+    latest_schema_changed INTEGER NOT NULL DEFAULT 0,\
+    version_count INTEGER NOT NULL DEFAULT 0,\
+    PRIMARY KEY (db_lower, table_lower)\
+);\
+CREATE INDEX IF NOT EXISTS ix_tb_tables_db_ts \
+    ON table_backup_tables(db_lower, latest_version_ts DESC);\
+CREATE TABLE IF NOT EXISTS table_backup_versions (\
+    version_id TEXT PRIMARY KEY,\
+    db_lower TEXT NOT NULL,\
+    table_lower TEXT NOT NULL,\
+    database TEXT NOT NULL,\
+    table_name TEXT NOT NULL,\
+    backup_ts TEXT NOT NULL,\
+    backup_date TEXT NOT NULL,\
+    source_file_name TEXT NOT NULL,\
+    content_hash TEXT NOT NULL,\
+    schema_hash TEXT NOT NULL,\
+    schema_changed INTEGER NOT NULL DEFAULT 0,\
+    has_data INTEGER NOT NULL DEFAULT 0,\
+    compressed_bytes INTEGER NOT NULL DEFAULT 0,\
+    raw_bytes INTEGER NOT NULL DEFAULT 0,\
+    rel_path TEXT NOT NULL,\
+    created_at TEXT NOT NULL\
+);\
+CREATE INDEX IF NOT EXISTS ix_tb_versions_lookup \
+    ON table_backup_versions(db_lower, table_lower, backup_ts DESC);\
+CREATE TABLE IF NOT EXISTS table_backup_runs (\
+    id INTEGER PRIMARY KEY AUTOINCREMENT,\
+    run_ts TEXT NOT NULL,\
+    run_date TEXT NOT NULL,\
+    database TEXT NOT NULL,\
+    source_file_name TEXT NOT NULL,\
+    tables_scanned INTEGER NOT NULL DEFAULT 0,\
+    tables_changed INTEGER NOT NULL DEFAULT 0,\
+    tables_missing INTEGER NOT NULL DEFAULT 0,\
+    status TEXT NOT NULL,\
+    error TEXT\
+);\
+CREATE INDEX IF NOT EXISTS ix_tb_runs_db_file \
+    ON table_backup_runs(database, source_file_name);\
 ";
 
 pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
@@ -140,6 +201,29 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
             return Err(format!("迁移中心服务 operation_size 列失败: {error}"));
         }
     }
+    for (col, ddl) in [
+        ("summary_kind", "ALTER TABLE audit_log ADD COLUMN summary_kind TEXT"),
+        ("summary_period", "ALTER TABLE audit_log ADD COLUMN summary_period TEXT"),
+        ("summary_meta", "ALTER TABLE audit_log ADD COLUMN summary_meta TEXT"),
+        (
+            "ext_summary_kind",
+            "ALTER TABLE table_external_changes ADD COLUMN summary_kind TEXT",
+        ),
+        (
+            "ext_summary_period",
+            "ALTER TABLE table_external_changes ADD COLUMN summary_period TEXT",
+        ),
+        (
+            "ext_occurrence_count",
+            "ALTER TABLE table_external_changes ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 1",
+        ),
+    ] {
+        if let Err(error) = sqlx::query(ddl).execute(&pool).await {
+            if !error.to_string().contains("duplicate column name") {
+                return Err(format!("迁移中心服务 {col} 列失败: {error}"));
+            }
+        }
+    }
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS ix_audit_server_db_ts ON audit_log(server_key, database, ts DESC)",
     )
@@ -158,6 +242,12 @@ pub async fn connect(db_path: &str) -> Result<SqlitePool, String> {
     .execute(&pool)
     .await
     .map_err(|e| format!("创建中心服务表历史索引失败: {e}"))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS ix_audit_summary_kind ON audit_log(summary_kind, ts)",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("创建中心服务归档索引失败: {e}"))?;
     Ok(pool)
 }
 

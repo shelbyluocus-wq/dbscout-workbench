@@ -82,19 +82,27 @@ export function buildHistoryRestorePlan({
   liveRows = [],
   revisions = [],
   targetIndex = 0,
+  targetRange = null,
   target = "before",
 } = {}) {
   const primaryKeys = Array.isArray(rawPrimaryKeys) ? rawPrimaryKeys.filter(Boolean) : [];
   if (primaryKeys.length === 0) return emptyPlan("no-primary-key");
 
-  if (!Array.isArray(revisions) || targetIndex < 0 || targetIndex >= revisions.length) {
+  const startIndex = targetRange && Number.isInteger(targetRange.startIndex)
+    ? targetRange.startIndex
+    : targetIndex;
+  const endRangeIndex = targetRange && Number.isInteger(targetRange.endIndex)
+    ? Math.max(startIndex, targetRange.endIndex)
+    : startIndex;
+
+  if (!Array.isArray(revisions) || startIndex < 0 || endRangeIndex >= revisions.length) {
     return emptyPlan("no-revision");
   }
-  if (revisions[targetIndex]?.isExternal) {
+  if (revisions[startIndex]?.isExternal && startIndex === endRangeIndex) {
     return emptyPlan("external-change", 0);
   }
 
-  const endIndex = target === "after" ? targetIndex - 1 : targetIndex;
+  const endIndex = target === "after" ? startIndex - 1 : endRangeIndex;
   if (endIndex < 0) return emptyPlan("already-current", 0);
 
   const columns = normalizeSnapshotColumns(rawColumns, primaryKeys);
@@ -107,6 +115,7 @@ export function buildHistoryRestorePlan({
   // Validate every Blackcat revision in [0 .. endIndex] first; external nodes
   // have no field-level diff so we track them for caution notices while the
   // transactional expectedCurrent guard protects against row-level conflicts.
+  // Lightweight zero-net-change (NOOP) summary nodes have 0 row ops and pass cleanly.
   let auditRevisionsUndone = 0;
   let crossedExternalTime = "";
   for (let revIdx = 0; revIdx <= endIndex; revIdx += 1) {
@@ -115,12 +124,16 @@ export function buildHistoryRestorePlan({
       if (!crossedExternalTime) crossedExternalTime = String(rev.ts || "");
       continue;
     }
+    if (rev?.isNoNetChange) {
+      continue;
+    }
     auditRevisionsUndone += 1;
     if (rev?.isIncomplete) {
       return emptyPlan("incomplete-revision", auditRevisionsUndone);
     }
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
+      if (op === "NOOP") continue;
       if (op === "DDL") return emptyPlan("contains-ddl", auditRevisionsUndone);
       const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
       if (!identity.complete) return emptyPlan("missing-row-identity", auditRevisionsUndone);
@@ -187,9 +200,10 @@ export function buildHistoryRestorePlan({
 
   for (let revIdx = 0; revIdx <= endIndex; revIdx += 1) {
     const rev = revisions[revIdx];
-    if (rev?.isExternal) continue;
+    if (rev?.isExternal || rev?.isNoNetChange) continue;
     for (const item of rev?.items || []) {
       const op = String(item?.operation || "").toUpperCase();
+      if (op === "NOOP") continue;
       const identity = normalizeItemRowIdentity(item, primaryKeys, colNameMap);
       const idKey = identity.key;
 

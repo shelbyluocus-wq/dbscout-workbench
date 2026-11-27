@@ -28,8 +28,10 @@ use crate::db::connect_database;
 use crate::sync::set_session_lock_wait_limits;
 use crate::types::{
     AppState, GmBackupItem, GmBackupListRequest, GmBackupListResponse, GmBackupTableInfo,
-    GmBackupTablesRequest, GmBackupTablesResponse, RestoreGmBackupRequest,
-    RestoreGmBackupResponse,
+    GmBackupTablesRequest, GmBackupTablesResponse, GmTableBackupListRequest,
+    GmTableBackupListResponse, GmTableBackupRunResponse, GmTableBackupSummary,
+    GmTableBackupVersion, GmTableBackupVersionsRequest, GmTableBackupVersionsResponse,
+    RestoreGmBackupRequest, RestoreGmBackupResponse, RestoreGmTableBackupRequest,
 };
 
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -421,6 +423,121 @@ async fn record_gm_restore_audit(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn execute_restore_statements(
+    app: &AppHandle,
+    job_id: &str,
+    connection_id: &str,
+    mysql_url: &str,
+    target_db: &str,
+    progress_target_label: &str,
+    done_message: &str,
+    statements: &[String],
+) -> Result<(), String> {
+    let total_stmts = statements.len() as u64;
+    emit_restore_progress(
+        app,
+        job_id,
+        connection_id,
+        target_db,
+        0,
+        total_stmts,
+        "running",
+        format!("正在向 {progress_target_label} 写入还原数据（共 {total_stmts} 条语句）..."),
+    );
+
+    let pool = connect_database(mysql_url, Some(target_db)).await?;
+    let restore_result = async {
+        let mut connection = pool
+            .acquire()
+            .await
+            .map_err(|error| format!("获取目标数据库连接失败: {error}"))?;
+        set_session_lock_wait_limits(&mut connection).await?;
+        for preamble in [
+            "SET NAMES utf8mb4",
+            "SET FOREIGN_KEY_CHECKS=0",
+            "SET UNIQUE_CHECKS=0",
+            "SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO'",
+        ] {
+            sqlx::query(preamble)
+                .execute(&mut *connection)
+                .await
+                .map_err(|error| format!("初始化还原会话失败 ({preamble}): {error}"))?;
+        }
+
+        let mut last_emit = Instant::now() - RESTORE_PROGRESS_INTERVAL;
+        let exec_result = async {
+            for (idx, stmt) in statements.iter().enumerate() {
+                sqlx::query(stmt)
+                    .execute(&mut *connection)
+                    .await
+                    .map_err(|error| {
+                        let preview: String = stmt.chars().take(120).collect();
+                        format!("还原第 {} 条 SQL 失败: {error}（语句片段: {preview}）", idx + 1)
+                    })?;
+                let done = (idx + 1) as u64;
+                if done == total_stmts || last_emit.elapsed() >= RESTORE_PROGRESS_INTERVAL {
+                    emit_restore_progress(
+                        app,
+                        job_id,
+                        connection_id,
+                        target_db,
+                        done,
+                        total_stmts,
+                        "running",
+                        format!("正在还原 {progress_target_label}（{done} / {total_stmts}）"),
+                    );
+                    last_emit = Instant::now();
+                }
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+
+        let reenable_fk = sqlx::query("SET FOREIGN_KEY_CHECKS=1")
+            .execute(&mut *connection)
+            .await;
+        let reenable_uniq = sqlx::query("SET UNIQUE_CHECKS=1")
+            .execute(&mut *connection)
+            .await;
+
+        match (exec_result, reenable_fk, reenable_uniq) {
+            (Ok(()), Ok(_), Ok(_)) => Ok(()),
+            (Err(err), _, _) => Err(err),
+            (Ok(()), Err(err), _) => Err(format!("还原完成但恢复外键检查失败: {err}")),
+            (Ok(()), Ok(_), Err(err)) => Err(format!("还原完成但恢复唯一性检查失败: {err}")),
+        }
+    }
+    .await;
+    pool.close().await;
+
+    if let Err(error) = restore_result {
+        emit_restore_progress(
+            app,
+            job_id,
+            connection_id,
+            target_db,
+            0,
+            total_stmts,
+            "failed",
+            "还原失败",
+        );
+        return Err(error);
+    }
+
+    emit_restore_progress(
+        app,
+        job_id,
+        connection_id,
+        target_db,
+        total_stmts,
+        total_stmts,
+        "done",
+        done_message,
+    );
+    Ok(())
+}
+
 pub async fn restore_gm_backup(
     app: &AppHandle,
     state: &AppState,
@@ -579,107 +696,17 @@ pub async fn restore_gm_backup(
         return Err("备份文件中未解析到可执行的 SQL 语句".into());
     }
 
-    let total_stmts = statements.len() as u64;
-    emit_restore_progress(
+    execute_restore_statements(
         app,
         &job_id,
         &request.connection_id,
+        mysql_url,
         target_db,
-        0,
-        total_stmts,
-        "running",
-        format!("正在向 {target_db} 写入还原数据（共 {total_stmts} 条语句）..."),
-    );
-
-    let pool = connect_database(mysql_url, Some(target_db)).await?;
-    let restore_result = async {
-        let mut connection = pool
-            .acquire()
-            .await
-            .map_err(|error| format!("获取目标数据库连接失败: {error}"))?;
-        set_session_lock_wait_limits(&mut connection).await?;
-        for preamble in [
-            "SET NAMES utf8mb4",
-            "SET FOREIGN_KEY_CHECKS=0",
-            "SET UNIQUE_CHECKS=0",
-            "SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO'",
-        ] {
-            sqlx::query(preamble)
-                .execute(&mut *connection)
-                .await
-                .map_err(|error| format!("初始化还原会话失败 ({preamble}): {error}"))?;
-        }
-
-        let mut last_emit = Instant::now() - RESTORE_PROGRESS_INTERVAL;
-        let exec_result = async {
-            for (idx, stmt) in statements.iter().enumerate() {
-                sqlx::query(stmt)
-                    .execute(&mut *connection)
-                    .await
-                    .map_err(|error| {
-                        let preview: String = stmt.chars().take(120).collect();
-                        format!("还原第 {} 条 SQL 失败: {error}（语句片段: {preview}）", idx + 1)
-                    })?;
-                let done = (idx + 1) as u64;
-                if done == total_stmts || last_emit.elapsed() >= RESTORE_PROGRESS_INTERVAL {
-                    emit_restore_progress(
-                        app,
-                        &job_id,
-                        &request.connection_id,
-                        target_db,
-                        done,
-                        total_stmts,
-                        "running",
-                        format!("正在还原 {target_db}（{done} / {total_stmts}）"),
-                    );
-                    last_emit = Instant::now();
-                }
-            }
-            Ok::<(), String>(())
-        }
-        .await;
-
-        let reenable_fk = sqlx::query("SET FOREIGN_KEY_CHECKS=1")
-            .execute(&mut *connection)
-            .await;
-        let reenable_uniq = sqlx::query("SET UNIQUE_CHECKS=1")
-            .execute(&mut *connection)
-            .await;
-
-        match (exec_result, reenable_fk, reenable_uniq) {
-            (Ok(()), Ok(_), Ok(_)) => Ok(()),
-            (Err(err), _, _) => Err(err),
-            (Ok(()), Err(err), _) => Err(format!("还原完成但恢复外键检查失败: {err}")),
-            (Ok(()), Ok(_), Err(err)) => Err(format!("还原完成但恢复唯一性检查失败: {err}")),
-        }
-    }
-    .await;
-    pool.close().await;
-
-    if let Err(error) = restore_result {
-        emit_restore_progress(
-            app,
-            &job_id,
-            &request.connection_id,
-            target_db,
-            0,
-            total_stmts,
-            "failed",
-            "还原失败",
-        );
-        return Err(error);
-    }
-
-    emit_restore_progress(
-        app,
-        &job_id,
-        &request.connection_id,
         target_db,
-        total_stmts,
-        total_stmts,
-        "done",
         "243 服务器备份还原完成",
-    );
+        &statements,
+    )
+    .await?;
 
     record_gm_restore_audit(
         app,
@@ -698,6 +725,487 @@ pub async fn restore_gm_backup(
         source_database: extracted.database,
         ts: extracted.ts,
         restored_tables: extracted.tables,
+        statement_count: statements.len(),
+        pre_restore_snapshot_path: String::new(),
+    })
+}
+
+// ---- 243 Per-table count-based backups (up to 60 changes per table) --------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerGmTableBackupListWire {
+    enabled: bool,
+    max_versions: usize,
+    #[serde(default)]
+    last_run_ts: Option<String>,
+    #[serde(default)]
+    databases: Vec<String>,
+    #[serde(default)]
+    items: Vec<GmTableBackupSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerGmTableBackupVersionsWire {
+    database: String,
+    table_name: String,
+    present_in_latest: bool,
+    last_seen_ts: String,
+    max_versions: usize,
+    #[serde(default)]
+    versions: Vec<GmTableBackupVersion>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerGmTableBackupExtractRequest<'a> {
+    database: &'a str,
+    table_name: &'a str,
+    version_id: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerGmTableBackupExtractWire {
+    database: String,
+    table_name: String,
+    #[allow(dead_code)]
+    version_id: String,
+    ts: String,
+    sql: String,
+}
+
+fn empty_table_backup_list(status: &str, error: Option<String>) -> GmTableBackupListResponse {
+    GmTableBackupListResponse {
+        status: status.to_string(),
+        enabled: false,
+        max_versions: 60,
+        last_run_ts: None,
+        databases: Vec::new(),
+        items: Vec::new(),
+        error,
+    }
+}
+
+async fn fetch_gm_table_backup_list(
+    http: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    request: &GmTableBackupListRequest,
+) -> GmTableBackupListResponse {
+    let mut url = match reqwest::Url::parse(&format!("{base_url}/backups/gm/table-history")) {
+        Ok(url) => url,
+        Err(error) => {
+            return empty_table_backup_list("unreachable", Some(format!("中心服务地址无效: {error}")));
+        }
+    };
+    {
+        let mut pairs = url.query_pairs_mut();
+        if let Some(db) = request.database.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            pairs.append_pair("database", db);
+        }
+        if let Some(search) = request.search.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            pairs.append_pair("search", search);
+        }
+        if let Some(include_deleted) = request.include_deleted {
+            pairs.append_pair("includeDeleted", if include_deleted { "true" } else { "false" });
+        }
+    }
+
+    let resp = match http
+        .get(url)
+        .bearer_auth(token)
+        .timeout(LIST_TIMEOUT)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(error) => {
+            return empty_table_backup_list(
+                "unreachable",
+                Some(format!("无法连接中心服务获取单表按次备份列表: {error}")),
+            );
+        }
+    };
+
+    match resp.status() {
+        StatusCode::OK => match resp.json::<ServerGmTableBackupListWire>().await {
+            Ok(wire) => GmTableBackupListResponse {
+                status: if wire.enabled {
+                    "ok".to_string()
+                } else {
+                    "disabled".to_string()
+                },
+                enabled: wire.enabled,
+                max_versions: wire.max_versions,
+                last_run_ts: wire.last_run_ts,
+                databases: wire.databases,
+                items: wire.items,
+                error: None,
+            },
+            Err(error) => empty_table_backup_list(
+                "unreachable",
+                Some(format!("解析单表按次备份列表失败: {error}")),
+            ),
+        },
+        StatusCode::UNAUTHORIZED => empty_table_backup_list(
+            "unauthorized",
+            Some("登录状态已失效，请在设置中重新登录黑猫账号".into()),
+        ),
+        StatusCode::NOT_FOUND => empty_table_backup_list(
+            "unsupported_server",
+            Some("243 中心服务尚未升级到支持单表按次备份的版本".into()),
+        ),
+        status => {
+            let body = resp.text().await.unwrap_or_default();
+            let detail = body.trim();
+            let msg = if detail.is_empty() {
+                format!("读取单表按次备份列表失败 ({status})")
+            } else {
+                format!("读取单表按次备份列表失败 ({status}): {detail}")
+            };
+            empty_table_backup_list("unreachable", Some(msg))
+        }
+    }
+}
+
+pub async fn list_gm_table_backups(
+    app: &AppHandle,
+    state: &AppState,
+    request: &GmTableBackupListRequest,
+) -> Result<GmTableBackupListResponse, String> {
+    ensure_loaded(app, state).await?;
+    let Some(base_url) = server_url(state).await else {
+        return Ok(empty_table_backup_list(
+            "not_configured",
+            Some("尚未配置中心服务地址".into()),
+        ));
+    };
+    let Some(session) = current_session(state).await else {
+        return Ok(empty_table_backup_list(
+            "logged_out",
+            Some("请先在设置中登录黑猫账号，再读取 243 单表按次备份".into()),
+        ));
+    };
+    let response =
+        fetch_gm_table_backup_list(&state.account.http, &base_url, &session.token, request).await;
+    if response.status == "unauthorized" {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            return Ok(fetch_gm_table_backup_list(
+                &state.account.http,
+                &base_url,
+                &refreshed.token,
+                request,
+            )
+            .await);
+        }
+    }
+    Ok(response)
+}
+
+pub async fn list_gm_table_backup_versions(
+    app: &AppHandle,
+    state: &AppState,
+    request: &GmTableBackupVersionsRequest,
+) -> Result<GmTableBackupVersionsResponse, String> {
+    ensure_loaded(app, state).await?;
+    let base_url = server_url(state)
+        .await
+        .ok_or_else(|| "尚未配置中心服务地址".to_string())?;
+    let session = current_session(state)
+        .await
+        .ok_or_else(|| "请先登录黑猫账号".to_string())?;
+
+    let mut url = reqwest::Url::parse(&format!("{base_url}/backups/gm/table-history/versions"))
+        .map_err(|error| format!("中心服务地址无效: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("database", request.database.trim())
+        .append_pair("tableName", request.table_name.trim());
+
+    let mut resp = state
+        .account
+        .http
+        .get(url.clone())
+        .bearer_auth(&session.token)
+        .timeout(TABLES_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("读取单表历史备份版本失败: {error}"))?;
+
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            resp = state
+                .account
+                .http
+                .get(url)
+                .bearer_auth(&refreshed.token)
+                .timeout(TABLES_TIMEOUT)
+                .send()
+                .await
+                .map_err(|error| format!("读取单表历史备份版本失败: {error}"))?;
+        }
+    }
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(match status {
+            StatusCode::UNAUTHORIZED => "登录状态已失效，请在设置中重新登录黑猫账号".into(),
+            StatusCode::NOT_FOUND if body.trim().is_empty() => {
+                "243 中心服务暂未记录该表的按次备份".into()
+            }
+            _ => {
+                let detail = body.trim();
+                if detail.is_empty() {
+                    format!("读取单表历史备份版本失败 ({status})")
+                } else {
+                    format!("读取单表历史备份版本失败: {detail}")
+                }
+            }
+        });
+    }
+
+    let wire: ServerGmTableBackupVersionsWire = resp
+        .json()
+        .await
+        .map_err(|error| format!("解析单表历史备份版本失败: {error}"))?;
+    Ok(GmTableBackupVersionsResponse {
+        database: wire.database,
+        table_name: wire.table_name,
+        present_in_latest: wire.present_in_latest,
+        last_seen_ts: wire.last_seen_ts,
+        max_versions: wire.max_versions,
+        versions: wire.versions,
+    })
+}
+
+pub async fn run_gm_table_backups_now(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<GmTableBackupRunResponse, String> {
+    ensure_loaded(app, state).await?;
+    let base_url = server_url(state)
+        .await
+        .ok_or_else(|| "尚未配置中心服务地址".to_string())?;
+    let session = current_session(state)
+        .await
+        .ok_or_else(|| "请先登录黑猫账号".to_string())?;
+
+    let url = format!("{base_url}/backups/gm/table-history/run");
+    let mut resp = state
+        .account
+        .http
+        .post(&url)
+        .bearer_auth(&session.token)
+        .timeout(EXTRACT_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("触发 243 单表按次备份巡检失败: {error}"))?;
+
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            resp = state
+                .account
+                .http
+                .post(&url)
+                .bearer_auth(&refreshed.token)
+                .timeout(EXTRACT_TIMEOUT)
+                .send()
+                .await
+                .map_err(|error| format!("触发 243 单表按次备份巡检失败: {error}"))?;
+        }
+    }
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let detail = body.trim();
+        return Err(if detail.is_empty() {
+            format!("触发单表巡检失败 ({status})")
+        } else {
+            format!("触发单表巡检失败: {detail}")
+        });
+    }
+
+    resp.json::<GmTableBackupRunResponse>()
+        .await
+        .map_err(|error| format!("解析单表巡检结果失败: {error}"))
+}
+
+pub async fn restore_gm_table_backup(
+    app: &AppHandle,
+    state: &AppState,
+    mysql_url: &str,
+    request: &RestoreGmTableBackupRequest,
+) -> Result<RestoreGmBackupResponse, String> {
+    let target_db = request.database.trim();
+    if target_db.is_empty() {
+        return Err("请选择要还原的目标数据库".into());
+    }
+    if backup::is_system_database(target_db) {
+        return Err(format!("系统内置数据库 `{target_db}` 不支持还原"));
+    }
+
+    ensure_loaded(app, state).await?;
+    let base_url = server_url(state)
+        .await
+        .ok_or_else(|| "尚未配置中心服务地址".to_string())?;
+    let session = current_session(state)
+        .await
+        .ok_or_else(|| "请先登录黑猫账号".to_string())?;
+
+    let job_id = format!(
+        "gm-table-restore-{}",
+        chrono::Utc::now().format("%Y%m%d-%H%M%S")
+    );
+    emit_restore_progress(
+        app,
+        &job_id,
+        &request.connection_id,
+        target_db,
+        0,
+        100,
+        "running",
+        format!("正在从 243 单表备份提取 `{}` 的历史版本...", request.table_name),
+    );
+
+    let extract_url = format!("{base_url}/backups/gm/table-history/extract");
+    let payload = ServerGmTableBackupExtractRequest {
+        database: request.source_database.trim(),
+        table_name: request.table_name.trim(),
+        version_id: request.version_id.trim(),
+    };
+    let mut extract_resp = state
+        .account
+        .http
+        .post(&extract_url)
+        .bearer_auth(&session.token)
+        .timeout(EXTRACT_TIMEOUT)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| {
+            emit_restore_progress(
+                app,
+                &job_id,
+                &request.connection_id,
+                target_db,
+                0,
+                100,
+                "failed",
+                "拉取单表备份失败",
+            );
+            format!("从 243 服务器提取单表备份失败: {error}")
+        })?;
+
+    if extract_resp.status() == StatusCode::UNAUTHORIZED {
+        if let SessionRecovery::Refreshed(refreshed) =
+            recover_unauthorized_session(app, state, &base_url, &session).await
+        {
+            extract_resp = state
+                .account
+                .http
+                .post(&extract_url)
+                .bearer_auth(&refreshed.token)
+                .timeout(EXTRACT_TIMEOUT)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|error| format!("从 243 服务器提取单表备份失败: {error}"))?;
+        }
+    }
+
+    if !extract_resp.status().is_success() {
+        let status = extract_resp.status();
+        let body = extract_resp.text().await.unwrap_or_default();
+        emit_restore_progress(
+            app,
+            &job_id,
+            &request.connection_id,
+            target_db,
+            0,
+            100,
+            "failed",
+            "提取单表备份失败",
+        );
+        if status == StatusCode::UNAUTHORIZED {
+            return Err("登录状态已失效，请在设置中重新登录黑猫账号".into());
+        }
+        let detail = body.trim();
+        return Err(if detail.is_empty() {
+            format!("提取 243 单表备份失败 ({status})")
+        } else {
+            format!("提取 243 单表备份失败: {detail}")
+        });
+    }
+
+    let extracted: ServerGmTableBackupExtractWire = extract_resp.json().await.map_err(|error| {
+        emit_restore_progress(
+            app,
+            &job_id,
+            &request.connection_id,
+            target_db,
+            0,
+            100,
+            "failed",
+            "解析单表备份失败",
+        );
+        format!("解析 243 单表备份响应失败: {error}")
+    })?;
+
+    let statements = filter_executable_dump_statements(&extracted.sql);
+    if statements.is_empty() {
+        emit_restore_progress(
+            app,
+            &job_id,
+            &request.connection_id,
+            target_db,
+            0,
+            100,
+            "failed",
+            "备份中没有可执行 SQL",
+        );
+        return Err("单表备份中未解析到可执行的 SQL 语句".into());
+    }
+
+    let label = format!("{target_db}.{}", extracted.table_name);
+    execute_restore_statements(
+        app,
+        &job_id,
+        &request.connection_id,
+        mysql_url,
+        target_db,
+        &label,
+        "243 单表按次备份还原完成",
+        &statements,
+    )
+    .await?;
+
+    let restored_tables = vec![extracted.table_name.clone()];
+    record_gm_restore_audit(
+        app,
+        state,
+        &request.connection_id,
+        target_db,
+        &extracted.database,
+        &extracted.ts,
+        &restored_tables,
+        false,
+    )
+    .await;
+
+    Ok(RestoreGmBackupResponse {
+        database: target_db.to_string(),
+        source_database: extracted.database,
+        ts: extracted.ts,
+        restored_tables,
         statement_count: statements.len(),
         pre_restore_snapshot_path: String::new(),
     })
@@ -776,6 +1284,36 @@ UNLOCK TABLES;
 
         let unauth_url = spawn_mock_server("401 Unauthorized", "").await;
         let unauth = fetch_gm_backup_list(&client, &unauth_url, "tok", &req).await;
+        assert_eq!(unauth.status, "unauthorized");
+    }
+
+    #[tokio::test]
+    async fn fetch_gm_table_backup_list_maps_server_statuses_cleanly() {
+        let client = reqwest::Client::new();
+        let req = GmTableBackupListRequest {
+            database: Some("newsg_4cfg".into()),
+            search: None,
+            include_deleted: Some(true),
+        };
+
+        let ok_url = spawn_mock_server(
+            "200 OK",
+            r#"{"enabled":true,"maxVersions":60,"lastRunTs":"2026-11-26 01:15:02","databases":["newsg_4cfg"],"items":[{"database":"newsg_4cfg","tableName":"heroprop","versionCount":12,"latestVersionId":"v12","latestVersionTs":"2026-11-26 01:15:00","latestSizeBytes":8192,"latestSchemaChanged":false,"presentInLatest":true,"lastSeenTs":"2026-11-26 01:15:00"}]}"#,
+        )
+        .await;
+        let ok = fetch_gm_table_backup_list(&client, &ok_url, "tok", &req).await;
+        assert_eq!(ok.status, "ok");
+        assert!(ok.enabled);
+        assert_eq!(ok.max_versions, 60);
+        assert_eq!(ok.items.len(), 1);
+        assert_eq!(ok.items[0].table_name, "heroprop");
+
+        let not_found_url = spawn_mock_server("404 Not Found", "").await;
+        let unsupported = fetch_gm_table_backup_list(&client, &not_found_url, "tok", &req).await;
+        assert_eq!(unsupported.status, "unsupported_server");
+
+        let unauth_url = spawn_mock_server("401 Unauthorized", "").await;
+        let unauth = fetch_gm_table_backup_list(&client, &unauth_url, "tok", &req).await;
         assert_eq!(unauth.status, "unauthorized");
     }
 }

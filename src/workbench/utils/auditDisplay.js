@@ -82,6 +82,7 @@ function objectChangeItems(oldValue, newValue) {
 
 export function auditChangeItems(entry) {
   const operation = String(entry?.operation || "").toUpperCase();
+  if (operation === "NOOP") return [];
   const oldValue = parsedValue(entry?.oldValue);
   const newValue = parsedValue(entry?.newValue);
 

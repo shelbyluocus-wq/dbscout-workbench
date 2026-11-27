@@ -980,3 +980,109 @@ test("resetGmBackups clears unauthorized cache so subsequent load refreshes clea
   assert.equal(backup.gmBackups.items.length, 1);
   backup.dispose();
 });
+
+test("243 per-table 60-change backup jump, version drill-down, restore, and manual scan", async () => {
+  const restoreCalls = [];
+  let scanCalls = 0;
+  const backend = createBackend();
+  const baseInvoke = backend.invokeWorkbench;
+  backend.invokeWorkbench = (command, payload = {}) => {
+    if (command === "list_gm_table_backups") {
+      return Promise.resolve({
+        status: "ok",
+        enabled: true,
+        maxVersions: 60,
+        lastRunTs: "2026-11-26 01:15:02",
+        databases: ["newsg_4cfg"],
+        items: [
+          {
+            database: "newsg_4cfg",
+            tableName: "heroprop",
+            versionCount: 7,
+            latestVersionId: "v-hero-7",
+            latestVersionTs: "2026-11-26 01:15:00",
+            latestSizeBytes: 96000,
+            latestSchemaChanged: false,
+            presentInLatest: true,
+            lastSeenTs: "2026-11-26 01:15:00",
+          },
+        ],
+        error: null,
+      });
+    }
+    if (command === "list_gm_table_backup_versions") {
+      return Promise.resolve({
+        database: payload.request.database,
+        tableName: payload.request.tableName,
+        presentInLatest: true,
+        lastSeenTs: "2026-11-26 01:15:00",
+        maxVersions: 60,
+        versions: [
+          {
+            versionId: "v-hero-7",
+            backupTs: "2026-11-26 01:15:00",
+            backupDate: "2026-11-26",
+            sourceFileName: "demo.zip",
+            contentHash: "abc123",
+            schemaChanged: false,
+            hasData: true,
+            compressedBytes: 12000,
+            rawBytes: 96000,
+            createdAt: "2026-11-26T01:15:02+08:00",
+          },
+        ],
+      });
+    }
+    if (command === "restore_gm_table_backup") {
+      restoreCalls.push(payload.request);
+      return Promise.resolve({
+        database: payload.request.database,
+        sourceDatabase: payload.request.sourceDatabase,
+        ts: "2026-11-26 01:15:00",
+        restoredTables: [payload.request.tableName],
+        statementCount: 4,
+        preRestoreSnapshotPath: "",
+      });
+    }
+    if (command === "run_gm_table_backups_now") {
+      scanCalls += 1;
+      return Promise.resolve({
+        databasesScanned: 1,
+        tablesScanned: 100,
+        tablesChanged: 2,
+        tablesMissing: 0,
+        skippedArchives: 0,
+      });
+    }
+    return baseInvoke(command, payload);
+  };
+
+  const backup = useBackupCenter({ ...backend });
+  await backup.open({
+    tab: "snapshot",
+    snapshotView: "table-history",
+    connectionId: "demo",
+    database: "newsg_4cfg",
+    tableName: "heroprop",
+  });
+  assert.equal(backup.dialog.tab, "snapshot");
+  assert.equal(backup.gmBackupViewMode.mode, "table-history");
+  assert.equal(backup.gmTableBackups.status, "ok");
+  assert.equal(backup.gmTableBackups.activeTable?.tableName, "heroprop");
+  assert.equal(backup.gmTableBackups.versions.length, 1);
+
+  const restored = await backup.restoreGmTableBackup({
+    connectionId: "demo",
+    database: "newsg_4cfg",
+    sourceDatabase: "newsg_4cfg",
+    tableName: "heroprop",
+    versionId: "v-hero-7",
+  });
+  assert.deepEqual(restored.restoredTables, ["heroprop"]);
+  assert.equal(restoreCalls[0].versionId, "v-hero-7");
+
+  const scanRes = await backup.runGmTableBackupsNow();
+  assert.equal(scanCalls, 1);
+  assert.equal(scanRes.tablesChanged, 2);
+  backup.dispose();
+});

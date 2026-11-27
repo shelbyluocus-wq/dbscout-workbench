@@ -206,3 +206,38 @@ test("serverScopeConnectionId includes teammates across workstations, preserves 
   assert.equal(history.state.operations[0].inserted, 2);
   assert.equal(history.state.operations[0].entryCount, 3);
 });
+
+test("groups consecutive same-user grid saves with operationIds within 5 minutes and preserves daily/NOOP summaries", async () => {
+  const rows = [
+    row("g3", { ts: "2026-11-26T02:04:00Z", operationId: "op-3", username: "alice", displayName: "Alice" }),
+    row("g2", { ts: "2026-11-26T02:02:00Z", operationId: "op-2", username: "alice", displayName: "Alice" }),
+    row("g1", { ts: "2026-11-26T01:50:00Z", operationId: "op-1", username: "alice", displayName: "Alice" }),
+    row("s1", {
+      ts: "2026-11-01T15:59:59Z",
+      operationId: "summary:daily:2026-11-01:seg0",
+      operation: "NOOP",
+      source: "summary",
+      summaryKind: "daily",
+      summaryPeriod: "2026-11-01",
+      summaryMeta: {
+        actors: [
+          { username: "alice", displayName: "Alice", operationCount: 2, entryCount: 2 },
+          { username: "bob", displayName: "Bob", operationCount: 1, entryCount: 1 },
+        ],
+        operationCount: 3,
+        entryCount: 3,
+        noNetChange: true,
+      },
+    }),
+  ];
+  const { history } = fixture(rows);
+  await history.selectTable(rows[0]);
+  assert.equal(history.state.operations.length, 3);
+  assert.equal(history.state.operations[0].isSession, true);
+  assert.equal(history.state.operations[0].stepCount, 2);
+  assert.equal(history.state.operations[0].entryCount, 2);
+  assert.equal(history.state.operations[1].isSession, false);
+  assert.equal(history.state.operations[2].summaryKind, "daily");
+  assert.equal(history.state.operations[2].isNoNetChange, true);
+  assert.equal(history.state.operations[2].summaryMeta.actors.length, 2);
+});

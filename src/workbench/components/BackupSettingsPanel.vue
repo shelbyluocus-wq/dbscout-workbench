@@ -235,6 +235,12 @@ async function onLogout() {
             </span>
           </label>
           <div class="wb-backup-config-field">
+            <span>{{ t('backup.settings.tieredRetentionLabel') }}</span>
+            <span class="wb-backup-config-input">
+              <em>{{ t('backup.settings.tieredRetentionNote') }}</em>
+            </span>
+          </div>
+          <div class="wb-backup-config-field">
             <span>{{ t('backup.settings.clearLabel') }}</span>
             <span class="wb-backup-config-input">
               <button
