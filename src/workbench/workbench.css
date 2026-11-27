@@ -11220,6 +11220,285 @@ label:has(input[type="checkbox"]:disabled) {
   to { opacity: 1; }
 }
 
+/* ── Rail database folders ───────────────────────────────────────────────
+   A folder tile is a 2×2 mosaic of its first databases' colors on a quiet
+   surface, so it reads as a stack rather than one database. */
+.wb-rail-db-folder {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  place-items: stretch;
+  gap: 2.5px;
+  padding: 3.5px;
+  border: 1px solid var(--wb-border-strong);
+  background: var(--wb-field-surface);
+}
+
+.wb-rail-db-folder-cell {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 2px;
+  background: var(--wb-rail-db-color, transparent);
+}
+
+.wb-rail-db-folder-cell.is-empty {
+  background: var(--wb-line);
+}
+
+.wb-rail-db-folder-cell.is-disconnected {
+  border: 1px dashed var(--wb-border-strong);
+  background: transparent;
+}
+
+.wb-rail-db-group-btn.is-open .wb-rail-db-folder {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+}
+
+.wb-rail-db-group-btn.is-drop-into .wb-rail-db-folder {
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-soft);
+  transform: scale(1.12);
+}
+
+/* The folder's flyout lists its databases with their full names. Rows share
+   the rail's press-and-drag sorting, scoped here because the panel teleports
+   out of the rail. */
+.wb-rail-db-flyout {
+  position: fixed;
+  z-index: 880;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  max-height: min(384px, calc(100vh - 16px));
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 10px;
+  background: var(--wb-menu-surface);
+  color: var(--wb-text);
+  box-shadow: 0 6px 8px color-mix(in srgb, var(--wb-text) 14%, transparent);
+  font-family: var(--wb-font-ui);
+  font-size: var(--wb-fs-body);
+  animation: wb-home-favorites-in 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  --wb-rail-sort-duration: 180ms;
+  --wb-rail-sort-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wb-rail-db-flyout-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.wb-rail-db-flyout-name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: var(--wb-fs-body);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wb-rail-db-flyout-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rail-db-flyout-name svg {
+  flex: none;
+  color: var(--wb-quiet-text);
+}
+
+.wb-rail-db-flyout-name:hover,
+.wb-rail-db-flyout-name:focus-visible {
+  background: var(--wb-accent-soft);
+}
+
+.wb-rail-db-flyout-name:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -1px;
+}
+
+.wb-rail-db-flyout-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 5px;
+  border: 1px solid var(--wb-accent);
+  border-radius: 5px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-size: var(--wb-fs-body);
+  font-weight: 650;
+  outline: none;
+}
+
+.wb-rail-db-flyout-count {
+  flex: none;
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-rail-db-flyout-list {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.wb-rail-db-flyout-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: var(--wb-fs-body);
+  text-align: left;
+  cursor: pointer;
+  transform: translateY(var(--wb-rail-sort-shift, 0px));
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow var(--wb-rail-sort-duration) var(--wb-rail-sort-ease),
+    transform var(--wb-rail-sort-duration) var(--wb-rail-sort-ease);
+}
+
+.wb-rail-db-flyout-row:hover:not(:disabled) {
+  background: var(--wb-accent-soft);
+}
+
+.wb-rail-db-flyout-row:focus-visible {
+  outline: 2px solid var(--wb-accent);
+  outline-offset: -2px;
+}
+
+.wb-rail-db-flyout-row:disabled {
+  color: var(--wb-disabled);
+  cursor: default;
+}
+
+.wb-rail-db-flyout-row .wb-rail-db-tile {
+  flex: none;
+}
+
+.wb-rail-db-flyout-row.is-disconnected .wb-rail-db-tile {
+  border: 1px dashed var(--wb-border-strong);
+  background: transparent;
+  color: var(--wb-quiet-text);
+}
+
+.wb-rail-db-flyout-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wb-rail-db-flyout-copy strong,
+.wb-rail-db-flyout-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rail-db-flyout-copy strong {
+  font-size: var(--wb-fs-body);
+  font-weight: 600;
+}
+
+.wb-rail-db-flyout-copy small {
+  color: var(--wb-secondary-text);
+  font-size: var(--wb-fs-caption);
+}
+
+.wb-rail-db-flyout-row.is-disconnected .wb-rail-db-flyout-copy strong {
+  color: var(--wb-quiet-text);
+}
+
+.wb-rail-db-flyout-check {
+  flex: none;
+  color: var(--wb-accent-strong);
+}
+
+.wb-rail-db-flyout.is-sorting .wb-rail-db-flyout-row.is-rail-dragging,
+.wb-rail-db-flyout.is-sorting .wb-rail-db-flyout-row.is-rail-settling {
+  z-index: 2;
+  border-color: var(--wb-accent);
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-menu-surface);
+}
+
+.wb-rail-db-flyout.is-sorting .wb-rail-db-flyout-row.is-rail-dragging {
+  box-shadow: 0 0 0 1px var(--wb-floating-border), var(--wb-floating-shadow);
+  cursor: grabbing;
+  transition:
+    box-shadow var(--wb-rail-sort-duration) var(--wb-rail-sort-ease);
+}
+
+.wb-rail-db-flyout.is-sorting .wb-rail-db-flyout-row:not(.is-rail-dragging, .is-rail-settling) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.wb-rail-db-flyout.is-sort-resetting .wb-rail-db-flyout-row {
+  transition: none;
+}
+
+/* The folder menus float above the flyout they were opened from. */
+.wb-rail-db-menu {
+  z-index: 900;
+}
+
+.wb-rail-db-menu .wb-rail-db-menu-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rail-db-menu .wb-context-check {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--wb-accent-strong);
+}
+
+.wb-rail-db-menu .wb-context-shortcut {
+  margin-inline-start: auto;
+  border: 0;
+  background: transparent;
+  color: var(--wb-quiet-text);
+  font-family: inherit;
+  font-size: var(--wb-fs-caption);
+  font-weight: 550;
+}
+
+.wb-rail-db-menu .wb-rail-db-menu-back {
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
 .wb-rail-db-popover {
   position: fixed;
   z-index: 880;
@@ -13908,6 +14187,164 @@ label:has(input[type="checkbox"]:disabled) {
   background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
 }
 
+/* A closed connection stays in the tree with a crossed-out server icon and
+   quieter text; one click opens it again. */
+.wb-connection-node.is-closed {
+  color: var(--wb-quiet-text);
+  font-weight: 400;
+}
+
+.wb-connection-node.is-closed .wb-tree-kind-icon {
+  color: var(--wb-muted);
+  opacity: 1;
+}
+
+/* ---- Connection groups: folder rows with their connections below ---- */
+.wb-source-group {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.wb-source-group + .wb-source-group,
+.wb-source-group + .wb-source-connection,
+.wb-source-connection + .wb-source-group {
+  margin-top: 3px;
+}
+
+.wb-connection-group-node {
+  padding-inline-start: var(--wb-tree-child-chevron-inline, 25px);
+  grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr);
+  min-height: var(--wb-tree-connection-h, 30px);
+  background: var(--wb-chrome-surface);
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
+.wb-connection-group-node:hover,
+.wb-connection-group-node:focus-visible {
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
+}
+
+.wb-connection-group-node .wb-tree-chevron {
+  position: absolute;
+  inset-inline-start: var(--wb-tree-row-padding-inline, 7px);
+  top: 50%;
+  margin-top: -4px;
+}
+
+.wb-connection-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-connection-group-count {
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-micro);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+/* A connection dragged over a group header joins that group. */
+.wb-connection-group-node.is-drop-into,
+.wb-connection-group-node.is-drop-into:hover {
+  border-color: var(--wb-accent);
+  background: linear-gradient(var(--wb-accent-soft), var(--wb-accent-soft)), var(--wb-chrome-surface);
+  color: var(--wb-accent-strong);
+}
+
+.wb-connection-group-node.is-renaming {
+  border-color: var(--wb-accent);
+  cursor: text;
+}
+
+.wb-connection-group-rename {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: 4px;
+  background: var(--wb-field-surface);
+  color: var(--wb-text);
+  font: inherit;
+  font-weight: 500;
+}
+
+.wb-connection-group-rename:focus {
+  border-color: var(--wb-accent);
+  outline: none;
+}
+
+.wb-connection-group-rename[aria-invalid="true"] {
+  border-color: var(--wb-danger);
+}
+
+.wb-connection-group-error {
+  margin: 3px 6px 2px var(--wb-tree-child-chevron-inline, 25px);
+  color: var(--wb-danger-text);
+  font-size: var(--wb-fs-caption);
+  line-height: 1.35;
+}
+
+/* Grouped connections sit one step in, on the group's guide line; the last
+   one's line stops at its own row rather than running past its databases. */
+.wb-source-connection.is-grouped {
+  margin-left: var(--wb-tree-branch-indent, 7px);
+  padding-left: var(--wb-tree-branch-padding-inline, 7px);
+}
+
+.wb-source-connection.is-grouped::before {
+  position: absolute;
+  top: -3px;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--wb-tree-guide);
+  content: "";
+  pointer-events: none;
+}
+
+.wb-source-connection.is-grouped.is-group-end::before {
+  bottom: auto;
+  height: calc(3px + var(--wb-tree-connection-h, 30px) / 2);
+}
+
+.wb-sidebar-connection-menu {
+  min-width: 196px;
+}
+
+.wb-sidebar-connection-menu.is-group-list {
+  max-height: min(360px, calc(100vh - 16px));
+}
+
+.wb-sidebar-connection-menu-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sidebar-connection-menu .wb-context-check {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--wb-accent-strong);
+}
+
+.wb-sidebar-connection-menu .wb-sidebar-connection-menu-back {
+  color: var(--wb-secondary-text);
+  font-weight: 600;
+}
+
 .wb-tree-row.is-dragging-source,
 .wb-tree-row.is-dragging-source:hover {
   border-color: transparent;
@@ -13945,6 +14382,8 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-source-connection.is-drop-before > .wb-tree-row::before,
 .wb-source-connection.is-drop-after > .wb-tree-row::before,
+.wb-source-group.is-drop-before > .wb-tree-row::before,
+.wb-source-group.is-drop-after > .wb-tree-row::before,
 .wb-source-database.is-drop-before > .wb-tree-row::before,
 .wb-source-database.is-drop-after > .wb-tree-row::before {
   position: absolute;
@@ -13960,11 +14399,13 @@ label:has(input[type="checkbox"]:disabled) {
 }
 
 .wb-source-connection.is-drop-before > .wb-tree-row::before,
+.wb-source-group.is-drop-before > .wb-tree-row::before,
 .wb-source-database.is-drop-before > .wb-tree-row::before {
   top: -2px;
 }
 
 .wb-source-connection.is-drop-after > .wb-tree-row::before,
+.wb-source-group.is-drop-after > .wb-tree-row::before,
 .wb-source-database.is-drop-after > .wb-tree-row::before {
   bottom: -2px;
 }
@@ -24974,6 +25415,19 @@ html[data-wb-theme="dark"].wb-fill-drag-active.wb-fill-drag-toggle * {
 
   .wb-rail-db-btn:hover:not(:disabled) .wb-rail-db-tile,
   .wb-rail-db-btn:active:not(:disabled) .wb-rail-db-tile {
+    transform: none;
+  }
+
+  .wb-rail-db-flyout {
+    animation: none;
+  }
+
+  .wb-rail-db-flyout-row,
+  .wb-rail-db-flyout.is-sorting .wb-rail-db-flyout-row.is-rail-dragging {
+    transition: none;
+  }
+
+  .wb-rail-db-group-btn.is-drop-into .wb-rail-db-folder {
     transform: none;
   }
 

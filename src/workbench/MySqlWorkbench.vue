@@ -205,6 +205,8 @@ import { useTableTransfer } from "./composables/useTableTransfer.js";
 import { textInputClipboard, usesNativeTextMenu } from "./utils/textInputClipboard.js";
 import { useActivityRail } from "./composables/useActivityRail.js";
 import { useRailDatabases } from "./composables/useRailDatabases.js";
+import { useConnectionGroupStore } from "./composables/connectionGroupStore.js";
+import { connectionIdentityKey } from "./utils/connectionIdentity.js";
 import { useConfigRelations } from "./composables/useConfigRelations.js";
 import { CONFIG_RELATION_CONTEXT } from "./composables/configRelationContext.js";
 import { normalizeRelationFilter, normalizeRelationOrigin } from "./utils/relationFilter.js";
@@ -293,6 +295,7 @@ function withShortcutLabel(action, shortcut) {
   return shortcut ? t("shell.withShortcut", { action, shortcut: formatShortcutForPlatform(shortcut) }) : action;
 }
 const windowPin = useWindowPin();
+const connectionGroups = useConnectionGroupStore();
 
 // Reapply the saved global binding on startup, including a cleared binding.
 async function syncGlobalShortcutBinding() {
@@ -360,6 +363,8 @@ const {
   onConnDialogFieldChange,
   submitConnDialog,
   removeConnection,
+  closeConnection,
+  openConnection,
   listSavedConnections,
   importNavicatConnections,
   dispose: disposeConnection,
@@ -962,7 +967,6 @@ const {
   openDesignFromContextMenu,
   renameFromContextMenu,
   renameDatabaseFromContextMenu,
-  renameConnectionFromContextMenu,
 } = useContextMenu(
   { statusText: conn.statusText },
   {
@@ -1480,10 +1484,17 @@ function currentRailDatabaseSource() {
 
 const {
   items: railDatabaseItems,
+  layout: railDatabaseLayout,
+  groupOptions: railDatabaseGroups,
   isOnRail: isRailDatabase,
   pin: pinRailDatabase,
   unpin: unpinRailDatabase,
   reorder: reorderRailDatabases,
+  reorderInGroup: reorderRailDatabaseGroup,
+  createGroup: createRailDatabaseGroup,
+  moveToGroup: moveRailDatabaseToGroup,
+  renameGroup: renameRailDatabaseGroup,
+  dissolveGroup: dissolveRailDatabaseGroup,
   setAppearance: setRailDatabaseAppearance,
   resetAppearance: resetRailDatabaseAppearance,
 } = useRailDatabases({
@@ -1969,12 +1980,68 @@ async function selectConnectionWithHome(connectionId, options) {
 async function handleSidebarExpandConnection(connectionId) {
   const target = connections.value.find((item) => item.id === connectionId);
   if (!target) return;
+  if (target.closed) {
+    await openSidebarConnection(connectionId);
+    return;
+  }
   if (!target.connected && target.saved) {
     await selectConnectionWithHome(connectionId);
     return;
   }
   if (!Array.isArray(databasesByConnection[connectionId])) {
     await fetchDatabasesForConnection(connectionId);
+  }
+}
+
+// Opening a connection keeps the current database in view; it becomes the
+// current one only when nothing else is.
+async function openSidebarConnection(connectionId) {
+  if (!connections.value.some((item) => item.id === connectionId)) return;
+  if (!selectedConnectionId.value) {
+    await selectConnectionWithHome(connectionId);
+    return;
+  }
+  await openConnection(connectionId);
+}
+
+// Closing a connection closes its tabs (home tabs follow the selection), after
+// one confirmation when it has any and the usual checks for unsaved work.
+async function closeSidebarConnections({ connectionIds = [] } = {}) {
+  const targets = connectionIds
+    .map((id) => connections.value.find((item) => item.id === id))
+    .filter((connection) => connection && !connection.closed && !connection.sampleData);
+  if (!targets.length) return;
+  const ids = new Set(targets.map((connection) => connection.id));
+  const tabs = workspace.tabs.filter((tab) => tab.kind !== "home" && ids.has(String(tab.connectionId || "")));
+  if (tabs.length) {
+    const confirmed = await confirmDialogConfirm({
+      title: targets.length === 1
+        ? t("connectionGroup.closeTitle", { name: connectionLabel(targets[0].id, targets[0].label || targets[0].id) })
+        : t("connectionGroup.closeManyTitle", { count: targets.length }),
+      message: t("connectionGroup.closeTabsMessage", { count: tabs.length }),
+      confirmText: t("connectionGroup.closeConnection"),
+      cancelText: t("m_2cd0f3be8738"),
+    });
+    if (!confirmed || !(await guardTabDepartures(tabs))) return;
+    resetGridState();
+    ids.forEach((connectionId) => closeConnectionTabs(workspace, { connectionId }).forEach(clearTabCellErrors));
+    pruneEmptyPanesInLayout(workspace);
+  }
+  const active = activeTab.value;
+  const fallback = active?.database && !ids.has(String(active.connectionId || ""))
+    ? { connectionId: active.connectionId, database: active.database }
+    : null;
+  for (const connection of targets) await closeConnection(connection.id, { fallback });
+  if (selectedDatabase.value) await restorePendingStartupOrEnsureHome();
+}
+
+async function refreshSidebarConnection({ connectionId = "" } = {}) {
+  try {
+    const list = await conn.refreshDatabases({ connectionId });
+    if (selectedDatabase.value) await restorePendingStartupOrEnsureHome();
+    statusText.value = list?.length ? `已刷新数据库列表（${list.length} 个）` : "已刷新数据库列表";
+  } catch (error) {
+    statusText.value = `刷新失败：${String(error)}`;
   }
 }
 
@@ -3963,12 +4030,6 @@ function openConnectionAliasDialog(source) {
   aliasDialog.open = true;
 }
 
-function openConnectionAliasFromContext() {
-  const source = renameConnectionFromContextMenu();
-  closeTabContextMenu();
-  openConnectionAliasDialog(source);
-}
-
 function closeAliasDialog() {
   aliasDialog.open = false;
 }
@@ -4542,12 +4603,6 @@ function deleteTablesFromContextMenu() {
   void deleteHomeTables({ ...source, origin: "sidebar" });
 }
 
-async function removeConnectionFromContext() {
-  const connectionId = contextMenu.connectionId;
-  closeContextMenu();
-  await confirmRemoveConnection({ connectionId });
-}
-
 async function confirmRemoveConnection({ connectionId = "" } = {}) {
   if (!connectionId) return;
   const connection = connections.value.find((item) => item.id === connectionId);
@@ -4561,7 +4616,8 @@ async function confirmRemoveConnection({ connectionId = "" } = {}) {
   });
   if (!confirmed) return;
   closeConnectionTabs(workspace, { connectionId });
-  await removeConnection(connectionId);
+  const removed = await removeConnection(connectionId);
+  if (removed && connection) connectionGroups.forget(connectionIdentityKey(connection));
   if (selectedDatabase.value) await restorePendingStartupOrEnsureHome();
   // 清理该连接的常驻库条目，避免幽灵条目残留在 Quick Open 浮层里。
   pinnedDatabases.value = removePinnedDatabasesForConnection(connectionId, pinnedDatabases.value);
@@ -6263,6 +6319,8 @@ onBeforeUnmount(() => {
         @more-select="selectMoreAction"
         :label="t('shell.activityRail')"
         :database-items="railDatabaseItems"
+        :database-layout="railDatabaseLayout"
+        :database-groups="railDatabaseGroups"
         :database-label="t('railDatabase.groupLabel')"
         @select="selectActivityRailEntry"
         @reorder="reorderActivityRailEntry"
@@ -6272,6 +6330,11 @@ onBeforeUnmount(() => {
         @database-unpin="unpinRailDatabase"
         @database-appearance="setRailDatabaseAppearance"
         @database-appearance-reset="resetRailDatabaseAppearance"
+        @database-group-create="createRailDatabaseGroup"
+        @database-group-move="moveRailDatabaseToGroup"
+        @database-group-rename="renameRailDatabaseGroup"
+        @database-group-dissolve="dissolveRailDatabaseGroup"
+        @database-group-reorder="reorderRailDatabaseGroup"
       />
       <HomeDatabaseFavorites ref="homeFavoritesRef" :pane-id="workspace.focusedPaneId" />
       <div v-if="showNarrowHint" class="wb-narrow-hint" role="status">
@@ -6336,6 +6399,10 @@ onBeforeUnmount(() => {
         @open-tables="openTablesFromSidebar"
         @delete-tables="deleteHomeTables"
         @remove-connection="confirmRemoveConnection"
+        @connection-open="openSidebarConnection"
+        @connection-close="closeSidebarConnections"
+        @refresh-connection="refreshSidebarConnection"
+        @contextmenu-open="closeAllContextMenus"
         @rename-table="openTableRenameFromSource"
         @rename-database="openDatabaseAliasDialog"
         @rename-connection="openConnectionAliasDialog"
@@ -6545,8 +6612,6 @@ onBeforeUnmount(() => {
       @send-table="openTableCopyFromContext"
       @rename="openTableRenameFromContext"
       @rename-database="openDatabaseAliasFromContext"
-      @rename-connection="openConnectionAliasFromContext"
-      @remove-connection="removeConnectionFromContext"
       @grid-row-insert-above="onGridRowInsertAbove"
       @grid-row-insert-below="onGridRowInsertBelow"
       @grid-cell-append-row="onGridCellAppendRow"

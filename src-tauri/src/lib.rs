@@ -13,6 +13,7 @@ mod mongodb;
 mod clipboard;
 mod cocos_build;
 mod commands;
+mod connection_lifecycle;
 mod config_relations;
 mod control_server;
 mod database_sync_jobs;
@@ -292,6 +293,9 @@ pub fn run() {
             commands::add_connection,
             commands::restore_connection,
             commands::remove_connection,
+            connection_lifecycle::close_connection,
+            connection_lifecycle::open_connection,
+            connection_lifecycle::register_connection,
             navicat_import::scan_navicat_connections,
             navicat_import::import_navicat_ncx_file,
             commands::save_export_file,

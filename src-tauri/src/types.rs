@@ -85,6 +85,9 @@ pub struct WorkbenchConnection {
     pub username: String,
     pub database: Option<String>,
     pub connected: bool,
+    /// Closed by the user: registered (its id and address are kept) but not
+    /// connected until it is opened again.
+    pub closed: bool,
     pub read_only: bool,
     /// Served from the built-in sample data rather than a real server, so
     /// features that read the server directly (config relations) are off.
@@ -1063,6 +1066,10 @@ impl RuntimeOptions {
 
 pub struct RuntimeState {
     pub connections: HashMap<String, RuntimeConnection>,
+    /// Connections the user closed. They keep their id so that aliases and
+    /// other per-connection settings still match when they are opened again,
+    /// but every lookup through `connections` treats them as absent.
+    pub closed_connections: HashMap<String, RuntimeConnection>,
     pub selected_connection_id: String,
     pub selected_database: String,
     pub schema: Vec<TableMeta>,
@@ -1771,6 +1778,7 @@ impl RuntimeState {
 
         Self {
             connections,
+            closed_connections: HashMap::new(),
             selected_connection_id,
             selected_database,
             schema,
@@ -1796,6 +1804,7 @@ impl RuntimeState {
         self.demo_schema_overrides.clear();
         self.demo_rows.clear();
         self.connections.clear();
+        self.closed_connections.clear();
         self.connections.insert(
             connection_id.clone(),
             performance_fixture_connection(&connection_id, &database),

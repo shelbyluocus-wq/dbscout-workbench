@@ -10,6 +10,7 @@ use crate::agent::{project::ProjectDirectoryInfo, AgentConfig, AgentContext, Age
 use crate::audit;
 use crate::backup;
 use crate::clickhouse;
+use crate::connection_lifecycle;
 use crate::gm_backup;
 use crate::mongodb;
 use crate::db::{
@@ -712,11 +713,17 @@ pub async fn list_connections(
 ) -> Result<Vec<WorkbenchConnection>, String> {
     let connections = {
         let rt = state.runtime.lock().await;
-        rt.connections.values().cloned().collect::<Vec<_>>()
+        rt.connections
+            .values()
+            .cloned()
+            .map(|connection| (connection, false))
+            .chain(rt.closed_connections.values().cloned().map(|connection| (connection, true)))
+            .collect::<Vec<_>>()
     };
     let mut result = Vec::with_capacity(connections.len());
-    for connection in connections {
-        let mysql_pool_connected = state.resources.has_connection_pool(&connection.id).await;
+    for (connection, closed) in connections {
+        let mysql_pool_connected =
+            !closed && state.resources.has_connection_pool(&connection.id).await;
         result.push(WorkbenchConnection {
             id: connection.id.clone(),
             kind: connection.kind,
@@ -725,7 +732,8 @@ pub async fn list_connections(
             port: connection.port,
             username: connection.username.clone(),
             database: connection.database.clone(),
-            connected: connection_connected(&connection, mysql_pool_connected),
+            connected: !closed && connection_connected(&connection, mysql_pool_connected),
+            closed,
             read_only: connection.kind.is_read_only(),
             sample_data: connection.kind == DatabaseKind::MySql && connection.mysql_url.is_none(),
         });
@@ -9081,7 +9089,7 @@ mod tests {
     }
 }
 
-fn runtime_connection_matches_url(
+pub(crate) fn runtime_connection_matches_url(
     connection: &RuntimeConnection,
     kind: DatabaseKind,
     url: &str,
@@ -9094,63 +9102,51 @@ fn runtime_connection_matches_url(
         }
 }
 
+/// Registers a connection that was just reached: under the id of a known
+/// connection to the same address when asked to (a closed one opens again),
+/// otherwise under a new id. Returns the id and whether it is new.
+async fn store_runtime_connection(
+    state: &State<'_, AppState>,
+    kind: DatabaseKind,
+    url: String,
+    (host, port, username): (String, u16, String),
+    select: bool,
+    reuse_existing: bool,
+) -> (String, bool) {
+    let mut rt = state.runtime.lock().await;
+    let existing_id = reuse_existing
+        .then(|| connection_lifecycle::reuse_connection_id(&mut rt, kind, &url))
+        .flatten();
+    if let Some(id) = existing_id {
+        return (id, false);
+    }
+    let number = connection_lifecycle::next_connection_number(&rt, kind);
+    let connection =
+        connection_lifecycle::new_runtime_connection(kind, number, url, host, port, username);
+    let id = connection.id.clone();
+    rt.connections.insert(id.clone(), connection);
+    if select {
+        rt.selected_connection_id = id.clone();
+    }
+    (id, true)
+}
+
 async fn connect_mysql_and_store(
     url: String,
     state: State<'_, AppState>,
     select: bool,
     reuse_existing: bool,
 ) -> Result<Vec<String>, String> {
-    let pool = connect_database(&url, None).await?;
-    let rows = sqlx::query("SHOW DATABASES")
-        .fetch_all(&pool)
-        .await
-        .map_err(|error| format!("读取数据库列表失败: {error}"))?;
-    let db_list: Vec<String> = rows
-        .into_iter()
-        .filter_map(|row| mysql_text::string(&row, 0).ok())
-        .filter(|name| {
-            !matches!(
-                name.as_str(),
-                "information_schema" | "mysql" | "performance_schema" | "sys"
-            )
-        })
-        .collect();
-    let (id, inserted) = {
-        let mut rt = state.runtime.lock().await;
-        let existing_id = reuse_existing
-            .then(|| {
-                rt.connections.iter().find_map(|(id, connection)| {
-                    runtime_connection_matches_url(connection, DatabaseKind::MySql, &url)
-                        .then(|| id.clone())
-                })
-            })
-            .flatten();
-        if let Some(id) = existing_id {
-            (id, false)
-        } else {
-            let connection_number = rt.connections.len() + 1;
-            let id = format!("mysql-{connection_number}");
-            rt.connections.insert(
-                id.clone(),
-                RuntimeConnection {
-                    id: id.clone(),
-                    kind: DatabaseKind::MySql,
-                    label: format!("MySQL {connection_number}"),
-                    host: "configured".into(),
-                    port: 3306,
-                    username: "mysql".into(),
-                    mysql_url: Some(url),
-                    clickhouse_url: None,
-                    mongodb_url: None,
-                    database: None,
-                },
-            );
-            if select {
-                rt.selected_connection_id = id.clone();
-            }
-            (id, true)
-        }
-    };
+    let (pool, db_list) = connection_lifecycle::connect_mysql_server(&url).await?;
+    let (id, inserted) = store_runtime_connection(
+        &state,
+        DatabaseKind::MySql,
+        url,
+        ("configured".into(), 3306, "mysql".into()),
+        select,
+        reuse_existing,
+    )
+    .await;
     if inserted {
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
@@ -9170,42 +9166,15 @@ async fn connect_clickhouse_and_store(
 ) -> Result<Vec<String>, String> {
     let db_list = clickhouse::list_databases(&url).await?;
     let (host, port, username) = clickhouse::describe_url(&url)?;
-    let (id, inserted) = {
-        let mut rt = state.runtime.lock().await;
-        let existing_id = reuse_existing
-            .then(|| {
-                rt.connections.iter().find_map(|(id, connection)| {
-                    runtime_connection_matches_url(connection, DatabaseKind::ClickHouse, &url)
-                        .then(|| id.clone())
-                })
-            })
-            .flatten();
-        if let Some(id) = existing_id {
-            (id, false)
-        } else {
-            let connection_number = rt.connections.len() + 1;
-            let id = format!("clickhouse-{connection_number}");
-            rt.connections.insert(
-                id.clone(),
-                RuntimeConnection {
-                    id: id.clone(),
-                    kind: DatabaseKind::ClickHouse,
-                    label: format!("ClickHouse {connection_number}"),
-                    host,
-                    port,
-                    username,
-                    mysql_url: None,
-                    clickhouse_url: Some(url),
-                    mongodb_url: None,
-                    database: None,
-                },
-            );
-            if select {
-                rt.selected_connection_id = id.clone();
-            }
-            (id, true)
-        }
-    };
+    let (id, inserted) = store_runtime_connection(
+        &state,
+        DatabaseKind::ClickHouse,
+        url,
+        (host, port, username),
+        select,
+        reuse_existing,
+    )
+    .await;
     if inserted {
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
@@ -9221,42 +9190,15 @@ async fn connect_mongodb_and_store(
 ) -> Result<Vec<String>, String> {
     let db_list = mongodb::list_databases(&url).await?;
     let (host, port, username) = mongodb::describe_url(&url)?;
-    let (id, inserted) = {
-        let mut rt = state.runtime.lock().await;
-        let existing_id = reuse_existing
-            .then(|| {
-                rt.connections.iter().find_map(|(id, connection)| {
-                    runtime_connection_matches_url(connection, DatabaseKind::MongoDb, &url)
-                        .then(|| id.clone())
-                })
-            })
-            .flatten();
-        if let Some(id) = existing_id {
-            (id, false)
-        } else {
-            let connection_number = rt.connections.len() + 1;
-            let id = format!("mongodb-{connection_number}");
-            rt.connections.insert(
-                id.clone(),
-                RuntimeConnection {
-                    id: id.clone(),
-                    kind: DatabaseKind::MongoDb,
-                    label: format!("MongoDB {connection_number}"),
-                    host,
-                    port,
-                    username,
-                    mysql_url: None,
-                    clickhouse_url: None,
-                    mongodb_url: Some(url),
-                    database: None,
-                },
-            );
-            if select {
-                rt.selected_connection_id = id.clone();
-            }
-            (id, true)
-        }
-    };
+    let (id, inserted) = store_runtime_connection(
+        &state,
+        DatabaseKind::MongoDb,
+        url,
+        (host, port, username),
+        select,
+        reuse_existing,
+    )
+    .await;
     if inserted {
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
@@ -9318,38 +9260,20 @@ pub async fn remove_connection(
         let connection = rt
             .connections
             .remove(&connection_id)
+            .or_else(|| rt.closed_connections.remove(&connection_id))
             .ok_or_else(|| "连接不存在".to_string())?;
         rt.sessions.invalidate_connection(&connection_id);
-        if rt.selected_connection_id == connection_id {
-            let next_id = rt.connections.keys().next().cloned().unwrap_or_default();
-            rt.selected_connection_id = next_id.clone();
-            if let Some(next) = rt.connections.get(&next_id) {
-                rt.selected_database = next.database.clone().unwrap_or_default();
-            } else {
-                rt.selected_database.clear();
-                rt.schema.clear();
-            }
-        }
+        connection_lifecycle::reselect_after_detach(&mut rt, &connection_id);
         connection.mongodb_url
     };
-    if let Some(url) = mongo_url {
-        mongodb::disconnect(&url).await;
-    }
-    state.schema_cache.invalidate_connection(&connection_id);
-    state.table_counts.invalidate_connection(&connection_id);
-    state
-        .table_counts
-        .close_connection_pools(&connection_id)
-        .await;
-    state.resources.close_connection(&connection_id).await;
-    let _ = app.emit(
-        TABLE_SESSIONS_INVALIDATED_EVENT,
-        TableSessionsInvalidatedPayload {
-            connection_id,
-            session_ids: Vec::new(),
-            reason: "connection-removed".into(),
-        },
-    );
+    connection_lifecycle::release_connection_resources(
+        &app,
+        &state,
+        connection_id,
+        mongo_url,
+        "connection-removed",
+    )
+    .await;
     Ok(())
 }
 

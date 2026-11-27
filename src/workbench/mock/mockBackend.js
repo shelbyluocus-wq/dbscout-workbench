@@ -550,7 +550,14 @@ function mockConnectionFromUrl(url, kind) {
   }
 }
 
-function upsertMockConnection(url, kind) {
+// Closed connections are unknown to every command, as in the Rust runtime.
+function assertMockConnectionOpen(connectionId) {
+  if (mockConnections.some((item) => String(item.id) === String(connectionId) && item.closed)) {
+    throw new Error("连接不存在");
+  }
+}
+
+function upsertMockConnection(url, kind, { closed = false } = {}) {
   const next = mockConnectionFromUrl(url, kind);
   const existing = mockConnections.find((connection) =>
     normalizeConnectionKind(connection.kind) === next.kind &&
@@ -561,8 +568,12 @@ function upsertMockConnection(url, kind) {
   if (existing) {
     existing.kind = next.kind;
     existing.readOnly = next.readOnly;
-    existing.connected = true;
+    if (!closed) {
+      existing.connected = true;
+      existing.closed = false;
+    }
   } else {
+    if (closed) Object.assign(next, { closed: true, connected: false });
     mockConnections.push(next);
   }
   if (normalizeConnectionKind(connection.kind) === "mongodb") {
@@ -1714,7 +1725,33 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
     URL.revokeObjectURL(url);
     return "mock-text-saved";
   }
-  if (command === "list_connections") return mockConnections.map((connection) => ({ ...connection }));
+  if (command === "list_connections") {
+    return mockConnections.map((connection) => ({ ...connection, closed: Boolean(connection.closed) }));
+  }
+  if (command === "close_connection") {
+    const connectionId = String(payload.connectionId || payload.connection_id || "");
+    const connection = mockConnections.find((item) => String(item.id) === connectionId);
+    if (!connection) throw new Error("连接不存在");
+    if (connection.closed) return null;
+    connection.closed = true;
+    connection.connected = false;
+    for (const [sessionId, session] of mockSessions) {
+      if (String(session.connectionId) === connectionId) mockSessions.delete(sessionId);
+    }
+    emitMockEvent("table-sessions-invalidated", { connectionId, sessionIds: [], reason: "connection-closed" });
+    return null;
+  }
+  if (command === "open_connection") {
+    const connectionId = String(payload.connectionId || payload.connection_id || "");
+    const connection = mockConnections.find((item) => String(item.id) === connectionId);
+    if (!connection) throw new Error("连接不存在");
+    connection.closed = false;
+    connection.connected = true;
+    return [...(mockConnectionDatabases[connectionId] || ["game_db"])];
+  }
+  if (command === "register_connection") {
+    return upsertMockConnection(payload.url, payload.kind, { closed: true }).id;
+  }
   if (command === "remove_connection") {
     const connectionId = payload.connectionId || payload.connection_id || "";
     const index = mockConnections.findIndex((connection) => String(connection.id) === String(connectionId));
@@ -1743,10 +1780,12 @@ export async function mockWorkbenchInvoke(command, payload = {}) {
   }
   if (command === "list_databases") {
     const { connectionId } = resolveContext(payload);
+    assertMockConnectionOpen(connectionId);
     return mockConnectionDatabases[connectionId] || ["game_db"];
   }
   if (command === "select_database") {
     const { connectionId, database } = resolveContext(payload);
+    assertMockConnectionOpen(connectionId);
     const schema = tableSchemaFor(connectionId, database);
     const tables = schema.map((table, index) => mockTableOption(table, connectionId, database, index));
     return {

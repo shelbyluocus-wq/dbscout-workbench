@@ -11,6 +11,7 @@ import {
   normalizeRailText,
   railDatabaseId,
 } from "./railDatabaseGlyph.js";
+import { isRailGroupId } from "./railDatabaseGroups.js";
 
 const PINNED_DATABASES_KEY = "dbscout_pinned_databases";
 
@@ -46,6 +47,7 @@ function normalizeEntry(entry) {
   const shortcut = String(entry?.shortcut || "").trim();
   if (shortcut) normalized.shortcut = shortcut;
   if (entry?.rail) normalized.rail = true;
+  if (entry?.rail && isRailGroupId(entry?.railGroup)) normalized.railGroup = entry.railGroup;
   const railIcon = normalizeRailIcon(entry?.railIcon);
   const railText = normalizeRailText(entry?.railText);
   if (railIcon) normalized.railIcon = railIcon;
@@ -142,6 +144,7 @@ export function setPinnedDatabaseRail(connectionId, database, rail, list = null,
     if (!entry.railColor && normalizedColor) entry.railColor = normalizedColor;
   } else {
     delete entry.rail;
+    delete entry.railGroup;
   }
   entries[index] = entry;
   writePinnedDatabases(entries);

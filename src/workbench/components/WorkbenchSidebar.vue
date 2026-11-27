@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
-import { ChevronRight, Languages, Server } from "lucide-vue-next";
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Languages, Server, ServerOff } from "lucide-vue-next";
 import {
   applyLocaleTableFolding,
   useLocaleTableFoldPreference,
@@ -10,6 +10,7 @@ import {
 import { computed, ref, reactive, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
+import SidebarConnectionMenu from "./SidebarConnectionMenu.vue";
 import ShortcutSettingsDialog from "./ShortcutSettingsDialog.vue";
 import FontSettingsDialog from "./FontSettingsDialog.vue";
 import WallpaperSettingsDialog from "./WallpaperSettingsDialog.vue";
@@ -34,6 +35,13 @@ import {
 import { createSidebarSearchState } from "../sidebarSearchState.js";
 import { createSidebarRowFollower, revealSidebarSearchResults } from "../sidebarScroll.js";
 import { previewDragOrder, resolvePreviewDropTarget, sameDragTarget } from "../sidebarDragPreview.js";
+import {
+  CONNECTION_GROUP_NAME_MAX_LENGTH,
+  buildConnectionTree,
+  useConnectionGroupStore,
+} from "../composables/connectionGroupStore.js";
+import { useConfirm } from "../composables/useConfirm.js";
+import { connectionIdentityKey } from "../utils/connectionIdentity.js";
 import { beginDatabaseDrag, endDatabaseDrag } from "../utils/databaseDragPayload.js";
 import { useAliases } from "../composables/aliasStore.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
@@ -92,6 +100,10 @@ const emit = defineEmits([
   "rename-database",
   "rename-connection",
   "remove-connection",
+  "connection-open",
+  "connection-close",
+  "refresh-connection",
+  "contextmenu-open",
   "open-tables",
   "delete-tables",
   "contextmenu",
@@ -130,7 +142,9 @@ function databaseTextStyle(connectionId, database) {
 
 const treeState = reactive(createSidebarTreeState());
 const fallbackSearchState = reactive(createSidebarSearchState());
-const dragState = reactive({ kind: "", connectionId: "", sourceId: "", targetId: "", targetPosition: "before" });
+// `targetGroupId` is the group a dragged connection would join ("" = none,
+// null = unchanged).
+const dragState = reactive({ kind: "", connectionId: "", sourceId: "", targetId: "", targetPosition: "before", targetGroupId: null });
 const treeNavRef = ref(null);
 const tableScrollRef = ref(null);
 const tableListRef = ref(null);
@@ -223,12 +237,14 @@ function toggleCollapseAll() {
   const ids = props.connections.map((c) => c.id);
   if (areAllCollapsed.value) {
     const expandableIds = props.connections
-      .filter((c) => c.connected !== false || !c.saved)
+      .filter((c) => !c.closed && (c.connected !== false || !c.saved))
       .map((c) => c.id);
     expandAllConnections(treeState, expandableIds.length ? expandableIds : ids);
+    groupStore.state.value.groups.forEach((group) => groupStore.setCollapsed(group.id, false));
     emit("expand-all-connections");
   } else {
     collapseAllConnections(treeState, ids);
+    groupStore.state.value.groups.forEach((group) => groupStore.setCollapsed(group.id, true));
   }
 }
 
@@ -323,6 +339,265 @@ const previewConnections = computed(() => {
   return props.connections;
 });
 
+// ── Connection groups ────────────────────────────────────────────────────
+const groupStore = useConnectionGroupStore();
+const { confirm: confirmDialog } = useConfirm();
+
+function connectionGroupId(connection) {
+  return groupStore.groupOf(connectionIdentityKey(connection));
+}
+
+const previewGroupState = computed(() => {
+  const { groups, members } = groupStore.state.value;
+  if (dragState.kind === "group" && dragState.sourceId && dragState.targetId) {
+    return {
+      members,
+      groups: previewDragOrder(groups, dragState.sourceId, dragState.targetId, {
+        position: dragState.targetPosition,
+        getKey: (group) => group.id,
+      }),
+    };
+  }
+  if (dragState.kind === "connection" && dragState.targetGroupId !== null) {
+    const key = connectionIdentityKey(props.connections.find((connection) => connection.id === dragState.sourceId));
+    if (!key) return { groups, members };
+    const next = { ...members };
+    if (dragState.targetGroupId) next[key] = dragState.targetGroupId;
+    else delete next[key];
+    return { groups, members: next };
+  }
+  return { groups, members };
+});
+
+const connectionTree = computed(() => buildConnectionTree(previewConnections.value, {
+  ...previewGroupState.value,
+  identityOf: connectionIdentityKey,
+}));
+
+// While a connection is dragged every group stays open, so the dragged row is
+// never unmounted mid-drag; while a group is dragged they all fold.
+function isGroupOpen(group) {
+  if (dragState.kind === "group") return false;
+  if (dragState.kind === "connection") return true;
+  return !group.collapsed;
+}
+
+// One flat, keyed list for the tree: group headers followed by their
+// connections, then the connections in no group.
+const treeItems = computed(() => {
+  const items = [];
+  for (const group of connectionTree.value.groups) {
+    items.push({ key: `group:${group.id}`, kind: "group", group, connection: null, groupId: group.id, groupEnd: false });
+    if (!isGroupOpen(group)) continue;
+    group.connections.forEach((connection, index) => {
+      items.push({
+        key: connection.id,
+        kind: "connection",
+        group: null,
+        connection,
+        groupId: group.id,
+        groupEnd: index === group.connections.length - 1,
+      });
+    });
+  }
+  connectionTree.value.ungrouped.forEach((connection) => {
+    items.push({ key: connection.id, kind: "connection", group: null, connection, groupId: "", groupEnd: false });
+  });
+  return items;
+});
+
+function groupCounts(group) {
+  const connections = group?.connections || [];
+  const closed = connections.filter((connection) => connection.closed).length;
+  return { openCount: connections.length - closed, closedCount: closed };
+}
+
+function revealConnectionGroup(connectionId) {
+  const connection = props.connections.find((item) => item.id === connectionId);
+  const groupId = connection ? connectionGroupId(connection) : "";
+  if (groupId) groupStore.setCollapsed(groupId, false);
+}
+
+function toggleGroup(group) {
+  if (groupRename.id === group.id) return;
+  groupStore.setCollapsed(group.id, !group.collapsed);
+}
+
+const groupRename = reactive({ id: "", draft: "", error: "" });
+const groupRenameInputRef = ref(null);
+
+function groupNameError(code) {
+  if (code === "empty") return t("connectionGroup.nameEmpty");
+  if (code === "duplicate") return t("connectionGroup.nameDuplicate");
+  if (code === "tooLong") return t("connectionGroup.nameTooLong", { max: CONNECTION_GROUP_NAME_MAX_LENGTH });
+  return "";
+}
+
+function startGroupRename(groupId) {
+  const group = groupStore.getGroup(groupId);
+  if (!group) return;
+  groupStore.setCollapsed(group.id, false);
+  groupRename.id = group.id;
+  groupRename.draft = group.name;
+  groupRename.error = "";
+  nextTick(() => {
+    const input = Array.isArray(groupRenameInputRef.value) ? groupRenameInputRef.value[0] : groupRenameInputRef.value;
+    input?.focus();
+    input?.select();
+  });
+}
+
+function focusGroupRow(groupId) {
+  nextTick(() => treeNavRef.value?.querySelector?.(`[data-connection-group-id="${groupId}"] .wb-connection-group-node`)?.focus?.({ preventScroll: true }));
+}
+
+function commitGroupRename() {
+  const id = groupRename.id;
+  if (!id) return;
+  const group = groupStore.getGroup(id);
+  if (group && groupRename.draft.trim() !== group.name) {
+    const result = groupStore.renameGroup(id, groupRename.draft);
+    if (!result.ok) {
+      groupRename.error = groupNameError(result.error);
+      return;
+    }
+  }
+  cancelGroupRename();
+  focusGroupRow(id);
+}
+
+function cancelGroupRename() {
+  groupRename.id = "";
+  groupRename.draft = "";
+  groupRename.error = "";
+}
+
+// A new group starts with the given connections and its name in edit mode.
+function createGroup(connectionIds = []) {
+  const memberKeys = connectionIds
+    .map((id) => connectionIdentityKey(props.connections.find((connection) => connection.id === id)))
+    .filter(Boolean);
+  const result = groupStore.createGroup(groupStore.suggestName(t("connectionGroup.defaultName")), { memberKeys });
+  if (result.ok) startGroupRename(result.group.id);
+}
+
+async function deleteGroup(groupId) {
+  const group = connectionTree.value.groups.find((item) => item.id === groupId);
+  if (!group) return;
+  const confirmed = !group.connections.length || await confirmDialog({
+    title: t("connectionGroup.deleteTitle"),
+    message: t("connectionGroup.deleteMessage", { name: group.name, count: group.connections.length }),
+    confirmText: t("connectionGroup.delete"),
+    cancelText: t("m_2cd0f3be8738"),
+    danger: true,
+  });
+  if (confirmed) groupStore.deleteGroup(groupId);
+}
+
+function moveConnectionToGroup(connectionId, groupId) {
+  const connection = props.connections.find((item) => item.id === connectionId);
+  if (!connection || !groupStore.assign(connectionIdentityKey(connection), groupId)) return;
+  if (groupId) groupStore.setCollapsed(groupId, false);
+}
+
+function handleGroupKeydown(event, group) {
+  if (event.key === "F2" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    startGroupRename(group.id);
+  } else if (isDeleteCommandKey(event)) {
+    void deleteGroup(group.id);
+  } else if (isContextMenuKey(event)) {
+    openGroupMenu(menuPointBelow(event.currentTarget), group);
+  } else if (event.key === "ArrowLeft" && !group.collapsed) {
+    groupStore.setCollapsed(group.id, true);
+  } else if (event.key === "ArrowRight" && group.collapsed) {
+    groupStore.setCollapsed(group.id, false);
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+// ── Connection and group menu ────────────────────────────────────────────
+const connectionMenu = reactive({ open: false, x: 0, y: 0, kind: "connection", connectionId: "", groupId: "", keyboard: false });
+let connectionMenuReturnFocus = null;
+
+function menuPointBelow(element) {
+  const rect = element?.getBoundingClientRect?.();
+  return rect ? { clientX: rect.left + 24, clientY: rect.bottom, keyboard: true } : { clientX: 0, clientY: 0, keyboard: true };
+}
+
+function showConnectionMenu(event, kind, { connectionId = "", groupId = "" } = {}) {
+  connectionMenuReturnFocus = event?.keyboard ? document.activeElement : null;
+  Object.assign(connectionMenu, {
+    open: true,
+    x: Number(event?.clientX || 0),
+    y: Number(event?.clientY || 0),
+    kind,
+    connectionId,
+    groupId,
+    keyboard: Boolean(event?.keyboard),
+  });
+}
+
+function openConnectionMenu(event, connection) {
+  emit("contextmenu-open");
+  showConnectionMenu(event, "connection", { connectionId: connection.id });
+}
+
+function openGroupMenu(event, group) {
+  emit("contextmenu-open");
+  showConnectionMenu(event, "group", { groupId: group.id });
+}
+
+function closeConnectionMenu({ restoreFocus = false } = {}) {
+  if (!connectionMenu.open) return;
+  connectionMenu.open = false;
+  const target = connectionMenuReturnFocus;
+  connectionMenuReturnFocus = null;
+  if (restoreFocus && target?.isConnected) target.focus({ preventScroll: true });
+}
+
+const menuConnection = computed(() => {
+  const connection = props.connections.find((item) => item.id === connectionMenu.connectionId);
+  if (!connection) return null;
+  return {
+    id: connection.id,
+    label: connectionLabel(connection.id, connection.label),
+    closed: Boolean(connection.closed),
+    closable: !connection.closed && !connection.sampleData,
+    groupId: connectionGroupId(connection),
+  };
+});
+
+const menuGroup = computed(() => {
+  const group = connectionTree.value.groups.find((item) => item.id === connectionMenu.groupId);
+  return group ? { id: group.id, name: group.name, ...groupCounts(group) } : null;
+});
+
+const menuGroups = computed(() => groupStore.state.value.groups.map(({ id, name }) => ({ id, name })));
+
+function onConnectionMenuSelect({ action, groupId = "" }) {
+  const connectionId = connectionMenu.connectionId;
+  const group = connectionTree.value.groups.find((item) => item.id === connectionMenu.groupId);
+  const keepFocus = !["rename", "remove", "new-group", "group-rename", "group-delete", "close", "group-close-all"].includes(action);
+  closeConnectionMenu({ restoreFocus: keepFocus });
+  if (action === "open") openConnectionRow(connectionId);
+  else if (action === "close") emit("connection-close", { connectionIds: [connectionId] });
+  else if (action === "new-group") createGroup([connectionId]);
+  else if (action === "move-to") moveConnectionToGroup(connectionId, groupId);
+  else if (action === "ungroup") moveConnectionToGroup(connectionId, "");
+  else if (action === "rename") emit("rename-connection", { connectionId });
+  else if (action === "refresh") emit("refresh-connection", { connectionId });
+  else if (action === "remove") emit("remove-connection", { connectionId });
+  else if (action === "group-open-all") {
+    group?.connections.filter((connection) => connection.closed).forEach((connection) => openConnectionRow(connection.id));
+  } else if (action === "group-close-all") {
+    emit("connection-close", { connectionIds: (group?.connections || []).filter((connection) => !connection.closed).map((connection) => connection.id) });
+  } else if (action === "group-rename" && group) startGroupRename(group.id);
+  else if (action === "group-delete" && group) void deleteGroup(group.id);
+}
+
 function rawDatabasesForConnection(connectionId) {
   const mapped = props.databasesByConnection?.[connectionId];
   if (Array.isArray(mapped)) return mapped;
@@ -354,6 +629,24 @@ function isConnectionLoading(connectionId) {
 function connectionFetchError(connectionId) {
   return props.databaseFetchErrors?.[connectionId] || null;
 }
+
+// A closed connection unfolds only to show it opening or why it failed to.
+function isConnectionBranchShown(connection) {
+  if (!isConnectionExpanded(treeState, connection.id, props.selectedConnectionId)) return false;
+  return !connection.closed || isConnectionLoading(connection.id) || Boolean(connectionFetchError(connection.id));
+}
+
+watch(
+  () => props.connections.filter((connection) => connection.closed).map((connection) => connection.id),
+  (closedIds, previousIds = []) => {
+    const previous = new Set(previousIds);
+    closedIds.filter((id) => !previous.has(id)).forEach((id) => {
+      if (connectionFetchError(id) || isConnectionLoading(id)) return;
+      treeState.collapsedConnectionIds.add(id);
+      treeState.expandedConnectionIds?.delete(id);
+    });
+  },
+);
 
 function retryConnectionFetch(connectionId) {
   const err = connectionFetchError(connectionId);
@@ -474,7 +767,7 @@ const visibleDatabaseCount = computed(() => {
 const tableBranchMaxHeight = computed(() => {
   const viewport = treeViewportHeight.value;
   if (viewport <= 0) return SIDEBAR_TABLE_BRANCH_MAX_HEIGHT;
-  const connectionRows = Math.min(previewConnections.value.length, 6) * 30;
+  const connectionRows = Math.min(treeItems.value.length, 6) * 30;
   const databaseRows = Math.min(visibleDatabaseCount.value || previewDatabases.value.length, 8) * 28;
   const available = viewport - connectionRows - databaseRows - 16;
   return Math.max(SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, available);
@@ -508,6 +801,7 @@ watch(
   ([connectionId, database], [previousConnectionId, previousDatabase]) => {
     if (connectionId && connectionId !== previousConnectionId) {
       revealSelectedConnection(treeState, connectionId);
+      revealConnectionGroup(connectionId);
     }
     settleDatabaseExpansion(treeState, connectionId, database);
     if (!connectionId || !database) return;
@@ -587,6 +881,7 @@ const selectedDatabaseFollower = createSidebarRowFollower({
 function revealSelectedDatabase(options) {
   if (props.selectedConnectionId) {
     revealSelectedConnection(treeState, props.selectedConnectionId);
+    revealConnectionGroup(props.selectedConnectionId);
   }
   // After the DOM update, so the branch transitions of this change have begun.
   return nextTick(() => selectedDatabaseFollower.follow(options));
@@ -638,8 +933,23 @@ function revealActiveTable() {
   void nextTick(() => attempt(1));
 }
 
+// Opening a closed connection unfolds it; the databases follow once connected.
+function openConnectionRow(connectionId) {
+  revealConnection(treeState, connectionId);
+  emit("connection-open", connectionId);
+}
+
 function onConnectionClick(connectionId) {
   const connection = props.connections.find((item) => item.id === connectionId);
+  if (connection?.closed) {
+    if (isConnectionLoading(connectionId)) return;
+    if (isConnectionExpanded(treeState, connectionId, props.selectedConnectionId) && connectionFetchError(connectionId)) {
+      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId);
+      return;
+    }
+    openConnectionRow(connectionId);
+    return;
+  }
   if (connection && !connection.connected && connection.saved) {
     revealConnection(treeState, connectionId);
     emit("select-connection", connectionId);
@@ -796,6 +1106,9 @@ function handleConnectionKeydown(event, connectionId) {
     emit("rename-connection", { connectionId });
   } else if (isDeleteCommandKey(event)) {
     emit("remove-connection", { connectionId });
+  } else if (isContextMenuKey(event)) {
+    const connection = props.connections.find((item) => item.id === connectionId);
+    if (connection) openConnectionMenu(menuPointBelow(event.currentTarget), connection);
   } else {
     return;
   }
@@ -869,11 +1182,13 @@ function startTableDrag(connectionId, database, table, event) {
 }
 
 function startSidebarDrag(kind, id, event, connectionId = "") {
+  closeConnectionMenu();
   dragState.kind = kind;
   dragState.connectionId = connectionId;
   dragState.sourceId = id;
   dragState.targetId = "";
   dragState.targetPosition = "before";
+  dragState.targetGroupId = null;
   setDragPayload(event, kind, id);
   if (kind === "database") beginDatabaseDrag(event, { connectionId, database: id });
 }
@@ -884,6 +1199,7 @@ function clearSidebarDrag() {
   dragState.sourceId = "";
   dragState.targetId = "";
   dragState.targetPosition = "before";
+  dragState.targetGroupId = null;
   endDatabaseDrag();
 }
 
@@ -936,14 +1252,89 @@ function dropPosition(event) {
   return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
 }
 
+// Over a connection row, the dragged connection takes that row's place and
+// its group; over a group header it joins the group; below the list it
+// leaves its group and goes last.
+function markConnectionDragTarget(connectionId, groupId, event) {
+  if (dragState.kind === "group") {
+    if (event?.dataTransfer) event.dataTransfer.dropEffect = "none";
+    return;
+  }
+  markDragTarget("connection", connectionId, event);
+  if (dragState.kind === "connection") dragState.targetGroupId = groupId;
+}
+
+function markGroupDragTarget(group, event) {
+  if (dragState.kind === "group") {
+    markDragTarget("group", group.id, event);
+    return;
+  }
+  if (dragState.kind !== "connection") return;
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dragState.targetId = "";
+  dragState.targetGroupId = group.id;
+}
+
+// Only the space below the last row counts: the gaps between rows belong to
+// the row targets around them.
+function isBelowLastRow(event) {
+  const rows = event?.currentTarget?.children;
+  const last = rows?.[rows.length - 1];
+  const rect = last?.getBoundingClientRect?.();
+  return Boolean(rect && event.clientY > rect.bottom);
+}
+
+function markListEndDragTarget(event) {
+  if (dragState.kind !== "connection") return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  if (!isBelowLastRow(event)) return;
+  const last = connectionTree.value.ungrouped.filter((connection) => connection.id !== dragState.sourceId).at(-1);
+  dragState.targetId = last?.id || "";
+  dragState.targetPosition = "after";
+  dragState.targetGroupId = "";
+}
+
+function isGroupDropTarget(group) {
+  return dragState.kind === "connection" && !dragState.targetId && dragState.targetGroupId === group.id;
+}
+
+function commitConnectionDrop(fallbackTargetId = "", fallbackPosition = "before") {
+  if (dragState.kind !== "connection" || !dragState.sourceId) return;
+  const sourceId = dragState.sourceId;
+  const groupId = dragState.targetGroupId;
+  const target = resolvePreviewDropTarget(dragState, fallbackTargetId, fallbackPosition);
+  if (target.targetId && sourceId !== target.targetId) {
+    emit("reorder-connections", sourceId, target.targetId, { position: target.position });
+  }
+  if (groupId !== null) moveConnectionToGroup(sourceId, groupId);
+}
+
 function dropConnection(connectionId, event) {
   if (dragState.kind === "connection" && dragState.sourceId) {
     const fallbackPosition = dragState.targetId === connectionId ? dragState.targetPosition : dropPosition(event);
-    const target = resolvePreviewDropTarget(dragState, connectionId, fallbackPosition);
-    if (dragState.sourceId !== target.targetId) {
-      emit("reorder-connections", dragState.sourceId, target.targetId, { position: target.position });
-    }
+    commitConnectionDrop(connectionId, fallbackPosition);
   }
+  clearSidebarDrag();
+}
+
+function dropOnGroup(group, event) {
+  if (dragState.kind === "group" && dragState.sourceId) {
+    const fallbackPosition = dragState.targetId === group.id ? dragState.targetPosition : dropPosition(event);
+    const target = resolvePreviewDropTarget(dragState, group.id, fallbackPosition);
+    if (dragState.sourceId !== target.targetId) groupStore.moveGroup(dragState.sourceId, target.targetId, target.position);
+  } else if (dragState.kind === "connection" && dragState.sourceId) {
+    dragState.targetId = "";
+    dragState.targetGroupId = group.id;
+    commitConnectionDrop();
+  }
+  clearSidebarDrag();
+}
+
+function dropOnListEnd(event) {
+  if (dragState.kind !== "connection") return;
+  event.preventDefault();
+  commitConnectionDrop();
   clearSidebarDrag();
 }
 
@@ -1010,6 +1401,15 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
         <button
           type="button"
           class="wb-header-btn"
+          :aria-label="t('connectionGroup.newGroup')"
+          :title="t('connectionGroup.newGroup')"
+          @click="createGroup()"
+        >
+          <FolderPlus :size="14" :stroke-width="1.75" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="wb-header-btn"
           :aria-label="areAllCollapsed ? t('m_a49b9e3cc423') : t('m_809ec93960dd')"
           :title="areAllCollapsed ? t('m_695704a261cb') : t('m_2fabdc5d8190')"
           @click="toggleCollapseAll"
@@ -1032,41 +1432,95 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
       :style="{ '--wb-tree-table-min-h': tableBranchMinHeight }"
       :aria-label="t('m_46770f47d1a3')"
     >
-      <TransitionGroup name="wb-tree-reorder" tag="div" class="wb-source-connection-list" :class="{ 'is-reordering': dragState.kind === 'connection' }">
+      <TransitionGroup
+        name="wb-tree-reorder"
+        tag="div"
+        class="wb-source-connection-list"
+        :class="{ 'is-reordering': dragState.kind === 'connection' || dragState.kind === 'group' }"
+        @dragover="markListEndDragTarget"
+        @drop="dropOnListEnd"
+      >
         <section
-          v-for="connection in previewConnections"
-          :key="connection.id"
-          class="wb-source-connection"
-          :data-connection-id="connection.id"
-          :class="[
-            dragNodeClass('connection', connection.id),
-            { 'is-expanded': isConnectionExpanded(treeState, connection.id, selectedConnectionId) },
-          ]"
+          v-for="{ key, kind: itemKind, group, connection, groupId: itemGroupId, groupEnd } in treeItems"
+          :key="key"
+          :data-connection-id="connection?.id"
+          :data-connection-group-id="group?.id"
+          :class="itemKind === 'group'
+            ? ['wb-source-group', dragNodeClass('group', group.id), { 'is-open': isGroupOpen(group) }]
+            : ['wb-source-connection', dragNodeClass('connection', connection.id), {
+              'is-expanded': isConnectionBranchShown(connection),
+              'is-grouped': Boolean(itemGroupId),
+              'is-group-end': groupEnd,
+            }]"
         >
+          <template v-if="itemKind === 'group'">
+            <div v-if="groupRename.id === group.id" class="wb-tree-row wb-connection-group-node is-renaming">
+              <span class="wb-tree-chevron is-open" aria-hidden="true"></span>
+              <FolderOpen :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+              <input
+                ref="groupRenameInputRef"
+                v-model="groupRename.draft"
+                class="wb-connection-group-rename"
+                :maxlength="CONNECTION_GROUP_NAME_MAX_LENGTH"
+                :aria-label="t('connectionGroup.rename')"
+                :aria-invalid="groupRename.error ? 'true' : 'false'"
+                :aria-describedby="groupRename.error ? 'wb-connection-group-error' : undefined"
+                @keydown.enter.prevent="commitGroupRename"
+                @keydown.esc.prevent.stop="cancelGroupRename(); focusGroupRow(group.id)"
+                @blur="commitGroupRename"
+              />
+            </div>
+            <button
+              v-else
+              type="button"
+              class="wb-tree-row wb-connection-group-node"
+              :class="[dragRowClass('group', group.id), { 'is-drop-into': isGroupDropTarget(group) }]"
+              :title="group.name"
+              :aria-expanded="isGroupOpen(group) ? 'true' : 'false'"
+              draggable="true"
+              @dragstart.stop="startSidebarDrag('group', group.id, $event)"
+              @dragover.prevent.stop="markGroupDragTarget(group, $event)"
+              @drop.prevent.stop="dropOnGroup(group, $event)"
+              @dragend="clearSidebarDrag"
+              @click="toggleGroup(group)"
+              @keydown="handleGroupKeydown($event, group)"
+              @contextmenu.prevent.stop="openGroupMenu($event, group)"
+            >
+              <span class="wb-tree-chevron" :class="{ 'is-open': isGroupOpen(group) }" aria-hidden="true"></span>
+              <component :is="isGroupOpen(group) ? FolderOpen : Folder" :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+              <span class="wb-connection-group-label">
+                <span class="wb-tree-label">{{ group.name }}</span>
+                <span v-if="!isGroupOpen(group) && group.connections.length" class="wb-connection-group-count">{{ group.connections.length }}</span>
+              </span>
+            </button>
+            <p v-if="groupRename.id === group.id && groupRename.error" id="wb-connection-group-error" class="wb-connection-group-error" role="alert">{{ groupRename.error }}</p>
+          </template>
+          <template v-else>
           <button
             class="wb-tree-row wb-connection-node"
-            :class="[{ active: connection.id === selectedConnectionId }, dragRowClass('connection', connection.id)]"
+            :class="[{ active: connection.id === selectedConnectionId, 'is-closed': connection.closed }, dragRowClass('connection', connection.id)]"
             :title="connectionTooltip(connection)"
-            :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId)"
+            :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId) && isConnectionBranchShown(connection)"
             draggable="true"
             @dragstart.stop="startSidebarDrag('connection', connection.id, $event)"
-            @dragover.prevent.stop="markDragTarget('connection', connection.id, $event)"
+            @dragover.prevent.stop="markConnectionDragTarget(connection.id, itemGroupId, $event)"
             @drop.prevent.stop="dropConnection(connection.id, $event)"
             @dragend="clearSidebarDrag"
             @click="onConnectionClick(connection.id)"
             @keydown="handleConnectionKeydown($event, connection.id)"
-            @contextmenu.prevent.stop="emit('contextmenu', $event, { kind: 'connection', connectionId: connection.id })"
+            @contextmenu.prevent.stop="openConnectionMenu($event, connection)"
           >
-            <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionExpanded(treeState, connection.id, selectedConnectionId) }" aria-hidden="true"></span>
-            <Server :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+            <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionBranchShown(connection) }" aria-hidden="true"></span>
+            <component :is="connection.closed ? ServerOff : Server" :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
             <span class="wb-alias-copy" :class="{ 'has-alias': getConnectionAlias(connection.id) }">
               <span class="wb-tree-label">{{ connectionLabel(connection.id, connection.label) }}</span>
               <span v-if="getConnectionAlias(connection.id)" class="wb-alias-realname">{{ connection.label }}</span>
             </span>
+            <span v-if="connection.closed" class="wb-visually-hidden">{{ t("connectionGroup.closedState") }}</span>
           </button>
 
           <Transition name="wb-branch" :duration="220" @after-enter="onBranchAfterEnter" @enter-cancelled="onBranchAfterEnter">
-          <section v-if="dragState.kind !== 'connection' && isConnectionExpanded(treeState, connection.id, selectedConnectionId)" class="wb-database-branch">
+          <section v-if="dragState.kind !== 'connection' && dragState.kind !== 'group' && isConnectionBranchShown(connection)" class="wb-database-branch">
             <div class="wb-branch-inner">
             <TransitionGroup
               name="wb-tree-reorder"
@@ -1217,15 +1671,30 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
             <div v-else-if="!databasesForConnection(connection.id).length && connectionFetchError(connection.id)" class="wb-tree-connection-error">
               <span>{{ connectionFetchError(connection.id).message }}</span>
               <button type="button" class="wb-tree-connection-retry" @click.stop="retryConnectionFetch(connection.id)">
-                {{ connectionFetchError(connection.id).needsReconnect ? t('m_1eff9b7d894c') : t('m_844b8cc8dff7') }}
+                {{ connectionFetchError(connection.id).needsReconnect ? t('m_1eff9b7d894c') : t('m_b8784c8dd563') }}
               </button>
             </div>
             </div>
           </section>
           </Transition>
+          </template>
         </section>
       </TransitionGroup>
     </nav>
+
+    <SidebarConnectionMenu
+      :open="connectionMenu.open"
+      :x="connectionMenu.x"
+      :y="connectionMenu.y"
+      :kind="connectionMenu.kind"
+      :theme="currentTheme"
+      :connection="menuConnection"
+      :group="menuGroup"
+      :groups="menuGroups"
+      :focus-on-open="connectionMenu.keyboard"
+      @select="onConnectionMenuSelect"
+      @close="closeConnectionMenu"
+    />
 
     <Teleport to="body">
       <Transition name="wb-sidebar-settings-sheet">

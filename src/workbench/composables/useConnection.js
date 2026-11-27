@@ -21,6 +21,7 @@ import {
   isSupportedConnectionKind,
   normalizeConnectionKind,
 } from "../utils/connectionKinds.js";
+import { savedConnectionKey } from "../utils/connectionIdentity.js";
 import {
   buildImportedConnectionRecord,
   hasConnectableCredentials,
@@ -45,6 +46,9 @@ export {
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
+// Saved connections the user closed, by savedConnectionKey: they are not
+// connected at startup until the user opens them again.
+const CLOSED_CONNECTIONS_KEY = "dbscout_closed_connections";
 const SCHEMA_LOAD_BATCH_SIZE = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
 // Status writes kept until the notice watcher drains them after each task.
@@ -58,12 +62,6 @@ export const SOURCE_SELECTION = Object.freeze({
   superseded: "superseded",
   failed: "failed",
 });
-
-function savedConnectionKey(connection) {
-  const kind = normalizeConnectionKind(connection?.kind);
-  const defaultUser = CONNECTION_KINDS[kind].defaultUser;
-  return [kind, connection.host, connection.port, connection.username || defaultUser].map((part) => String(part ?? "").trim()).join(":");
-}
 
 function readSavedConnections() {
   try {
@@ -109,6 +107,25 @@ function moveItem(items, sourceId, targetId, identity, position = "before") {
   const insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
   next.splice(insertIndex, 0, source);
   return next;
+}
+
+function readClosedConnectionKeys() {
+  const stored = readJsonStorage(CLOSED_CONNECTIONS_KEY, []);
+  return new Set((Array.isArray(stored) ? stored : []).map(String).filter(Boolean));
+}
+
+function rememberConnectionClosed(connection, closed) {
+  if (!connection?.saved) return;
+  const key = savedConnectionKey(connection);
+  const keys = readClosedConnectionKeys();
+  if (closed === keys.has(key)) return;
+  if (closed) keys.add(key);
+  else keys.delete(key);
+  writeJsonStorage(CLOSED_CONNECTIONS_KEY, [...keys]);
+}
+
+function isPlaceholderConnectionId(connectionId) {
+  return String(connectionId || "").startsWith("saved-");
 }
 
 function writeSavedConnection(connection) {
@@ -460,6 +477,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   async function fetchDatabasesForConnection(connectionId) {
     const resolvedId = String(connectionId || "").trim();
     if (!resolvedId) return [];
+    // Background and bulk listings never open a connection the user closed.
+    if (connectionById(resolvedId)?.closed) return [];
     if (inFlightConnections.has(resolvedId)) return databasesByConnection[resolvedId] || [];
     inFlightConnections.add(resolvedId);
     loadingConnectionIds.add(resolvedId);
@@ -502,6 +521,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   async function fetchAllConnectionsDatabases() {
     const targets = visibleConnections.value
+      .filter((connection) => !connection?.closed)
       .map((connection) => connection?.id)
       .filter(Boolean)
       .filter((id) => !inFlightConnections.has(String(id)));
@@ -539,7 +559,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     if (requestedId && connections.value.some((item) => item.id === requestedId && item.connected)) {
       return true;
     }
-    const hasDisconnected = connections.value.some((item) => item?.saved && !item.connected);
+    const hasDisconnected = connections.value.some((item) => item?.saved && !item.connected && !item.closed);
     if (!hasDisconnected) return false;
     const saved = readSavedConnections();
     if (!saved.length) return false;
@@ -595,7 +615,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       if (allowSnapshotId) {
         selectedConnection =
           connections.value.find((item) => item.id === snapshot.connectionId && item.connected) ||
-          connections.value.find((item) => item.id === snapshot.connectionId) ||
+          connections.value.find((item) => item.id === snapshot.connectionId && !item.closed) ||
           null;
       }
     }
@@ -604,7 +624,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
 
     if (!selectedConnection) {
-      statusText.value = "请先新建数据库连接";
+      statusText.value = connections.value.length ? "连接都已关闭，单击连接即可打开" : "请先新建数据库连接";
       return;
     }
     selectedConnectionId.value = selectedConnection.id;
@@ -650,11 +670,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     else statusText.value = "请选择数据库";
   }
 
-  function chooseInitialConnection() {
+  function chooseInitialConnection({ excludeId = "" } = {}) {
+    const candidates = connections.value.filter((item) => !item.closed && item.id !== excludeId);
     return (
-      connections.value.find((item) => item.connected && item.host && item.host !== "demo") ||
-      connections.value.find((item) => item.database) ||
-      connections.value[0]
+      candidates.find((item) => item.connected && item.host && item.host !== "demo") ||
+      candidates.find((item) => item.database) ||
+      candidates[0]
     );
   }
 
@@ -688,7 +709,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     const existing = connections.value.find((connection) => (
       connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)
     ));
-    if (existing?.connected) {
+    if (existing?.connected || existing?.closed) {
       applySavedMetadata(existing, savedConn);
       migratePlaceholderAlias(placeholderId, existing.id, savedConn.alias);
       replaceConnectionOrderId(placeholderId, existing.id);
@@ -697,13 +718,18 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     const kind = normalizeConnectionKind(savedConn.kind);
     const url = savedConn.url || buildConnectionUrl({ ...savedConn, kind });
+    const closed = readClosedConnectionKeys().has(savedConnectionKey(savedConn));
     if (!url) {
-      upsertSavedConnectionPlaceholder(savedConn, false);
-      return null;
+      const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
+      placeholder.closed = closed;
+      return closed ? placeholder : null;
     }
     const previousIds = new Set(connections.value.map((connection) => connection.id));
     try {
-      const restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
+      // A connection the user closed only reserves its id: no network.
+      let restoredDatabases = null;
+      if (closed) await invokeWorkbench("register_connection", { kind, url });
+      else restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
       const previousConnections = connections.value;
       const merged = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
       const restored =
@@ -720,16 +746,20 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         if (selectedConnectionId.value === placeholderId) {
           selectedConnectionId.value = restored.id;
         }
-        restored.connected = true;
+        restored.connected = !closed;
+        restored.closed = closed;
         delete restored.restoreError;
         connections.value = applyConnectionOrder(merged.filter((connection) => connection.id !== placeholderId));
         return restored;
       }
       connections.value = applyConnectionOrder(merged);
-      return upsertSavedConnectionPlaceholder(savedConn, true);
+      const placeholder = upsertSavedConnectionPlaceholder(savedConn, !closed);
+      placeholder.closed = closed;
+      return placeholder;
     } catch (error) {
       const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
-      placeholder.restoreError = String(error?.message || error || formatConnectionTestError(error));
+      placeholder.closed = closed;
+      if (!closed) placeholder.restoreError = String(error?.message || error || formatConnectionTestError(error));
       return placeholder;
     }
   }
@@ -747,8 +777,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     const byId = new Map(nextConnections.map((connection) => [connection.id, connection]));
     for (const connection of previousConnections) {
       if (!connection.saved) continue;
-      if (byId.has(connection.id)) Object.assign(byId.get(connection.id), connection, { connected: byId.get(connection.id).connected });
-      else byId.set(connection.id, connection);
+      if (byId.has(connection.id)) {
+        const next = byId.get(connection.id);
+        Object.assign(next, connection, { connected: next.connected, closed: Boolean(next.closed) });
+      } else byId.set(connection.id, connection);
     }
     return [...byId.values()];
   }
@@ -773,7 +805,15 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     busy.value = true;
     try {
       let runtimeConnection = connection;
-      if (!connection.connected && connection.saved) {
+      // Choosing a closed connection is an explicit request to open it.
+      let openedDatabases = null;
+      if (connection.closed) {
+        const opened = await openConnection(connectionId);
+        if (!opened.ok) return SOURCE_SELECTION.failed;
+        connectionId = opened.connectionId;
+        runtimeConnection = connectionById(connectionId) || connection;
+        openedDatabases = opened.databases;
+      } else if (!connection.connected && connection.saved) {
         const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
         runtimeConnection = saved ? await ensureSavedConnectionRuntime(saved) : null;
         if (!runtimeConnection?.connected) {
@@ -796,7 +836,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       workspace.tables = [];
       workspace.schema = [];
       ++tableLoadToken;
-      const nextDatabases = applyDatabaseOrder(
+      const nextDatabases = openedDatabases || applyDatabaseOrder(
         connectionId,
         await measureAsync(
           "database.list",
@@ -1212,34 +1252,136 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return false;
     }
     removeSavedConnection(connection);
+    rememberConnectionClosed(connection, false);
     aliases.removeConnectionAliases(connectionId);
     databaseDecorations.removeConnectionDecorations(connectionId);
-    delete databasesByConnection[connectionId];
-    delete databaseFetchErrors[connectionId];
-    loadingConnectionIds.delete(connectionId);
-    clearCachedTablesForConnection(connectionId);
+    forgetConnectionCaches(connectionId);
     connections.value = connections.value.filter((item) => item.id !== connectionId);
     writeJsonStorage(CONNECTION_ORDER_KEY, connections.value.map((item) => item.id));
     const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
     delete orderMap[databaseOrderKey(connectionId)];
     writeJsonStorage(DATABASE_ORDER_KEY, orderMap);
     if (selectedConnectionId.value === connectionId) {
-      const next = chooseInitialConnection();
-      if (next) {
-        await selectConnection(next.id);
-      } else {
-        selectedConnectionId.value = "";
-        selectedDatabase.value = "";
-        databases.value = [];
-        workspace.connectionId = "";
-        workspace.database = "";
-        workspace.tables = [];
-        workspace.schema = [];
-        statusText.value = "请先新建数据库连接";
-      }
+      await selectFallbackSource();
     }
     statusText.value = `已移除连接 ${connectionLabel(connectionId, connection.label || connectionId)}`;
     return true;
+  }
+
+  function clearSelectedSource() {
+    selectedConnectionId.value = "";
+    selectedDatabase.value = "";
+    databases.value = [];
+    workspace.connectionId = "";
+    workspace.database = "";
+    workspace.tables = [];
+    workspace.schema = [];
+  }
+
+  // After the selected connection went away: the given source when it is on
+  // an open connection, otherwise the first open connection, otherwise none.
+  async function selectFallbackSource({ connectionId: preferredId = "", database = "", excludeId = "" } = {}) {
+    const preferred = preferredId && preferredId !== excludeId ? connectionById(preferredId) : null;
+    const next = preferred && !preferred.closed ? preferred : chooseInitialConnection({ excludeId });
+    if (next) {
+      await selectConnection(next.id, { preferredDatabase: next === preferred ? database : "" });
+      return;
+    }
+    clearSelectedSource();
+    statusText.value = connections.value.length ? "连接都已关闭，单击连接即可打开" : "请先新建数据库连接";
+  }
+
+  function forgetConnectionCaches(connectionId) {
+    delete databasesByConnection[connectionId];
+    delete databaseFetchErrors[connectionId];
+    loadingConnectionIds.delete(connectionId);
+    restoredDatabaseLists.delete(connectionId);
+    clearCachedTablesForConnection(connectionId);
+  }
+
+  // Closes the connection to the server but keeps it in the tree: its id,
+  // alias, order and group stay, and a saved one is not reconnected at
+  // startup until it is opened again. `fallback` is the source to show when
+  // the closed connection was the selected one (the tab that becomes active).
+  async function closeConnection(connectionId, { fallback = null } = {}) {
+    const connection = connectionById(connectionId);
+    if (!connection || connection.closed || connection.sampleData) return false;
+    if (!isPlaceholderConnectionId(connectionId)) {
+      try {
+        await invokeWorkbench("close_connection", { connectionId });
+      } catch (error) {
+        setStatus(`关闭连接失败：${String(error?.message || error)}`, { error: true });
+        return false;
+      }
+    }
+    connection.connected = false;
+    connection.closed = true;
+    delete connection.restoreError;
+    rememberConnectionClosed(connection, true);
+    forgetConnectionCaches(connectionId);
+    if (selectedConnectionId.value === connectionId) {
+      schemaMetadata.cancelSource({ connectionId, database: selectedDatabase.value });
+      await selectFallbackSource({ ...(fallback || {}), excludeId: connectionId });
+    }
+    statusText.value = `已关闭连接 ${connectionLabel(connectionId, connection.label || connectionId)}`;
+    return true;
+  }
+
+  // Connects a closed connection again under its own id. Returns the id it
+  // now runs under (a saved one that never reached the server gets a new
+  // one) and its databases.
+  async function openConnection(connectionId) {
+    const connection = connectionById(connectionId);
+    if (!connection) return { ok: false };
+    if (!connection.closed) {
+      return { ok: true, connectionId, databases: databasesByConnection[connectionId] || [] };
+    }
+    loadingConnectionIds.add(connectionId);
+    delete databaseFetchErrors[connectionId];
+    try {
+      let runtimeId = connectionId;
+      let list;
+      if (isPlaceholderConnectionId(connectionId)) {
+        rememberConnectionClosed(connection, false);
+        connection.closed = false;
+        const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
+        const runtime = saved ? await ensureSavedConnectionRuntime(saved) : null;
+        if (!runtime?.connected) {
+          throw new Error(runtime?.restoreError || connection.restoreError || "无法连接服务器");
+        }
+        runtimeId = runtime.id;
+        list = restoredDatabaseLists.get(runtimeId)
+          || await invokeWorkbench("list_databases", { connectionId: runtimeId });
+        restoredDatabaseLists.delete(runtimeId);
+      } else {
+        list = await measureAsync(
+          "connection.open",
+          () => invokeWorkbench("open_connection", { connectionId }),
+          { connectionId },
+        );
+      }
+      const opened = connectionById(runtimeId) || connection;
+      opened.connected = true;
+      opened.closed = false;
+      delete opened.restoreError;
+      rememberConnectionClosed(opened, false);
+      const ordered = applyDatabaseOrder(runtimeId, Array.isArray(list) ? list : []);
+      databasesByConnection[runtimeId] = ordered;
+      delete databaseFetchErrors[runtimeId];
+      statusText.value = `已打开连接 ${connectionLabel(runtimeId, opened.label || runtimeId)}`;
+      return { ok: true, connectionId: runtimeId, databases: ordered };
+    } catch (error) {
+      const message = String(error?.message || error || "无法连接服务器");
+      if (isPlaceholderConnectionId(connectionId) && connectionById(connectionId)) {
+        connection.closed = true;
+        rememberConnectionClosed(connection, true);
+      }
+      databaseFetchErrors[connectionId] = { message, needsReconnect: false };
+      setStatus(`打开连接失败：${message}`, { error: true });
+      return { ok: false, error: message };
+    } finally {
+      loadingConnectionIds.delete(connectionId);
+    }
   }
 
   async function submitConnDialog() {
@@ -1291,6 +1433,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
           connections.value = connections.value.filter((connection) => connection.id !== reconnectPlaceholderId);
         }
       }
+      rememberConnectionClosed({ saved: true, kind: normalizedKind, host: connDialog.host.trim(), port: connDialog.port.trim(), username: connDialog.username }, false);
       writeSavedConnection({
         kind: normalizedKind,
         host: connDialog.host.trim(),
@@ -1466,6 +1609,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     onConnDialogFieldChange,
     submitConnDialog,
     removeConnection,
+    closeConnection,
+    openConnection,
     listSavedConnections,
     importNavicatConnections,
     dispose,

@@ -306,11 +306,5 @@ export function useContextMenu(
     return source;
   }
 
-  function renameConnectionFromContextMenu() {
-    const source = { connectionId: contextMenu.connectionId };
-    closeContextMenu();
-    return source;
-  }
-
-  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, copyFromContextMenu, pasteFromContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu, renameDatabaseFromContextMenu, renameConnectionFromContextMenu };
+  return { contextMenu, contextMenuStyle, openContextMenu, openRowContextMenu, closeContextMenu, copyFromContextMenu, pasteFromContextMenu, refreshFromContextMenu, openDesignFromContextMenu, renameFromContextMenu, renameDatabaseFromContextMenu };
 }

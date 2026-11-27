@@ -16,6 +16,8 @@ const props = defineProps({
   theme: { type: String, default: "light" },
   moreActions: { type: Array, default: () => [] },
   databaseItems: { type: Array, default: () => [] },
+  databaseLayout: { type: Array, default: () => [] },
+  databaseGroups: { type: Array, default: () => [] },
   databaseLabel: { type: String, default: "" },
 });
 
@@ -30,6 +32,11 @@ const emit = defineEmits([
   "database-unpin",
   "database-appearance",
   "database-appearance-reset",
+  "database-group-create",
+  "database-group-move",
+  "database-group-rename",
+  "database-group-dissolve",
+  "database-group-reorder",
 ]);
 
 const sortGroupRef = ref(null);
@@ -165,6 +172,8 @@ function sortableStyle(item, index) {
 
     <WorkbenchRailDatabaseGroup
       :items="databaseItems"
+      :layout="databaseLayout"
+      :groups="databaseGroups"
       :label="databaseLabel"
       :theme="theme"
       :pending-drop="pendingDrop"
@@ -174,6 +183,12 @@ function sortableStyle(item, index) {
       @unpin="(item) => emit('database-unpin', item)"
       @appearance="(payload) => emit('database-appearance', payload)"
       @appearance-reset="(item) => emit('database-appearance-reset', item)"
+      @drop="(payload) => { dropHover = false; emit('database-drop', payload); }"
+      @group-create="(item) => emit('database-group-create', item)"
+      @group-move="(item, groupId) => emit('database-group-move', item, groupId)"
+      @group-rename="(groupId, name) => emit('database-group-rename', groupId, name)"
+      @group-dissolve="(groupId) => emit('database-group-dissolve', groupId)"
+      @group-reorder="(groupId, sourceId, targetId, options) => emit('database-group-reorder', groupId, sourceId, targetId, options)"
       @sort-phase="(phase) => { databaseSortPhase = phase; }"
     />
 

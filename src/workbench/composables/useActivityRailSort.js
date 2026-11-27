@@ -36,6 +36,22 @@ export function railSortTargetIndex(slots, sourceIndex, offset) {
   return target;
 }
 
+// The slot the lifted entry is held over closely enough to drop into it
+// (its middle part, not the edges that reorder), or -1.
+export const RAIL_SORT_INTO_RATIO = 0.3;
+
+export function railSortIntoIndex(slots, sourceIndex, offset, canDropInto) {
+  const source = slots[sourceIndex];
+  if (!source || typeof canDropInto !== "function") return -1;
+  const center = source.top + source.height / 2 + offset;
+  return slots.findIndex((slot, index) => (
+    index !== sourceIndex
+    && slot
+    && canDropInto(index)
+    && Math.abs(slot.top + slot.height / 2 - center) <= slot.height * RAIL_SORT_INTO_RATIO
+  ));
+}
+
 // Vertical shift for a non-dragged entry so the gap opens at `targetIndex`.
 export function railSortSiblingShift(slots, sourceIndex, targetIndex, index) {
   if (index === sourceIndex || !slots[index]) return 0;
@@ -65,12 +81,22 @@ function nextFrame(callback) {
  * siblings slide to open a gap) → settling (entry glides into its slot) →
  * resetting (new order committed with transitions off, so nothing jumps) → idle.
  */
-export function useActivityRailSort({ items, container, onReorder, selector = "[data-wb-rail-sort-id]" }) {
+export function useActivityRailSort({
+  items,
+  container,
+  onReorder,
+  selector = "[data-wb-rail-sort-id]",
+  // Optional drop-into targets (folders): `canDropInto(source, target)` and
+  // `onDropInto({ sourceId, targetId })`.
+  canDropInto = null,
+  onDropInto = null,
+}) {
   const phase = ref("idle");
   const draggingId = ref("");
   const offset = ref(0);
   const sourceIndex = ref(-1);
   const targetIndex = ref(-1);
+  const intoId = ref("");
 
   let slots = [];
   let pointerId = null;
@@ -122,6 +148,7 @@ export function useActivityRailSort({ items, container, onReorder, selector = "[
     offset.value = 0;
     sourceIndex.value = -1;
     targetIndex.value = -1;
+    intoId.value = "";
   }
 
   function onPointerDown(item, event) {
@@ -162,7 +189,13 @@ export function useActivityRailSort({ items, container, onReorder, selector = "[
     if (phase.value !== "dragging") return;
     event.preventDefault?.();
     offset.value = clampRailSortOffset(slots, sourceIndex.value, delta);
-    targetIndex.value = railSortTargetIndex(slots, sourceIndex.value, offset.value);
+    const source = items.value[sourceIndex.value];
+    const into = canDropInto
+      ? railSortIntoIndex(slots, sourceIndex.value, offset.value, (index) => canDropInto(source, items.value[index]))
+      : -1;
+    // Held over a folder, the others stay put; otherwise a gap opens.
+    intoId.value = into >= 0 ? items.value[into].id : "";
+    targetIndex.value = into >= 0 ? sourceIndex.value : railSortTargetIndex(slots, sourceIndex.value, offset.value);
   }
 
   function handlePointerUp(event) {
@@ -205,15 +238,21 @@ export function useActivityRailSort({ items, container, onReorder, selector = "[
     removeListeners();
     releaseCapture();
     const source = sourceIndex.value;
+    const dropIntoId = commit ? intoId.value : "";
+    intoId.value = dropIntoId;
+    const intoIndex = dropIntoId ? items.value.findIndex((item) => item.id === dropIntoId) : -1;
     const target = commit ? targetIndex.value : source;
     targetIndex.value = target;
-    offset.value = slots[target] && slots[source] ? slots[target].top - slots[source].top : 0;
+    const landing = intoIndex >= 0 ? intoIndex : target;
+    offset.value = slots[landing] && slots[source] ? slots[landing].top - slots[source].top : 0;
     phase.value = "settling";
     const finish = () => {
       const sourceId = draggingId.value;
       const targetId = items.value[target]?.id;
       phase.value = "resetting";
-      if (commit && targetId && target !== source) {
+      if (dropIntoId) {
+        onDropInto?.({ sourceId, targetId: dropIntoId });
+      } else if (commit && targetId && target !== source) {
         onReorder?.({ sourceId, targetId, position: target > source ? "after" : "before" });
       }
       reset();
@@ -265,9 +304,21 @@ export function useActivityRailSort({ items, container, onReorder, selector = "[
     reset();
   }
 
+  // The folder the lifted entry is held over, until the drop lands in it.
+  function isDropInto(item) {
+    return (phase.value === "dragging" || phase.value === "settling") && Boolean(intoId.value) && item.id === intoId.value;
+  }
+
+  function isSettlingInto(item) {
+    return phase.value === "settling" && Boolean(intoId.value) && item.id === draggingId.value;
+  }
+
   return {
     phase,
     draggingId,
+    intoId,
+    isDropInto,
+    isSettlingInto,
     onPointerDown,
     consumeClick,
     shiftFor,

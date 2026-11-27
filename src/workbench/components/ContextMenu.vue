@@ -22,7 +22,6 @@ import {
   Snowflake,
   TableProperties,
   Trash2,
-  Unplug,
 } from "lucide-vue-next";
 import { useShortcuts } from "../composables/useShortcuts.js";
 import { formatShortcutForPlatform, isMacOSPlatform } from "../utils/desktopPlatform.js";
@@ -75,7 +74,7 @@ const props = defineProps({
   databaseOnRail: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'clear-cells', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'rename-connection', 'toggle-database-rail', 'remove-connection', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-cell-append-row', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
+const emit = defineEmits(['close', 'open-tables', 'delete-tables', 'copy', 'paste', 'clear-cells', 'refresh', 'open-design', 'sync-database', 'send-table', 'rename', 'rename-database', 'toggle-database-rail', 'grid-row-insert-above', 'grid-row-insert-below', 'grid-cell-append-row', 'grid-row-paste-above', 'grid-row-delete', 'set-null', 'toggle-hit-result-pane', 'freeze-row', 'freeze-column', 'freeze-cell', 'freeze-top-row', 'freeze-first-column', 'unfreeze', 'reset-column-order', 'edit-comment']);
 
 const showFreezeActions = computed(() => props.surface === "grid" || props.kind === "grid-row");
 const showTableActions = computed(() => props.tableScoped && !["inspector", "detail", "grid"].includes(props.surface));
@@ -219,14 +218,12 @@ const contextMenuStyle = computed(() => ({
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emit('send-table')"><Send :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_8f211e16faf2') }}</button>
     <button v-if="showTransferActions" type="button" role="menuitem" @click="emitSyncDatabase"><DatabaseZap :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_623281e9dfdb') }}</button>
     <button v-if="(showTableActions || surface === 'grid') && canToggleHitResultPane" type="button" role="menuitem" @click="emit('toggle-hit-result-pane')"><Columns2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ hitResultPaneOpen ? t('m_5d43a2115ed9') : t('m_d7898968a0a2') }}</button>
-    <hr v-if="showTableActions || kind === 'database' || kind === 'connection'" class="wb-context-separator" role="separator" />
+    <hr v-if="showTableActions || kind === 'database'" class="wb-context-separator" role="separator" />
     <!-- 通用操作组 -->
-    <button v-if="kind === 'connection'" type="button" role="menuitem" @click="emit('rename-connection')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_d35464f7ca6b') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('toggle-database-rail')"><component :is="databaseOnRail ? PinOff : Pin" :size="14" class="wb-context-icon" aria-hidden="true" />{{ t(databaseOnRail ? 'railDatabase.unpin' : 'railDatabase.pin') }}</button>
     <button v-if="kind === 'database'" type="button" role="menuitem" @click="emit('rename-database')"><Pencil :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_1a4af72dce0e') }}</button>
     <button v-if="surface !== 'input'" type="button" role="menuitem" @click="emit('refresh')"><RefreshCw :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_aee887434131') }}<kbd v-if="shortcutHints.refresh" class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.refresh }}</kbd></button>
     <!-- 危险操作放最后 -->
     <button v-if="showSidebarTableActions" type="button" role="menuitem" class="danger" :disabled="!canDeleteTables" @click="emit('delete-tables')"><Trash2 :size="14" class="wb-context-icon" aria-hidden="true" />{{ tableCount > 1 ? t('home.deleteTables', { count: tableCount }) : t('m_d545721cef25') }}<kbd class="wb-context-shortcut" aria-hidden="true">{{ shortcutHints.deleteTables }}</kbd></button>
-    <button v-if="kind === 'connection'" type="button" role="menuitem" class="danger" @click="emit('remove-connection')"><Unplug :size="14" class="wb-context-icon" aria-hidden="true" />{{ t('m_e4e4e0ad5de1') }}</button>
   </menu>
 </template>

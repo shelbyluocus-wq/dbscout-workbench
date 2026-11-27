@@ -1447,7 +1447,7 @@ test("settings drawer offers a color-theme picker row", () => {
 test("sidebar tree nodes use lucide icons for connection, database, and table", () => {
   const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
-  assert.match(sidebarVue, /<Server :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /:is="connection\.closed \? ServerOff : Server" :size="15" class="wb-tree-kind-icon"/);
   assert.match(sidebarVue, /:is="databaseTreeIcon\(connection\.id, database\)"/);
   assert.match(sidebarVue, /:is="tableTreeIcon\(connection\.id, database\)"/);
   assert.match(sidebarVue, /:style="databaseMarkerStyle\(connection\.id, database\)"/);
