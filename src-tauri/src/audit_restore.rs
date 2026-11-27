@@ -2,7 +2,7 @@
 use crate::{
     audit::{self, AuditEntry, PendingAudit},
     audit_history::{HistoryRequest, GROUP_KEY},
-    db,
+    db, mysql_text,
     perf::PerfContext,
     types::{AppState, CellUpdateChange, RowIdentity, TableMeta},
 };
@@ -280,15 +280,19 @@ async fn validate_features(
     d: &str,
     t: &str,
 ) -> Result<(), String> {
-    let engine: Option<String> = sqlx::query_scalar(
+    let engine_row = sqlx::query(
         "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME=?",
     )
     .bind(d)
     .bind(t)
     .fetch_optional(&mut *connection)
     .await
-    .map_err(|e| e.to_string())?
-    .flatten();
+    .map_err(|e| e.to_string())?;
+    let engine = match engine_row {
+        Some(row) => mysql_text::optional_string(&row, 0)
+            .map_err(|e| format!("读取表存储引擎失败: {e}"))?,
+        None => None,
+    };
     if engine.as_deref() != Some("InnoDB") {
         return Err("仅支持 InnoDB 表的事务恢复".into());
     }
@@ -322,24 +326,41 @@ async fn validate_locked_schema(
     table: &TableMeta,
 ) -> Result<(), String> {
     validate_features(&mut **tx, d, t).await?;
-    let columns=sqlx::query("SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_KEY,GENERATION_EXPRESSION FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION")
-        .bind(d).bind(t).fetch_all(&mut **tx).await.map_err(|e|e.to_string())?;
-    if columns.len() != table.columns.len()
-        || columns
-            .iter()
-            .zip(&table.columns)
-            .any(|(actual, expected)| {
-                actual.get::<String, _>("COLUMN_NAME") != expected.column_name
-                    || actual.get::<String, _>("COLUMN_TYPE") != expected.column_type
-                    || (actual.get::<String, _>("IS_NULLABLE") == "YES") != expected.is_nullable
-                    || (actual.get::<String, _>("COLUMN_KEY") == "PRI") != expected.is_primary_key
-                    || actual
-                        .get::<Option<String>, _>("GENERATION_EXPRESSION")
-                        .is_some_and(|value| !value.trim().is_empty())
-                        != expected.is_generated
-            })
-    {
+    let columns = sqlx::query(
+        "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, GENERATION_EXPRESSION \
+         FROM information_schema.COLUMNS \
+         WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION",
+    )
+    .bind(d)
+    .bind(t)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    if columns.len() != table.columns.len() {
         return Err("读取期间表结构已变化，请重新预览；本次未修改数据".into());
+    }
+    for (actual, expected) in columns.iter().zip(&table.columns) {
+        let column_name = mysql_text::string(actual, "COLUMN_NAME")
+            .map_err(|e| format!("读取锁定表结构失败: {e}"))?;
+        let column_type = mysql_text::string(actual, "COLUMN_TYPE")
+            .map_err(|e| format!("读取锁定表结构失败: {e}"))?;
+        let is_nullable = mysql_text::string(actual, "IS_NULLABLE")
+            .map_err(|e| format!("读取锁定表结构失败: {e}"))?
+            == "YES";
+        let is_primary_key = mysql_text::string(actual, "COLUMN_KEY")
+            .map_err(|e| format!("读取锁定表结构失败: {e}"))?
+            == "PRI";
+        let is_generated = mysql_text::optional_string(actual, "GENERATION_EXPRESSION")
+            .map_err(|e| format!("读取锁定表结构失败: {e}"))?
+            .is_some_and(|value| !value.trim().is_empty());
+        if column_name != expected.column_name
+            || column_type != expected.column_type
+            || is_nullable != expected.is_nullable
+            || is_primary_key != expected.is_primary_key
+            || is_generated != expected.is_generated
+        {
+            return Err("读取期间表结构已变化，请重新预览；本次未修改数据".into());
+        }
     }
     Ok(())
 }
@@ -371,19 +392,22 @@ async fn fingerprint(
     for row in rows {
         let mut values = Vec::<Option<String>>::new();
         for i in 0..table.columns.len() {
-            values.push(row.try_get(i).map_err(|e| format!("读取字段失败: {e}"))?);
+            values.push(
+                mysql_text::optional_string(&row, i).map_err(|e| format!("读取字段失败: {e}"))?,
+            );
         }
         hashes.push(digest(
             &serde_json::to_vec(&values).map_err(|e| e.to_string())?,
         ));
     }
     hashes.sort();
-    let ddl = sqlx::query(&format!("SHOW CREATE TABLE {}", db::qualified_table(d, t)))
+    let ddl_row = sqlx::query(&format!("SHOW CREATE TABLE {}", db::qualified_table(d, t)))
         .fetch_one(&mut **tx)
         .await
-        .map_err(|e| e.to_string())?
-        .try_get::<String, _>(1)
         .map_err(|e| e.to_string())?;
+    let ddl = mysql_text::string(&ddl_row, "Create Table")
+        .or_else(|_| mysql_text::string(&ddl_row, 1))
+        .map_err(|e| format!("读取表结构 DDL 失败: {e}"))?;
     // AUTO_INCREMENT is an allocation counter, not table data, and MySQL does
     // not roll it back. Exclude only that table option from the schema hash.
     let ddl = ddl
@@ -557,8 +581,8 @@ pub async fn restore_audit_table(
             for (i, col) in columns.iter().enumerate() {
                 full.insert(
                     col.clone(),
-                    row.try_get::<Option<String>, _>(i)
-                        .map_err(|e| e.to_string())?,
+                    mysql_text::optional_string(&row, i)
+                        .map_err(|e| format!("读取删除行字段失败: {e}"))?,
                 );
             }
             let (sql, binds) = audit::build_delete_inverse(
@@ -1114,8 +1138,8 @@ pub async fn apply_history_state_restore(
             for (i, col) in columns.iter().enumerate() {
                 full.insert(
                     col.clone(),
-                    row.try_get::<Option<String>, _>(i)
-                        .map_err(|e| e.to_string())?,
+                    mysql_text::optional_string(&row, i)
+                        .map_err(|e| format!("读取删除行字段失败: {e}"))?,
                 );
             }
             let (sql, binds) = audit::build_delete_inverse(
@@ -1509,5 +1533,59 @@ mod tests {
                 .unwrap_err()
                 .contains("主键")
         );
+    }
+
+    #[test]
+    fn mysql_metadata_and_text_reads_use_mysql_text_without_panicking_get() {
+        let source = include_str!("audit_restore.rs");
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("audit_restore.rs should contain #[cfg(test)]");
+        let validate_locked = prod
+            .split("async fn validate_locked_schema(")
+            .nth(1)
+            .and_then(|rest| rest.split("async fn fingerprint(").next())
+            .expect("validate_locked_schema should exist");
+        assert!(
+            !validate_locked.contains(".get::<"),
+            "validate_locked_schema must not call panicking Row::get on MySQL 8.4 metadata"
+        );
+        for column in [
+            "COLUMN_NAME",
+            "COLUMN_TYPE",
+            "IS_NULLABLE",
+            "COLUMN_KEY",
+            "GENERATION_EXPRESSION",
+        ] {
+            assert!(
+                validate_locked.contains(&format!("mysql_text::string(actual, \"{column}\")"))
+                    || validate_locked
+                        .contains(&format!("mysql_text::optional_string(actual, \"{column}\")")),
+                "validate_locked_schema must decode {column} via mysql_text"
+            );
+        }
+
+        let validate_features = prod
+            .split("async fn validate_features(")
+            .nth(1)
+            .and_then(|rest| rest.split("async fn validate_table(").next())
+            .expect("validate_features should exist");
+        assert!(
+            validate_features.contains("mysql_text::optional_string"),
+            "validate_features must decode ENGINE via mysql_text"
+        );
+
+        let fingerprint_fn = prod
+            .split("async fn fingerprint(")
+            .nth(1)
+            .and_then(|rest| rest.split("async fn locked_transaction(").next())
+            .expect("fingerprint should exist");
+        assert!(
+            !fingerprint_fn.contains(".try_get"),
+            "fingerprint must decode MySQL 8.4 HEX/DDL text via mysql_text instead of raw try_get"
+        );
+        assert!(fingerprint_fn.contains("mysql_text::optional_string(&row, i)"));
+        assert!(fingerprint_fn.contains("mysql_text::string(&ddl_row, \"Create Table\")"));
     }
 }
