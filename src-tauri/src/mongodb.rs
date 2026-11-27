@@ -26,8 +26,8 @@ use crate::types::{
 };
 
 const SCHEMA_SAMPLE_LIMIT: i64 = 100;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-const SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(4);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(8);
 
 fn client_cache() -> &'static Mutex<HashMap<String, Client>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Client>>> = OnceLock::new();

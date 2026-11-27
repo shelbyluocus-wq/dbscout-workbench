@@ -46,11 +46,15 @@ export {
 const SAVED_CONNECTIONS_KEY = "dbscout_connections";
 const CONNECTION_ORDER_KEY = "dbscout_connection_order";
 const DATABASE_ORDER_KEY = "dbscout_database_order";
+// Per-saved-connection cached database lists (keyed by savedConnectionKey) so
+// restarts show known databases immediately while live refreshes run in background.
+const CACHED_DATABASES_KEY = "dbscout_cached_databases";
 // Saved connections the user closed, by savedConnectionKey: they are not
 // connected at startup until the user opens them again.
 const CLOSED_CONNECTIONS_KEY = "dbscout_closed_connections";
 const SCHEMA_LOAD_BATCH_SIZE = 80;
 const CONNECTION_TEST_TIMEOUT_MS = 4000;
+const STARTUP_RESTORE_CONCURRENCY = 6;
 // Status writes kept until the notice watcher drains them after each task.
 const STATUS_JOURNAL_LIMIT = 20;
 
@@ -112,6 +116,113 @@ function moveItem(items, sourceId, targetId, identity, position = "before") {
 function readClosedConnectionKeys() {
   const stored = readJsonStorage(CLOSED_CONNECTIONS_KEY, []);
   return new Set((Array.isArray(stored) ? stored : []).map(String).filter(Boolean));
+}
+
+function readCachedDatabasesMap() {
+  const stored = readJsonStorage(CACHED_DATABASES_KEY, {});
+  return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+}
+
+function getPersistedDatabases(connection, runtimeId = "") {
+  if (connection?.saved || (connection?.host && connection.host !== "configured")) {
+    const key = savedConnectionKey(connection);
+    const cached = readCachedDatabasesMap()[key];
+    if (Array.isArray(cached) && cached.length > 0) {
+      return cached.map(String).filter(Boolean);
+    }
+  }
+  if (runtimeId && !isPlaceholderConnectionId(runtimeId)) {
+    const orderMap = readJsonStorage(DATABASE_ORDER_KEY, {});
+    const ordered = orderMap[databaseOrderKey(runtimeId)];
+    if (Array.isArray(ordered) && ordered.length > 0) {
+      return ordered.map(String).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function rememberPersistedDatabases(connection, list) {
+  if (!connection || !Array.isArray(list)) return;
+  if (!connection.saved && (!connection.host || connection.host === "configured")) return;
+  const key = savedConnectionKey(connection);
+  if (!key) return;
+  const normalized = list.map(String).filter(Boolean);
+  const map = readCachedDatabasesMap();
+  const previous = Array.isArray(map[key]) ? map[key] : null;
+  if (
+    previous
+    && previous.length === normalized.length
+    && previous.every((item, index) => item === normalized[index])
+  ) {
+    return;
+  }
+  map[key] = normalized;
+  writeJsonStorage(CACHED_DATABASES_KEY, map);
+}
+
+function forgetPersistedDatabases(connection) {
+  if (!connection) return;
+  const key = savedConnectionKey(connection);
+  if (!key) return;
+  const map = readCachedDatabasesMap();
+  if (!Object.hasOwn(map, key)) return;
+  delete map[key];
+  writeJsonStorage(CACHED_DATABASES_KEY, map);
+}
+
+// Strict classification of genuine authentication/credential errors so timeouts,
+// pool contention, and transient network failures NEVER open the password dialog.
+export function isAuthenticationError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  if (
+    /timed?\s*out|timeout|连接超时|connection refused|actively refused|no route to host|network is unreachable|host is unreachable|operation not permitted|broken pipe|connection reset|pool timed out|server selection|unknown host|failed to lookup|name or service not known|连接不存在|连接资源已关闭/i.test(lower)
+  ) {
+    return false;
+  }
+  return (
+    /access denied|authentication|auth failed|bad auth|unauthorized|invalid credentials|missing password|wrong password|using password|认证失败|用户名或密码错误|请输入密码|需要密码|密码错误/.test(lower)
+    || /\b(401|403|1045|1044|1698)\b/.test(lower)
+    || /code:\s*516\b/.test(lower)
+  );
+}
+
+function urlHasEmbeddedPassword(rawUrl) {
+  const text = String(rawUrl || "").trim();
+  if (!text) return false;
+  try {
+    const parsed = new URL(text);
+    return Boolean(parsed.password);
+  } catch {
+    return false;
+  }
+}
+
+function hasSavedCredentials(saved) {
+  if (!saved) return false;
+  const kind = normalizeConnectionKind(saved.kind, saved.url);
+  if (kind === CONNECTION_KINDS.mongodb.kind || kind === CONNECTION_KINDS.clickhouse.kind) {
+    return true;
+  }
+  return Boolean(String(saved.password ?? "").length > 0 || urlHasEmbeddedPassword(saved.url));
+}
+
+async function runWithBoundedConcurrency(items, limit, worker) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return [];
+  const results = new Array(list.length);
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(1, Number(limit) || 1), list.length);
+  const runners = Array.from({ length: workerCount }, async () => {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(list[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 function rememberConnectionClosed(connection, closed) {
@@ -244,11 +355,11 @@ function formatConnectionTestError(error) {
   return "连接测试失败：请检查连接参数后重试";
 }
 
-async function restoreRuntimeConnection(invokeWorkbench, payload) {
+async function invokeWithTransientLanRetry(invokeWorkbench, command, payload) {
   const retryDelays = [250, 750];
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await invokeWorkbench("restore_connection", payload);
+      return await invokeWorkbench(command, payload);
     } catch (error) {
       // macOS can briefly reject LAN routes while registering a cold app launch.
       const message = String(error?.message || error || "");
@@ -256,6 +367,14 @@ async function restoreRuntimeConnection(invokeWorkbench, payload) {
       await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
     }
   }
+}
+
+async function restoreRuntimeConnection(invokeWorkbench, payload) {
+  return invokeWithTransientLanRetry(invokeWorkbench, "restore_connection", payload);
+}
+
+async function openRuntimeConnection(invokeWorkbench, payload) {
+  return invokeWithTransientLanRetry(invokeWorkbench, "open_connection", payload);
 }
 
 
@@ -293,6 +412,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     password: "",
     importedDatabase: "",
     reconnectPlaceholderId: "",
+    reconnectConnectionId: "",
     reconnectAlias: "",
     reconnectUrl: "",
     error: "",
@@ -339,7 +459,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   let tableLoadToken = 0;
   let connectionSelectionToken = 0;
   const savedRestoreRequests = new Map();
-  // Database lists returned by restore_connection during startup, by runtime id.
+  const inFlightOpenRequests = new Map();
+  let reconcileChain = Promise.resolve();
+  // Database lists returned by restore_connection/open_connection during startup, by runtime id.
   const restoredDatabaseLists = new Map();
 
   // 统一状态写入入口：同时设置文案与错误标志。鼓励新代码用这个替代直接赋值。
@@ -406,6 +528,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     const ordered = applyDatabaseOrder(resolvedConnectionId, Array.isArray(dbList) ? dbList : []);
     databases.value = ordered;
     databasesByConnection[resolvedConnectionId] = ordered;
+    rememberPersistedDatabases(connection, ordered);
+    delete databaseFetchErrors[resolvedConnectionId];
     pruneStoredDatabaseOrder(resolvedConnectionId, ordered);
     aliases.pruneDatabaseAliases(resolvedConnectionId, ordered);
     databaseDecorations.pruneDatabaseDecorations(resolvedConnectionId, ordered);
@@ -474,6 +598,39 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     },
   );
 
+  async function refreshConnectionDatabasesInBackground(connectionId) {
+    const resolvedId = String(connectionId || "").trim();
+    if (!resolvedId || isPlaceholderConnectionId(resolvedId)) return;
+    if (connectionById(resolvedId)?.closed) return;
+    if (inFlightConnections.has(resolvedId)) return;
+    inFlightConnections.add(resolvedId);
+    try {
+      const list = await invokeWorkbench("list_databases", { connectionId: resolvedId });
+      if (disposed) return;
+      const current = connectionById(resolvedId);
+      if (!current || current.closed) return;
+      const ordered = applyDatabaseOrder(resolvedId, Array.isArray(list) ? list : []);
+      databasesByConnection[resolvedId] = ordered;
+      rememberPersistedDatabases(current, ordered);
+      if (selectedConnectionId.value === resolvedId) {
+        databases.value = ordered;
+      }
+      delete databaseFetchErrors[resolvedId];
+      markPerf("database.refreshed-bg", { connectionId: resolvedId, count: ordered.length });
+    } catch (error) {
+      // Background refresh must never disconnect a working connection, wipe its
+      // cached database list, or pop a password modal on transient failures.
+      if (isAuthenticationError(error)) {
+        databaseFetchErrors[resolvedId] = {
+          message: String(error?.message || error || "认证失败，请重新输入密码"),
+          needsReconnect: true,
+        };
+      }
+    } finally {
+      inFlightConnections.delete(resolvedId);
+    }
+  }
+
   async function fetchDatabasesForConnection(connectionId) {
     const resolvedId = String(connectionId || "").trim();
     if (!resolvedId) return [];
@@ -485,34 +642,45 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     try {
       const connection = connections.value.find((item) => item.id === resolvedId);
       let runtimeId = resolvedId;
-      // 未连接的 saved 连接：尝试恢复 runtime，失败则标记需要重新连接。
+      // 未连接的 saved 连接：尝试恢复 runtime，仅在确认为认证错误或缺少凭据时标记 needsReconnect。
       if (connection && !connection.connected && connection.saved) {
         const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
-        const runtime = saved ? await ensureSavedConnectionRuntime(saved) : null;
+        const runtime = !isPlaceholderConnectionId(resolvedId)
+          ? await connectRegisteredConnection(connection, saved)
+          : (saved ? await ensureSavedConnectionRuntime(saved) : null);
         if (!runtime?.connected) {
+          const detail = runtime?.restoreError || connection.restoreError || "";
+          const authFailure = isAuthenticationError(detail) || !hasSavedCredentials(saved);
           databaseFetchErrors[resolvedId] = {
-            message: "需重新输入密码",
-            needsReconnect: true,
+            message: authFailure ? "需重新输入密码" : (detail || "无法连接服务器"),
+            needsReconnect: authFailure,
           };
-          delete databasesByConnection[resolvedId];
-          return [];
+          return databasesByConnection[resolvedId] || [];
         }
         runtimeId = runtime.id;
+        if (Array.isArray(databasesByConnection[runtimeId]) && databasesByConnection[runtimeId].length > 0) {
+          delete databaseFetchErrors[resolvedId];
+          delete databaseFetchErrors[runtimeId];
+          return databasesByConnection[runtimeId];
+        }
       }
       const list = await invokeWorkbench("list_databases", { connectionId: runtimeId });
       const ordered = applyDatabaseOrder(runtimeId, Array.isArray(list) ? list : []);
       databasesByConnection[resolvedId] = ordered;
       if (runtimeId !== resolvedId) databasesByConnection[runtimeId] = ordered;
+      rememberPersistedDatabases(connectionById(runtimeId) || connection, ordered);
       delete databaseFetchErrors[resolvedId];
+      if (runtimeId !== resolvedId) delete databaseFetchErrors[runtimeId];
       markPerf("database.cached", { connectionId: resolvedId, count: ordered.length });
       return ordered;
     } catch (error) {
+      const message = String(error?.message || error || "加载失败");
       databaseFetchErrors[resolvedId] = {
-        message: String(error?.message || error || "加载失败"),
-        needsReconnect: false,
+        message,
+        needsReconnect: isAuthenticationError(error),
       };
-      delete databasesByConnection[resolvedId];
-      return [];
+      // Preserve any cached databases rather than blanking the tree on transient errors.
+      return databasesByConnection[resolvedId] || [];
     } finally {
       inFlightConnections.delete(resolvedId);
       loadingConnectionIds.delete(resolvedId);
@@ -543,14 +711,202 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     return connectionHasCapability(connection?.kind, name);
   }
 
-  // Saved connections are restored strictly one after another in saved order:
-  // runtime connection ids are allocated in that order and aliases, backups and
-  // database order are keyed by them. Startup only waits until the last-used
-  // connection is ready; the rest of the same chain continues in background.
+  // Startup restores all saved connections immediately into the tree (using
+  // zero-network batch registration on real Tauri or immediate placeholders on
+  // test mocks), then connects open servers in bounded parallel while keeping
+  // deterministic saved-order runtime ids. Startup only waits until the
+  // last-used connection is ready; the rest finish concurrently in background.
   let connectionsRestored = Promise.resolve();
 
   function whenConnectionsRestored() {
     return connectionsRestored;
+  }
+
+  function hydrateCachedDatabasesFor(connection) {
+    if (!connection?.id || connection.closed) return;
+    if (Array.isArray(databasesByConnection[connection.id]) && databasesByConnection[connection.id].length > 0) {
+      return;
+    }
+    const cached = getPersistedDatabases(connection, connection.id);
+    if (cached.length > 0) {
+      databasesByConnection[connection.id] = applyDatabaseOrder(connection.id, cached);
+    }
+  }
+
+  function canUseBatchSavedRegistration() {
+    return (
+      typeof globalThis?.__TAURI_INTERNALS__?.invoke === "function"
+      || invokeWorkbench?._supportsBatchRegister === true
+    );
+  }
+
+  async function tryRegisterSavedConnections(saved, closedKeys) {
+    if (!saved.length || !canUseBatchSavedRegistration()) return null;
+    const entries = saved.map((savedConn) => {
+      const kind = normalizeConnectionKind(savedConn.kind, savedConn.url);
+      const url = savedConn.url || buildConnectionUrl({ ...savedConn, kind });
+      return {
+        kind,
+        url: String(url || ""),
+        closed: closedKeys.has(savedConnectionKey(savedConn)),
+      };
+    });
+    try {
+      const ids = await invokeWorkbench("register_saved_connections", { entries });
+      if (Array.isArray(ids) && ids.length === saved.length && ids.some(Boolean)) {
+        return ids.map((id) => String(id || ""));
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function connectRegisteredConnection(connection, savedConn = null) {
+    const id = String(connection?.id || "");
+    if (!id || isPlaceholderConnectionId(id)) return Promise.resolve(connection || null);
+    if (connection.connected) return Promise.resolve(connection);
+    if (inFlightOpenRequests.has(id)) return inFlightOpenRequests.get(id);
+
+    const request = (async () => {
+      loadingConnectionIds.add(id);
+      try {
+        const list = await openRuntimeConnection(invokeWorkbench, { connectionId: id });
+        const target = connectionById(id) || connection;
+        if (savedConn) applySavedMetadata(target, savedConn);
+        target.connected = true;
+        target.closed = false;
+        delete target.restoreError;
+        const ordered = applyDatabaseOrder(id, Array.isArray(list) ? list : []);
+        restoredDatabaseLists.set(id, Array.isArray(list) ? list : []);
+        databasesByConnection[id] = ordered;
+        rememberPersistedDatabases(target, ordered);
+        delete databaseFetchErrors[id];
+        return target;
+      } catch (error) {
+        const target = connectionById(id) || connection;
+        const message = String(error?.message || error || formatConnectionTestError(error));
+        if (!target.connected) {
+          target.restoreError = message;
+          databaseFetchErrors[id] = {
+            message,
+            needsReconnect: isAuthenticationError(error) || (savedConn ? !hasSavedCredentials(savedConn) : false),
+          };
+        }
+        return target;
+      } finally {
+        loadingConnectionIds.delete(id);
+      }
+    })().finally(() => inFlightOpenRequests.delete(id));
+
+    inFlightOpenRequests.set(id, request);
+    return request;
+  }
+
+  function prehydrateSavedConnectionsFromStorage(saved, closedKeys) {
+    if (!saved.length) return;
+    let changed = false;
+    for (const savedConn of saved) {
+      const key = savedConnectionKey(savedConn);
+      const placeholderId = `saved-${key}`;
+      const existing = connections.value.find((connection) => (
+        connection.id === placeholderId || savedConnectionMatches(connection, savedConn)
+      ));
+      const closed = closedKeys.has(key);
+      if (existing) {
+        applySavedMetadata(existing, savedConn);
+        if (!existing.connected) existing.closed = closed;
+        hydrateCachedDatabasesFor(existing);
+      } else {
+        const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
+        placeholder.closed = closed;
+        hydrateCachedDatabasesFor(placeholder);
+        changed = true;
+      }
+    }
+    if (changed) {
+      connections.value = applyConnectionOrder(connections.value);
+    }
+  }
+
+  function restoreRegisteredConnections(saved, assignedIds, closedKeys, { priorityConnectionId = "", readyWhen = () => false } = {}) {
+    const byId = new Map(connections.value.map((connection) => [connection.id, connection]));
+    const openTargets = [];
+
+    saved.forEach((savedConn, index) => {
+      const key = savedConnectionKey(savedConn);
+      const placeholderId = `saved-${key}`;
+      const closed = closedKeys.has(key);
+      const runtimeId = assignedIds[index] || placeholderId;
+      const existing = byId.get(runtimeId)
+        || [...byId.values()].find((item) => item.id !== placeholderId && savedConnectionMatches(item, savedConn));
+      const kind = normalizeConnectionKind(savedConn.kind, savedConn.url);
+      const entry = existing || {
+        id: runtimeId,
+        kind,
+        database: savedConn.database || null,
+        connected: false,
+        closed,
+        readOnly: isReadOnlyKind(kind),
+      };
+      applySavedMetadata(entry, savedConn);
+      if (!entry.connected) entry.closed = closed;
+      if (runtimeId !== placeholderId) {
+        migratePlaceholderAlias(placeholderId, runtimeId, savedConn.alias);
+        replaceConnectionOrderId(placeholderId, runtimeId);
+        byId.delete(placeholderId);
+      } else if (savedConn.alias && !aliases.getConnectionAlias(entry.id)) {
+        aliases.setConnectionAlias(entry.id, savedConn.alias);
+      }
+      byId.set(entry.id, entry);
+      if (!entry.closed) {
+        hydrateCachedDatabasesFor(entry);
+        if (!entry.connected && !isPlaceholderConnectionId(entry.id)) {
+          openTargets.push({ entry, savedConn });
+        }
+      }
+    });
+
+    connections.value = applyConnectionOrder([...byId.values()]);
+
+    if (priorityConnectionId) {
+      const idx = openTargets.findIndex((item) => item.entry.id === priorityConnectionId);
+      if (idx > 0) {
+        const [priority] = openTargets.splice(idx, 1);
+        openTargets.unshift(priority);
+      }
+    }
+
+    let readyResolved = false;
+    let resolveReady;
+    const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+    const checkReady = () => {
+      if (!readyResolved && readyWhen()) {
+        readyResolved = true;
+        resolveReady();
+      }
+    };
+    checkReady();
+
+    const allDone = runWithBoundedConcurrency(
+      openTargets,
+      STARTUP_RESTORE_CONCURRENCY,
+      async ({ entry, savedConn }) => {
+        await connectRegisteredConnection(entry, savedConn);
+        checkReady();
+      },
+    ).then(() => {
+      restoredDatabaseLists.clear();
+      connections.value = applyConnectionOrder(connections.value);
+      markPerf("connection.all-restored", { count: connections.value.length });
+      if (!readyResolved) {
+        readyResolved = true;
+        resolveReady();
+      }
+    });
+
+    connectionsRestored = allDone;
+    return readyPromise;
   }
 
   async function restoreDisconnectedSavedConnections({ targetConnectionId = "" } = {}) {
@@ -559,10 +915,31 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     if (requestedId && connections.value.some((item) => item.id === requestedId && item.connected)) {
       return true;
     }
-    const hasDisconnected = connections.value.some((item) => item?.saved && !item.connected && !item.closed);
-    if (!hasDisconnected) return false;
+    const disconnected = connections.value.filter((item) => item?.saved && !item.connected && !item.closed);
+    if (!disconnected.length) return false;
     const saved = readSavedConnections();
     if (!saved.length) return false;
+
+    const registeredDisconnected = disconnected.filter((item) => !isPlaceholderConnectionId(item.id));
+    if (registeredDisconnected.length === disconnected.length) {
+      const orderedTargets = [...registeredDisconnected];
+      if (requestedId) {
+        const idx = orderedTargets.findIndex((item) => item.id === requestedId);
+        if (idx > 0) {
+          const [priority] = orderedTargets.splice(idx, 1);
+          orderedTargets.unshift(priority);
+        }
+      }
+      await runWithBoundedConcurrency(orderedTargets, STARTUP_RESTORE_CONCURRENCY, async (connection) => {
+        const savedConn = saved.find((item) => savedConnectionMatches(connection, item)) || null;
+        await connectRegisteredConnection(connection, savedConn);
+      });
+      connections.value = applyConnectionOrder(connections.value);
+      return requestedId
+        ? connections.value.some((item) => item.id === requestedId && item.connected)
+        : connections.value.some((item) => item.connected);
+    }
+
     await restoreSavedConnectionsInOrder(saved, {
       readyWhen: () => Boolean(requestedId) && connections.value.some((item) => (
         item.id === requestedId && item.connected
@@ -575,36 +952,83 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   }
 
   function restoreSavedConnectionsInOrder(saved, { readyWhen = () => false } = {}) {
-    let chain = Promise.resolve();
-    const steps = saved.map((savedConn) => {
-      chain = chain
-        .then(() => ensureSavedConnectionRuntime(savedConn))
-        .catch(() => null);
-      return chain;
-    });
-    connectionsRestored = chain.then(() => {
+    const closedKeys = readClosedConnectionKeys();
+    prehydrateSavedConnectionsFromStorage(saved, closedKeys);
+
+    let readyResolved = false;
+    let resolveReady;
+    const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+    const checkReady = () => {
+      if (!readyResolved && readyWhen()) {
+        readyResolved = true;
+        resolveReady();
+      }
+    };
+    checkReady();
+
+    // Group contiguous open entries so they connect in parallel while preserving
+    // exact register_connection ordering around any closed entries.
+    const segments = [];
+    for (const savedConn of saved) {
+      const closed = closedKeys.has(savedConnectionKey(savedConn));
+      if (closed) {
+        segments.push({ closed: true, items: [savedConn] });
+      } else {
+        const last = segments[segments.length - 1];
+        if (last && !last.closed) last.items.push(savedConn);
+        else segments.push({ closed: false, items: [savedConn] });
+      }
+    }
+
+    const allDone = (async () => {
+      for (const segment of segments) {
+        if (segment.closed) {
+          await ensureSavedConnectionRuntime(segment.items[0]).catch(() => null);
+          checkReady();
+        } else {
+          await runWithBoundedConcurrency(
+            segment.items,
+            STARTUP_RESTORE_CONCURRENCY,
+            async (savedConn) => {
+              await ensureSavedConnectionRuntime(savedConn).catch(() => null);
+              checkReady();
+            },
+          );
+        }
+      }
+    })().then(() => {
       restoredDatabaseLists.clear();
       connections.value = applyConnectionOrder(connections.value);
       markPerf("connection.all-restored", { count: connections.value.length });
-    });
-    return (async () => {
-      for (const step of steps) {
-        if (readyWhen()) return;
-        await step;
+      if (!readyResolved) {
+        readyResolved = true;
+        resolveReady();
       }
-    })();
+    });
+
+    connectionsRestored = allDone;
+    return readyPromise;
   }
 
   async function loadConnections() {
     connections.value = applyConnectionOrder(await measureAsync("connection.list", () => invokeWorkbench("list_connections")));
     const saved = readSavedConnections();
+    const closedKeys = readClosedConnectionKeys();
     const snapshot = loadWorkspaceSnapshot();
     const lastUsedConnectionId = String(snapshot?.connectionId || "");
-    await restoreSavedConnectionsInOrder(saved, {
-      readyWhen: () => Boolean(lastUsedConnectionId) && connections.value.some((item) => (
-        item.id === lastUsedConnectionId && item.connected
-      )),
-    });
+    const readyWhen = () => Boolean(lastUsedConnectionId) && connections.value.some((item) => (
+      item.id === lastUsedConnectionId && item.connected
+    ));
+
+    const registeredIds = await tryRegisterSavedConnections(saved, closedKeys);
+    if (registeredIds) {
+      await restoreRegisteredConnections(saved, registeredIds, closedKeys, {
+        priorityConnectionId: lastUsedConnectionId,
+        readyWhen,
+      });
+    } else {
+      await restoreSavedConnectionsInOrder(saved, { readyWhen });
+    }
     connections.value = applyConnectionOrder(connections.value);
     markPerf("connection.loaded", { count: connections.value.length });
     let selectedConnection;
@@ -630,7 +1054,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     selectedConnectionId.value = selectedConnection.id;
     if (!selectedConnection.connected && selectedConnection.saved) {
       databases.value = [];
-      setStatus(selectedConnection.restoreError || "请重新输入密码以恢复连接", { error: true });
+      const savedEntry = saved.find((item) => savedConnectionMatches(selectedConnection, item));
+      const detail = selectedConnection.restoreError || "";
+      const fallbackMsg = isAuthenticationError(detail) || !hasSavedCredentials(savedEntry)
+        ? "请重新输入密码以恢复连接"
+        : "无法连接服务器，请检查网络或单击重试";
+      setStatus(detail || fallbackMsg, { error: true });
       return;
     }
     try {
@@ -638,17 +1067,22 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       // list; reuse it instead of a second identical round trip.
       const restoredList = restoredDatabaseLists.get(selectedConnection.id);
       restoredDatabaseLists.delete(selectedConnection.id);
+      const cachedList = databasesByConnection[selectedConnection.id];
+      const hasPreloaded = Array.isArray(restoredList) || (Array.isArray(cachedList) && cachedList.length > 0 && selectedConnection.connected && !selectedConnection.saved);
       databases.value = applyDatabaseOrder(
         selectedConnection.id,
         Array.isArray(restoredList)
           ? restoredList
-          : await measureAsync(
-            "database.list",
-            () => invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
-            { connectionId: selectedConnection.id },
-          ),
+          : hasPreloaded
+            ? cachedList
+            : await measureAsync(
+              "database.list",
+              () => invokeWorkbench("list_databases", { connectionId: selectedConnection.id }),
+              { connectionId: selectedConnection.id },
+            ),
       );
       databasesByConnection[selectedConnection.id] = databases.value;
+      rememberPersistedDatabases(selectedConnection, databases.value);
       markPerf("database.loaded", { connectionId: selectedConnection.id, count: databases.value.length });
     } catch (error) {
       databases.value = [];
@@ -704,6 +1138,12 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     writeJsonStorage(CONNECTION_ORDER_KEY, nextOrder);
   }
 
+  function runReconcileStep(task) {
+    const run = reconcileChain.then(task, task);
+    reconcileChain = run.catch(() => null);
+    return run;
+  }
+
   async function restoreSavedConnectionRuntime(savedConn) {
     const placeholderId = `saved-${savedConnectionKey(savedConn)}`;
     const existing = connections.value.find((connection) => (
@@ -716,7 +1156,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       connections.value = connections.value.filter((connection) => connection.id !== placeholderId);
       return existing;
     }
-    const kind = normalizeConnectionKind(savedConn.kind);
+    const kind = normalizeConnectionKind(savedConn.kind, savedConn.url);
     const url = savedConn.url || buildConnectionUrl({ ...savedConn, kind });
     const closed = readClosedConnectionKeys().has(savedConnectionKey(savedConn));
     if (!url) {
@@ -724,42 +1164,70 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       placeholder.closed = closed;
       return closed ? placeholder : null;
     }
-    const previousIds = new Set(connections.value.map((connection) => connection.id));
     try {
       // A connection the user closed only reserves its id: no network.
       let restoredDatabases = null;
-      if (closed) await invokeWorkbench("register_connection", { kind, url });
-      else restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
-      const previousConnections = connections.value;
-      const merged = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
-      const restored =
-        merged.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
-        merged.find((connection) => !previousIds.has(connection.id) && connection.id !== placeholderId);
-      if (restored) {
-        if (Array.isArray(restoredDatabases)) {
-          restoredDatabaseLists.set(restored.id, restoredDatabases);
-          databasesByConnection[restored.id] = applyDatabaseOrder(restored.id, restoredDatabases);
-        }
-        applySavedMetadata(restored, savedConn);
-        migratePlaceholderAlias(placeholderId, restored.id, savedConn.alias);
-        replaceConnectionOrderId(placeholderId, restored.id);
-        if (selectedConnectionId.value === placeholderId) {
-          selectedConnectionId.value = restored.id;
-        }
-        restored.connected = !closed;
-        restored.closed = closed;
-        delete restored.restoreError;
-        connections.value = applyConnectionOrder(merged.filter((connection) => connection.id !== placeholderId));
-        return restored;
+      let registeredId = "";
+      if (closed) {
+        registeredId = String((await invokeWorkbench("register_connection", { kind, url })) || "");
+      } else {
+        restoredDatabases = await restoreRuntimeConnection(invokeWorkbench, { kind, url });
       }
-      connections.value = applyConnectionOrder(merged);
-      const placeholder = upsertSavedConnectionPlaceholder(savedConn, !closed);
-      placeholder.closed = closed;
-      return placeholder;
+      return await runReconcileStep(async () => {
+        const previousConnections = connections.value;
+        const claimedIds = new Set(
+          previousConnections
+            .filter((connection) => connection.id !== placeholderId && (connection.saved || (connection.host && connection.host !== "configured")))
+            .map((connection) => connection.id),
+        );
+        const merged = mergeConnections(previousConnections, await invokeWorkbench("list_connections"));
+        const restored =
+          (registeredId ? merged.find((connection) => connection.id === registeredId) : null) ||
+          merged.find((connection) => connection.id !== placeholderId && savedConnectionMatches(connection, savedConn)) ||
+          merged.find((connection) => (
+            !claimedIds.has(connection.id)
+            && connection.id !== placeholderId
+            && !connection.saved
+            && normalizeConnectionKind(connection.kind) === kind
+          )) ||
+          merged.find((connection) => !claimedIds.has(connection.id) && connection.id !== placeholderId && !connection.saved);
+        if (restored) {
+          applySavedMetadata(restored, savedConn);
+          if (Array.isArray(restoredDatabases)) {
+            restoredDatabaseLists.set(restored.id, restoredDatabases);
+            const ordered = applyDatabaseOrder(restored.id, restoredDatabases);
+            databasesByConnection[restored.id] = ordered;
+            rememberPersistedDatabases(restored, ordered);
+          } else if (Array.isArray(databasesByConnection[placeholderId]) && !Array.isArray(databasesByConnection[restored.id])) {
+            databasesByConnection[restored.id] = databasesByConnection[placeholderId];
+          }
+          if (placeholderId !== restored.id) {
+            delete databasesByConnection[placeholderId];
+            delete databaseFetchErrors[placeholderId];
+          }
+          migratePlaceholderAlias(placeholderId, restored.id, savedConn.alias);
+          replaceConnectionOrderId(placeholderId, restored.id);
+          if (selectedConnectionId.value === placeholderId) {
+            selectedConnectionId.value = restored.id;
+          }
+          restored.connected = !closed;
+          restored.closed = closed;
+          delete restored.restoreError;
+          delete databaseFetchErrors[restored.id];
+          connections.value = applyConnectionOrder(merged.filter((connection) => connection.id !== placeholderId));
+          return restored;
+        }
+        connections.value = applyConnectionOrder(merged);
+        const placeholder = upsertSavedConnectionPlaceholder(savedConn, !closed);
+        placeholder.closed = closed;
+        return placeholder;
+      });
     } catch (error) {
       const placeholder = upsertSavedConnectionPlaceholder(savedConn, false);
       placeholder.closed = closed;
-      if (!closed) placeholder.restoreError = String(error?.message || error || formatConnectionTestError(error));
+      if (!closed && !placeholder.connected) {
+        placeholder.restoreError = String(error?.message || error || formatConnectionTestError(error));
+      }
       return placeholder;
     }
   }
@@ -779,7 +1247,11 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       if (!connection.saved) continue;
       if (byId.has(connection.id)) {
         const next = byId.get(connection.id);
-        Object.assign(next, connection, { connected: next.connected, closed: Boolean(next.closed) });
+        const nextClosed = Boolean(next.closed);
+        // Never downgrade a live connected runtime entry to disconnected from a
+        // racing `list_connections` snapshot while its pool is still attaching.
+        const nextConnected = nextClosed ? false : Boolean(next.connected || connection.connected);
+        Object.assign(next, connection, { connected: nextConnected, closed: nextClosed });
       } else byId.set(connection.id, connection);
     }
     return [...byId.values()];
@@ -788,6 +1260,9 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
   function upsertSavedConnectionPlaceholder(savedConn, connected) {
     const id = `saved-${savedConnectionKey(savedConn)}`;
     const existing = connections.value.find((connection) => connection.id === id || savedConnectionMatches(connection, savedConn));
+    if (existing && !isPlaceholderConnectionId(existing.id) && existing.connected && !connected) {
+      return existing;
+    }
     const placeholder = applySavedMetadata(existing || { id, database: savedConn.database || null }, savedConn);
     placeholder.connected = connected;
     if (savedConn.alias && !aliases.getConnectionAlias(placeholder.id)) {
@@ -815,21 +1290,65 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         openedDatabases = opened.databases;
       } else if (!connection.connected && connection.saved) {
         const saved = readSavedConnections().find((item) => savedConnectionMatches(connection, item));
-        runtimeConnection = saved ? await ensureSavedConnectionRuntime(saved) : null;
+        runtimeConnection = !isPlaceholderConnectionId(connectionId)
+          ? await connectRegisteredConnection(connection, saved)
+          : (saved ? await ensureSavedConnectionRuntime(saved) : null);
         if (!runtimeConnection?.connected) {
-          const detail = runtimeConnection?.restoreError || connection.restoreError;
-          prefillConnDialog(connection, detail ? `请重新输入密码以恢复连接：${detail}` : "请重新输入密码以恢复连接");
-          setStatus(connDialog.error, { error: true });
+          const detail = runtimeConnection?.restoreError || connection.restoreError || "";
+          const authFailure = isAuthenticationError(detail) || !hasSavedCredentials(saved);
+          if (authFailure) {
+            prefillConnDialog(connection, detail ? `请重新输入密码以恢复连接：${detail}` : "请重新输入密码以恢复连接");
+            setStatus(connDialog.error, { error: true });
+          } else {
+            databaseFetchErrors[connectionId] = {
+              message: detail || "无法连接服务器",
+              needsReconnect: false,
+            };
+            setStatus(detail ? `连接失败：${detail}` : "无法连接服务器，请检查网络后重试", { error: true });
+          }
           return SOURCE_SELECTION.failed;
         }
         connectionId = runtimeConnection.id;
+        if (Array.isArray(restoredDatabaseLists.get(connectionId))) {
+          openedDatabases = applyDatabaseOrder(connectionId, restoredDatabaseLists.get(connectionId));
+          restoredDatabaseLists.delete(connectionId);
+        }
       }
       if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
-      selectedConnectionId.value = connectionId;
-      selectedDatabase.value = "";
+
       const cachedDatabases = Array.isArray(databasesByConnection[connectionId])
         ? applyDatabaseOrder(connectionId, databasesByConnection[connectionId])
         : [];
+      const preferredMissingFromCache = Boolean(
+        preferredDatabase
+        && cachedDatabases.length > 0
+        && !cachedDatabases.some((db) => String(db) === String(preferredDatabase)),
+      );
+
+      // Fast path (stale-while-revalidate): when switching to an already-connected
+      // server with cached databases, land on the target database immediately
+      // without clearing selectedDatabase or blocking on a live list_databases RTT.
+      if (!openedDatabases && cachedDatabases.length > 0 && !preferredMissingFromCache) {
+        selectedConnectionId.value = connectionId;
+        databases.value = cachedDatabases;
+        delete databaseFetchErrors[connectionId];
+        void refreshConnectionDatabasesInBackground(connectionId);
+        const requestedDatabase = cachedDatabases.find((database) => (
+          String(database) === String(preferredDatabase || "")
+        ));
+        const restoredDatabase = cachedDatabases.find((database) => (
+          String(database) === String(runtimeConnection?.database || "")
+        ));
+        const database = requestedDatabase || restoredDatabase || cachedDatabases[0] || "";
+        if (database) {
+          return await selectDatabase({ connectionId, database }, { connectionSelectionToken: selectionToken });
+        }
+        selectedDatabase.value = "";
+        return SOURCE_SELECTION.selected;
+      }
+
+      selectedConnectionId.value = connectionId;
+      selectedDatabase.value = "";
       databases.value = cachedDatabases;
       workspace.connectionId = connectionId || "";
       workspace.database = "";
@@ -847,6 +1366,8 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
       databases.value = nextDatabases;
       databasesByConnection[connectionId] = nextDatabases;
+      rememberPersistedDatabases(runtimeConnection, nextDatabases);
+      delete databaseFetchErrors[connectionId];
       markPerf("database.loaded", { connectionId, count: databases.value.length });
       const requestedDatabase = databases.value.find((database) => (
         String(database) === String(preferredDatabase || "")
@@ -860,8 +1381,16 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return SOURCE_SELECTION.selected;
     } catch (error) {
       if (selectionToken !== connectionSelectionToken) return SOURCE_SELECTION.superseded;
-      prefillConnDialog(connection, "连接已失效，请重新输入密码");
-      statusText.value = `切换连接失败：${String(error)}`;
+      const detail = String(error?.message || error || "");
+      if (isAuthenticationError(error)) {
+        prefillConnDialog(connection, detail ? `认证失败，请重新输入密码：${detail}` : "认证失败，请重新输入密码");
+      } else {
+        databaseFetchErrors[connectionId] = {
+          message: detail || "加载数据库列表失败",
+          needsReconnect: false,
+        };
+      }
+      setStatus(`切换连接失败：${detail || String(error)}`, { error: true });
       return SOURCE_SELECTION.failed;
     } finally {
       if (selectionToken === connectionSelectionToken) busy.value = false;
@@ -872,13 +1401,15 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     resetConnTestState();
     const kind = normalizeConnectionKind(connection.kind);
     const defaults = CONNECTION_KINDS[kind];
+    const id = String(connection.id || "");
     connDialog.kind = kind;
     connDialog.host = String(connection.host || "127.0.0.1");
     connDialog.port = String(connection.port || defaults.defaultPort);
     connDialog.username = connection.username || defaults.defaultUser;
     connDialog.password = "";
     connDialog.importedDatabase = String(connection.database || "").trim();
-    connDialog.reconnectPlaceholderId = String(connection.id || "").startsWith("saved-") ? String(connection.id) : "";
+    connDialog.reconnectPlaceholderId = isPlaceholderConnectionId(id) ? id : "";
+    connDialog.reconnectConnectionId = id && !isPlaceholderConnectionId(id) ? id : "";
     connDialog.reconnectAlias = aliases.getConnectionAlias(connection.id) || "";
     connDialog.reconnectUrl = kind === CONNECTION_KINDS.mongodb.kind ? String(connection.url || "") : "";
     connDialog.error = message;
@@ -1154,6 +1685,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
 
   function clearConnDialogReconnectMeta() {
     connDialog.reconnectPlaceholderId = "";
+    connDialog.reconnectConnectionId = "";
     connDialog.reconnectAlias = "";
     connDialog.reconnectUrl = "";
   }
@@ -1252,6 +1784,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       return false;
     }
     removeSavedConnection(connection);
+    forgetPersistedDatabases(connection);
     rememberConnectionClosed(connection, false);
     aliases.removeConnectionAliases(connectionId);
     databaseDecorations.removeConnectionDecorations(connectionId);
@@ -1367,6 +1900,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
       rememberConnectionClosed(opened, false);
       const ordered = applyDatabaseOrder(runtimeId, Array.isArray(list) ? list : []);
       databasesByConnection[runtimeId] = ordered;
+      rememberPersistedDatabases(opened, ordered);
       delete databaseFetchErrors[runtimeId];
       statusText.value = `已打开连接 ${connectionLabel(runtimeId, opened.label || runtimeId)}`;
       return { ok: true, connectionId: runtimeId, databases: ordered };
@@ -1394,6 +1928,7 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     }
     const normalizedKind = normalizeConnectionKind(kind);
     const reconnectPlaceholderId = connDialog.reconnectPlaceholderId;
+    const reconnectConnectionId = connDialog.reconnectConnectionId;
     const reconnectAlias = connDialog.reconnectAlias;
     const url =
       normalizedKind === CONNECTION_KINDS.mongodb.kind && connDialog.reconnectUrl
@@ -1404,16 +1939,30 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
     try {
       // Runtime ids are allocated by count: never add/remove mid-restore.
       await whenConnectionsRestored();
-      const previousIds = new Set(connections.value.map((connection) => connection.id));
-      const dbList = await invokeWorkbench("add_connection", { kind: normalizedKind, url });
-      connections.value = applyConnectionOrder(
-        mergeConnections(connections.value, await invokeWorkbench("list_connections")),
-      );
-      const newConnection =
-        connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== reconnectPlaceholderId) ||
-        connections.value[connections.value.length - 1];
+      const existingRuntimeTarget = reconnectConnectionId ? connectionById(reconnectConnectionId) : null;
+      let dbList;
+      let newConnection;
+      if (existingRuntimeTarget && !isPlaceholderConnectionId(reconnectConnectionId)) {
+        // Re-authenticating an existing runtime connection updates it in place
+        // so its runtime id, aliases, decorations and rail pins never duplicate.
+        dbList = await invokeWorkbench("update_connection_credentials", {
+          connectionId: reconnectConnectionId,
+          kind: normalizedKind,
+          url,
+        });
+        newConnection = connectionById(reconnectConnectionId) || existingRuntimeTarget;
+      } else {
+        const previousIds = new Set(connections.value.map((connection) => connection.id));
+        dbList = await invokeWorkbench("add_connection", { kind: normalizedKind, url });
+        connections.value = applyConnectionOrder(
+          mergeConnections(connections.value, await invokeWorkbench("list_connections")),
+        );
+        newConnection =
+          connections.value.find((connection) => !previousIds.has(connection.id) && connection.id !== reconnectPlaceholderId) ||
+          connections.value[connections.value.length - 1];
+      }
       if (newConnection) selectedConnectionId.value = newConnection.id;
-      const orderedNewDatabases = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, dbList);
+      const orderedNewDatabases = applyDatabaseOrder(newConnection?.id || selectedConnectionId.value, Array.isArray(dbList) ? dbList : []);
       databases.value = orderedNewDatabases;
       if (newConnection?.id) databasesByConnection[newConnection.id] = orderedNewDatabases;
       connDialog.open = false;
@@ -1429,6 +1978,10 @@ export function useConnection(workspace, invokeWorkbench, { schemaMetadata: prov
         });
         migratePlaceholderAlias(reconnectPlaceholderId, newConnection.id, reconnectAlias);
         newConnection.connected = true;
+        newConnection.closed = false;
+        delete newConnection.restoreError;
+        delete databaseFetchErrors[newConnection.id];
+        rememberPersistedDatabases(newConnection, orderedNewDatabases);
         if (reconnectPlaceholderId && reconnectPlaceholderId !== newConnection.id) {
           connections.value = connections.value.filter((connection) => connection.id !== reconnectPlaceholderId);
         }

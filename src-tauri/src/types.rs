@@ -1,4 +1,8 @@
-use std::{collections::HashMap, env, sync::atomic::AtomicBool};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    sync::atomic::AtomicBool,
+};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -1070,6 +1074,9 @@ pub struct RuntimeState {
     /// other per-connection settings still match when they are opened again,
     /// but every lookup through `connections` treats them as absent.
     pub closed_connections: HashMap<String, RuntimeConnection>,
+    /// Open saved connections whose ids were pre-reserved at startup but whose
+    /// first live connect has not completed yet.
+    pub pending_connections: HashSet<String>,
     pub selected_connection_id: String,
     pub selected_database: String,
     pub schema: Vec<TableMeta>,
@@ -1903,6 +1910,7 @@ impl RuntimeState {
         Self {
             connections,
             closed_connections: HashMap::new(),
+            pending_connections: HashSet::new(),
             selected_connection_id,
             selected_database,
             schema,
@@ -1929,6 +1937,7 @@ impl RuntimeState {
         self.demo_rows.clear();
         self.connections.clear();
         self.closed_connections.clear();
+        self.pending_connections.clear();
         self.connections.insert(
             connection_id.clone(),
             performance_fixture_connection(&connection_id, &database),

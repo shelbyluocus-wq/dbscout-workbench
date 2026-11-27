@@ -51,62 +51,68 @@ export function useRailDatabases({
   initialGroups = readRailGroups(),
 }) {
   const groups = ref(initialGroups);
-  const items = computed(() => (Array.isArray(pinnedDatabases.value) ? pinnedDatabases.value : [])
-    .filter((entry) => entry.rail)
-    .map((entry) => {
-      const id = railDatabaseId(entry.connectionId, entry.database);
-      const label = databaseLabel(entry.connectionId, entry.database) || entry.database;
-      const connection = (connections.value || []).find(
-        (candidate) => String(candidate?.id) === String(entry.connectionId),
-      ) || null;
-      const connectionName = connectionLabel(entry.connectionId, connection?.label || entry.connectionId);
-      const hasPendingSavedPlaceholder = !connection && (connections.value || []).some(
-        (candidate) => candidate?.saved && candidate.connected !== true,
-      );
-      const missing = !connection && !hasPendingSavedPlaceholder;
-      const disconnected = hasPendingSavedPlaceholder || (!missing && connection.connected !== true);
-      const decoration = getDatabaseDecoration(entry.connectionId, entry.database);
-      const autoText = deriveRailMonogram(label);
-      let glyph;
-      if (entry.railIcon) {
-        glyph = { kind: "icon", id: entry.railIcon, icon: railDatabaseIconComponent(entry.railIcon) };
-      } else if (entry.railText) {
-        glyph = { kind: "text", text: entry.railText, compact: isCompactRailText(entry.railText) };
-      } else if (decoration?.icon && decoration.icon !== "database") {
-        glyph = { kind: "icon", id: decoration.icon, icon: railDatabaseIconComponent(decoration.icon) };
-      } else {
-        glyph = { kind: "text", text: autoText, compact: isCompactRailText(autoText) };
-      }
-      const color = entry.railColor || decoration?.color || autoRailColor(id);
-      const source = currentSource?.() || {};
-      const current = sameSource(entry, source.connectionId, source.database) && Boolean(source.database);
-      const hint = missing
-        ? translate("railDatabase.missingHint")
-        : current
-          ? translate("railDatabase.currentHint", { connection: connectionName })
-          : disconnected
-            ? translate("railDatabase.disconnectedHint", { connection: connectionName })
-            : translate("railDatabase.switchHint", { connection: connectionName });
-      return {
-        id,
-        connectionId: entry.connectionId,
-        database: entry.database,
-        label,
-        realName: entry.database,
-        connectionLabel: connectionName,
-        hint,
-        glyph,
-        color,
-        ink: readableInkOn(color),
-        current,
-        disconnected,
-        missing,
-        groupId: entry.railGroup || "",
-        shortcutLabel: formatShortcutForPlatform(entry.shortcut || ""),
-        custom: { icon: entry.railIcon || "", text: entry.railText || "", color: entry.railColor || "" },
-        autoText,
-      };
-    }));
+  const items = computed(() => {
+    const pinned = Array.isArray(pinnedDatabases.value) ? pinnedDatabases.value : [];
+    const list = Array.isArray(connections.value) ? connections.value : [];
+    const connectionsById = new Map();
+    let hasAnyPendingSaved = false;
+    for (const candidate of list) {
+      if (candidate?.id != null) connectionsById.set(String(candidate.id), candidate);
+      if (candidate?.saved && candidate.connected !== true) hasAnyPendingSaved = true;
+    }
+    const source = currentSource?.() || {};
+    return pinned
+      .filter((entry) => entry.rail)
+      .map((entry) => {
+        const id = railDatabaseId(entry.connectionId, entry.database);
+        const label = databaseLabel(entry.connectionId, entry.database) || entry.database;
+        const connection = connectionsById.get(String(entry.connectionId)) || null;
+        const connectionName = connectionLabel(entry.connectionId, connection?.label || entry.connectionId);
+        const hasPendingSavedPlaceholder = !connection && hasAnyPendingSaved;
+        const missing = !connection && !hasPendingSavedPlaceholder;
+        const disconnected = hasPendingSavedPlaceholder || (!missing && connection.connected !== true);
+        const decoration = getDatabaseDecoration(entry.connectionId, entry.database);
+        const autoText = deriveRailMonogram(label);
+        let glyph;
+        if (entry.railIcon) {
+          glyph = { kind: "icon", id: entry.railIcon, icon: railDatabaseIconComponent(entry.railIcon) };
+        } else if (entry.railText) {
+          glyph = { kind: "text", text: entry.railText, compact: isCompactRailText(entry.railText) };
+        } else if (decoration?.icon && decoration.icon !== "database") {
+          glyph = { kind: "icon", id: decoration.icon, icon: railDatabaseIconComponent(decoration.icon) };
+        } else {
+          glyph = { kind: "text", text: autoText, compact: isCompactRailText(autoText) };
+        }
+        const color = entry.railColor || decoration?.color || autoRailColor(id);
+        const current = sameSource(entry, source.connectionId, source.database) && Boolean(source.database);
+        const hint = missing
+          ? translate("railDatabase.missingHint")
+          : current
+            ? translate("railDatabase.currentHint", { connection: connectionName })
+            : disconnected
+              ? translate("railDatabase.disconnectedHint", { connection: connectionName })
+              : translate("railDatabase.switchHint", { connection: connectionName });
+        return {
+          id,
+          connectionId: entry.connectionId,
+          database: entry.database,
+          label,
+          realName: entry.database,
+          connectionLabel: connectionName,
+          hint,
+          glyph,
+          color,
+          ink: readableInkOn(color),
+          current,
+          disconnected,
+          missing,
+          groupId: entry.railGroup || "",
+          shortcutLabel: formatShortcutForPlatform(entry.shortcut || ""),
+          custom: { icon: entry.railIcon || "", text: entry.railText || "", color: entry.railColor || "" },
+          autoText,
+        };
+      });
+  });
 
   // The rail's top level: database tiles and group folders, in rail order.
   const layout = computed(() => {

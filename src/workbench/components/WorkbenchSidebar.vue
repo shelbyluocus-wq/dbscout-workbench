@@ -7,7 +7,7 @@ import {
   applyLocaleTableFolding,
   useLocaleTableFoldPreference,
 } from "../utils/localeTableGrouping.js";
-import { computed, ref, reactive, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
+import { computed, ref, reactive, shallowRef, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import DesignDebugDialog from "./DesignDebugDialog.vue";
 import SidebarSearchPanel from "./SidebarSearchPanel.vue";
 import SidebarConnectionMenu from "./SidebarConnectionMenu.vue";
@@ -42,9 +42,10 @@ import {
 } from "../composables/connectionGroupStore.js";
 import { useConfirm } from "../composables/useConfirm.js";
 import { connectionIdentityKey } from "../utils/connectionIdentity.js";
+import { CONNECTION_KINDS, connectionKindBadge, normalizeConnectionKind } from "../utils/connectionKinds.js";
 import { beginDatabaseDrag, endDatabaseDrag } from "../utils/databaseDragPayload.js";
 import { useAliases } from "../composables/aliasStore.js";
-import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
+import { databaseTextColorCss, resolveDatabaseDecoration, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";
 import { computeTableBranchMinHeight, SIDEBAR_TABLE_BRANCH_MAX_HEIGHT, useSidebarVirtualTables } from "../composables/useSidebarVirtualTables.js";
 import { useSidebarTableSelection } from "../composables/useSidebarTableSelection.js";
 import { isContextMenuKey, isDeleteCommandKey } from "../utils/listSelection.js";
@@ -118,34 +119,67 @@ const emit = defineEmits([
   "change-font",
 ]);
 
-const { databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
-const { getDatabaseDecoration } = useDatabaseDecorations();
+const { databaseAliases, connectionAliases, databaseLabel, getDatabaseAlias, connectionLabel, getConnectionAlias } = useAliases();
+const { decorations: databaseDecorationsMap, getDatabaseDecoration } = useDatabaseDecorations();
+
+// Precompute normalized decorations only for databases that have custom display
+// settings, turning per-row icon/style lookups into O(1) Map reads with zero
+// regexes or allocations during high-volume tree renders.
+const databaseDecorationCache = computed(() => {
+  const rawMap = databaseDecorationsMap.value || {};
+  const byConn = new Map();
+  for (const [connKey, scope] of Object.entries(rawMap)) {
+    if (!scope || typeof scope !== "object") continue;
+    const dbMap = new Map();
+    for (const dbName of Object.keys(scope)) {
+      const decoration = resolveDatabaseDecoration(rawMap, connKey, dbName);
+      if (!decoration) continue;
+      const textColor = databaseTextColorCss(decoration.textColor);
+      dbMap.set(dbName, {
+        decoration,
+        icon: databaseDecorationIconComponent(decoration.icon),
+        tableIcon: databaseTableIconComponent(decoration),
+        markerStyle: decoration.color ? { color: decoration.color } : undefined,
+        textStyle: textColor ? { color: textColor } : undefined,
+      });
+    }
+    if (dbMap.size) byConn.set(connKey, dbMap);
+  }
+  return byConn;
+});
+
+function cachedDatabaseDisplay(connectionId, database) {
+  const scope = databaseDecorationCache.value.get(String(connectionId || "default"));
+  return scope ? scope.get(String(database || "")) || null : null;
+}
 
 function databaseDecoration(connectionId, database) {
-  return getDatabaseDecoration(connectionId, database);
+  return cachedDatabaseDisplay(connectionId, database)?.decoration ?? getDatabaseDecoration(connectionId, database);
 }
 
 function connectionTreeIcon(connection) {
   return connectionIconComponent(connection);
 }
 
+function connectionEngineBadge(connection) {
+  const kind = normalizeConnectionKind(connection?.kind, connection?.url);
+  return kind === CONNECTION_KINDS.mysql.kind ? "" : connectionKindBadge(kind);
+}
+
 function databaseTreeIcon(connectionId, database) {
-  const decoration = databaseDecoration(connectionId, database);
-  return databaseDecorationIconComponent(decoration?.icon);
+  return cachedDatabaseDisplay(connectionId, database)?.icon || databaseDecorationIconComponent();
 }
 
 function tableTreeIcon(connectionId, database) {
-  return databaseTableIconComponent(databaseDecoration(connectionId, database));
+  return cachedDatabaseDisplay(connectionId, database)?.tableIcon || databaseTableIconComponent(null);
 }
 
 function databaseMarkerStyle(connectionId, database) {
-  const color = databaseDecoration(connectionId, database)?.color;
-  return color ? { color } : undefined;
+  return cachedDatabaseDisplay(connectionId, database)?.markerStyle;
 }
 
 function databaseTextStyle(connectionId, database) {
-  const color = databaseTextColorCss(databaseDecoration(connectionId, database)?.textColor);
-  return color ? { color } : undefined;
+  return cachedDatabaseDisplay(connectionId, database)?.textStyle;
 }
 
 const treeState = reactive(createSidebarTreeState());
@@ -237,7 +271,7 @@ const areAllCollapsed = computed(() =>
   areAllConnectionsCollapsed(
     treeState,
     props.connections.map((c) => c.id),
-    props.selectedConnectionId,
+    effectiveActiveConnectionId.value,
   ),
 );
 
@@ -640,7 +674,7 @@ function connectionFetchError(connectionId) {
 
 // A closed connection unfolds only to show it opening or why it failed to.
 function isConnectionBranchShown(connection) {
-  if (!isConnectionExpanded(treeState, connection.id, props.selectedConnectionId)) return false;
+  if (!isConnectionExpanded(treeState, connection.id, effectiveActiveConnectionId.value)) return false;
   return !connection.closed || isConnectionLoading(connection.id) || Boolean(connectionFetchError(connection.id));
 }
 
@@ -766,7 +800,7 @@ const treeViewportHeight = ref(0);
 const visibleDatabaseCount = computed(() => {
   let count = 0;
   for (const conn of previewConnections.value) {
-    if (isConnectionExpanded(treeState, conn.id, props.selectedConnectionId)) {
+    if (isConnectionExpanded(treeState, conn.id, effectiveActiveConnectionId.value)) {
       count += databasesForConnection(conn.id).length;
     }
   }
@@ -792,67 +826,68 @@ const tableBranchMinHeight = computed(() => {
   return `${height}px`;
 });
 
-watch(
-  () => props.activeTab?.id,
-  async () => {
-    const tab = props.activeTab;
-    if (!tab) return;
-    if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
-    revealActiveTable();
-  },
-);
-
-let pendingSidebarClickAnchor = null;
-
-watch(
-  () => [props.selectedConnectionId, props.selectedDatabase],
-  ([connectionId, database], [previousConnectionId, previousDatabase]) => {
-    if (connectionId && connectionId !== previousConnectionId) {
-      revealSelectedConnection(treeState, connectionId);
-      revealConnectionGroup(connectionId);
-    }
-    settleDatabaseExpansion(treeState, connectionId, database);
-    if (!connectionId || !database) return;
-    if (connectionId === previousConnectionId && database === previousDatabase) return;
-    const key = databaseRowKey(connectionId, database);
-    const anchorOffset = pendingSidebarClickAnchor?.key === key ? pendingSidebarClickAnchor.offset : null;
-    pendingSidebarClickAnchor = null;
-    if (!treeState.collapsedConnectionIds.has(connectionId)) {
-      revealSelectedDatabase(anchorOffset !== null ? { anchorViewportOffset: anchorOffset } : undefined);
-    }
-    nextTick(() => revealActiveTable());
-  },
-);
-
-// 只在「进入搜索态」（空 → 非空）时把表区带回顶部，再在下一帧校正首个结果。
-// 这既避开虚拟表列表卸载与搜索结果挂载之间的布局竞争，也完全不触碰数据库导航滚动。
-let wasSearching = false;
-watch(
-  () => props.treeQuery,
-  (query) => {
-    const nowSearching = !!(query || "").trim();
-    const entering = nowSearching && !wasSearching;
-    wasSearching = nowSearching;
-    if (!entering) return;
-    nextTick(() => {
-      const container = tableScrollElement();
-      if (!container) return;
-      if (typeof container.scrollTo === "function") container.scrollTo({ top: 0, behavior: "auto" });
-      else container.scrollTop = 0;
-      requestAnimationFrame(() => {
-        revealSidebarSearchResults(tableScrollElement(), { smooth: false });
-      });
-    });
-  },
-);
-
 // The highlighted "current" database follows the active tab right away; the
 // selected source catches up in the background (tabSourceSync), and covers
 // tabs without a database of their own.
-const currentDatabaseKey = computed(() => {
+const currentDatabaseTarget = computed(() => {
   const tab = props.activeTab;
-  if (tab?.database) return databaseRowKey(tab.connectionId || props.selectedConnectionId, tab.database);
-  return props.selectedDatabase ? databaseRowKey(props.selectedConnectionId, props.selectedDatabase) : "";
+  if (tab?.database) {
+    return {
+      connectionId: String(tab.connectionId || props.selectedConnectionId || ""),
+      database: String(tab.database || ""),
+    };
+  }
+  if (props.selectedConnectionId && props.selectedDatabase) {
+    return {
+      connectionId: String(props.selectedConnectionId),
+      database: String(props.selectedDatabase),
+    };
+  }
+  return { connectionId: "", database: "" };
+});
+
+const currentDatabaseKey = computed(() => {
+  const { connectionId, database } = currentDatabaseTarget.value;
+  return database ? databaseRowKey(connectionId, database) : "";
+});
+
+const effectiveActiveConnectionId = computed(
+  () => currentDatabaseTarget.value.connectionId || props.selectedConnectionId,
+);
+
+const expandedDatabaseConnectionId = computed(() => {
+  const key = treeState.expandedDatabaseKey;
+  if (!key) return "";
+  const separator = key.indexOf("\u001f");
+  return separator > 0 ? key.slice(0, separator) : "";
+});
+
+let tableBranchMemoSeq = 0;
+const activeTableBranchMemo = computed(() => {
+  void treeState.expandedDatabaseKey;
+  void treeState.pendingDatabaseKey;
+  void props.selectedConnectionId;
+  void props.selectedDatabase;
+  void props.treeQuery;
+  void props.busy;
+  void props.activeTab?.id;
+  void props.activeTab?.tableName;
+  void tableVirtualRange.value.start;
+  void tableVirtualRange.value.end;
+  void tableVirtualRange.value.totalHeight;
+  void renderedVisibleTables.value;
+  void effectiveSchemaSearchResults.value;
+  void effectiveSearchState.value.valueLoading;
+  void effectiveSearchState.value.valueResults;
+  void effectiveSearchState.value.valueProgress;
+  void effectiveSearchState.value.valueError;
+  void effectiveSearchState.value.selectedIndex;
+  void tableSelection.isMultiple.value;
+  void tableSelection.selectedSet.value;
+  void foldLocaleTables.value;
+  void expandedLocaleBases.value;
+  void sidebarLocaleFold.value;
+  return ++tableBranchMemoSeq;
 });
 
 function isCurrentDatabase(connectionId, database) {
@@ -879,21 +914,168 @@ function getDatabaseRowRefSetter(connectionId, database) {
   return setter;
 }
 
-// 外部入口切换数据库时只做 nearest reveal，绝不把数据库吸到导航区顶部；
+const EXTERNAL_REVEAL_MARGIN = 36;
+let pendingSidebarClickAnchor = null;
+const pendingRevealRequest = shallowRef(null);
+let lastAutoRevealedKey = "";
+
+// 外部入口切换数据库时做带上下文留白的 nearest reveal，绝不把数据库强行吸顶；
 // 直接在侧栏点击已滚动树中的数据库行时，锚定鼠标下的行视口偏移，防止上方分支收起时整行跳走。
 const selectedDatabaseFollower = createSidebarRowFollower({
   getContainer: () => treeNavRef.value,
-  getRow: () => databaseRowRefs.get(databaseRowKey(props.selectedConnectionId, props.selectedDatabase)),
+  getRow: () => {
+    const key = pendingRevealRequest.value?.key || currentDatabaseKey.value || databaseRowKey(props.selectedConnectionId, props.selectedDatabase);
+    return key ? databaseRowRefs.get(key) : null;
+  },
 });
 
-function revealSelectedDatabase(options) {
-  if (props.selectedConnectionId) {
-    revealSelectedConnection(treeState, props.selectedConnectionId);
-    revealConnectionGroup(props.selectedConnectionId);
-  }
+function revealDatabaseRow(connectionId, database, options = {}) {
+  const connId = String(connectionId || "");
+  const db = String(database || "");
+  if (!connId || !db) return Promise.resolve(false);
+  revealSelectedConnection(treeState, connId);
+  revealConnectionGroup(connId);
+  const key = databaseRowKey(connId, db);
+  const request = {
+    key,
+    connectionId: connId,
+    database: db,
+    options,
+    revealed: false,
+    scheduled: true,
+  };
+  pendingRevealRequest.value = request;
+  lastAutoRevealedKey = key;
   // After the DOM update, so the branch transitions of this change have begun.
-  return nextTick(() => selectedDatabaseFollower.follow(options));
+  return nextTick(() => {
+    request.scheduled = false;
+    if (pendingRevealRequest.value !== request) return false;
+    return selectedDatabaseFollower.follow({
+      ...options,
+      getRow: () => databaseRowRefs.get(key) || null,
+      onRowFound: () => {
+        if (pendingRevealRequest.value === request) request.revealed = true;
+      },
+      onUserScroll: () => {
+        if (pendingRevealRequest.value === request) pendingRevealRequest.value = null;
+      },
+    });
+  });
 }
+
+function revealSelectedDatabase(options) {
+  const target = currentDatabaseTarget.value;
+  const connId = target.connectionId || props.selectedConnectionId;
+  const db = target.database || props.selectedDatabase;
+  if (!connId || !db) {
+    if (connId) {
+      revealSelectedConnection(treeState, connId);
+      revealConnectionGroup(connId);
+    }
+    return nextTick(() => selectedDatabaseFollower.follow(options));
+  }
+  const mergedOptions = options?.anchorViewportOffset !== undefined
+    ? options
+    : { margin: EXTERNAL_REVEAL_MARGIN, ...options };
+  return revealDatabaseRow(connId, db, mergedOptions);
+}
+
+watch(
+  () => props.activeTab?.id,
+  async () => {
+    const tab = props.activeTab;
+    if (!tab) return;
+    if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
+    revealActiveTable();
+  },
+);
+
+// React immediately when the active database target changes (rail tile, tab
+// switch, favorites, Quick Open, or sidebar click) without waiting for a
+// cross-connection list_databases round trip.
+watch(
+  () => [currentDatabaseTarget.value.connectionId, currentDatabaseTarget.value.database],
+  ([connectionId, database], [previousConnectionId, previousDatabase]) => {
+    if (!connectionId || !database) return;
+    if (connectionId === previousConnectionId && database === previousDatabase) return;
+    const key = databaseRowKey(connectionId, database);
+    if (pendingSidebarClickAnchor?.key === key) {
+      const anchorOffset = pendingSidebarClickAnchor.offset;
+      pendingSidebarClickAnchor = null;
+      if (anchorOffset !== null && pendingRevealRequest.value?.key === key) return;
+      void revealDatabaseRow(connectionId, database, anchorOffset !== null ? { anchorViewportOffset: anchorOffset } : {});
+      return;
+    }
+    void revealDatabaseRow(connectionId, database, { margin: EXTERNAL_REVEAL_MARGIN });
+  },
+);
+
+watch(
+  () => [props.selectedConnectionId, props.selectedDatabase],
+  ([connectionId, database], [previousConnectionId, previousDatabase]) => {
+    if (connectionId && connectionId !== previousConnectionId) {
+      revealSelectedConnection(treeState, connectionId);
+      revealConnectionGroup(connectionId);
+    }
+    settleDatabaseExpansion(treeState, connectionId, database);
+    if (!connectionId || !database) return;
+    if (connectionId === previousConnectionId && database === previousDatabase) return;
+    const key = databaseRowKey(connectionId, database);
+    if (pendingSidebarClickAnchor?.key === key) {
+      const anchorOffset = pendingSidebarClickAnchor.offset;
+      pendingSidebarClickAnchor = null;
+      if (anchorOffset === null || pendingRevealRequest.value?.key !== key) {
+        void revealDatabaseRow(connectionId, database, anchorOffset !== null ? { anchorViewportOffset: anchorOffset } : {});
+      }
+    } else if (lastAutoRevealedKey !== key) {
+      void revealDatabaseRow(connectionId, database, { margin: EXTERNAL_REVEAL_MARGIN });
+    } else if (
+      pendingRevealRequest.value?.key === key
+      && !pendingRevealRequest.value.revealed
+      && !pendingRevealRequest.value.scheduled
+    ) {
+      void revealDatabaseRow(connectionId, database, pendingRevealRequest.value.options);
+    }
+    nextTick(() => revealActiveTable());
+  },
+);
+
+// If a target connection's database list arrives late (e.g. slow remote
+// list_databases exceeding the follower's animation timeout), finish revealing
+// the target row as soon as it mounts.
+watch(
+  () => {
+    const req = pendingRevealRequest.value;
+    return req && !req.revealed ? rawDatabasesForConnection(req.connectionId).length : 0;
+  },
+  (count) => {
+    const req = pendingRevealRequest.value;
+    if (!count || !req || req.revealed || req.scheduled) return;
+    void revealDatabaseRow(req.connectionId, req.database, req.options);
+  },
+);
+
+// 只在「进入搜索态」（空 → 非空）时把表区带回顶部，再在下一帧校正首个结果。
+// 这既避开虚拟表列表卸载与搜索结果挂载之间的布局竞争，也完全不触碰数据库导航滚动。
+let wasSearching = false;
+watch(
+  () => props.treeQuery,
+  (query) => {
+    const nowSearching = !!(query || "").trim();
+    const entering = nowSearching && !wasSearching;
+    wasSearching = nowSearching;
+    if (!entering) return;
+    nextTick(() => {
+      const container = tableScrollElement();
+      if (!container) return;
+      if (typeof container.scrollTo === "function") container.scrollTo({ top: 0, behavior: "auto" });
+      else container.scrollTop = 0;
+      requestAnimationFrame(() => {
+        revealSidebarSearchResults(tableScrollElement(), { smooth: false });
+      });
+    });
+  },
+);
 
 // A collapsed sidebar has no layout to measure; a database chosen meanwhile
 // is brought into view when the tree is shown again.
@@ -911,35 +1093,50 @@ onMounted(() => {
 onBeforeUnmount(() => {
   treeVisibilityObserver?.disconnect();
   selectedDatabaseFollower.stop();
+  databaseRowRefs.clear();
+  databaseRowRefSetters.clear();
 });
 
 // 把当前 tab 对应的表滚动到侧栏可视区内，并预留上下边距。
 // 表列表已虚拟化：离屏行没有 DOM，因此按表在列表中的下标计算滚动位置，
-// 而不是查询 DOM 元素。跨连接/数据库切换时表数据异步加载，故带有限次重试。
-function revealActiveTable() {
+// 并在跨库异步加载表列表完成后响应式补定位（不再依赖有限帧轮询）。
+const pendingActiveTableReveal = ref("");
+
+function tryRevealPendingActiveTable() {
+  const pendingKey = pendingActiveTableReveal.value;
+  if (!pendingKey) return false;
   const tab = props.activeTab;
   const container = tableScrollElement();
-  if (!tab || !container) return;
-  if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
-
-  const MAX_ATTEMPTS = 8;
-
-  const attempt = (count) => {
-    if (count > MAX_ATTEMPTS) return;
-    const index = filteredTables.value.findIndex(
-      (table) => (table.tableName || table.table_name) === tab.tableName,
-    );
-    if (index < 0) {
-      // 表尚未进入列表（展开/加载未完成），下一帧再试。
-      requestAnimationFrame(() => attempt(count + 1));
-      return;
-    }
-    // 表区独立滚动；按整行高度留出 1 行上下文，避免自动定位时把上方相邻行截断半截。
-    scrollTableIntoView(index, { margin: tableRowHeight.value });
-  };
-
-  void nextTick(() => attempt(1));
+  if (!tab?.tableName || !container) return false;
+  if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return false;
+  const expectedKey = `${tab.connectionId}\u001f${tab.database}\u001f${tab.tableName}`;
+  if (pendingKey !== expectedKey) return false;
+  const index = filteredTables.value.findIndex(
+    (table) => (table.tableName || table.table_name) === tab.tableName,
+  );
+  if (index < 0) return false;
+  pendingActiveTableReveal.value = "";
+  // 表区独立滚动；按整行高度留出 1 行上下文，避免自动定位时把上方相邻行截断半截。
+  scrollTableIntoView(index, { margin: tableRowHeight.value });
+  return true;
 }
+
+function revealActiveTable() {
+  const tab = props.activeTab;
+  if (!tab?.tableName) {
+    pendingActiveTableReveal.value = "";
+    return;
+  }
+  if (tab.connectionId !== props.selectedConnectionId || tab.database !== props.selectedDatabase) return;
+  pendingActiveTableReveal.value = `${tab.connectionId}\u001f${tab.database}\u001f${tab.tableName}`;
+  void nextTick(() => tryRevealPendingActiveTable());
+}
+
+watch([filteredTables, tableScrollRef], () => {
+  if (pendingActiveTableReveal.value) {
+    void nextTick(() => tryRevealPendingActiveTable());
+  }
+});
 
 // Opening a closed connection unfolds it; the databases follow once connected.
 function openConnectionRow(connectionId) {
@@ -949,10 +1146,11 @@ function openConnectionRow(connectionId) {
 
 function onConnectionClick(connectionId) {
   const connection = props.connections.find((item) => item.id === connectionId);
+  const activeConnId = effectiveActiveConnectionId.value;
   if (connection?.closed) {
     if (isConnectionLoading(connectionId)) return;
-    if (isConnectionExpanded(treeState, connectionId, props.selectedConnectionId) && connectionFetchError(connectionId)) {
-      toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId);
+    if (isConnectionExpanded(treeState, connectionId, activeConnId) && connectionFetchError(connectionId)) {
+      toggleConnectionExpansion(treeState, connectionId, activeConnId);
       return;
     }
     openConnectionRow(connectionId);
@@ -963,8 +1161,8 @@ function onConnectionClick(connectionId) {
     emit("select-connection", connectionId);
     return;
   }
-  toggleConnectionExpansion(treeState, connectionId, props.selectedConnectionId);
-  if (!isConnectionExpanded(treeState, connectionId, props.selectedConnectionId)) {
+  toggleConnectionExpansion(treeState, connectionId, activeConnId);
+  if (!isConnectionExpanded(treeState, connectionId, activeConnId)) {
     return;
   }
   if (!props.selectedDatabase && shouldEmitSidebarDatabaseOpen({ activeTab: props.activeTab })) {
@@ -996,13 +1194,19 @@ function onDatabaseClick(connectionId, database, event) {
     return;
   }
   const anchorOffset = captureRowViewportOffset(event);
-  pendingSidebarClickAnchor = anchorOffset !== null
-    ? { key: databaseRowKey(connectionId, database), offset: anchorOffset }
-    : null;
+  const key = databaseRowKey(connectionId, database);
+  pendingSidebarClickAnchor = { key, offset: anchorOffset };
+  // Keep the previously expanded connection open when clicking a database under
+  // another connection in the sidebar so rows above never collapse out from
+  // under the user's cursor.
+  const prevActiveConn = effectiveActiveConnectionId.value;
+  if (prevActiveConn && prevActiveConn !== connectionId && isConnectionExpanded(treeState, prevActiveConn, prevActiveConn)) {
+    revealConnection(treeState, prevActiveConn);
+  }
   revealConnection(treeState, connectionId);
   revealDatabase(treeState, connectionId, database);
   if (anchorOffset !== null) {
-    void revealSelectedDatabase({ anchorViewportOffset: anchorOffset });
+    void revealDatabaseRow(connectionId, database, { anchorViewportOffset: anchorOffset });
   }
   emit("select-database", { connectionId, database });
 }
@@ -1223,10 +1427,14 @@ function isDragTarget(kind, id, connectionId = "") {
   return true;
 }
 
+const EMPTY_DRAG_CLASS = Object.freeze({});
+
 function dragNodeClass(kind, id, connectionId = "") {
+  if (!dragState.kind) return EMPTY_DRAG_CLASS;
   const source = isDragSource(kind, id, connectionId);
   const targetBefore = isDragTarget(kind, id, connectionId) && dragState.targetPosition === "before";
   const targetAfter = isDragTarget(kind, id, connectionId) && dragState.targetPosition === "after";
+  if (!source && !targetBefore && !targetAfter) return EMPTY_DRAG_CLASS;
   return {
     "is-drag-ghost": source,
     "is-drop-before": targetBefore,
@@ -1235,8 +1443,10 @@ function dragNodeClass(kind, id, connectionId = "") {
 }
 
 function dragRowClass(kind, id, connectionId = "") {
+  if (!dragState.kind) return EMPTY_DRAG_CLASS;
   const source = isDragSource(kind, id, connectionId);
   const target = isDragTarget(kind, id, connectionId);
+  if (!source && !target) return EMPTY_DRAG_CLASS;
   return {
     "is-dragging-source": source,
     "is-drag-over": target,
@@ -1437,6 +1647,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
     <nav
       ref="treeNavRef"
       class="wb-source-tree"
+      :class="{ 'is-dragging': Boolean(dragState.kind) }"
       :style="{ '--wb-tree-table-min-h': tableBranchMinHeight }"
       :aria-label="t('m_46770f47d1a3')"
     >
@@ -1451,6 +1662,42 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
         <section
           v-for="{ key, kind: itemKind, group, connection, groupId: itemGroupId, groupEnd } in treeItems"
           :key="key"
+          v-memo="itemKind === 'group'
+            ? [
+              group.id,
+              group.name,
+              group.collapsed,
+              group.connections.length,
+              isGroupOpen(group),
+              groupRename.id === group.id ? `${groupRename.draft}\u001f${groupRename.error}` : '',
+              dragState.kind === 'group' || dragState.kind === 'connection'
+                ? `${dragState.kind}|${dragState.sourceId}|${dragState.targetId}|${dragState.targetPosition}|${isGroupDropTarget(group)}`
+                : '',
+            ]
+            : [
+              connection.id,
+              connection.label,
+              connection.connected,
+              connection.closed,
+              connection.kind,
+              itemGroupId,
+              groupEnd,
+              connection.id === selectedConnectionId,
+              connection.id === effectiveActiveConnectionId,
+              isConnectionBranchShown(connection),
+              connection.id === currentDatabaseTarget.connectionId ? currentDatabaseKey : '',
+              isConnectionBranchShown(connection) ? databasesForConnection(connection.id) : null,
+              isConnectionBranchShown(connection) ? isConnectionLoading(connection.id) : false,
+              isConnectionBranchShown(connection) ? connectionFetchError(connection.id) : null,
+              connection.id === expandedDatabaseConnectionId ? activeTableBranchMemo : 0,
+              dragState.kind === 'connection' || dragState.kind === 'group'
+                || (dragState.kind === 'database' && (!dragState.connectionId || dragState.connectionId === connection.id))
+                ? `${dragState.kind}|${dragState.sourceId}|${dragState.targetId}|${dragState.targetPosition}|${dragState.targetGroupId}`
+                : '',
+              connectionAliases,
+              isConnectionBranchShown(connection) ? databaseAliases : null,
+              isConnectionBranchShown(connection) ? databaseDecorationsMap : null,
+            ]"
           :data-connection-id="connection?.id"
           :data-connection-group-id="group?.id"
           :class="itemKind === 'group'
@@ -1511,11 +1758,12 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
                 active: connection.id === selectedConnectionId,
                 'is-connected': !connection.closed && connection.connected !== false,
                 'is-closed': connection.closed,
+                'has-engine-badge': Boolean(connectionEngineBadge(connection)),
               },
               dragRowClass('connection', connection.id),
             ]"
             :title="connectionTooltip(connection)"
-            :aria-expanded="isConnectionExpanded(treeState, connection.id, selectedConnectionId) && isConnectionBranchShown(connection)"
+            :aria-expanded="isConnectionExpanded(treeState, connection.id, effectiveActiveConnectionId) && isConnectionBranchShown(connection)"
             draggable="true"
             @dragstart.stop="startSidebarDrag('connection', connection.id, $event)"
             @dragover.prevent.stop="markConnectionDragTarget(connection.id, itemGroupId, $event)"
@@ -1531,6 +1779,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
               <span class="wb-tree-label">{{ connectionLabel(connection.id, connection.label) }}</span>
               <span v-if="getConnectionAlias(connection.id)" class="wb-alias-realname">{{ connection.label }}</span>
             </span>
+            <span v-if="connectionEngineBadge(connection)" class="wb-connection-engine-badge">{{ connectionEngineBadge(connection) }}</span>
             <span v-if="connection.closed" class="wb-visually-hidden">{{ t("connectionGroup.closedState") }}</span>
           </button>
 
@@ -1546,6 +1795,17 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
               <section
                 v-for="database in databasesForConnection(connection.id)"
                 :key="database"
+                v-memo="[
+                  database,
+                  isCurrentDatabase(connection.id, database),
+                  isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase),
+                  isDatabaseExpanded(treeState, connection.id, database, selectedConnectionId, selectedDatabase) ? activeTableBranchMemo : 0,
+                  dragState.kind === 'database' && (!dragState.connectionId || dragState.connectionId === connection.id)
+                    ? `${dragState.sourceId}|${dragState.targetId}|${dragState.targetPosition}`
+                    : '',
+                  databaseAliases,
+                  databaseDecorationsMap,
+                ]"
                 class="wb-source-database"
                 :class="[
                   dragNodeClass('database', database, connection.id),

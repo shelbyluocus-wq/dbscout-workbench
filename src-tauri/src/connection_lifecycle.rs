@@ -7,6 +7,8 @@
 //! connections, so keeping closed ones counted keeps the ids of the others
 //! (and the aliases, order and groups keyed by them) stable.
 
+use reqwest::Url;
+use serde::Deserialize;
 use sqlx::MySqlPool;
 use tauri::{AppHandle, Emitter, State};
 
@@ -23,6 +25,51 @@ use crate::types::{AppState, DatabaseKind, RuntimeConnection, RuntimeState};
 
 const MYSQL_SYSTEM_DATABASES: [&str; 4] =
     ["information_schema", "mysql", "performance_schema", "sys"];
+
+fn decode_percent_component(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = &raw[index + 1..index + 3];
+            if let Ok(value) = u8::from_str_radix(hex, 16) {
+                out.push(value);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| raw.to_string())
+}
+
+pub(crate) fn describe_mysql_url(raw: &str) -> (String, u16, String) {
+    let Ok(url) = Url::parse(raw) else {
+        return ("configured".to_string(), 3306, "mysql".to_string());
+    };
+    let host = url
+        .host_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "configured".to_string());
+    let port = url.port().unwrap_or(3306);
+    let username = if url.username().is_empty() {
+        "mysql".to_string()
+    } else {
+        decode_percent_component(url.username())
+    };
+    (host, port, username)
+}
+
+fn describe_connection_url(kind: DatabaseKind, url: &str) -> Result<(String, u16, String), String> {
+    match kind {
+        DatabaseKind::MySql => Ok(describe_mysql_url(url)),
+        DatabaseKind::ClickHouse => clickhouse::describe_url(url),
+        DatabaseKind::MongoDb => mongodb::describe_url(url),
+    }
+}
 
 fn kind_naming(kind: DatabaseKind) -> (&'static str, &'static str) {
     match kind {
@@ -194,6 +241,7 @@ fn detach_for_close(
         .connections
         .remove(connection_id)
         .expect("connection was just found");
+    rt.pending_connections.remove(connection_id);
     rt.sessions.invalidate_connection(connection_id);
     reselect_after_detach(rt, connection_id);
     let mongodb_url = connection.mongodb_url.clone();
@@ -252,18 +300,176 @@ pub async fn open_connection(
         DatabaseKind::ClickHouse => (None, clickhouse::list_databases(&url).await?),
         DatabaseKind::MongoDb => (None, mongodb::list_databases(&url).await?),
     };
+    if let Some(pool) = pool {
+        let mut installed = false;
+        let pool_for_cleanup = pool.clone();
+        let attach_result = state
+            .resources
+            .get_or_connect_server(ServerPoolKey::new(&connection_id), || async {
+                installed = true;
+                Ok(pool)
+            })
+            .await;
+        if !installed {
+            pool_for_cleanup.close().await;
+        }
+        attach_result?;
+    }
     {
         let mut rt = state.runtime.lock().await;
         if !reopen_entry(&mut rt, &connection_id) {
             return Err("连接不存在".into());
         }
+        rt.pending_connections.remove(&connection_id);
     }
+    Ok(databases)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedConnectionSpec {
+    pub kind: Option<String>,
+    pub url: String,
+    #[serde(default)]
+    pub closed: bool,
+}
+
+fn register_saved_entry(
+    rt: &mut RuntimeState,
+    kind: DatabaseKind,
+    url: String,
+    host: String,
+    port: u16,
+    username: String,
+    closed: bool,
+) -> String {
+    if let Some(id) = find_open_id(rt, kind, &url) {
+        return id;
+    }
+    if let Some(id) = find_closed_id(rt, kind, &url) {
+        if !closed {
+            reopen_entry(rt, &id);
+            rt.pending_connections.insert(id.clone());
+        }
+        return id;
+    }
+    let number = next_connection_number(rt, kind);
+    let connection = new_runtime_connection(kind, number, url, host, port, username);
+    let id = connection.id.clone();
+    if closed {
+        rt.closed_connections.insert(id.clone(), connection);
+    } else {
+        rt.connections.insert(id.clone(), connection);
+        rt.pending_connections.insert(id.clone());
+    }
+    id
+}
+
+/// Reserves deterministic runtime ids for all saved connections in saved order
+/// without touching the network. Closed entries stay in `closed_connections`;
+/// open entries enter `connections` + `pending_connections` until connected.
+#[tauri::command]
+pub async fn register_saved_connections(
+    entries: Vec<SavedConnectionSpec>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let mut rt = state.runtime.lock().await;
+    let mut ids = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let trimmed = entry.url.trim();
+        if trimmed.is_empty() {
+            ids.push(String::new());
+            continue;
+        }
+        let kind = DatabaseKind::infer(entry.kind.as_deref(), trimmed);
+        let Ok((host, port, username)) = describe_connection_url(kind, trimmed) else {
+            ids.push(String::new());
+            continue;
+        };
+        ids.push(register_saved_entry(
+            &mut rt,
+            kind,
+            trimmed.to_string(),
+            host,
+            port,
+            username,
+            entry.closed,
+        ));
+    }
+    Ok(ids)
+}
+
+/// Updates credentials/address of an existing runtime connection in place
+/// without allocating a duplicate id. Tests the new credentials first so an
+/// invalid password never disturbs the existing runtime entry.
+#[tauri::command]
+pub async fn update_connection_credentials(
+    connection_id: String,
+    kind: Option<String>,
+    url: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let trimmed = url.trim().to_string();
+    let kind = DatabaseKind::infer(kind.as_deref(), &trimmed);
+    let (host, port, username) = describe_connection_url(kind, &trimmed)?;
+    let (pool, databases) = match kind {
+        DatabaseKind::MySql => {
+            let (pool, databases) = connect_mysql_server(&trimmed).await?;
+            (Some(pool), databases)
+        }
+        DatabaseKind::ClickHouse => (None, clickhouse::list_databases(&trimmed).await?),
+        DatabaseKind::MongoDb => (None, mongodb::list_databases(&trimmed).await?),
+    };
+
+    let old_mongo_url = {
+        let mut rt = state.runtime.lock().await;
+        if let Some(closed) = rt.closed_connections.remove(&connection_id) {
+            rt.connections.insert(connection_id.clone(), closed);
+        }
+        let Some(connection) = rt.connections.get_mut(&connection_id) else {
+            if let Some(pool) = pool {
+                pool.close().await;
+            }
+            return Err("连接不存在".into());
+        };
+        let previous_mongo = connection
+            .mongodb_url
+            .clone()
+            .filter(|old| kind != DatabaseKind::MongoDb || old != &trimmed);
+        connection.kind = kind;
+        connection.host = host;
+        connection.port = port;
+        connection.username = username;
+        connection.mysql_url = (kind == DatabaseKind::MySql).then(|| trimmed.clone());
+        connection.clickhouse_url = (kind == DatabaseKind::ClickHouse).then(|| trimmed.clone());
+        connection.mongodb_url = (kind == DatabaseKind::MongoDb).then(|| trimmed.clone());
+        rt.pending_connections.insert(connection_id.clone());
+        rt.sessions.invalidate_connection(&connection_id);
+        previous_mongo
+    };
+
+    release_connection_resources(
+        &app,
+        &state,
+        connection_id.clone(),
+        old_mongo_url,
+        "connection-reconnected",
+    )
+    .await;
+
     if let Some(pool) = pool {
         state
             .resources
             .get_or_connect_server(ServerPoolKey::new(&connection_id), || async { Ok(pool) })
             .await?;
     }
+
+    {
+        let mut rt = state.runtime.lock().await;
+        rt.pending_connections.remove(&connection_id);
+    }
+
     Ok(databases)
 }
 
@@ -294,11 +500,7 @@ pub async fn register_connection(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let kind = DatabaseKind::infer(kind.as_deref(), &url);
-    let (host, port, username) = match kind {
-        DatabaseKind::MySql => ("configured".to_string(), 3306, "mysql".to_string()),
-        DatabaseKind::ClickHouse => clickhouse::describe_url(&url)?,
-        DatabaseKind::MongoDb => mongodb::describe_url(&url)?,
-    };
+    let (host, port, username) = describe_connection_url(kind, &url)?;
     let mut rt = state.runtime.lock().await;
     Ok(register_entry(&mut rt, kind, url, host, port, username))
 }
@@ -408,5 +610,76 @@ mod tests {
         let id = rt.selected_connection_id.clone();
         assert!(detach_for_close(&mut rt, &id).is_err());
         assert!(rt.connections.contains_key(&id));
+    }
+
+    #[test]
+    fn describe_mysql_url_extracts_real_host_port_and_username() {
+        assert_eq!(
+            describe_mysql_url("mysql://game_cn:secret@127.0.0.1:13306"),
+            ("127.0.0.1".into(), 13306, "game_cn".into())
+        );
+        assert_eq!(
+            describe_mysql_url("mysql://ops%40admin:secret@192.168.1.243"),
+            ("192.168.1.243".into(), 3306, "ops@admin".into())
+        );
+        assert_eq!(
+            describe_mysql_url("not-a-url"),
+            ("configured".into(), 3306, "mysql".into())
+        );
+    }
+
+    #[test]
+    fn register_saved_entry_reserves_ids_in_order_and_tracks_pending_vs_closed() {
+        let mut rt = runtime();
+        let id1 = register_saved_entry(
+            &mut rt,
+            DatabaseKind::MySql,
+            "mysql://root:a@10.0.0.1:3306".into(),
+            "10.0.0.1".into(),
+            3306,
+            "root".into(),
+            false,
+        );
+        let id2 = register_saved_entry(
+            &mut rt,
+            DatabaseKind::MongoDb,
+            "mongodb://127.0.0.1:27117".into(),
+            "127.0.0.1".into(),
+            27117,
+            "".into(),
+            true,
+        );
+        let id3 = register_saved_entry(
+            &mut rt,
+            DatabaseKind::ClickHouse,
+            "http://default:@127.0.0.1:18123".into(),
+            "127.0.0.1".into(),
+            18123,
+            "default".into(),
+            false,
+        );
+        assert_eq!(id1, "mysql-1");
+        assert_eq!(id2, "mongodb-2");
+        assert_eq!(id3, "clickhouse-3");
+        assert!(rt.connections.contains_key(&id1));
+        assert!(rt.pending_connections.contains(&id1));
+        assert!(rt.closed_connections.contains_key(&id2));
+        assert!(!rt.pending_connections.contains(&id2));
+        assert!(rt.connections.contains_key(&id3));
+        assert!(rt.pending_connections.contains(&id3));
+
+        // Idempotent re-registration returns the exact same ids.
+        let again1 = register_saved_entry(
+            &mut rt,
+            DatabaseKind::MySql,
+            "mysql://root:a@10.0.0.1:3306".into(),
+            "10.0.0.1".into(),
+            3306,
+            "root".into(),
+            false,
+        );
+        assert_eq!(again1, id1);
+        assert_eq!(rt.connections.len(), 2);
+        assert_eq!(rt.closed_connections.len(), 1);
     }
 }

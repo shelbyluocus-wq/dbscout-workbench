@@ -14313,7 +14313,7 @@ label:has(input[type="checkbox"]:disabled) {
   opacity: 0;
 }
 
-.wb-source-tree:has(.is-dragging-source) .wb-tree-row {
+.wb-source-tree.is-dragging .wb-tree-row {
   cursor: grabbing;
 }
 
@@ -14386,6 +14386,25 @@ label:has(input[type="checkbox"]:disabled) {
 
 .wb-connection-node .wb-tree-chevron.is-open {
   transform: rotate(90deg);
+}
+
+.wb-connection-node.has-engine-badge {
+  grid-template-columns: var(--wb-tree-icon-width) minmax(0, 1fr) auto;
+}
+
+.wb-connection-engine-badge {
+  flex: none;
+  padding-inline: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wb-text) 7%, transparent);
+  color: var(--wb-quiet-text);
+  font-size: var(--wb-fs-micro);
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.wb-connection-node.is-closed .wb-connection-engine-badge {
+  color: var(--wb-disabled);
 }
 
 /* Connected servers light up their icon in the online green tone and keep
@@ -14752,6 +14771,10 @@ label:has(input[type="checkbox"]:disabled) {
   animation: 3.2s cubic-bezier(0.25, 0.5, 0.55, 0.85) infinite;
 }
 
+.wb-branch-enter-active .wb-current-db-halo-trail,
+.wb-branch-enter-active .wb-current-db-halo-head,
+.wb-branch-leave-active .wb-current-db-halo-trail,
+.wb-branch-leave-active .wb-current-db-halo-head,
 .wb-sidebar.is-collapsed .wb-current-db-halo-trail,
 .wb-sidebar.is-collapsed .wb-current-db-halo-head,
 .wb-sidebar.is-pane-animating .wb-current-db-halo-trail,
@@ -31106,3 +31129,4 @@ button.wb-table-mention:active {
   outline: 2px solid var(--wb-accent);
   outline-offset: 1px;
 }
+

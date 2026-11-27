@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::OnceLock, time::Duration};
 
 use reqwest::Url;
 use serde_json::Value;
@@ -80,7 +80,23 @@ pub fn describe_url(raw: &str) -> Result<(String, u16, String), String> {
     Ok((host, port, username))
 }
 
-const CLICKHOUSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+const CLICKHOUSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+const CLICKHOUSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn shared_http_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(CLICKHOUSE_CONNECT_TIMEOUT)
+                .timeout(CLICKHOUSE_REQUEST_TIMEOUT)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .build()
+                .map_err(|error| format!("初始化 ClickHouse 客户端失败: {error}"))
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
 
 #[derive(Clone, Copy)]
 enum ClickHouseQueryKind {
@@ -135,11 +151,7 @@ async fn execute_json_query_inner(
     perf: Option<(&PerformanceRecorder, &PerfContext)>,
 ) -> Result<Value, String> {
     let (url, auth) = parse_http_url(url)?;
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(3))
-        .timeout(CLICKHOUSE_REQUEST_TIMEOUT)
-        .build()
-        .map_err(|error| format!("初始化 ClickHouse 客户端失败: {error}"))?;
+    let client = shared_http_client()?;
     let mut request = client.post(url).body(sql.to_string());
     if let Some((username, password)) = auth {
         request = request.basic_auth(username, Some(password));

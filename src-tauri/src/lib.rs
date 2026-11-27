@@ -296,6 +296,8 @@ pub fn run() {
             connection_lifecycle::close_connection,
             connection_lifecycle::open_connection,
             connection_lifecycle::register_connection,
+            connection_lifecycle::register_saved_connections,
+            connection_lifecycle::update_connection_credentials,
             navicat_import::scan_navicat_connections,
             navicat_import::import_navicat_ncx_file,
             commands::save_export_file,

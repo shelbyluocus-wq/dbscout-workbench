@@ -101,7 +101,8 @@ export function isConnFormComplete(dialog) {
 
 export function isConnTestReady(dialog) {
   if (!isConnFormComplete(dialog)) return false;
-  if (normalizeConnectionKind(dialog?.kind) === CONNECTION_KINDS.mongodb.kind) return true;
+  const kind = normalizeConnectionKind(dialog?.kind);
+  if (kind === CONNECTION_KINDS.mongodb.kind || kind === CONNECTION_KINDS.clickhouse.kind) return true;
   return Boolean(String(dialog?.password ?? "").length);
 }
 

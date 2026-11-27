@@ -34,16 +34,24 @@ function isSearchBoxInView(container, searchBox) {
 /**
  * Reveals a database row with nearest-edge semantics without pinning it to the top.
  * The outer navigation moves only when the row is actually clipped.
+ * An optional `margin` adds breathing room only when the row was off-screen,
+ * keeping parent connection headers or neighboring rows visible after a jump.
  */
-export function revealSidebarNavigationRow(container, row, { behavior = "auto" } = {}) {
+export function revealSidebarNavigationRow(container, row, { behavior = "auto", margin = 0 } = {}) {
   if (!container || !row) return false;
   const containerRect = container.getBoundingClientRect?.() || { top: 0, bottom: 0 };
   const rowRect = row.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+  const viewportHeight = Math.max(0, Number(containerRect.bottom) - Number(containerRect.top));
+  const rowHeight = Math.max(0, Number(rowRect.bottom) - Number(rowRect.top));
+  const clampedMargin = Math.min(
+    Math.max(0, Number(margin) || 0),
+    Math.max(0, Math.floor((viewportHeight - rowHeight) / 2)),
+  );
   let delta = 0;
   if (Number(rowRect.top) < Number(containerRect.top)) {
-    delta = Number(rowRect.top) - Number(containerRect.top);
+    delta = Number(rowRect.top) - Number(containerRect.top) - clampedMargin;
   } else if (Number(rowRect.bottom) > Number(containerRect.bottom)) {
-    delta = Number(rowRect.bottom) - Number(containerRect.bottom);
+    delta = Number(rowRect.bottom) - Number(containerRect.bottom) + clampedMargin;
   }
   if (!delta) return false;
   scrollToTop(container, (Number(container.scrollTop) || 0) + delta, behavior);
@@ -64,14 +72,6 @@ const FOLLOW_USER_SCROLL_EVENTS = ["wheel", "touchmove"];
 function isLaidOut(container) {
   const rect = container?.getBoundingClientRect?.();
   return !!rect && Number(rect.bottom) - Number(rect.top) > 0;
-}
-
-// The row's position in the scrolled content, so scrolling done by the
-// follower itself never reads as the tree still moving.
-function rowContentOffset(container, row) {
-  const containerRect = container.getBoundingClientRect?.() || { top: 0 };
-  const rowRect = row.getBoundingClientRect?.() || { top: 0 };
-  return Number(rowRect.top) - Number(containerRect.top) + (Number(container.scrollTop) || 0);
 }
 
 function isTreeAnimating(container) {
@@ -112,6 +112,7 @@ export function createSidebarRowFollower({
   let frame = null;
   let releaseUserScroll = null;
   let waiting = false;
+  let pendingOptions = null;
 
   function end() {
     if (frame !== null) cancelFrame(frame);
@@ -122,45 +123,84 @@ export function createSidebarRowFollower({
 
   function stop() {
     waiting = false;
+    pendingOptions = null;
     end();
   }
 
   function follow(options = {}) {
     end();
+    pendingOptions = options || {};
     const container = getContainer();
-    const anchorOffset = Number.isFinite(options?.anchorViewportOffset)
-      ? Number(options.anchorViewportOffset)
+    const resolveRow = typeof pendingOptions.getRow === "function" ? pendingOptions.getRow : getRow;
+    const anchorOffset = Number.isFinite(pendingOptions.anchorViewportOffset)
+      ? Number(pendingOptions.anchorViewportOffset)
       : null;
+    const margin = Number.isFinite(pendingOptions.margin) ? Math.max(0, Number(pendingOptions.margin)) : 0;
+    const onUserAbort = typeof pendingOptions.onUserScroll === "function" ? pendingOptions.onUserScroll : null;
+    const onRowFound = typeof pendingOptions.onRowFound === "function" ? pendingOptions.onRowFound : null;
+
     waiting = !isLaidOut(container);
     if (waiting) return false;
 
     const startedAt = now();
     let settled = 0;
+    let rowSeen = false;
     // Where the row was when it last moved. Comparing against this rather than
     // the previous frame keeps the slow tail of an easing curve, a fraction of
     // a pixel per frame, from passing for a row at rest.
     let restingOffset = null;
-    releaseUserScroll = onUserScroll(container, stop);
+    releaseUserScroll = onUserScroll(container, () => {
+      stop();
+      onUserAbort?.();
+    });
 
     const step = () => {
       frame = null;
-      if (!isLaidOut(container)) {
+      const containerRect = container?.getBoundingClientRect?.();
+      const viewportHeight = containerRect
+        ? Math.max(0, Number(containerRect.bottom) - Number(containerRect.top))
+        : 0;
+      if (!viewportHeight) {
         waiting = true;
         end();
         return;
       }
-      const row = getRow();
+      const row = resolveRow();
       let offset = null;
       if (row) {
-        offset = rowContentOffset(container, row);
+        if (!rowSeen) {
+          rowSeen = true;
+          onRowFound?.();
+        }
+        // Single DOM read pass + at most one scroll write to avoid forced
+        // read-write-read layout thrashing while branches animate.
+        const rowRect = row.getBoundingClientRect?.() || { top: 0, bottom: 0 };
+        const currentScrollTop = Number(container.scrollTop) || 0;
+        const rowTopInView = Number(rowRect.top) - Number(containerRect.top);
+        const rowBottomInView = Number(rowRect.bottom) - Number(containerRect.top);
+        const rowHeight = Math.max(0, rowBottomInView - rowTopInView);
+        offset = rowTopInView + currentScrollTop;
+
+        let nextScrollTop = currentScrollTop;
         if (anchorOffset !== null) {
           const desiredTop = Math.max(0, offset - anchorOffset);
-          if (Math.abs((Number(container.scrollTop) || 0) - desiredTop) >= 0.5) {
-            scrollToTop(container, desiredTop, "auto");
+          if (Math.abs(desiredTop - currentScrollTop) >= 0.5) {
+            nextScrollTop = desiredTop;
           }
         }
-        revealSidebarNavigationRow(container, row);
-        offset = rowContentOffset(container, row);
+        const projectedTop = offset - nextScrollTop;
+        const projectedBottom = projectedTop + rowHeight;
+        const clampedMargin = anchorOffset === null && margin > 0
+          ? Math.min(margin, Math.max(0, Math.floor((viewportHeight - rowHeight) / 2)))
+          : 0;
+        if (projectedTop < 0) {
+          nextScrollTop = Math.max(0, offset - clampedMargin);
+        } else if (projectedBottom > viewportHeight) {
+          nextScrollTop = Math.max(0, offset + rowHeight - viewportHeight + clampedMargin);
+        }
+        if (Math.abs(nextScrollTop - currentScrollTop) >= 0.5) {
+          scrollToTop(container, nextScrollTop, "auto");
+        }
       }
       if (offset !== null && restingOffset !== null && Math.abs(offset - restingOffset) < 0.5) {
         settled += 1;
@@ -169,15 +209,19 @@ export function createSidebarRowFollower({
         restingOffset = offset;
       }
       const atRest = settled >= settleFrames && !isAnimating(container);
-      if (atRest || now() - startedAt >= maxDuration) end();
-      else frame = requestFrame(step);
+      if (atRest || now() - startedAt >= maxDuration) {
+        if (atRest) pendingOptions = null;
+        end();
+      } else {
+        frame = requestFrame(step);
+      }
     };
     step();
     return true;
   }
 
   function resume() {
-    return waiting ? follow() : false;
+    return waiting ? follow(pendingOptions || {}) : false;
   }
 
   return { follow, resume, stop };

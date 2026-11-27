@@ -716,14 +716,22 @@ pub async fn list_connections(
         rt.connections
             .values()
             .cloned()
-            .map(|connection| (connection, false))
-            .chain(rt.closed_connections.values().cloned().map(|connection| (connection, true)))
+            .map(|connection| {
+                let pending = rt.pending_connections.contains(&connection.id);
+                (connection, false, pending)
+            })
+            .chain(
+                rt.closed_connections
+                    .values()
+                    .cloned()
+                    .map(|connection| (connection, true, false)),
+            )
             .collect::<Vec<_>>()
     };
     let mut result = Vec::with_capacity(connections.len());
-    for (connection, closed) in connections {
+    for (connection, closed, pending) in connections {
         let mysql_pool_connected =
-            !closed && state.resources.has_connection_pool(&connection.id).await;
+            !closed && !pending && state.resources.has_connection_pool(&connection.id).await;
         result.push(WorkbenchConnection {
             id: connection.id.clone(),
             kind: connection.kind,
@@ -732,7 +740,7 @@ pub async fn list_connections(
             port: connection.port,
             username: connection.username.clone(),
             database: connection.database.clone(),
-            connected: !closed && connection_connected(&connection, mysql_pool_connected),
+            connected: !closed && !pending && connection_connected(&connection, mysql_pool_connected),
             closed,
             read_only: connection.kind.is_read_only(),
             sample_data: connection.kind == DatabaseKind::MySql && connection.mysql_url.is_none(),
@@ -1829,10 +1837,14 @@ pub async fn list_databases(
         )
     };
     if let Some(url) = clickhouse_url.filter(|_| kind == DatabaseKind::ClickHouse) {
-        return clickhouse::list_databases(&url).await;
+        let dbs = clickhouse::list_databases(&url).await?;
+        state.runtime.lock().await.pending_connections.remove(&connection_id);
+        return Ok(dbs);
     }
     if let Some(url) = mongodb_url.filter(|_| kind == DatabaseKind::MongoDb) {
-        return mongodb::list_databases(&url).await;
+        let dbs = mongodb::list_databases(&url).await?;
+        state.runtime.lock().await.pending_connections.remove(&connection_id);
+        return Ok(dbs);
     }
     let Some(_mysql_url) = mysql_url else {
         return Ok(match demo_profile {
@@ -1846,6 +1858,7 @@ pub async fn list_databases(
         .fetch_all(&pool)
         .await
         .map_err(|error| format!("读取数据库失败: {error}"))?;
+    state.runtime.lock().await.pending_connections.remove(&connection_id);
     Ok(rows
         .into_iter()
         .filter_map(|row| mysql_text::string(&row, 0).ok())
@@ -9138,11 +9151,12 @@ async fn connect_mysql_and_store(
     reuse_existing: bool,
 ) -> Result<Vec<String>, String> {
     let (pool, db_list) = connection_lifecycle::connect_mysql_server(&url).await?;
+    let (host, port, username) = connection_lifecycle::describe_mysql_url(&url);
     let (id, inserted) = store_runtime_connection(
         &state,
         DatabaseKind::MySql,
         url,
-        ("configured".into(), 3306, "mysql".into()),
+        (host, port, username),
         select,
         reuse_existing,
     )
@@ -9151,10 +9165,20 @@ async fn connect_mysql_and_store(
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
     }
-    state
+    let mut installed = false;
+    let pool_for_cleanup = pool.clone();
+    let attach_result = state
         .resources
-        .get_or_connect_server(ServerPoolKey::new(&id), || async { Ok(pool) })
-        .await?;
+        .get_or_connect_server(ServerPoolKey::new(&id), || async {
+            installed = true;
+            Ok(pool)
+        })
+        .await;
+    if !installed {
+        pool_for_cleanup.close().await;
+    }
+    attach_result?;
+    state.runtime.lock().await.pending_connections.remove(&id);
     Ok(db_list)
 }
 
@@ -9179,6 +9203,7 @@ async fn connect_clickhouse_and_store(
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
     }
+    state.runtime.lock().await.pending_connections.remove(&id);
     Ok(db_list)
 }
 
@@ -9203,6 +9228,7 @@ async fn connect_mongodb_and_store(
         state.schema_cache.invalidate_connection(&id);
         state.table_counts.invalidate_connection(&id);
     }
+    state.runtime.lock().await.pending_connections.remove(&id);
     Ok(db_list)
 }
 
@@ -9262,6 +9288,7 @@ pub async fn remove_connection(
             .remove(&connection_id)
             .or_else(|| rt.closed_connections.remove(&connection_id))
             .ok_or_else(|| "连接不存在".to_string())?;
+        rt.pending_connections.remove(&connection_id);
         rt.sessions.invalidate_connection(&connection_id);
         connection_lifecycle::reselect_after_detach(&mut rt, &connection_id);
         connection.mongodb_url

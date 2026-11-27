@@ -345,3 +345,128 @@ test("follower does not mistake a slow easing tail for a row at rest", () => {
   while (harness.runFrame());
   assert.equal(harness.rowVisible(), true);
 });
+
+test("database navigation reveal honors optional context margin when clipped without moving visible rows", () => {
+  const calls = [];
+  const container = {
+    scrollTop: 200,
+    getBoundingClientRect: () => ({ top: 20, bottom: 320 }),
+    scrollTo(options) {
+      calls.push(options);
+    },
+  };
+
+  // Clipped below: lands 36px above bottom edge.
+  assert.equal(
+    revealSidebarNavigationRow(container, makeElement({ top: 340, bottom: 368 }), { margin: 36 }),
+    true,
+  );
+  assert.deepEqual(calls, [{ top: 284, behavior: "auto" }]);
+
+  // Clipped above: lands 36px below top edge.
+  calls.length = 0;
+  assert.equal(
+    revealSidebarNavigationRow(container, makeElement({ top: -12, bottom: 16 }), { margin: 36 }),
+    true,
+  );
+  assert.deepEqual(calls, [{ top: 132, behavior: "auto" }]);
+
+  // Already fully visible inside viewport: does not jitter even if closer than margin.
+  calls.length = 0;
+  assert.equal(
+    revealSidebarNavigationRow(container, makeElement({ top: 24, bottom: 52 }), { margin: 36 }),
+    false,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("follower supports explicit target getRow, context margin, callbacks, and single-pass DOM reads", () => {
+  let rowReads = 0;
+  let containerReads = 0;
+  let foundCount = 0;
+  let abortedCount = 0;
+  const frames = [];
+  const listeners = new Map();
+  const state = { clock: 0, targetTop: 900, otherTop: 100, rect: { top: 0, bottom: 300 } };
+  const container = {
+    scrollTop: 0,
+    getBoundingClientRect() {
+      containerReads += 1;
+      return state.rect;
+    },
+    scrollTo({ top }) {
+      this.scrollTop = top;
+    },
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type) => listeners.delete(type),
+  };
+  const makeRow = (getTop) => ({
+    getBoundingClientRect() {
+      rowReads += 1;
+      const top = state.rect.top + getTop() - container.scrollTop;
+      return { top, bottom: top + 28 };
+    },
+  });
+  const staleRow = makeRow(() => state.otherTop);
+  const clickedRow = makeRow(() => state.targetTop);
+
+  const follower = createSidebarRowFollower({
+    getContainer: () => container,
+    getRow: () => staleRow,
+    isAnimating: () => false,
+    requestFrame: (cb) => frames.push(cb),
+    cancelFrame: (handle) => { frames[handle - 1] = null; },
+    now: () => state.clock,
+  });
+
+  // Explicit target getRow + margin overrides stale default getRow and reads DOM once.
+  assert.equal(
+    follower.follow({
+      getRow: () => clickedRow,
+      margin: 36,
+      onRowFound: () => { foundCount += 1; },
+      onUserScroll: () => { abortedCount += 1; },
+    }),
+    true,
+  );
+  assert.equal(foundCount, 1);
+  assert.equal(containerReads, 2); // 1 in isLaidOut + 1 in step read pass
+  assert.equal(rowReads, 1); // single read pass (no read-write-read thrash)
+  assert.equal(container.scrollTop, 900 + 28 - 300 + 36);
+
+  // User wheel aborts and fires onUserScroll callback.
+  listeners.get("wheel")();
+  assert.equal(abortedCount, 1);
+  assert.equal(listeners.size, 0);
+});
+
+test("follower resume preserves explicit target getRow and margin after sidebar reopens", () => {
+  const frames = [];
+  const state = { clock: 0, rowTop: 1100, rect: { top: 0, bottom: 0 } };
+  const container = {
+    scrollTop: 0,
+    getBoundingClientRect: () => state.rect,
+    scrollTo({ top }) { this.scrollTop = top; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const targetRow = {
+    getBoundingClientRect: () => ({
+      top: state.rect.top + state.rowTop - container.scrollTop,
+      bottom: state.rect.top + state.rowTop - container.scrollTop + 28,
+    }),
+  };
+  const follower = createSidebarRowFollower({
+    getContainer: () => container,
+    getRow: () => null,
+    isAnimating: () => false,
+    requestFrame: (cb) => frames.push(cb),
+    cancelFrame: () => {},
+    now: () => state.clock,
+  });
+
+  assert.equal(follower.follow({ getRow: () => targetRow, margin: 36 }), false);
+  state.rect = { top: 0, bottom: 300 };
+  assert.equal(follower.resume(), true);
+  assert.equal(container.scrollTop, 1100 + 28 - 300 + 36);
+});

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { reactive, watch } from "vue";
 import { createWorkspaceState, openDatabaseHomeTab, buildSchemaSearchResults } from "./workspaceState.js";
-import { SOURCE_SELECTION, useConnection } from "./composables/useConnection.js";
+import { SOURCE_SELECTION, isAuthenticationError, useConnection } from "./composables/useConnection.js";
 
 function installLocalStorage(initial = {}) {
   const store = { ...initial };
@@ -1656,11 +1656,13 @@ test("revisiting a connection displays its cached database list while refreshing
   assert.deepEqual(conn.databases.value, ["other_db"]);
 
   const switchingBack = conn.selectConnection("mysql-main");
-  await flushAsync();
+  // Stale-while-revalidate: revisiting a cached connection completes immediately
+  // without blocking on the background live list_databases refresh.
+  assert.equal(await switchingBack, SOURCE_SELECTION.selected);
   assert.deepEqual(conn.databases.value, ["game_db", "analytics"]);
 
   pendingRefresh.resolve(["game_db", "analytics", "events"]);
-  assert.equal(await switchingBack, SOURCE_SELECTION.selected);
+  await flushAsync();
   assert.deepEqual(conn.databases.value, ["game_db", "analytics", "events"]);
 });
 
@@ -1733,6 +1735,184 @@ test("caches per-database table lists across switches and reorders non-selected 
     await conn.selectDatabase({ connectionId: "mysql-2", database: "newsg_4cfg" });
     assert.deepEqual(tableNames(conn.getCachedTables("mysql-1", "edota_3cfg")), ["heroprop", "skillprop"]);
     assert.deepEqual(tableNames(conn.getCachedTables("mysql-2", "newsg_4cfg")), ["goodsprop"]);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("isAuthenticationError distinguishes real auth errors from timeouts and network failures", () => {
+  assert.equal(isAuthenticationError("Access denied for user 'root'@'localhost' (using password: YES)"), true);
+  assert.equal(isAuthenticationError("ClickHouse 查询失败: Code: 516. Authentication failed"), true);
+  assert.equal(isAuthenticationError("认证失败：用户名或密码错误"), true);
+  assert.equal(isAuthenticationError("missing password"), true);
+  assert.equal(isAuthenticationError("HTTP 401 Unauthorized"), true);
+
+  assert.equal(isAuthenticationError("pool timed out while waiting for an open connection"), false);
+  assert.equal(isAuthenticationError("connection timed out"), false);
+  assert.equal(isAuthenticationError("连接超时：请检查网络或防火墙设置"), false);
+  assert.equal(isAuthenticationError("No route to host (os error 65)"), false);
+  assert.equal(isAuthenticationError("connection refused"), false);
+  assert.equal(isAuthenticationError("连接 MySQL 失败: Connection reset by peer"), false);
+});
+
+test("transient list_databases timeout on a connected server never opens password dialog or drops state", async () => {
+  installLocalStorage();
+  const conn = useConnection(createWorkspaceState(), async (command) => {
+    if (command === "list_databases") throw new Error("pool timed out while waiting for an open connection");
+    return {};
+  });
+  conn.connections.value = [
+    { id: "clickhouse-1", kind: "clickhouse", label: "CH", host: "127.0.0.1", port: "18123", username: "default", connected: true, saved: true },
+  ];
+  try {
+    const outcome = await conn.selectConnection("clickhouse-1");
+    assert.equal(outcome, SOURCE_SELECTION.failed);
+    assert.equal(conn.connDialog.open, false);
+    assert.equal(conn.connections.value[0].connected, true);
+    assert.equal(conn.databaseFetchErrors["clickhouse-1"].needsReconnect, false);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("transient restore timeout on a saved server with credentials never opens password dialog", async () => {
+  installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      { kind: "mysql", host: "127.0.0.1", port: "13306", username: "root", password: "secret" },
+    ]),
+  });
+  const conn = useConnection(createWorkspaceState(), async (command) => {
+    if (command === "restore_connection") throw new Error("connection timed out");
+    return [];
+  });
+  conn.connections.value = [
+    { id: "saved-mysql:127.0.0.1:13306:root", kind: "mysql", label: "root@127.0.0.1:13306", host: "127.0.0.1", port: "13306", username: "root", connected: false, saved: true },
+  ];
+  try {
+    const outcome = await conn.selectConnection("saved-mysql:127.0.0.1:13306:root");
+    assert.equal(outcome, SOURCE_SELECTION.failed);
+    assert.equal(conn.connDialog.open, false);
+    assert.equal(conn.databaseFetchErrors["saved-mysql:127.0.0.1:13306:root"].needsReconnect, false);
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("authentic auth failure opens reconnect dialog and updates existing runtime connection in place", async () => {
+  const store = installLocalStorage({
+    dbscout_connections: JSON.stringify([
+      { kind: "mysql", host: "127.0.0.1", port: "13306", username: "root", password: "old" },
+    ]),
+  });
+  const calls = [];
+  const conn = useConnection(createWorkspaceState(), async (command, payload = {}) => {
+    calls.push({ command, payload });
+    if (command === "list_databases") throw new Error("Access denied for user 'root'@'127.0.0.1' (using password: YES)");
+    if (command === "update_connection_credentials") return ["game_db"];
+    if (command === "select_database") return { tables: [] };
+    return [];
+  });
+  conn.connections.value = [
+    { id: "mysql-1", kind: "mysql", label: "root@127.0.0.1:13306", host: "127.0.0.1", port: "13306", username: "root", connected: true, saved: true },
+  ];
+  conn.setConnectionAlias("mysql-1", "决胜1");
+  try {
+    const outcome = await conn.selectConnection("mysql-1");
+    assert.equal(outcome, SOURCE_SELECTION.failed);
+    assert.equal(conn.connDialog.open, true);
+    assert.equal(conn.connDialog.reconnectConnectionId, "mysql-1");
+
+    conn.connDialog.password = "new_secret";
+    await conn.submitConnDialog();
+
+    assert.equal(calls.some((c) => c.command === "add_connection"), false, "never allocates duplicate id");
+    assert.equal(calls.some((c) => c.command === "update_connection_credentials" && c.payload.connectionId === "mysql-1"), true);
+    assert.deepEqual(conn.connections.value.map((item) => item.id), ["mysql-1"]);
+    assert.equal(conn.getConnectionAlias("mysql-1"), "决胜1");
+    assert.equal(JSON.parse(store.dbscout_connections)[0].password, "new_secret");
+  } finally {
+    conn.dispose();
+  }
+});
+
+test("cold start hydrates all saved connections and cached databases immediately and connects in parallel", async () => {
+  const saved = Array.from({ length: 8 }, (_, index) => ({
+    kind: index < 3 ? "mysql" : index < 6 ? "mongodb" : "clickhouse",
+    host: `127.0.0.${index + 1}`,
+    port: index < 3 ? "13306" : index < 6 ? "27117" : "18123",
+    username: index < 6 && index >= 3 ? "" : "root",
+    password: "secret",
+    alias: `Conn ${index + 1}`,
+  }));
+  installLocalStorage({
+    dbscout_connections: JSON.stringify(saved),
+    dbscout_closed_connections: JSON.stringify(["clickhouse:127.0.0.8:18123:root"]),
+    dbscout_cached_databases: JSON.stringify({
+      "mysql:127.0.0.1:13306:root": ["cached_db_1"],
+      "mongodb:127.0.0.4:27117:": ["cached_mongo_1"],
+    }),
+    dbscout_workspace: JSON.stringify({ version: 2, connectionId: "mysql-1", database: "cached_db_1", tabs: [] }),
+  });
+
+  const openGates = new Map();
+  const openedOrder = [];
+  const invoke = async (command, payload = {}) => {
+    if (command === "list_connections") return [];
+    if (command === "register_saved_connections") {
+      return payload.entries.map((entry, idx) => `${entry.kind}-${idx + 1}`);
+    }
+    if (command === "open_connection") {
+      openedOrder.push(payload.connectionId);
+      const gate = deferred();
+      openGates.set(payload.connectionId, gate);
+      return gate.promise;
+    }
+    if (command === "select_database") return { tables: [] };
+    return [];
+  };
+  invoke._supportsBatchRegister = true;
+
+  const conn = useConnection(createWorkspaceState(), invoke);
+  try {
+    const loading = conn.loadConnections();
+    await flushUntil(() => openGates.size >= 6);
+
+    // Every saved connection and its cached databases appear immediately before any network call completes.
+    assert.equal(conn.connections.value.length, 8);
+    assert.deepEqual(
+      conn.connections.value.map((item) => item.id),
+      ["mysql-1", "mysql-2", "mysql-3", "mongodb-4", "mongodb-5", "mongodb-6", "clickhouse-7", "clickhouse-8"],
+    );
+    assert.equal(conn.connections.value[7].closed, true);
+    assert.equal(openedOrder.includes("clickhouse-8"), false, "closed connection is never opened");
+    assert.deepEqual(conn.databasesByConnection["mysql-1"], ["cached_db_1"]);
+    assert.deepEqual(conn.databasesByConnection["mongodb-4"], ["cached_mongo_1"]);
+    assert.equal(conn.getConnectionAlias("mongodb-4"), "Conn 4");
+
+    // Even if mysql-2 resolves before mysql-1, deterministic ids never shift.
+    openGates.get("mysql-2").resolve(["live_db_2"]);
+    await flushAsync();
+    assert.equal(conn.connections.value.find((item) => item.id === "mysql-2").connected, true);
+
+    // Resolving lastUsedConnectionId unblocks loadConnections while remaining servers are still connecting.
+    openGates.get("mysql-1").resolve(["cached_db_1", "live_db_1"]);
+    await loading;
+    assert.equal(conn.selectedConnectionId.value, "mysql-1");
+    assert.equal(conn.selectedDatabase.value, "cached_db_1");
+
+    // Finish remaining servers (one fails transiently — must not open password dialog or lose cached DBs).
+    openGates.get("mongodb-4").reject(new Error("connection timed out"));
+    for (const [id, gate] of openGates.entries()) {
+      if (id !== "mysql-1" && id !== "mysql-2" && id !== "mongodb-4") gate.resolve([`db_${id}`]);
+    }
+    await flushUntil(() => openGates.has("clickhouse-7"));
+    openGates.get("clickhouse-7").resolve(["db_ch_7"]);
+    await conn.whenConnectionsRestored();
+
+    assert.equal(conn.connDialog.open, false);
+    assert.deepEqual(conn.databasesByConnection["mongodb-4"], ["cached_mongo_1"], "transient startup failure preserves cached DB list");
+    assert.equal(conn.databaseFetchErrors["mongodb-4"].needsReconnect, false);
+    assert.equal(conn.connections.value.find((item) => item.id === "clickhouse-7").connected, true);
   } finally {
     conn.dispose();
   }
