@@ -6,9 +6,12 @@ import {
   Rocket,
   ShieldCheck,
   Star,
-  Table2,
 } from "lucide-vue-next";
-import { DefaultDatabaseIcon } from "./DefaultDatabaseIcon.js";
+import {
+  DefaultDatabaseIcon,
+  DefaultTableIcon,
+  connectionIconComponent,
+} from "./workbenchIcons.js";
 
 const ICON_COMPONENTS = Object.freeze({
   database: DefaultDatabaseIcon,
@@ -21,6 +24,8 @@ const ICON_COMPONENTS = Object.freeze({
   cloud: Cloud,
 });
 
+export { connectionIconComponent };
+
 export function databaseDecorationIconComponent(icon) {
   return ICON_COMPONENTS[String(icon || "")] || DefaultDatabaseIcon;
 }
@@ -28,5 +33,5 @@ export function databaseDecorationIconComponent(icon) {
 export function databaseTableIconComponent(decoration) {
   return decoration
     ? databaseDecorationIconComponent(decoration.icon)
-    : Table2;
+    : DefaultTableIcon;
 }

@@ -1,7 +1,8 @@
 <script setup>
 import { t } from "../i18n/index.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, unref, watch } from "vue";
-import { AppWindow, Folder, FolderOpen, Pencil, Plus, Search, Star, Table2, Trash2, X } from "lucide-vue-next";
+import { AppWindow, Folder, FolderOpen, Pencil, Plus, Search, Star, Trash2, X } from "lucide-vue-next";
+import { DefaultTableIcon as Table2 } from "./workbenchIcons.js";
 
 import { useTableFolderContext } from "../composables/tableFolderContext.js";
 import { databaseTextColorCss, useDatabaseDecorations } from "../composables/databaseDecorationStore.js";

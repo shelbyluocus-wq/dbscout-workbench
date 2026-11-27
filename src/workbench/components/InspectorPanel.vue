@@ -12,11 +12,11 @@ import {
   Hash,
   KeyRound,
   MapPin,
-  Table2,
   ToggleLeft,
   Type,
   Variable,
 } from "lucide-vue-next";
+import { DefaultTableIcon as Table2 } from "./workbenchIcons.js";
 import { columnName } from "../utils/normalize.js";
 import { columnTypeKind } from "../utils/columnTypes.js";
 import { relationTableSummary } from "../utils/configRelations.js";

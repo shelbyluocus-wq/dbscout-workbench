@@ -1368,7 +1368,7 @@ test("database display separates icon and name colors with theme-following defau
   assert.match(tabsVue, /useDatabaseDecorations\(\)/);
   assert.match(tabsVue, /:is="tabDatabaseIcon\(tab\)"/);
   assert.match(tabsVue, /v-if="tabDatabaseDecoration\(tab\)"/);
-  assert.match(tabsVue, /<svg v-else class="wb-tab-db-icon"/);
+  assert.match(tabsVue, /<DefaultDatabaseIcon[\s\S]*?v-else[\s\S]*?class="wb-tab-db-icon"/);
   assert.match(tabsVue, /:style="tabDatabaseDecorationStyle\(tab\)"/);
   assert.match(ruleBody(".wb-dbhome-title h2"), /color:\s*var\(--wb-dbhome-name-color, var\(--wb-text\)\)/);
   assert.match(ruleBody(".wb-dbhome-title-icon"), /color:\s*var\(--wb-dbhome-icon-color, var\(--wb-accent-strong\)\)/);
@@ -1447,7 +1447,7 @@ test("settings drawer offers a color-theme picker row", () => {
 test("sidebar tree nodes use lucide icons for connection, database, and table", () => {
   const sidebarVue = readLocalizedContractSource(join(__dirname, "components", "WorkbenchSidebar.vue"), "utf8");
 
-  assert.match(sidebarVue, /:is="connection\.closed \? ServerOff : Server" :size="15" class="wb-tree-kind-icon"/);
+  assert.match(sidebarVue, /:is="connectionTreeIcon\(connection\)" :size="15" class="wb-tree-kind-icon"/);
   assert.match(sidebarVue, /'is-connected':\s*!connection\.closed && connection\.connected !== false/);
   assert.match(sidebarVue, /:is="databaseTreeIcon\(connection\.id, database\)"/);
   assert.match(sidebarVue, /:is="tableTreeIcon\(connection\.id, database\)"/);

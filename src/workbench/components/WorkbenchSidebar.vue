@@ -2,7 +2,7 @@
 import { t } from "../i18n/index.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import LanguageSettings from "./LanguageSettings.vue";
-import { ChevronRight, Folder, FolderOpen, FolderPlus, Languages, Server, ServerOff } from "lucide-vue-next";
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Languages } from "lucide-vue-next";
 import {
   applyLocaleTableFolding,
   useLocaleTableFoldPreference,
@@ -50,7 +50,11 @@ import { useSidebarTableSelection } from "../composables/useSidebarTableSelectio
 import { isContextMenuKey, isDeleteCommandKey } from "../utils/listSelection.js";
 import { splitMiddleEllipsis } from "../utils/middleEllipsis.js";
 import { shouldEmitSidebarDatabaseOpen } from "../utils/workspaceHomeRecovery.js";
-import { databaseDecorationIconComponent, databaseTableIconComponent } from "./databaseDecorationIcons.js";
+import {
+  connectionIconComponent,
+  databaseDecorationIconComponent,
+  databaseTableIconComponent,
+} from "./databaseDecorationIcons.js";
 
 function themeLabel(theme) {
   const keys = { slate: "theme.slate", teal: "theme.teal", azure: "theme.azure" };
@@ -119,6 +123,10 @@ const { getDatabaseDecoration } = useDatabaseDecorations();
 
 function databaseDecoration(connectionId, database) {
   return getDatabaseDecoration(connectionId, database);
+}
+
+function connectionTreeIcon(connection) {
+  return connectionIconComponent(connection);
 }
 
 function databaseTreeIcon(connectionId, database) {
@@ -1518,7 +1526,7 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
             @contextmenu.prevent.stop="openConnectionMenu($event, connection)"
           >
             <span class="wb-tree-chevron" :class="{ 'is-open': isConnectionBranchShown(connection) }" aria-hidden="true"></span>
-            <component :is="connection.closed ? ServerOff : Server" :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
+            <component :is="connectionTreeIcon(connection)" :size="15" class="wb-tree-kind-icon" aria-hidden="true" />
             <span class="wb-alias-copy" :class="{ 'has-alias': getConnectionAlias(connection.id) }">
               <span class="wb-tree-label">{{ connectionLabel(connection.id, connection.label) }}</span>
               <span v-if="getConnectionAlias(connection.id)" class="wb-alias-realname">{{ connection.label }}</span>

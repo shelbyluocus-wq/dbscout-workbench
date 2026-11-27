@@ -2,7 +2,8 @@
 import { t } from "../i18n/index.js";
 import { tPlatform } from "../utils/platformLabels.js";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowDownToLine, ArrowUpToLine, Check, ChevronDown, ChevronUp, Filter, History, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, Table2, X } from "lucide-vue-next";
+import { ArrowDownToLine, ArrowUpToLine, Check, ChevronDown, ChevronUp, Filter, History, Link2, ListFilter, LoaderCircle, MessageSquareText, Plus, Search, X } from "lucide-vue-next";
+import { DefaultTableIcon as Table2 } from "./workbenchIcons.js";
 import { formatColumnFilterChip, getColumnFilter, normalizeColumnFilters } from "../utils/columnFilter.js";
 import { isCellPending, getCellError, collectCellStatesForTable } from "../editState.js";
 import { tabRowAt, tabRowCount, tabRows } from "../rowStore.js";

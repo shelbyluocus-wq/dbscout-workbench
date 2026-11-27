@@ -14,6 +14,7 @@ import { ensureContrast } from "../utils/systemAccentTheme.js";
 import { writeTableDrag } from "../utils/tableDragPayload.js";
 import { partitionTabs } from "../utils/tabOverflow.js";
 import { databaseDecorationIconComponent } from "./databaseDecorationIcons.js";
+import { DefaultDatabaseIcon } from "./workbenchIcons.js";
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -508,11 +509,13 @@ onBeforeUnmount(() => {
                   class="wb-tab-db-icon is-decorated"
                   aria-hidden="true"
                 />
-                <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
-                  <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
-                  <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
-                  <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
-                </svg>
+                <DefaultDatabaseIcon
+                  v-else
+                  :size="11"
+                  :stroke-width="1.75"
+                  class="wb-tab-db-icon"
+                  aria-hidden="true"
+                />
                 <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
               </template>
               <span
@@ -624,11 +627,13 @@ onBeforeUnmount(() => {
                   class="wb-tab-db-icon is-decorated"
                   aria-hidden="true"
                 />
-                <svg v-else class="wb-tab-db-icon" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" aria-hidden="true">
-                  <ellipse cx="6" cy="2.7" rx="4.1" ry="1.9" />
-                  <path d="M1.9 2.7v6.6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9V2.7" />
-                  <path d="M1.9 6c0 1.05 1.83 1.9 4.1 1.9s4.1-.85 4.1-1.9" />
-                </svg>
+                <DefaultDatabaseIcon
+                  v-else
+                  :size="11"
+                  :stroke-width="1.75"
+                  class="wb-tab-db-icon"
+                  aria-hidden="true"
+                />
                 <span class="wb-tab-db">{{ tabDatabaseLabel(tab) }}</span>
                 <span v-if="tabConnectionLabel(tab)" class="wb-tab-overflow-connection">{{ tabConnectionLabel(tab) }}</span>
               </span>
