@@ -2197,6 +2197,7 @@ test("theme palettes style the full workbench and its sidebar settings control",
   assert.match(styles, /\.wb-grid-shell\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*background:\s*var\(--wb-workspace-mist-canvas\)/s);
   assert.match(styles, /\.wb-grid-wrap\s*\{[^}]*overflow-anchor:\s*none/s);
+  assert.match(styles, /\.wb-source-tree\s*\{[^}]*overflow-anchor:\s*none/s);
   assert.match(styles, /\.wb-cell-identity\.is-panel\s*\{[^}]*background:[^}]*var\(--wb-glass-strong\)/s);
   assert.match(styles, /\.wb-workspace\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);
   assert.match(styles, /\.wb-sidebar\s*\{[^}]*background:\s*var\(--wb-chrome-surface\)/s);

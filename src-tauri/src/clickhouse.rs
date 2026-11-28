@@ -168,7 +168,7 @@ async fn execute_json_query_inner(
         let response = request
             .send()
             .await
-            .map_err(|error| format!("连接 ClickHouse 失败: {error}"))?;
+            .map_err(|error| format!("连接 ClickHouse 失败: {}", describe_request_error(&error)))?;
         let status = response.status();
         let text = response
             .text()
@@ -215,6 +215,25 @@ async fn execute_json_query_inner(
     decoded
 }
 
+/// reqwest's own message stops at "error sending request for url"; the cause
+/// (timeout, refused, reset) is only in its source chain.
+fn describe_request_error(error: &reqwest::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !text.is_empty() && !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        source = cause.source();
+    }
+    if error.is_timeout() && !message.to_ascii_lowercase().contains("timed out") {
+        message.push_str(": timed out");
+    }
+    message
+}
+
 pub fn friendly_clickhouse_connect_error(error: &str) -> String {
     let lower = error.to_ascii_lowercase();
     if lower.contains("401")
@@ -225,15 +244,15 @@ pub fn friendly_clickhouse_connect_error(error: &str) -> String {
     {
         return "认证失败：用户名或密码错误".into();
     }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "连接超时：请检查网络或防火墙设置".into();
+    }
     if lower.contains("connection refused")
         || lower.contains("actively refused")
         || lower.contains("failed to connect")
         || lower.contains("error sending request")
     {
         return "无法连接到服务器：请检查主机和端口是否正确".into();
-    }
-    if lower.contains("timed out") || lower.contains("timeout") {
-        return "连接超时：请检查网络或防火墙设置".into();
     }
     if lower.contains("unknown host")
         || lower.contains("failed to lookup")

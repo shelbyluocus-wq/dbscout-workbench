@@ -11,6 +11,33 @@
         ],
         "createdAt": "2026-09-08T08:19:55.420Z",
         "reason": "Pre-existing Markdown comment preview compiles user images; src is a capture group, not a placeholder."
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "src/workbench/workbench.css"
+        ],
+        "createdAt": "2026-11-28T08:26:48.883Z",
+        "reason": "Agent triage 2026-11-28 (user asked to fix old findings): remaining width transitions are determinate progress fills (width is the data) and the sidebar slot collapse, which must reflow the main pane and is test-enforced; the dead handle height transition and the grip width hover were fixed."
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/workbench/workbench.css"
+        ],
+        "createdAt": "2026-11-28T08:26:48.973Z",
+        "reason": "Agent triage 2026-11-28: the stripes are a Markdown blockquote rule and the grid insert-position marker, both functional conventions rather than card accents."
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "src/workbench/workbenchShell.test.js"
+        ],
+        "createdAt": "2026-11-28T08:26:49.073Z",
+        "reason": "Agent triage 2026-11-28: a test regex asserting the intentional sidebar slot width transition, not UI code."
       }
     ]
   }

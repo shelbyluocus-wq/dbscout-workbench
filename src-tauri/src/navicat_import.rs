@@ -391,13 +391,8 @@ fn parse_mongodb_entry(entry: &RawNavicatEntry, index: usize) -> Option<NavicatI
     if !auth_source.is_empty() {
         query_pairs.push(("authSource", auth_source));
     }
-    if !auth_mechanism.is_empty()
-        && !matches!(
-            auth_mechanism.to_ascii_uppercase().as_str(),
-            "DEFAULT" | "NONE"
-        )
-    {
-        query_pairs.push(("authMechanism", auth_mechanism));
+    if let Some(mechanism) = crate::mongodb::canonical_auth_mechanism(&auth_mechanism) {
+        query_pairs.push(("authMechanism", mechanism.to_string()));
     }
     if !replica_set.is_empty() {
         query_pairs.push(("replicaSet", replica_set));
@@ -755,6 +750,32 @@ mod tests {
         assert_eq!(
             parsed.url,
             "mongodb://admin:This%20is%20a%20test@10.0.0.8:27018/?authSource=admin&replicaSet=rs0&tls=true"
+        );
+    }
+
+    #[test]
+    fn mongodb_keeps_only_auth_mechanisms_the_driver_accepts() {
+        let entry = |mechanism: &str| {
+            raw(
+                "mongodb",
+                "本地 Mongo",
+                &[
+                    ("Host", "localhost"),
+                    ("Port", "28018"),
+                    ("UserName", "admin"),
+                    ("AuthDatabase", "admin"),
+                    ("AuthMechanism", mechanism),
+                ],
+            )
+        };
+
+        let navicat_label = parse_navicat_entry(&entry("Password"), 0).expect("mongodb entry");
+        assert_eq!(navicat_label.url, "mongodb://admin@localhost:28018/?authSource=admin");
+
+        let lowercase = parse_navicat_entry(&entry("scram-sha-256"), 0).expect("mongodb entry");
+        assert_eq!(
+            lowercase.url,
+            "mongodb://admin@localhost:28018/?authSource=admin&authMechanism=SCRAM-SHA-256"
         );
     }
 

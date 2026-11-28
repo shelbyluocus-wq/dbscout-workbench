@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet},
     sync::OnceLock,
     time::Duration,
@@ -38,8 +39,65 @@ pub async fn disconnect(url: &str) {
     client_cache().lock().await.remove(url);
 }
 
+const AUTH_MECHANISMS: [&str; 7] = [
+    "SCRAM-SHA-1",
+    "SCRAM-SHA-256",
+    "MONGODB-X509",
+    "GSSAPI",
+    "PLAIN",
+    "MONGODB-AWS",
+    "MONGODB-OIDC",
+];
+
+/// The driver's spelling of an `authMechanism` value, or `None` for labels it
+/// rejects (Navicat saves its own, such as `Password`, for plain user/password).
+pub fn canonical_auth_mechanism(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    AUTH_MECHANISMS
+        .into_iter()
+        .find(|mechanism| mechanism.eq_ignore_ascii_case(value))
+}
+
+/// Drops an `authMechanism` the driver would reject so it negotiates SCRAM from
+/// the credentials instead; already saved Navicat imports carry such values.
+fn normalize_auth_mechanism(url: &str) -> Cow<'_, str> {
+    let Some((base, query)) = url.split_once('?') else {
+        return Cow::Borrowed(url);
+    };
+    let mut changed = false;
+    let pairs: Vec<Cow<'_, str>> = query
+        .split('&')
+        .filter_map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            if !key.eq_ignore_ascii_case("authMechanism") {
+                return Some(Cow::Borrowed(pair));
+            }
+            match canonical_auth_mechanism(value) {
+                Some(mechanism) if mechanism == value => Some(Cow::Borrowed(pair)),
+                Some(mechanism) => {
+                    changed = true;
+                    Some(Cow::Owned(format!("{key}={mechanism}")))
+                }
+                None => {
+                    changed = true;
+                    None
+                }
+            }
+        })
+        .collect();
+    if !changed {
+        return Cow::Borrowed(url);
+    }
+    if pairs.is_empty() {
+        Cow::Owned(base.to_string())
+    } else {
+        Cow::Owned(format!("{base}?{}", pairs.join("&")))
+    }
+}
+
 async fn connect_client(url: &str) -> Result<Client, String> {
-    let mut options = ClientOptions::parse(url)
+    let url = normalize_auth_mechanism(url);
+    let mut options = ClientOptions::parse(&*url)
         .await
         .map_err(|error| friendly_mongo_connect_error(&error.to_string()))?;
     options.connect_timeout = Some(CONNECT_TIMEOUT);
@@ -966,6 +1024,35 @@ mod tests {
         assert_eq!(host, "db.internal");
         assert_eq!(port, 27018);
         assert_eq!(user, "alice");
+    }
+
+    #[test]
+    fn unsupported_auth_mechanism_is_dropped_before_parsing() {
+        assert_eq!(
+            normalize_auth_mechanism("mongodb://admin:pw@localhost:28018/?authMechanism=Password"),
+            "mongodb://admin:pw@localhost:28018/"
+        );
+        assert_eq!(
+            normalize_auth_mechanism(
+                "mongodb://admin:pw@h:1/?authSource=admin&authmechanism=Password&tls=true"
+            ),
+            "mongodb://admin:pw@h:1/?authSource=admin&tls=true"
+        );
+        assert_eq!(
+            normalize_auth_mechanism("mongodb://admin:pw@h:1/?authMechanism=scram-sha-256"),
+            "mongodb://admin:pw@h:1/?authMechanism=SCRAM-SHA-256"
+        );
+        let untouched = "mongodb://admin:pw@h:1/?authMechanism=SCRAM-SHA-1";
+        assert!(matches!(normalize_auth_mechanism(untouched), Cow::Borrowed(url) if url == untouched));
+    }
+
+    #[tokio::test]
+    async fn navicat_password_label_no_longer_fails_url_parsing() {
+        let url = normalize_auth_mechanism("mongodb://admin:pw@localhost:28018/?authMechanism=Password");
+        assert!(ClientOptions::parse(&*url).await.is_ok());
+        assert!(ClientOptions::parse("mongodb://admin:pw@localhost:28018/?authMechanism=Password")
+            .await
+            .is_err());
     }
 
     #[test]

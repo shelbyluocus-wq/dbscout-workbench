@@ -13321,6 +13321,9 @@ label:has(input[type="checkbox"]:disabled) {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Chromium (WebView2) scroll anchoring would pin a row below an unfolding
+     branch and push the branch out of view; the reveal follower owns this. */
+  overflow-anchor: none;
   padding: 0 6px 8px;
   background-color: inherit;
   scrollbar-color: transparent var(--wb-scrollbar-track);
@@ -23698,7 +23701,7 @@ label:has(input[type="checkbox"]:disabled) {
   height: 7px;
   cursor: row-resize;
   background: transparent;
-  transition: background 0.12s ease, height 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .wb-cell-detail-handle:hover {
@@ -23715,17 +23718,17 @@ label:has(input[type="checkbox"]:disabled) {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 28px;
+  width: 44px;
   height: 3px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--wb-grid-heading) 45%, transparent);
-  transform: translate(-50%, -50%);
-  transition: width 0.22s ease, background 0.18s ease;
+  transform: translate(-50%, -50%) scaleX(calc(28 / 44));
+  transition: transform 0.22s ease, background 0.18s ease;
 }
 
 .wb-cell-detail-handle:hover .wb-cell-detail-handle-grip,
 .wb-cell-detail-handle:focus-visible .wb-cell-detail-handle-grip {
-  width: 44px;
+  transform: translate(-50%, -50%) scaleX(1);
   background: var(--wb-accent-strong);
 }
 
