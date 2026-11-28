@@ -1,6 +1,6 @@
 [package]
 name = "dbscout-workbench"
-version = "0.1.81"
+version = "0.1.82"
 description = "Blackcat - a desktop database workbench"
 edition = "2021"
 
