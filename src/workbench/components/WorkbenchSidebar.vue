@@ -1163,6 +1163,10 @@ function onConnectionClick(connectionId) {
     return;
   }
   if (connection && !connection.connected && connection.saved) {
+    if (isConnectionBranchShown(connection)) {
+      toggleConnectionExpansion(treeState, connectionId, activeConnId);
+      return;
+    }
     revealConnection(treeState, connectionId);
     emit("select-connection", connectionId);
     return;
@@ -1792,6 +1796,12 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
           <Transition name="wb-branch" :duration="220" @after-enter="onBranchAfterEnter" @enter-cancelled="onBranchAfterEnter">
           <section v-if="dragState.kind !== 'connection' && dragState.kind !== 'group' && isConnectionBranchShown(connection)" class="wb-database-branch">
             <div class="wb-branch-inner">
+            <div v-if="connectionFetchError(connection.id) && !isConnectionLoading(connection.id)" class="wb-tree-connection-error">
+              <span>{{ connectionFetchError(connection.id).message }}</span>
+              <button type="button" class="wb-tree-connection-retry" @click.stop="retryConnectionFetch(connection.id)">
+                {{ connectionFetchError(connection.id).needsReconnect ? t('m_1eff9b7d894c') : t('m_b8784c8dd563') }}
+              </button>
+            </div>
             <TransitionGroup
               name="wb-tree-reorder"
               tag="div"
@@ -1949,12 +1959,6 @@ defineExpose({ focusSearch, revealSelectedDatabase, toggleSettings, openSettings
             </TransitionGroup>
             <p v-if="isConnectionLoading(connection.id) && !databasesForConnection(connection.id).length" class="wb-tree-loading">
               <span class="wb-tree-loading-spinner" aria-hidden="true"></span> {{ t('m_4927a53bcc88') }} </p>
-            <div v-else-if="!databasesForConnection(connection.id).length && connectionFetchError(connection.id)" class="wb-tree-connection-error">
-              <span>{{ connectionFetchError(connection.id).message }}</span>
-              <button type="button" class="wb-tree-connection-retry" @click.stop="retryConnectionFetch(connection.id)">
-                {{ connectionFetchError(connection.id).needsReconnect ? t('m_1eff9b7d894c') : t('m_b8784c8dd563') }}
-              </button>
-            </div>
             </div>
           </section>
           </Transition>

@@ -143,3 +143,17 @@ test("MySqlWorkbench and WorkbenchSidebar wire home-tab recovery on connection s
   assert.match(orchestrator, /discardPaneHomeTabs\(workspace, targetPaneId\)/);
   assert.match(sidebar, /shouldEmitSidebarDatabaseOpen\(\{\s*activeTab:\s*props\.activeTab\s*\}\)/);
 });
+
+test("a disconnected saved connection showing cached databases still collapses and shows why it is offline", () => {
+  const sidebar = readFileSync(new URL("./components/WorkbenchSidebar.vue", import.meta.url), "utf8");
+
+  assert.match(
+    sidebar,
+    /!connection\.connected && connection\.saved\) \{\s*if \(isConnectionBranchShown\(connection\)\) \{\s*toggleConnectionExpansion\(/,
+  );
+  assert.match(
+    sidebar,
+    /<div v-if="connectionFetchError\(connection\.id\) && !isConnectionLoading\(connection\.id\)" class="wb-tree-connection-error">/,
+  );
+  assert.doesNotMatch(sidebar, /!databasesForConnection\(connection\.id\)\.length && connectionFetchError/);
+});
